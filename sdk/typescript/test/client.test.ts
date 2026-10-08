@@ -217,6 +217,43 @@ describe('pagination', () => {
     expect(await collect(paginate(fetchPage), 1)).toEqual([1]);
   });
 
+  // The shapes OpsAPI's list endpoints really return (surveyed across ~230 of them).
+  it('reads camelCase meta.totalPages (kanban, cms, templates, documents)', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ data: [page], meta: { page, perPage: 1, totalPages: 2 } }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('works out the last page from total + page size', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ data: page === 1 ? [1, 2] : [3], meta: { total: 3, per_page: 2 } }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2, 3]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads items and paging info at the top level (e.g. tax admin lists)', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ items: [page], page, total_pages: 2 }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2]);
+  });
+
+  it('never loops on an endpoint that ignores ?page (no paging info at all)', async () => {
+    const fetchPage = vi.fn(async () => ({ data: [{ uuid: 'a' }, { uuid: 'b' }] }));
+    expect(await collect(paginate(fetchPage))).toEqual([{ uuid: 'a' }, { uuid: 'b' }]);
+    expect(fetchPage).toHaveBeenCalledTimes(2); // page 2 repeated page 1: stop, nothing yielded twice
+  });
+
+  it('takes items from anywhere with options.items', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ notifications: page === 1 ? ['n1'] : [], unread_count: 1 }));
+    expect(await collect(paginate<string>(fetchPage, { items: (r) => r.notifications }))).toEqual(['n1']);
+  });
+
+  it('keeps the item type from typed responses', async () => {
+    type Customer = { uuid: string; email: string };
+    const fetchPage = async (page: number) => ({ data: page === 1 ? [{ uuid: 'c1', email: 'a@b.test' }] as Customer[] : [] });
+    const first = (await collect(paginate(fetchPage)))[0];
+    const email: string = first!.email; // compiles only if T was inferred as Customer
+    expect(email).toBe('a@b.test');
+  });
+
   it('follows next_cursor', async () => {
     const fetchPage = vi.fn(async (cursor?: string) =>
       !cursor ? { data: ['a'], meta: { next_cursor: 'c1' } } : { data: ['b'], meta: { next_cursor: null } });

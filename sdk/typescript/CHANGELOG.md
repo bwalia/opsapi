@@ -2,10 +2,14 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
-## 0.1.1
+## 1.0.0
 
-- Fixed: `auth.login()`, `auth.verify2fa()`, `auth.refresh()` and `auth.logout()` now send form fields, which is what OpsAPI reads on `/auth/*`. In 0.1.0 sign-in failed with "identifier required".
-- README: what OpsAPI is, how to run your own server from Docker Hub (local trial and production checklist), first sign-in, creating an API key, and troubleshooting.
+The first stable release. From here the client follows [SemVer](https://semver.org/): breaking changes come only in a new major version.
+
+- Fixed: sign-in. `auth.login()`, `auth.verify2fa()`, `auth.refresh()` and `auth.logout()` now send form fields, which is what OpsAPI reads on `/auth/*`. In 0.1.0 sign-in failed with "identifier required".
+- `paginate()` handles every list shape OpsAPI returns: `meta.total_pages`, camelCase `meta.totalPages`, `total` + page size, paging info at the top level, items under `items`, and endpoints that aren't paginated at all. It stops at the last page and never loops; in 0.1.0 a list with no paging info that ignores `?page` was fetched forever. New `options.items` reads items kept elsewhere (e.g. `(r) => r.notifications`). `paginateCursor()` also reads a top-level or camelCase next cursor. `PageResult` and `PageOptions` are exported.
+- Verified against a live server: sign-in with 2FA and refresh, API keys, create/read/update/delete, pagination across endpoint shapes, errors (401/403/404/422), and webhook signatures produced by the server.
+- README: what OpsAPI is, running your own server from Docker Hub (local trial and production checklist), first sign-in, creating an API key, and troubleshooting.
 
 ## 0.1.0
 

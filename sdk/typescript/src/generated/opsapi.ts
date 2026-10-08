@@ -4,7 +4,7 @@
 export interface paths {
     "/api/chat/access/grant": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21,7 +21,7 @@ export interface paths {
     };
     "/api/chat/agent": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38,7 +38,7 @@ export interface paths {
     };
     "/api/chat/agent/confirm": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55,7 +55,7 @@ export interface paths {
     };
     "/api/chat/agent/conversation": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -73,7 +73,7 @@ export interface paths {
     };
     "/api/chat/agent/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -90,7 +90,7 @@ export interface paths {
     };
     "/api/chat/bookmarks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -108,7 +108,7 @@ export interface paths {
     };
     "/api/chat/bookmarks/{message_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -125,7 +125,7 @@ export interface paths {
     };
     "/api/chat/channels": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -143,7 +143,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/mentions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -160,7 +160,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/mentions/read-all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -177,7 +177,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/messages": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -195,7 +195,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/messages/pinned": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -212,7 +212,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/messages/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -229,7 +229,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/reactions/popular": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -246,7 +246,7 @@ export interface paths {
     };
     "/api/chat/channels/{channel_uuid}/unread": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -263,7 +263,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -282,7 +282,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/files": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -299,7 +299,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/files/images": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -316,7 +316,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/invites": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -333,7 +333,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/join": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -350,7 +350,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/leave": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -367,7 +367,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -385,7 +385,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/members/{user_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -402,7 +402,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/members/{user_uuid}/role": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -419,7 +419,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/presence": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -436,7 +436,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -453,7 +453,7 @@ export interface paths {
     };
     "/api/chat/channels/{uuid}/settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -470,7 +470,7 @@ export interface paths {
     };
     "/api/chat/channels/business": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -487,7 +487,7 @@ export interface paths {
     };
     "/api/chat/channels/defaults": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -504,7 +504,7 @@ export interface paths {
     };
     "/api/chat/channels/direct": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -521,7 +521,7 @@ export interface paths {
     };
     "/api/chat/channels/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -538,7 +538,7 @@ export interface paths {
     };
     "/api/chat/drafts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -555,7 +555,7 @@ export interface paths {
     };
     "/api/chat/drafts/{channel_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -574,7 +574,7 @@ export interface paths {
     };
     "/api/chat/files": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -591,7 +591,7 @@ export interface paths {
     };
     "/api/chat/files/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -608,7 +608,7 @@ export interface paths {
     };
     "/api/chat/invites": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -625,7 +625,7 @@ export interface paths {
     };
     "/api/chat/invites/{uuid}/accept": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -642,7 +642,7 @@ export interface paths {
     };
     "/api/chat/invites/{uuid}/decline": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -659,7 +659,7 @@ export interface paths {
     };
     "/api/chat/mentions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -676,7 +676,7 @@ export interface paths {
     };
     "/api/chat/mentions/{uuid}/read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -693,7 +693,7 @@ export interface paths {
     };
     "/api/chat/mentions/read-all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -710,7 +710,7 @@ export interface paths {
     };
     "/api/chat/mentions/unread/count": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -727,7 +727,7 @@ export interface paths {
     };
     "/api/chat/messages/{message_uuid}/reactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -745,7 +745,7 @@ export interface paths {
     };
     "/api/chat/messages/{message_uuid}/reactions/{emoji}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -762,7 +762,7 @@ export interface paths {
     };
     "/api/chat/messages/{message_uuid}/reactions/{emoji}/users": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -779,7 +779,7 @@ export interface paths {
     };
     "/api/chat/messages/{message_uuid}/reactions/toggle": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -796,7 +796,7 @@ export interface paths {
     };
     "/api/chat/messages/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -815,7 +815,7 @@ export interface paths {
     };
     "/api/chat/messages/{uuid}/pin": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -833,7 +833,7 @@ export interface paths {
     };
     "/api/chat/messages/{uuid}/thread": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -850,7 +850,7 @@ export interface paths {
     };
     "/api/chat/presence": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -868,7 +868,7 @@ export interface paths {
     };
     "/api/chat/presence/custom-status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -885,7 +885,7 @@ export interface paths {
     };
     "/api/chat/users/mentionable": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -902,7 +902,7 @@ export interface paths {
     };
     "/api/chat/users/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -919,7 +919,7 @@ export interface paths {
     };
     "/api/v2/academy/admin/instructors/{user_uuid}/fee": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -936,7 +936,7 @@ export interface paths {
     };
     "/api/v2/academy/admin/payouts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -953,7 +953,7 @@ export interface paths {
     };
     "/api/v2/academy/admin/payouts/{user_uuid}/mark-paid": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -970,7 +970,7 @@ export interface paths {
     };
     "/api/v2/academy/admin/settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -988,7 +988,7 @@ export interface paths {
     };
     "/api/v2/academy/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1005,7 +1005,7 @@ export interface paths {
     };
     "/api/v2/academy/courses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1023,7 +1023,7 @@ export interface paths {
     };
     "/api/v2/academy/courses/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1042,7 +1042,7 @@ export interface paths {
     };
     "/api/v2/academy/courses/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1059,7 +1059,7 @@ export interface paths {
     };
     "/api/v2/academy/courses/{uuid}/lessons": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1077,7 +1077,7 @@ export interface paths {
     };
     "/api/v2/academy/courses/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1094,7 +1094,7 @@ export interface paths {
     };
     "/api/v2/academy/creator/account": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1112,7 +1112,7 @@ export interface paths {
     };
     "/api/v2/academy/creator/profile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1130,7 +1130,7 @@ export interface paths {
     };
     "/api/v2/academy/creator/subscription-plan": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1147,7 +1147,7 @@ export interface paths {
     };
     "/api/v2/academy/instructor/register": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1164,7 +1164,7 @@ export interface paths {
     };
     "/api/v2/academy/instructor/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1181,7 +1181,7 @@ export interface paths {
     };
     "/api/v2/academy/lessons/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1200,7 +1200,7 @@ export interface paths {
     };
     "/api/v2/academy/pending-courses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1217,7 +1217,7 @@ export interface paths {
     };
     "/api/v2/access/my-patients": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1234,7 +1234,7 @@ export interface paths {
     };
     "/api/v2/access/verify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1251,7 +1251,7 @@ export interface paths {
     };
     "/api/v2/accounting/accounts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1269,7 +1269,7 @@ export interface paths {
     };
     "/api/v2/accounting/accounts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1288,7 +1288,7 @@ export interface paths {
     };
     "/api/v2/accounting/ai/categorize": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1305,7 +1305,7 @@ export interface paths {
     };
     "/api/v2/accounting/ai/query": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1322,7 +1322,7 @@ export interface paths {
     };
     "/api/v2/accounting/ai/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1339,7 +1339,7 @@ export interface paths {
     };
     "/api/v2/accounting/ai/suggest-vat": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1356,7 +1356,7 @@ export interface paths {
     };
     "/api/v2/accounting/ai/vat-suggest": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1373,7 +1373,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1390,7 +1390,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1408,7 +1408,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/{uuid}/categorize": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1425,7 +1425,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/{uuid}/reconcile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1442,7 +1442,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/by-category": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1459,7 +1459,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/by-tag": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1476,7 +1476,7 @@ export interface paths {
     };
     "/api/v2/accounting/bank-transactions/import": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1493,7 +1493,7 @@ export interface paths {
     };
     "/api/v2/accounting/dashboard/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1510,7 +1510,7 @@ export interface paths {
     };
     "/api/v2/accounting/expenses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1528,7 +1528,7 @@ export interface paths {
     };
     "/api/v2/accounting/expenses/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1547,7 +1547,7 @@ export interface paths {
     };
     "/api/v2/accounting/expenses/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1564,7 +1564,7 @@ export interface paths {
     };
     "/api/v2/accounting/expenses/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1581,7 +1581,7 @@ export interface paths {
     };
     "/api/v2/accounting/hmrc-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1598,7 +1598,7 @@ export interface paths {
     };
     "/api/v2/accounting/journal-entries": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1616,7 +1616,7 @@ export interface paths {
     };
     "/api/v2/accounting/journal-entries/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1633,7 +1633,7 @@ export interface paths {
     };
     "/api/v2/accounting/journal-entries/{uuid}/void": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1650,7 +1650,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/balance-sheet": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1667,7 +1667,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/dashboard-stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1684,7 +1684,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/expense-summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1701,7 +1701,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/profit-and-loss": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1718,7 +1718,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/profit-loss": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1735,7 +1735,7 @@ export interface paths {
     };
     "/api/v2/accounting/reports/trial-balance": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1752,7 +1752,7 @@ export interface paths {
     };
     "/api/v2/accounting/vat-returns": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1770,7 +1770,7 @@ export interface paths {
     };
     "/api/v2/accounting/vat-returns/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1787,7 +1787,7 @@ export interface paths {
     };
     "/api/v2/accounting/vat-returns/{uuid}/submit": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1804,7 +1804,7 @@ export interface paths {
     };
     "/api/v2/admin/ai-usage": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1821,7 +1821,7 @@ export interface paths {
     };
     "/api/v2/admin/bank-accounts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1838,7 +1838,7 @@ export interface paths {
     };
     "/api/v2/admin/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1856,7 +1856,7 @@ export interface paths {
     };
     "/api/v2/admin/categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1874,7 +1874,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1891,7 +1891,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1908,7 +1908,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1925,7 +1925,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/{uuid}/promote": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1942,7 +1942,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1959,7 +1959,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/duplicates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1976,7 +1976,7 @@ export interface paths {
     };
     "/api/v2/admin/custom-categories/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1993,7 +1993,7 @@ export interface paths {
     };
     "/api/v2/admin/dashboard": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2010,7 +2010,7 @@ export interface paths {
     };
     "/api/v2/admin/export/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2027,7 +2027,7 @@ export interface paths {
     };
     "/api/v2/admin/hmrc-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2045,7 +2045,7 @@ export interface paths {
     };
     "/api/v2/admin/hmrc-categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2063,7 +2063,7 @@ export interface paths {
     };
     "/api/v2/admin/identity-lock/announce": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2080,7 +2080,7 @@ export interface paths {
     };
     "/api/v2/admin/identity-lock/settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2098,7 +2098,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2116,7 +2116,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2135,7 +2135,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}/invitations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2153,7 +2153,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}/redirect-origins": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2171,7 +2171,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}/roles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2188,7 +2188,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2205,7 +2205,7 @@ export interface paths {
     };
     "/api/v2/admin/namespaces/{id}/transfer-ownership": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2222,7 +2222,7 @@ export interface paths {
     };
     "/api/v2/admin/settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2239,7 +2239,7 @@ export interface paths {
     };
     "/api/v2/admin/settings/{key}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2257,7 +2257,7 @@ export interface paths {
     };
     "/api/v2/admin/statements": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2274,7 +2274,7 @@ export interface paths {
     };
     "/api/v2/admin/tax-user-profiles/{user_uuid}/unlock": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2291,7 +2291,7 @@ export interface paths {
     };
     "/api/v2/admin/transactions/low-confidence": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2308,7 +2308,7 @@ export interface paths {
     };
     "/api/v2/admin/users/{user_uuid}/namespaces": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2325,7 +2325,7 @@ export interface paths {
     };
     "/api/v2/admin/users/{user_uuid}/namespaces/{namespace_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2342,7 +2342,7 @@ export interface paths {
     };
     "/api/v2/admin/users/{user_uuid}/namespaces/{namespace_id}/roles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2359,7 +2359,7 @@ export interface paths {
     };
     "/api/v2/all-documents": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2376,7 +2376,7 @@ export interface paths {
     };
     "/api/v2/api-keys": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2394,7 +2394,7 @@ export interface paths {
     };
     "/api/v2/api-keys/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2411,7 +2411,7 @@ export interface paths {
     };
     "/api/v2/bank-transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2429,7 +2429,7 @@ export interface paths {
     };
     "/api/v2/bank-transactions/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2448,7 +2448,7 @@ export interface paths {
     };
     "/api/v2/billing/checkout": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2465,7 +2465,7 @@ export interface paths {
     };
     "/api/v2/billing/checkout/{session_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2482,7 +2482,7 @@ export interface paths {
     };
     "/api/v2/billing/checkout/payment-intent": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2499,7 +2499,7 @@ export interface paths {
     };
     "/api/v2/billing/entitlements": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2516,7 +2516,7 @@ export interface paths {
     };
     "/api/v2/billing/payments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2533,7 +2533,7 @@ export interface paths {
     };
     "/api/v2/billing/plans": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2551,7 +2551,7 @@ export interface paths {
     };
     "/api/v2/billing/plans/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2570,7 +2570,7 @@ export interface paths {
     };
     "/api/v2/billing/plans/{uuid}/sync": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2587,7 +2587,7 @@ export interface paths {
     };
     "/api/v2/billing/subscription": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2604,7 +2604,7 @@ export interface paths {
     };
     "/api/v2/billing/subscription/cancel": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2621,7 +2621,7 @@ export interface paths {
     };
     "/api/v2/billing/subscription/change-plan": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2638,7 +2638,7 @@ export interface paths {
     };
     "/api/v2/buyer/orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2655,7 +2655,7 @@ export interface paths {
     };
     "/api/v2/buyer/orders/{order_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2672,7 +2672,7 @@ export interface paths {
     };
     "/api/v2/buyer/orders/{order_id}/cancel": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2689,7 +2689,7 @@ export interface paths {
     };
     "/api/v2/buyer/orders/{order_id}/repeat": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2706,7 +2706,7 @@ export interface paths {
     };
     "/api/v2/care-plans/due-for-review": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2723,7 +2723,7 @@ export interface paths {
     };
     "/api/v2/cart": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2740,7 +2740,7 @@ export interface paths {
     };
     "/api/v2/cart/add": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2757,7 +2757,7 @@ export interface paths {
     };
     "/api/v2/cart/clear": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2774,7 +2774,7 @@ export interface paths {
     };
     "/api/v2/cart/remove/{product_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2791,7 +2791,7 @@ export interface paths {
     };
     "/api/v2/cart/totals": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2808,7 +2808,7 @@ export interface paths {
     };
     "/api/v2/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2826,7 +2826,7 @@ export interface paths {
     };
     "/api/v2/categories/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2845,7 +2845,7 @@ export interface paths {
     };
     "/api/v2/categories/check": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2862,7 +2862,7 @@ export interface paths {
     };
     "/api/v2/categories/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2879,7 +2879,7 @@ export interface paths {
     };
     "/api/v2/checkout": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2896,7 +2896,7 @@ export interface paths {
     };
     "/api/v2/checkout-enhanced": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2913,7 +2913,7 @@ export interface paths {
     };
     "/api/v2/cms/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2931,7 +2931,7 @@ export interface paths {
     };
     "/api/v2/cms/categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2949,7 +2949,7 @@ export interface paths {
     };
     "/api/v2/cms/pages": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2967,7 +2967,7 @@ export interface paths {
     };
     "/api/v2/cms/pages/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2986,7 +2986,7 @@ export interface paths {
     };
     "/api/v2/cms/posts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3004,7 +3004,7 @@ export interface paths {
     };
     "/api/v2/cms/posts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3023,7 +3023,7 @@ export interface paths {
     };
     "/api/v2/cms/tags": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3041,7 +3041,7 @@ export interface paths {
     };
     "/api/v2/cms/tags/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3059,7 +3059,7 @@ export interface paths {
     };
     "/api/v2/cms/webhooks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3077,7 +3077,7 @@ export interface paths {
     };
     "/api/v2/cms/webhooks/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3096,7 +3096,7 @@ export interface paths {
     };
     "/api/v2/cms/webhooks/{uuid}/trigger": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3113,7 +3113,7 @@ export interface paths {
     };
     "/api/v2/crm/accounts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3131,7 +3131,7 @@ export interface paths {
     };
     "/api/v2/crm/accounts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3150,7 +3150,7 @@ export interface paths {
     };
     "/api/v2/crm/activities": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3168,7 +3168,7 @@ export interface paths {
     };
     "/api/v2/crm/activities/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3187,7 +3187,7 @@ export interface paths {
     };
     "/api/v2/crm/activities/{uuid}/complete": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3205,7 +3205,7 @@ export interface paths {
     };
     "/api/v2/crm/contacts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3223,7 +3223,7 @@ export interface paths {
     };
     "/api/v2/crm/contacts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3242,7 +3242,7 @@ export interface paths {
     };
     "/api/v2/crm/dashboard/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3259,7 +3259,7 @@ export interface paths {
     };
     "/api/v2/crm/deals": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3277,7 +3277,7 @@ export interface paths {
     };
     "/api/v2/crm/deals/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3296,7 +3296,7 @@ export interface paths {
     };
     "/api/v2/crm/deals/pipeline/{pipeline_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3313,7 +3313,7 @@ export interface paths {
     };
     "/api/v2/crm/leads": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3331,7 +3331,7 @@ export interface paths {
     };
     "/api/v2/crm/leads/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3350,7 +3350,7 @@ export interface paths {
     };
     "/api/v2/crm/leads/{uuid}/convert": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3367,7 +3367,7 @@ export interface paths {
     };
     "/api/v2/crm/leads/notification-settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3385,7 +3385,7 @@ export interface paths {
     };
     "/api/v2/crm/leads/notification-settings/test-telegram": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3402,7 +3402,7 @@ export interface paths {
     };
     "/api/v2/crm/leads/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3419,7 +3419,7 @@ export interface paths {
     };
     "/api/v2/crm/pipelines": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3437,7 +3437,7 @@ export interface paths {
     };
     "/api/v2/crm/pipelines/{pipeline_uuid}/deals": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3454,7 +3454,7 @@ export interface paths {
     };
     "/api/v2/crm/pipelines/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3473,7 +3473,7 @@ export interface paths {
     };
     "/api/v2/customers": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3491,7 +3491,7 @@ export interface paths {
     };
     "/api/v2/customers/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3510,7 +3510,7 @@ export interface paths {
     };
     "/api/v2/delivery-assignments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3527,7 +3527,7 @@ export interface paths {
     };
     "/api/v2/delivery-assignments/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3544,7 +3544,7 @@ export interface paths {
     };
     "/api/v2/delivery-assignments/{uuid}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3561,7 +3561,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/assignment-stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3578,7 +3578,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/assignments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3595,7 +3595,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/available-orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3612,7 +3612,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/dashboard": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3629,7 +3629,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/earnings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3646,7 +3646,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/nearby-orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3663,7 +3663,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/notifications": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3680,7 +3680,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/notifications/{id}/read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3697,7 +3697,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/request-delivery": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3714,7 +3714,7 @@ export interface paths {
     };
     "/api/v2/delivery-partner/request-order": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3731,7 +3731,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/areas": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3748,7 +3748,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/by-area": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3765,7 +3765,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/location": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3782,7 +3782,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/profile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3800,7 +3800,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/register": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3817,7 +3817,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3834,7 +3834,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/verification/send-otp": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3851,7 +3851,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/verification/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3868,7 +3868,7 @@ export interface paths {
     };
     "/api/v2/delivery-partners/verification/verify-otp": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3885,7 +3885,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3902,7 +3902,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests/{uuid}/accept": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3919,7 +3919,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests/{uuid}/cancel": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3936,7 +3936,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3953,7 +3953,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests/partner": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3970,7 +3970,7 @@ export interface paths {
     };
     "/api/v2/delivery-requests/store/{store_slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3987,7 +3987,7 @@ export interface paths {
     };
     "/api/v2/delivery/active": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4004,7 +4004,7 @@ export interface paths {
     };
     "/api/v2/delivery/assignments/{assignment_id}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4021,7 +4021,7 @@ export interface paths {
     };
     "/api/v2/delivery/fee-estimate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4039,7 +4039,7 @@ export interface paths {
     };
     "/api/v2/delivery/history": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4056,7 +4056,7 @@ export interface paths {
     };
     "/api/v2/delivery/orders/{order_id}/accept": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4073,7 +4073,7 @@ export interface paths {
     };
     "/api/v2/delivery/pricing-config": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4090,7 +4090,7 @@ export interface paths {
     };
     "/api/v2/delivery/pricing-config/update": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4107,7 +4107,7 @@ export interface paths {
     };
     "/api/v2/delivery/validate-fee": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4124,7 +4124,7 @@ export interface paths {
     };
     "/api/v2/dementia/due-for-reassessment": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4141,7 +4141,7 @@ export interface paths {
     };
     "/api/v2/dementia/high-risk-wandering": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4158,7 +4158,7 @@ export interface paths {
     };
     "/api/v2/device-tokens": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4177,7 +4177,7 @@ export interface paths {
     };
     "/api/v2/device-tokens/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4194,7 +4194,7 @@ export interface paths {
     };
     "/api/v2/device-tokens/all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4211,7 +4211,7 @@ export interface paths {
     };
     "/api/v2/documents": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4230,7 +4230,7 @@ export interface paths {
     };
     "/api/v2/documents/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4249,7 +4249,7 @@ export interface paths {
     };
     "/api/v2/documents/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4266,7 +4266,7 @@ export interface paths {
     };
     "/api/v2/documents/{uuid}/email": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4283,7 +4283,7 @@ export interface paths {
     };
     "/api/v2/documents/buckets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4300,7 +4300,7 @@ export interface paths {
     };
     "/api/v2/documents/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4317,7 +4317,7 @@ export interface paths {
     };
     "/api/v2/documents/generate/invoice/{invoice_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4334,7 +4334,7 @@ export interface paths {
     };
     "/api/v2/documents/generate/timesheet/{timesheet_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4351,7 +4351,7 @@ export interface paths {
     };
     "/api/v2/documents/presigned/*": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4368,7 +4368,7 @@ export interface paths {
     };
     "/api/v2/documents/upload": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4385,7 +4385,7 @@ export interface paths {
     };
     "/api/v2/documents/upload/{bucket_name}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4402,7 +4402,7 @@ export interface paths {
     };
     "/api/v2/domains": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4420,7 +4420,7 @@ export interface paths {
     };
     "/api/v2/domains/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4439,7 +4439,7 @@ export interface paths {
     };
     "/api/v2/domains/{uuid}/cloudflare/records": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4457,7 +4457,7 @@ export interface paths {
     };
     "/api/v2/domains/{uuid}/cloudflare/records/{record_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4475,7 +4475,7 @@ export interface paths {
     };
     "/api/v2/domains/{uuid}/refresh-expiry": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4492,7 +4492,7 @@ export interface paths {
     };
     "/api/v2/domains/all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4509,7 +4509,7 @@ export interface paths {
     };
     "/api/v2/domains/cloudflare/zones": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4526,7 +4526,7 @@ export interface paths {
     };
     "/api/v2/domains/credentials": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4544,7 +4544,7 @@ export interface paths {
     };
     "/api/v2/domains/credentials/{provider}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4561,7 +4561,7 @@ export interface paths {
     };
     "/api/v2/domains/credentials/verify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4578,7 +4578,7 @@ export interface paths {
     };
     "/api/v2/domains/export": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4595,7 +4595,7 @@ export interface paths {
     };
     "/api/v2/domains/github-integrations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4612,7 +4612,7 @@ export interface paths {
     };
     "/api/v2/domains/pipeline/run": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4629,7 +4629,7 @@ export interface paths {
     };
     "/api/v2/domains/pipeline/runs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4646,7 +4646,7 @@ export interface paths {
     };
     "/api/v2/domains/pipeline/runs/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4663,7 +4663,7 @@ export interface paths {
     };
     "/api/v2/domains/refresh-expiry": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4680,7 +4680,7 @@ export interface paths {
     };
     "/api/v2/domains/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4697,7 +4697,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-configs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4715,7 +4715,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-configs/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4734,7 +4734,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-configs/{uuid}/manifest": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4751,7 +4751,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-configs/{uuid}/run-now": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4768,7 +4768,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-repos": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4786,7 +4786,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-repos/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4804,7 +4804,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4822,7 +4822,7 @@ export interface paths {
     };
     "/api/v2/domains/sync-to-repo": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4839,7 +4839,7 @@ export interface paths {
     };
     "/api/v2/domains/wslproxy/connect": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4856,7 +4856,7 @@ export interface paths {
     };
     "/api/v2/domains/wslproxy/disconnect": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4873,7 +4873,7 @@ export interface paths {
     };
     "/api/v2/domains/wslproxy/rules": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4890,7 +4890,7 @@ export interface paths {
     };
     "/api/v2/domains/wslproxy/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4907,7 +4907,7 @@ export interface paths {
     };
     "/api/v2/email/config": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4924,7 +4924,7 @@ export interface paths {
     };
     "/api/v2/email/preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4941,7 +4941,7 @@ export interface paths {
     };
     "/api/v2/email/send": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4958,7 +4958,7 @@ export interface paths {
     };
     "/api/v2/email/templates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4975,7 +4975,7 @@ export interface paths {
     };
     "/api/v2/employees/candidates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4992,7 +4992,7 @@ export interface paths {
     };
     "/api/v2/employees/team-members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5009,7 +5009,7 @@ export interface paths {
     };
     "/api/v2/enquiries": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5027,7 +5027,7 @@ export interface paths {
     };
     "/api/v2/enquiries/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5046,7 +5046,7 @@ export interface paths {
     };
     "/api/v2/field-service/asset-types": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5064,7 +5064,7 @@ export interface paths {
     };
     "/api/v2/field-service/asset-types/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5081,7 +5081,7 @@ export interface paths {
     };
     "/api/v2/field-service/assets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5099,7 +5099,7 @@ export interface paths {
     };
     "/api/v2/field-service/assets/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5118,7 +5118,7 @@ export interface paths {
     };
     "/api/v2/field-service/assets/{uuid}/service-levels": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5135,7 +5135,7 @@ export interface paths {
     };
     "/api/v2/field-service/assets/{uuid}/tests": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5153,7 +5153,7 @@ export interface paths {
     };
     "/api/v2/field-service/contracts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5171,7 +5171,7 @@ export interface paths {
     };
     "/api/v2/field-service/contracts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5190,7 +5190,7 @@ export interface paths {
     };
     "/api/v2/field-service/employees/{uuid}/licences": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5208,7 +5208,7 @@ export interface paths {
     };
     "/api/v2/field-service/engineers": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5225,7 +5225,7 @@ export interface paths {
     };
     "/api/v2/field-service/fault-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5242,7 +5242,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-items/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5260,7 +5260,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-items/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5277,7 +5277,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-items/{uuid}/photos": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5294,7 +5294,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-items/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5311,7 +5311,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-phases/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5329,7 +5329,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-phases/{uuid}/checklist/{index}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5346,7 +5346,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-phases/{uuid}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5363,7 +5363,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-photos/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5380,7 +5380,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-types": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5398,7 +5398,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-types/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5417,7 +5417,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-types/{uuid}/phases": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5434,7 +5434,7 @@ export interface paths {
     };
     "/api/v2/field-service/job-types/{uuid}/phases/reorder": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5451,7 +5451,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5469,7 +5469,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5488,7 +5488,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/comments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5505,7 +5505,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/invoice": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5522,7 +5522,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/invoice-preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5539,7 +5539,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/items": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5556,7 +5556,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/part-proposals": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5573,7 +5573,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/phases": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5590,7 +5590,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/phases/reorder": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5607,7 +5607,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/photos": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5625,7 +5625,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/quote-email": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5642,7 +5642,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5659,7 +5659,7 @@ export interface paths {
     };
     "/api/v2/field-service/jobs/{uuid}/visits": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5676,7 +5676,7 @@ export interface paths {
     };
     "/api/v2/field-service/licences/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5694,7 +5694,7 @@ export interface paths {
     };
     "/api/v2/field-service/parts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5712,7 +5712,7 @@ export interface paths {
     };
     "/api/v2/field-service/parts/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5731,7 +5731,7 @@ export interface paths {
     };
     "/api/v2/field-service/phase-templates/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5749,7 +5749,7 @@ export interface paths {
     };
     "/api/v2/field-service/reports": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5766,7 +5766,7 @@ export interface paths {
     };
     "/api/v2/field-service/reports/{key}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5783,7 +5783,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-levels/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5801,7 +5801,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-requests": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5819,7 +5819,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-requests/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5838,7 +5838,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-requests/{uuid}/assign": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5855,7 +5855,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-requests/{uuid}/convert-to-job": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5872,7 +5872,7 @@ export interface paths {
     };
     "/api/v2/field-service/service-requests/{uuid}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5889,7 +5889,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/connection": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5906,7 +5906,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/log": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5923,7 +5923,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/pull": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5940,7 +5940,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/push": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5957,7 +5957,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5974,7 +5974,7 @@ export interface paths {
     };
     "/api/v2/field-service/simpro/test": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5991,7 +5991,7 @@ export interface paths {
     };
     "/api/v2/field-service/sites": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6009,7 +6009,7 @@ export interface paths {
     };
     "/api/v2/field-service/sites/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6028,7 +6028,7 @@ export interface paths {
     };
     "/api/v2/field-service/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6045,7 +6045,7 @@ export interface paths {
     };
     "/api/v2/field-service/team-members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6062,7 +6062,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6079,7 +6079,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6098,7 +6098,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/cancel": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6115,7 +6115,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/check-in": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6132,7 +6132,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/check-out": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6149,7 +6149,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/en-route": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6166,7 +6166,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/log-timesheet": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6183,7 +6183,7 @@ export interface paths {
     };
     "/api/v2/field-service/visits/{uuid}/no-access": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6200,7 +6200,7 @@ export interface paths {
     };
     "/api/v2/groups": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6218,7 +6218,7 @@ export interface paths {
     };
     "/api/v2/groups/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6237,7 +6237,7 @@ export interface paths {
     };
     "/api/v2/groups/{id}/members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6254,7 +6254,7 @@ export interface paths {
     };
     "/api/v2/hmrc/businesses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6271,7 +6271,7 @@ export interface paths {
     };
     "/api/v2/hmrc/businesses/fetch": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6288,7 +6288,7 @@ export interface paths {
     };
     "/api/v2/hmrc/nino": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6307,7 +6307,7 @@ export interface paths {
     };
     "/api/v2/hmrc/obligations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6324,7 +6324,7 @@ export interface paths {
     };
     "/api/v2/hmrc/obligations/fetch": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6341,7 +6341,7 @@ export interface paths {
     };
     "/api/v2/hmrc/sandbox/create-test-user": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6358,7 +6358,7 @@ export interface paths {
     };
     "/api/v2/hmrc/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6375,7 +6375,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/alerts/active": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6392,7 +6392,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/alerts/critical": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6409,7 +6409,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/departments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6427,7 +6427,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/departments/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6446,7 +6446,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/wards": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6464,7 +6464,7 @@ export interface paths {
     };
     "/api/v2/hospitals/{hospital_id}/wards/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6483,7 +6483,7 @@ export interface paths {
     };
     "/api/v2/invitations/{token}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6500,7 +6500,7 @@ export interface paths {
     };
     "/api/v2/invitations/{token}/accept": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6517,7 +6517,7 @@ export interface paths {
     };
     "/api/v2/invitations/{token}/decline": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6534,7 +6534,7 @@ export interface paths {
     };
     "/api/v2/invoices": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6552,7 +6552,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6571,7 +6571,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}/email": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6588,7 +6588,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}/items": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6605,7 +6605,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}/payments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6623,7 +6623,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}/send": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6640,7 +6640,7 @@ export interface paths {
     };
     "/api/v2/invoices/{uuid}/void": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6657,7 +6657,7 @@ export interface paths {
     };
     "/api/v2/invoices/customer-billable": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6674,7 +6674,7 @@ export interface paths {
     };
     "/api/v2/invoices/dashboard/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6691,7 +6691,7 @@ export interface paths {
     };
     "/api/v2/invoices/from-customer": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6708,7 +6708,7 @@ export interface paths {
     };
     "/api/v2/invoices/from-timesheet": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6725,7 +6725,7 @@ export interface paths {
     };
     "/api/v2/invoices/items/{item_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6743,7 +6743,7 @@ export interface paths {
     };
     "/api/v2/invoices/payments/{payment_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6760,7 +6760,7 @@ export interface paths {
     };
     "/api/v2/invoices/tax-rates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6778,7 +6778,7 @@ export interface paths {
     };
     "/api/v2/invoices/tax-rates/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6796,7 +6796,7 @@ export interface paths {
     };
     "/api/v2/kanban/attachments/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6813,7 +6813,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{board_uuid}/tasks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6831,7 +6831,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6850,7 +6850,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}/columns": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6867,7 +6867,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}/columns/reorder": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6884,7 +6884,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}/full": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6901,7 +6901,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}/reorder": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6918,7 +6918,7 @@ export interface paths {
     };
     "/api/v2/kanban/boards/{uuid}/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6935,7 +6935,7 @@ export interface paths {
     };
     "/api/v2/kanban/checklist-items/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6952,7 +6952,7 @@ export interface paths {
     };
     "/api/v2/kanban/checklist-items/{uuid}/toggle": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6969,7 +6969,7 @@ export interface paths {
     };
     "/api/v2/kanban/checklists/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6986,7 +6986,7 @@ export interface paths {
     };
     "/api/v2/kanban/checklists/{uuid}/items": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7003,7 +7003,7 @@ export interface paths {
     };
     "/api/v2/kanban/columns/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7021,7 +7021,7 @@ export interface paths {
     };
     "/api/v2/kanban/comments/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7039,7 +7039,7 @@ export interface paths {
     };
     "/api/v2/kanban/epics/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7058,7 +7058,7 @@ export interface paths {
     };
     "/api/v2/kanban/epics/{uuid}/tasks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7077,7 +7077,7 @@ export interface paths {
     };
     "/api/v2/kanban/labels/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7095,7 +7095,7 @@ export interface paths {
     };
     "/api/v2/kanban/my-tasks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7112,7 +7112,7 @@ export interface paths {
     };
     "/api/v2/kanban/namespace/projects": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7129,7 +7129,7 @@ export interface paths {
     };
     "/api/v2/kanban/notification-preferences": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7147,7 +7147,7 @@ export interface paths {
     };
     "/api/v2/kanban/notifications": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7164,7 +7164,7 @@ export interface paths {
     };
     "/api/v2/kanban/notifications/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7181,7 +7181,7 @@ export interface paths {
     };
     "/api/v2/kanban/notifications/{uuid}/read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7198,7 +7198,7 @@ export interface paths {
     };
     "/api/v2/kanban/notifications/mark-all-read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7215,7 +7215,7 @@ export interface paths {
     };
     "/api/v2/kanban/notifications/unread-count": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7232,7 +7232,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7250,7 +7250,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/backlog": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7267,7 +7267,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/boards": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7285,7 +7285,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/epics": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7303,7 +7303,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/labels": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7321,7 +7321,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/sprints": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7339,7 +7339,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{project_uuid}/velocity": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7356,7 +7356,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7375,7 +7375,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/activity": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7392,7 +7392,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/activity-summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7409,7 +7409,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/analytics": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7426,7 +7426,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/completion-trend": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7443,7 +7443,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/cycle-time": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7460,7 +7460,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/label-stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7477,7 +7477,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/member-activity": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7494,7 +7494,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7512,7 +7512,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/members/{user_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7529,7 +7529,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/members/{user_uuid}/role": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7546,7 +7546,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/notification-preferences": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7564,7 +7564,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/priority-distribution": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7581,7 +7581,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/star": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7598,7 +7598,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7615,7 +7615,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/team-workload": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7632,7 +7632,7 @@ export interface paths {
     };
     "/api/v2/kanban/projects/{uuid}/time-report": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7649,7 +7649,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7668,7 +7668,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/burndown": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7685,7 +7685,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/cancel": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7702,7 +7702,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/complete": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7719,7 +7719,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/start": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7736,7 +7736,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7753,7 +7753,7 @@ export interface paths {
     };
     "/api/v2/kanban/sprints/{uuid}/tasks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7772,7 +7772,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7791,7 +7791,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/activities": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7808,7 +7808,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/assignees": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7826,7 +7826,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/assignees/{user_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7843,7 +7843,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/attachments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7861,7 +7861,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/checklists": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7879,7 +7879,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/comments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7897,7 +7897,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/labels": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7915,7 +7915,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/labels/{label_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7932,7 +7932,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/move": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7949,7 +7949,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/time-entries": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7967,7 +7967,7 @@ export interface paths {
     };
     "/api/v2/kanban/tasks/{uuid}/time-summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7984,7 +7984,7 @@ export interface paths {
     };
     "/api/v2/kanban/time-entries/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8002,7 +8002,7 @@ export interface paths {
     };
     "/api/v2/kanban/time-entries/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8019,7 +8019,7 @@ export interface paths {
     };
     "/api/v2/kanban/time-entries/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8036,7 +8036,7 @@ export interface paths {
     };
     "/api/v2/kanban/timer/current": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8053,7 +8053,7 @@ export interface paths {
     };
     "/api/v2/kanban/timer/start": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8070,7 +8070,7 @@ export interface paths {
     };
     "/api/v2/kanban/timer/stop": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8087,7 +8087,7 @@ export interface paths {
     };
     "/api/v2/kanban/timesheet": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8104,7 +8104,7 @@ export interface paths {
     };
     "/api/v2/menu": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8121,7 +8121,7 @@ export interface paths {
     };
     "/api/v2/menu/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8140,7 +8140,7 @@ export interface paths {
     };
     "/api/v2/menu/all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8157,7 +8157,7 @@ export interface paths {
     };
     "/api/v2/modules": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8175,7 +8175,7 @@ export interface paths {
     };
     "/api/v2/modules/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8194,7 +8194,7 @@ export interface paths {
     };
     "/api/v2/modules/available": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8211,7 +8211,7 @@ export interface paths {
     };
     "/api/v2/my/stores": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8228,7 +8228,7 @@ export interface paths {
     };
     "/api/v2/namespace": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8246,7 +8246,7 @@ export interface paths {
     };
     "/api/v2/namespace/activity": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8263,7 +8263,7 @@ export interface paths {
     };
     "/api/v2/namespace/activity/changes": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8280,7 +8280,7 @@ export interface paths {
     };
     "/api/v2/namespace/activity/members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8297,7 +8297,7 @@ export interface paths {
     };
     "/api/v2/namespace/activity/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8314,7 +8314,7 @@ export interface paths {
     };
     "/api/v2/namespace/ai-usage": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8331,7 +8331,7 @@ export interface paths {
     };
     "/api/v2/namespace/audit-logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8348,7 +8348,7 @@ export interface paths {
     };
     "/api/v2/namespace/github-integrations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8366,7 +8366,7 @@ export interface paths {
     };
     "/api/v2/namespace/github-integrations/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8385,7 +8385,7 @@ export interface paths {
     };
     "/api/v2/namespace/invitations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8403,7 +8403,7 @@ export interface paths {
     };
     "/api/v2/namespace/invitations/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8421,7 +8421,7 @@ export interface paths {
     };
     "/api/v2/namespace/invitations/{id}/resend": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8438,7 +8438,7 @@ export interface paths {
     };
     "/api/v2/namespace/leave": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8455,7 +8455,7 @@ export interface paths {
     };
     "/api/v2/namespace/members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8473,7 +8473,7 @@ export interface paths {
     };
     "/api/v2/namespace/members/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8492,7 +8492,7 @@ export interface paths {
     };
     "/api/v2/namespace/members/{id}/transfer-ownership": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8509,7 +8509,7 @@ export interface paths {
     };
     "/api/v2/namespace/menu-config": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8527,7 +8527,7 @@ export interface paths {
     };
     "/api/v2/namespace/menu-config/{key}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8544,7 +8544,7 @@ export interface paths {
     };
     "/api/v2/namespace/menu-config/{key}/disable": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8561,7 +8561,7 @@ export interface paths {
     };
     "/api/v2/namespace/menu-config/{key}/enable": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8578,7 +8578,7 @@ export interface paths {
     };
     "/api/v2/namespace/plugins": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8595,7 +8595,7 @@ export interface paths {
     };
     "/api/v2/namespace/plugins/{code}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8612,7 +8612,7 @@ export interface paths {
     };
     "/api/v2/namespace/roles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8630,7 +8630,7 @@ export interface paths {
     };
     "/api/v2/namespace/roles/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8649,7 +8649,7 @@ export interface paths {
     };
     "/api/v2/namespace/roles/meta/permissions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8666,7 +8666,7 @@ export interface paths {
     };
     "/api/v2/namespace/services": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8684,7 +8684,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8703,7 +8703,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/deploy": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8720,7 +8720,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/deployments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8737,7 +8737,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/deployments/{did}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8754,7 +8754,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/deployments/{did}/sync": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8771,7 +8771,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/secrets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8789,7 +8789,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/secrets/{sid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8807,7 +8807,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/variables": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8825,7 +8825,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/{id}/variables/{vid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8843,7 +8843,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8860,7 +8860,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/sync-deployments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8877,7 +8877,7 @@ export interface paths {
     };
     "/api/v2/namespace/services/test-github-connectivity": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8894,7 +8894,7 @@ export interface paths {
     };
     "/api/v2/namespace/settings/modules": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8912,7 +8912,7 @@ export interface paths {
     };
     "/api/v2/namespace/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8929,7 +8929,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8947,7 +8947,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8966,7 +8966,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/{id}/deliveries": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8983,7 +8983,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/{id}/deliveries/{delivery_id}/redeliver": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9000,7 +9000,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/{id}/rotate-secret": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9017,7 +9017,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/{id}/test": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9034,7 +9034,7 @@ export interface paths {
     };
     "/api/v2/namespace/webhooks/events": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9051,7 +9051,7 @@ export interface paths {
     };
     "/api/v2/notifications": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9068,7 +9068,7 @@ export interface paths {
     };
     "/api/v2/notifications/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9085,7 +9085,7 @@ export interface paths {
     };
     "/api/v2/notifications/{id}/read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9102,7 +9102,7 @@ export interface paths {
     };
     "/api/v2/notifications/mark-all-read": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9119,7 +9119,7 @@ export interface paths {
     };
     "/api/v2/orderitems": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9137,7 +9137,7 @@ export interface paths {
     };
     "/api/v2/orderitems/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9156,7 +9156,7 @@ export interface paths {
     };
     "/api/v2/orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9174,7 +9174,7 @@ export interface paths {
     };
     "/api/v2/orders/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9193,7 +9193,7 @@ export interface paths {
     };
     "/api/v2/orders/{id}/available-transitions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9210,7 +9210,7 @@ export interface paths {
     };
     "/api/v2/orders/{id}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9227,7 +9227,7 @@ export interface paths {
     };
     "/api/v2/orders/{id}/status-history": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9244,7 +9244,7 @@ export interface paths {
     };
     "/api/v2/orders/{id}/update-status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9261,7 +9261,7 @@ export interface paths {
     };
     "/api/v2/orders/bulk-update-status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9278,7 +9278,7 @@ export interface paths {
     };
     "/api/v2/orders/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9295,7 +9295,7 @@ export interface paths {
     };
     "/api/v2/orders/stores": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9312,7 +9312,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/access-controls": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9330,7 +9330,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/access-controls/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9349,7 +9349,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/access-controls/{id}/revoke": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9366,7 +9366,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/alerts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9384,7 +9384,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/alerts/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9403,7 +9403,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/alerts/{id}/acknowledge": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9420,7 +9420,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/alerts/{id}/resolve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9437,7 +9437,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/audit-logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9454,7 +9454,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/audit-logs/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9471,7 +9471,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/audit-logs/access-history": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9488,7 +9488,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/audit-logs/failed-access": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9505,7 +9505,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/care-logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9523,7 +9523,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/care-logs/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9542,7 +9542,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/care-logs/incidents": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9559,7 +9559,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/care-plans": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9577,7 +9577,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/care-plans/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9596,7 +9596,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/daily-logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9614,7 +9614,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/daily-logs/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9633,7 +9633,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/daily-logs/today": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9650,7 +9650,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/dementia-assessments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9668,7 +9668,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/dementia-assessments/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9687,7 +9687,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/dementia-assessments/latest": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9704,7 +9704,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/family-members": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9722,7 +9722,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/family-members/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9741,7 +9741,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/family-members/emergency": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9758,7 +9758,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/family-members/next-of-kin": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9775,7 +9775,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/medications": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9793,7 +9793,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/medications/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9812,7 +9812,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/medications/active": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9829,7 +9829,7 @@ export interface paths {
     };
     "/api/v2/patients/{patient_id}/medications/prn": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9846,7 +9846,7 @@ export interface paths {
     };
     "/api/v2/payments/confirm": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9863,7 +9863,7 @@ export interface paths {
     };
     "/api/v2/payments/create-checkout-session": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9880,7 +9880,7 @@ export interface paths {
     };
     "/api/v2/payments/create-intent": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9897,7 +9897,7 @@ export interface paths {
     };
     "/api/v2/payments/test": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9914,7 +9914,7 @@ export interface paths {
     };
     "/api/v2/payments/test-checkout": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9931,7 +9931,7 @@ export interface paths {
     };
     "/api/v2/permissions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9949,7 +9949,7 @@ export interface paths {
     };
     "/api/v2/permissions/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9968,7 +9968,7 @@ export interface paths {
     };
     "/api/v2/permissions/batch": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9985,7 +9985,7 @@ export interface paths {
     };
     "/api/v2/plugins": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10002,7 +10002,7 @@ export interface paths {
     };
     "/api/v2/plugins/{code}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10019,7 +10019,7 @@ export interface paths {
     };
     "/api/v2/plugins/{code}/events/retry": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10036,7 +10036,7 @@ export interface paths {
     };
     "/api/v2/plugins/{code}/jobs/{job}/run": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10053,7 +10053,7 @@ export interface paths {
     };
     "/api/v2/plugins/{code}/resources/{resource}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10070,7 +10070,7 @@ export interface paths {
     };
     "/api/v2/products": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10088,7 +10088,7 @@ export interface paths {
     };
     "/api/v2/products/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10107,7 +10107,7 @@ export interface paths {
     };
     "/api/v2/products/{product_id}/variants": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10125,7 +10125,7 @@ export interface paths {
     };
     "/api/v2/products/currency": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10142,7 +10142,7 @@ export interface paths {
     };
     "/api/v2/projects": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10160,7 +10160,7 @@ export interface paths {
     };
     "/api/v2/projects/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10179,7 +10179,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/checkout/course/{slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10196,7 +10196,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/checkout/subscription": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10213,7 +10213,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/courses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10230,7 +10230,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/courses/{slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10247,7 +10247,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/courses/{slug}/enroll": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10264,7 +10264,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/courses/{slug}/enrollment": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10281,7 +10281,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/courses/{slug}/progress": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10298,7 +10298,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/enrollments/me": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10315,7 +10315,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/instructors": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10332,7 +10332,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/instructors/{username}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10349,7 +10349,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/lessons/{uuid}/progress": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10366,7 +10366,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/lessons/{uuid}/stream-url": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10383,7 +10383,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/me/entitlements": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10400,7 +10400,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/me/learning": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10417,7 +10417,7 @@ export interface paths {
     };
     "/api/v2/public/academy/{namespace}/plan": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10434,7 +10434,7 @@ export interface paths {
     };
     "/api/v2/public/academy/stripe/webhook": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10451,7 +10451,7 @@ export interface paths {
     };
     "/api/v2/public/billing/checkout/return": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10468,7 +10468,7 @@ export interface paths {
     };
     "/api/v2/public/billing/plans": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10485,7 +10485,7 @@ export interface paths {
     };
     "/api/v2/public/billing/webhook": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10502,7 +10502,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10519,7 +10519,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/nav": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10536,7 +10536,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/pages": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10553,7 +10553,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/pages/{slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10570,7 +10570,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/posts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10587,7 +10587,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/posts/{slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10604,7 +10604,7 @@ export interface paths {
     };
     "/api/v2/public/cms/{namespace}/tags": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10621,7 +10621,7 @@ export interface paths {
     };
     "/api/v2/public/leads/{namespace_slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10638,7 +10638,7 @@ export interface paths {
     };
     "/api/v2/public/shop/stripe/webhook": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10655,7 +10655,7 @@ export interface paths {
     };
     "/api/v2/public/stores/{slug}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10672,7 +10672,7 @@ export interface paths {
     };
     "/api/v2/public/stores/{slug}/products": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10689,7 +10689,7 @@ export interface paths {
     };
     "/api/v2/public/stores/{slug}/products/{product_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10706,7 +10706,7 @@ export interface paths {
     };
     "/api/v2/public/stores/{slug}/reviews": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10723,7 +10723,7 @@ export interface paths {
     };
     "/api/v2/register": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10740,7 +10740,7 @@ export interface paths {
     };
     "/api/v2/render-templates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10758,7 +10758,7 @@ export interface paths {
     };
     "/api/v2/render-templates/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10777,7 +10777,7 @@ export interface paths {
     };
     "/api/v2/render-templates/{uuid}/preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10794,7 +10794,7 @@ export interface paths {
     };
     "/api/v2/render-templates/defaults": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10811,7 +10811,7 @@ export interface paths {
     };
     "/api/v2/render-templates/preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10828,7 +10828,7 @@ export interface paths {
     };
     "/api/v2/roles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10846,7 +10846,7 @@ export interface paths {
     };
     "/api/v2/roles/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10865,7 +10865,7 @@ export interface paths {
     };
     "/api/v2/secrets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10883,7 +10883,7 @@ export interface paths {
     };
     "/api/v2/secrets/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10902,7 +10902,7 @@ export interface paths {
     };
     "/api/v2/secrets/{id}/show": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10919,7 +10919,7 @@ export interface paths {
     };
     "/api/v2/seller/dashboard/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10936,7 +10936,7 @@ export interface paths {
     };
     "/api/v2/seller/orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10953,7 +10953,7 @@ export interface paths {
     };
     "/api/v2/seller/orders/{order_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10970,7 +10970,7 @@ export interface paths {
     };
     "/api/v2/seller/orders/{order_uuid}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10987,7 +10987,7 @@ export interface paths {
     };
     "/api/v2/settings/public": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11004,7 +11004,7 @@ export interface paths {
     };
     "/api/v2/storeproducts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11022,7 +11022,7 @@ export interface paths {
     };
     "/api/v2/storeproducts/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11041,7 +11041,7 @@ export interface paths {
     };
     "/api/v2/stores": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11059,7 +11059,7 @@ export interface paths {
     };
     "/api/v2/stores/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11078,7 +11078,7 @@ export interface paths {
     };
     "/api/v2/stores/{slug}/delivery-partners": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11096,7 +11096,7 @@ export interface paths {
     };
     "/api/v2/stores/{slug}/delivery-partners/{partner_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11113,7 +11113,7 @@ export interface paths {
     };
     "/api/v2/stores/{slug}/delivery-partners/{partner_uuid}/prefer": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11130,7 +11130,7 @@ export interface paths {
     };
     "/api/v2/stores/{slug}/delivery-partners/{partner_uuid}/toggle": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11147,7 +11147,7 @@ export interface paths {
     };
     "/api/v2/stores/{store_id}/orders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11164,7 +11164,7 @@ export interface paths {
     };
     "/api/v2/stores/{store_id}/products": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11182,7 +11182,7 @@ export interface paths {
     };
     "/api/v2/support/admin/conversations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11199,7 +11199,7 @@ export interface paths {
     };
     "/api/v2/support/admin/conversations/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11216,7 +11216,7 @@ export interface paths {
     };
     "/api/v2/support/conversations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11234,7 +11234,7 @@ export interface paths {
     };
     "/api/v2/support/conversations/{id}/messages": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11252,7 +11252,7 @@ export interface paths {
     };
     "/api/v2/support/unread-count": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11269,7 +11269,7 @@ export interface paths {
     };
     "/api/v2/tags": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11287,7 +11287,7 @@ export interface paths {
     };
     "/api/v2/tags/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11306,7 +11306,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/cmi/export": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11323,7 +11323,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/cmi/import/apply": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11340,7 +11340,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/cmi/import/dry-run": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11357,7 +11357,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/form-sections": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11375,7 +11375,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/form-sections/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11393,7 +11393,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/income-types": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11411,7 +11411,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/income-types/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11430,7 +11430,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/income-types/{uuid}/usage": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11447,7 +11447,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11465,7 +11465,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11484,7 +11484,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/save-transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11501,7 +11501,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/suggest-rules": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11518,7 +11518,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11536,7 +11536,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/transactions/{tx_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11553,7 +11553,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/upload-csv": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11570,7 +11570,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/profiles/{uuid}/usage": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11587,7 +11587,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11604,7 +11604,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/transactions/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11621,7 +11621,7 @@ export interface paths {
     };
     "/api/v2/tax/admin/transactions/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11638,7 +11638,7 @@ export interface paths {
     };
     "/api/v2/tax/bank-accounts": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11656,7 +11656,7 @@ export interface paths {
     };
     "/api/v2/tax/bank-accounts/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11675,7 +11675,7 @@ export interface paths {
     };
     "/api/v2/tax/bank-accounts/find-or-create": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11692,7 +11692,7 @@ export interface paths {
     };
     "/api/v2/tax/business-ca-catalogue": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11709,7 +11709,7 @@ export interface paths {
     };
     "/api/v2/tax/business-line-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11726,7 +11726,7 @@ export interface paths {
     };
     "/api/v2/tax/businesses": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11744,7 +11744,7 @@ export interface paths {
     };
     "/api/v2/tax/businesses/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11763,7 +11763,7 @@ export interface paths {
     };
     "/api/v2/tax/businesses/{uuid}/capital-allowances": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11781,7 +11781,7 @@ export interface paths {
     };
     "/api/v2/tax/businesses/{uuid}/values": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11799,7 +11799,7 @@ export interface paths {
     };
     "/api/v2/tax/calculate/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11816,7 +11816,7 @@ export interface paths {
     };
     "/api/v2/tax/calculate/multi": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11833,7 +11833,7 @@ export interface paths {
     };
     "/api/v2/tax/calculate/summary/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11850,7 +11850,7 @@ export interface paths {
     };
     "/api/v2/tax/calculate/year-statements": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11867,7 +11867,7 @@ export interface paths {
     };
     "/api/v2/tax/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11885,7 +11885,7 @@ export interface paths {
     };
     "/api/v2/tax/categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11903,7 +11903,7 @@ export interface paths {
     };
     "/api/v2/tax/classify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11920,7 +11920,7 @@ export interface paths {
     };
     "/api/v2/tax/classify/providers": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11937,7 +11937,7 @@ export interface paths {
     };
     "/api/v2/tax/classify/test": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11954,7 +11954,7 @@ export interface paths {
     };
     "/api/v2/tax/custom-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11972,7 +11972,7 @@ export interface paths {
     };
     "/api/v2/tax/custom-categories/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11991,7 +11991,7 @@ export interface paths {
     };
     "/api/v2/tax/dashboard/statements-by-period": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12008,7 +12008,7 @@ export interface paths {
     };
     "/api/v2/tax/dashboard/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12025,7 +12025,7 @@ export interface paths {
     };
     "/api/v2/tax/dashboard/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12042,7 +12042,7 @@ export interface paths {
     };
     "/api/v2/tax/dashboard/year-comparison": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12059,7 +12059,7 @@ export interface paths {
     };
     "/api/v2/tax/employments": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12077,7 +12077,7 @@ export interface paths {
     };
     "/api/v2/tax/employments/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12096,7 +12096,7 @@ export interface paths {
     };
     "/api/v2/tax/extract": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12113,7 +12113,7 @@ export interface paths {
     };
     "/api/v2/tax/extract/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12130,7 +12130,7 @@ export interface paths {
     };
     "/api/v2/tax/extract/bank-details": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12147,7 +12147,7 @@ export interface paths {
     };
     "/api/v2/tax/file": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12164,7 +12164,7 @@ export interface paths {
     };
     "/api/v2/tax/file/{statement_id}/check-duplicate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12181,7 +12181,7 @@ export interface paths {
     };
     "/api/v2/tax/file/{statement_id}/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12198,7 +12198,7 @@ export interface paths {
     };
     "/api/v2/tax/form-card-summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12215,7 +12215,7 @@ export interface paths {
     };
     "/api/v2/tax/form-items": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12233,7 +12233,7 @@ export interface paths {
     };
     "/api/v2/tax/form-items/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12251,7 +12251,7 @@ export interface paths {
     };
     "/api/v2/tax/form-records": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12269,7 +12269,7 @@ export interface paths {
     };
     "/api/v2/tax/form-records/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12287,7 +12287,7 @@ export interface paths {
     };
     "/api/v2/tax/form-sections": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12304,7 +12304,7 @@ export interface paths {
     };
     "/api/v2/tax/form-summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12321,7 +12321,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/aggregate-preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12338,7 +12338,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/business/default": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12355,7 +12355,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/business/select": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12372,7 +12372,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/calculate-preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12389,7 +12389,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/sandbox/provision": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12406,7 +12406,7 @@ export interface paths {
     };
     "/api/v2/tax/hmrc/submit-final-declaration": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12423,7 +12423,7 @@ export interface paths {
     };
     "/api/v2/tax/my-incomes": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12441,7 +12441,7 @@ export interface paths {
     };
     "/api/v2/tax/my-incomes/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12460,7 +12460,7 @@ export interface paths {
     };
     "/api/v2/tax/my-incomes/types": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12477,7 +12477,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas-line-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12494,7 +12494,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas-properties": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12512,7 +12512,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas-properties/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12531,7 +12531,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas-properties/{uuid}/lines": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12549,7 +12549,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas-property-lines/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12567,7 +12567,7 @@ export interface paths {
     };
     "/api/v2/tax/overseas/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12584,7 +12584,7 @@ export interface paths {
     };
     "/api/v2/tax/profile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12601,7 +12601,7 @@ export interface paths {
     };
     "/api/v2/tax/profile/nino": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12619,7 +12619,7 @@ export interface paths {
     };
     "/api/v2/tax/profile/nino/verify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12636,7 +12636,7 @@ export interface paths {
     };
     "/api/v2/tax/profile/obligations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12653,7 +12653,7 @@ export interface paths {
     };
     "/api/v2/tax/profile/preferences": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12670,7 +12670,7 @@ export interface paths {
     };
     "/api/v2/tax/profiles": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12687,7 +12687,7 @@ export interface paths {
     };
     "/api/v2/tax/properties": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12705,7 +12705,7 @@ export interface paths {
     };
     "/api/v2/tax/properties/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12724,7 +12724,7 @@ export interface paths {
     };
     "/api/v2/tax/properties/{uuid}/lines": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12742,7 +12742,7 @@ export interface paths {
     };
     "/api/v2/tax/property-line-categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12759,7 +12759,7 @@ export interface paths {
     };
     "/api/v2/tax/property-lines/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12777,7 +12777,7 @@ export interface paths {
     };
     "/api/v2/tax/rates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12794,7 +12794,7 @@ export interface paths {
     };
     "/api/v2/tax/rates/{tax_year}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12811,7 +12811,7 @@ export interface paths {
     };
     "/api/v2/tax/rates/all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12828,7 +12828,7 @@ export interface paths {
     };
     "/api/v2/tax/reconcile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12845,7 +12845,7 @@ export interface paths {
     };
     "/api/v2/tax/reconcile/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12862,7 +12862,7 @@ export interface paths {
     };
     "/api/v2/tax/rental/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12879,7 +12879,7 @@ export interface paths {
     };
     "/api/v2/tax/reports/category-breakdown": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12896,7 +12896,7 @@ export interface paths {
     };
     "/api/v2/tax/reports/hmrc-boxes": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12913,7 +12913,7 @@ export interface paths {
     };
     "/api/v2/tax/reports/monthly-trend": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12930,7 +12930,7 @@ export interface paths {
     };
     "/api/v2/tax/reports/tax-calculation": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12947,7 +12947,7 @@ export interface paths {
     };
     "/api/v2/tax/self-employment/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12964,7 +12964,7 @@ export interface paths {
     };
     "/api/v2/tax/settings/account": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12981,7 +12981,7 @@ export interface paths {
     };
     "/api/v2/tax/settings/change-password": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12998,7 +12998,7 @@ export interface paths {
     };
     "/api/v2/tax/settings/preferences": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13016,7 +13016,7 @@ export interface paths {
     };
     "/api/v2/tax/settings/profile": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13034,7 +13034,7 @@ export interface paths {
     };
     "/api/v2/tax/statements": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13052,7 +13052,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13071,7 +13071,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{id}/audit": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13088,7 +13088,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{id}/workflow": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13105,7 +13105,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{statement_id}/transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13122,7 +13122,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{statement_id}/transactions/bulk": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13139,7 +13139,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{statement_id}/transactions/bulk-confirm": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13156,7 +13156,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{statement_id}/transactions/bulk-confirm-classification": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13173,7 +13173,7 @@ export interface paths {
     };
     "/api/v2/tax/statements/{statement_id}/transactions/classify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13190,7 +13190,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13207,7 +13207,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13226,7 +13226,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/{id}/confirm": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13243,7 +13243,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/{id}/confirm-classification": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13260,7 +13260,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/{id}/history": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13277,7 +13277,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/categories": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13294,7 +13294,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/send-to-training": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13311,7 +13311,7 @@ export interface paths {
     };
     "/api/v2/tax/transactions/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13328,7 +13328,7 @@ export interface paths {
     };
     "/api/v2/tax/upload": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13345,7 +13345,7 @@ export interface paths {
     };
     "/api/v2/tax/upload/presigned/{statement_id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13362,7 +13362,7 @@ export interface paths {
     };
     "/api/v2/templates": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13380,7 +13380,7 @@ export interface paths {
     };
     "/api/v2/templates/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13399,7 +13399,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13418,7 +13418,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}/clone": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13435,7 +13435,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}/preview": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13452,7 +13452,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}/restore/{version}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13469,7 +13469,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}/set-default": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13486,7 +13486,7 @@ export interface paths {
     };
     "/api/v2/templates/{uuid}/versions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13503,7 +13503,7 @@ export interface paths {
     };
     "/api/v2/templates/preview-raw": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13520,7 +13520,7 @@ export interface paths {
     };
     "/api/v2/templates/variables/{type}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13537,7 +13537,7 @@ export interface paths {
     };
     "/api/v2/test-notification": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13554,7 +13554,7 @@ export interface paths {
     };
     "/api/v2/test-notification/tokens": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13571,7 +13571,7 @@ export interface paths {
     };
     "/api/v2/themes": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13589,7 +13589,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13608,7 +13608,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/activate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13625,7 +13625,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/duplicate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13642,7 +13642,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/preview.css": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13659,7 +13659,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/publish": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13676,7 +13676,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/revert": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13693,7 +13693,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/revisions": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13710,7 +13710,7 @@ export interface paths {
     };
     "/api/v2/themes/{uuid}/unpublish": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13727,7 +13727,7 @@ export interface paths {
     };
     "/api/v2/themes/active": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13744,7 +13744,7 @@ export interface paths {
     };
     "/api/v2/themes/active/styles.css": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13761,7 +13761,7 @@ export interface paths {
     };
     "/api/v2/themes/install/{source_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13778,7 +13778,7 @@ export interface paths {
     };
     "/api/v2/themes/marketplace": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13795,7 +13795,7 @@ export interface paths {
     };
     "/api/v2/themes/presets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13812,7 +13812,7 @@ export interface paths {
     };
     "/api/v2/themes/schema": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13829,7 +13829,7 @@ export interface paths {
     };
     "/api/v2/timesheets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13847,7 +13847,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13866,7 +13866,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}/approve": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13883,7 +13883,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}/entries": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13901,7 +13901,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}/reject": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13918,7 +13918,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}/reopen": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13935,7 +13935,7 @@ export interface paths {
     };
     "/api/v2/timesheets/{uuid}/submit": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13952,7 +13952,7 @@ export interface paths {
     };
     "/api/v2/timesheets/approval-queue": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13969,7 +13969,7 @@ export interface paths {
     };
     "/api/v2/timesheets/entries/{entry_uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13987,7 +13987,7 @@ export interface paths {
     };
     "/api/v2/timesheets/lookups/customers": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14004,7 +14004,7 @@ export interface paths {
     };
     "/api/v2/timesheets/lookups/tasks": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14021,7 +14021,7 @@ export interface paths {
     };
     "/api/v2/timesheets/summary": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14038,7 +14038,7 @@ export interface paths {
     };
     "/api/v2/training-data/process-pending": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14055,7 +14055,7 @@ export interface paths {
     };
     "/api/v2/training-data/reembed-all": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14072,7 +14072,7 @@ export interface paths {
     };
     "/api/v2/training-data/search-similar": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14089,7 +14089,7 @@ export interface paths {
     };
     "/api/v2/training-data/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14106,7 +14106,7 @@ export interface paths {
     };
     "/api/v2/user/{user_uuid}/namespace-memberships": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14123,7 +14123,7 @@ export interface paths {
     };
     "/api/v2/user/add-to-namespace": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14140,7 +14140,7 @@ export interface paths {
     };
     "/api/v2/user/invitations": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14157,7 +14157,7 @@ export interface paths {
     };
     "/api/v2/user/menu": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14174,7 +14174,7 @@ export interface paths {
     };
     "/api/v2/user/namespace-settings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14192,7 +14192,7 @@ export interface paths {
     };
     "/api/v2/user/namespaces": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14210,7 +14210,7 @@ export interface paths {
     };
     "/api/v2/user/namespaces/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14227,7 +14227,7 @@ export interface paths {
     };
     "/api/v2/user/namespaces/{id}/switch": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14244,7 +14244,7 @@ export interface paths {
     };
     "/api/v2/users": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14262,7 +14262,7 @@ export interface paths {
     };
     "/api/v2/users/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14281,7 +14281,7 @@ export interface paths {
     };
     "/api/v2/users/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14298,7 +14298,7 @@ export interface paths {
     };
     "/api/v2/variants/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14317,7 +14317,7 @@ export interface paths {
     };
     "/api/v2/vault": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14335,7 +14335,7 @@ export interface paths {
     };
     "/api/v2/vault/export/env": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14352,7 +14352,7 @@ export interface paths {
     };
     "/api/v2/vault/export/json": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14369,7 +14369,7 @@ export interface paths {
     };
     "/api/v2/vault/folders": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14387,7 +14387,7 @@ export interface paths {
     };
     "/api/v2/vault/folders/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14405,7 +14405,7 @@ export interface paths {
     };
     "/api/v2/vault/import/env": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14422,7 +14422,7 @@ export interface paths {
     };
     "/api/v2/vault/key": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14439,7 +14439,7 @@ export interface paths {
     };
     "/api/v2/vault/logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14456,7 +14456,7 @@ export interface paths {
     };
     "/api/v2/vault/providers": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14474,7 +14474,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/{uuid}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14493,7 +14493,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/{uuid}/logs": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14510,7 +14510,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/{uuid}/mappings": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14527,7 +14527,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/{uuid}/sync": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14544,7 +14544,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/test-connection": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14561,7 +14561,7 @@ export interface paths {
     };
     "/api/v2/vault/providers/types": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14578,7 +14578,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14596,7 +14596,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14615,7 +14615,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets/{id}/rotate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14632,7 +14632,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets/{id}/share": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14649,7 +14649,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets/{id}/shares": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14666,7 +14666,7 @@ export interface paths {
     };
     "/api/v2/vault/secrets/expiring": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14683,7 +14683,7 @@ export interface paths {
     };
     "/api/v2/vault/shared": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14700,7 +14700,7 @@ export interface paths {
     };
     "/api/v2/vault/shares/{id}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14717,7 +14717,7 @@ export interface paths {
     };
     "/api/v2/vault/stats": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14734,7 +14734,7 @@ export interface paths {
     };
     "/api/v2/vault/unlock": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14751,7 +14751,7 @@ export interface paths {
     };
     "/api/v2/vault/users/search": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14768,7 +14768,7 @@ export interface paths {
     };
     "/api/v2/webhooks/github": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14785,7 +14785,7 @@ export interface paths {
     };
     "/api/v2/webhooks/stripe": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14802,7 +14802,7 @@ export interface paths {
     };
     "/auth/2fa/resend": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14819,7 +14819,7 @@ export interface paths {
     };
     "/auth/2fa/verify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14836,7 +14836,7 @@ export interface paths {
     };
     "/auth/change-password": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14853,7 +14853,7 @@ export interface paths {
     };
     "/auth/delete-account": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14870,7 +14870,7 @@ export interface paths {
     };
     "/auth/e2e/peek-otp": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14887,7 +14887,7 @@ export interface paths {
     };
     "/auth/forgot-password": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14904,7 +14904,7 @@ export interface paths {
     };
     "/auth/google": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14921,7 +14921,7 @@ export interface paths {
     };
     "/auth/google/callback": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14938,7 +14938,7 @@ export interface paths {
     };
     "/auth/hmrc/callback": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14955,7 +14955,7 @@ export interface paths {
     };
     "/auth/hmrc/disconnect": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14972,7 +14972,7 @@ export interface paths {
     };
     "/auth/hmrc/initiate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14989,7 +14989,7 @@ export interface paths {
     };
     "/auth/login": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15006,7 +15006,7 @@ export interface paths {
     };
     "/auth/logout": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15023,7 +15023,7 @@ export interface paths {
     };
     "/auth/me": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15040,7 +15040,7 @@ export interface paths {
     };
     "/auth/oauth/validate": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15057,7 +15057,7 @@ export interface paths {
     };
     "/auth/pin/setup": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15074,7 +15074,7 @@ export interface paths {
     };
     "/auth/pin/status": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15091,7 +15091,7 @@ export interface paths {
     };
     "/auth/pin/verify": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15108,7 +15108,7 @@ export interface paths {
     };
     "/auth/refresh": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15125,7 +15125,7 @@ export interface paths {
     };
     "/auth/reset-password": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15142,7 +15142,7 @@ export interface paths {
     };
     "/health": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15159,7 +15159,7 @@ export interface paths {
     };
     "/live": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15176,7 +15176,7 @@ export interface paths {
     };
     "/plugin-ui/_sdk/{file}": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15193,7 +15193,7 @@ export interface paths {
     };
     "/plugin-ui/{code}/*": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15210,7 +15210,7 @@ export interface paths {
     };
     "/ready": {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15567,7 +15567,7 @@ export type $defs = Record<string, never>;
 export interface operations {
     post__api_chat_access_grant: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15613,7 +15613,7 @@ export interface operations {
     };
     post__api_chat_agent: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15659,7 +15659,7 @@ export interface operations {
     };
     post__api_chat_agent_confirm: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15706,6 +15706,7 @@ export interface operations {
     get__api_chat_agent_conversation: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -15751,7 +15752,7 @@ export interface operations {
     };
     delete__api_chat_agent_conversation: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15785,6 +15786,7 @@ export interface operations {
     get__api_chat_agent_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -15831,6 +15833,7 @@ export interface operations {
     get__api_chat_bookmarks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -15876,7 +15879,7 @@ export interface operations {
     };
     post__api_chat_bookmarks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15922,7 +15925,7 @@ export interface operations {
     };
     delete__api_chat_bookmarks_message_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Message uuid */
@@ -15959,6 +15962,7 @@ export interface operations {
     get__api_chat_channels: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16004,7 +16008,7 @@ export interface operations {
     };
     post__api_chat_channels: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -16051,6 +16055,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_mentions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16099,7 +16104,7 @@ export interface operations {
     };
     post__api_chat_channels_channel_uuid_mentions_read_all: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Channel uuid */
@@ -16149,6 +16154,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_messages: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16197,7 +16203,7 @@ export interface operations {
     };
     post__api_chat_channels_channel_uuid_messages: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Channel uuid */
@@ -16247,6 +16253,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_messages_pinned: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16296,6 +16303,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_messages_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16345,6 +16353,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_reactions_popular: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16394,6 +16403,7 @@ export interface operations {
     get__api_chat_channels_channel_uuid_unread: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16442,7 +16452,7 @@ export interface operations {
     };
     get__api_chat_channels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16484,7 +16494,7 @@ export interface operations {
     };
     put__api_chat_channels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16533,7 +16543,7 @@ export interface operations {
     };
     delete__api_chat_channels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16570,6 +16580,7 @@ export interface operations {
     get__api_chat_channels_uuid_files: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16619,6 +16630,7 @@ export interface operations {
     get__api_chat_channels_uuid_files_images: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16667,7 +16679,7 @@ export interface operations {
     };
     post__api_chat_channels_uuid_invites: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16716,7 +16728,7 @@ export interface operations {
     };
     post__api_chat_channels_uuid_join: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16765,7 +16777,7 @@ export interface operations {
     };
     post__api_chat_channels_uuid_leave: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16815,6 +16827,7 @@ export interface operations {
     get__api_chat_channels_uuid_members: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -16863,7 +16876,7 @@ export interface operations {
     };
     post__api_chat_channels_uuid_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -16912,7 +16925,7 @@ export interface operations {
     };
     delete__api_chat_channels_uuid_members_user_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -16950,7 +16963,7 @@ export interface operations {
     };
     put__api_chat_channels_uuid_members_user_uuid_role: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -17002,6 +17015,7 @@ export interface operations {
     get__api_chat_channels_uuid_presence: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17050,7 +17064,7 @@ export interface operations {
     };
     post__api_chat_channels_uuid_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17099,7 +17113,7 @@ export interface operations {
     };
     put__api_chat_channels_uuid_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17149,6 +17163,7 @@ export interface operations {
     get__api_chat_channels_business: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17194,7 +17209,7 @@ export interface operations {
     };
     post__api_chat_channels_defaults: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -17240,7 +17255,7 @@ export interface operations {
     };
     post__api_chat_channels_direct: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -17287,6 +17302,7 @@ export interface operations {
     get__api_chat_channels_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17333,6 +17349,7 @@ export interface operations {
     get__api_chat_drafts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17378,7 +17395,7 @@ export interface operations {
     };
     get__api_chat_drafts_channel_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Channel uuid */
@@ -17420,7 +17437,7 @@ export interface operations {
     };
     put__api_chat_drafts_channel_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Channel uuid */
@@ -17469,7 +17486,7 @@ export interface operations {
     };
     delete__api_chat_drafts_channel_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Channel uuid */
@@ -17505,7 +17522,7 @@ export interface operations {
     };
     post__api_chat_files: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -17551,7 +17568,7 @@ export interface operations {
     };
     delete__api_chat_files_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17588,6 +17605,7 @@ export interface operations {
     get__api_chat_invites: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17633,7 +17651,7 @@ export interface operations {
     };
     post__api_chat_invites_uuid_accept: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17682,7 +17700,7 @@ export interface operations {
     };
     post__api_chat_invites_uuid_decline: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17732,6 +17750,7 @@ export interface operations {
     get__api_chat_mentions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17777,7 +17796,7 @@ export interface operations {
     };
     post__api_chat_mentions_uuid_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -17826,7 +17845,7 @@ export interface operations {
     };
     post__api_chat_mentions_read_all: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -17873,6 +17892,7 @@ export interface operations {
     get__api_chat_mentions_unread_count: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17919,6 +17939,7 @@ export interface operations {
     get__api_chat_messages_message_uuid_reactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -17967,7 +17988,7 @@ export interface operations {
     };
     post__api_chat_messages_message_uuid_reactions: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Message uuid */
@@ -18016,7 +18037,7 @@ export interface operations {
     };
     delete__api_chat_messages_message_uuid_reactions_emoji: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Emoji */
@@ -18055,6 +18076,7 @@ export interface operations {
     get__api_chat_messages_message_uuid_reactions_emoji_users: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18105,7 +18127,7 @@ export interface operations {
     };
     post__api_chat_messages_message_uuid_reactions_toggle: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Message uuid */
@@ -18154,7 +18176,7 @@ export interface operations {
     };
     get__api_chat_messages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -18196,7 +18218,7 @@ export interface operations {
     };
     put__api_chat_messages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -18245,7 +18267,7 @@ export interface operations {
     };
     delete__api_chat_messages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -18281,7 +18303,7 @@ export interface operations {
     };
     post__api_chat_messages_uuid_pin: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -18330,7 +18352,7 @@ export interface operations {
     };
     delete__api_chat_messages_uuid_pin: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -18367,6 +18389,7 @@ export interface operations {
     get__api_chat_messages_uuid_thread: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18416,6 +18439,7 @@ export interface operations {
     get__api_chat_presence: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18461,7 +18485,7 @@ export interface operations {
     };
     put__api_chat_presence: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -18507,7 +18531,7 @@ export interface operations {
     };
     delete__api_chat_presence_custom_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -18541,6 +18565,7 @@ export interface operations {
     get__api_chat_users_mentionable: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18587,6 +18612,7 @@ export interface operations {
     get__api_chat_users_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18632,7 +18658,7 @@ export interface operations {
     };
     put__api_v2_academy_admin_instructors_user_uuid_fee: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -18682,6 +18708,7 @@ export interface operations {
     get__api_v2_academy_admin_payouts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18727,7 +18754,7 @@ export interface operations {
     };
     post__api_v2_academy_admin_payouts_user_uuid_mark_paid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -18777,6 +18804,7 @@ export interface operations {
     get__api_v2_academy_admin_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18822,7 +18850,7 @@ export interface operations {
     };
     put__api_v2_academy_admin_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -18869,6 +18897,7 @@ export interface operations {
     get__api_v2_academy_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18915,6 +18944,7 @@ export interface operations {
     get__api_v2_academy_courses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -18960,7 +18990,7 @@ export interface operations {
     };
     post__api_v2_academy_courses: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19006,7 +19036,7 @@ export interface operations {
     };
     get__api_v2_academy_courses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19048,7 +19078,7 @@ export interface operations {
     };
     put__api_v2_academy_courses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19097,7 +19127,7 @@ export interface operations {
     };
     delete__api_v2_academy_courses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19133,7 +19163,7 @@ export interface operations {
     };
     post__api_v2_academy_courses_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19188,6 +19218,7 @@ export interface operations {
     get__api_v2_academy_courses_uuid_lessons: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19236,7 +19267,7 @@ export interface operations {
     };
     post__api_v2_academy_courses_uuid_lessons: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19285,7 +19316,7 @@ export interface operations {
     };
     post__api_v2_academy_courses_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19338,6 +19369,7 @@ export interface operations {
     get__api_v2_academy_creator_account: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19383,7 +19415,7 @@ export interface operations {
     };
     put__api_v2_academy_creator_account: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19430,6 +19462,7 @@ export interface operations {
     get__api_v2_academy_creator_profile: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19475,7 +19508,7 @@ export interface operations {
     };
     put__api_v2_academy_creator_profile: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19521,7 +19554,7 @@ export interface operations {
     };
     put__api_v2_academy_creator_subscription_plan: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19567,7 +19600,7 @@ export interface operations {
     };
     post__api_v2_academy_instructor_register: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19614,6 +19647,7 @@ export interface operations {
     get__api_v2_academy_instructor_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19659,7 +19693,7 @@ export interface operations {
     };
     get__api_v2_academy_lessons_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19701,7 +19735,7 @@ export interface operations {
     };
     put__api_v2_academy_lessons_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19750,7 +19784,7 @@ export interface operations {
     };
     delete__api_v2_academy_lessons_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -19787,6 +19821,7 @@ export interface operations {
     get__api_v2_academy_pending_courses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19833,6 +19868,7 @@ export interface operations {
     get__api_v2_access_my_patients: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19879,6 +19915,7 @@ export interface operations {
     get__api_v2_access_verify: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19925,6 +19962,7 @@ export interface operations {
     get__api_v2_accounting_accounts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -19970,7 +20008,7 @@ export interface operations {
     };
     post__api_v2_accounting_accounts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20016,7 +20054,7 @@ export interface operations {
     };
     get__api_v2_accounting_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20058,7 +20096,7 @@ export interface operations {
     };
     put__api_v2_accounting_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20107,7 +20145,7 @@ export interface operations {
     };
     delete__api_v2_accounting_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20143,7 +20181,7 @@ export interface operations {
     };
     post__api_v2_accounting_ai_categorize: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20189,7 +20227,7 @@ export interface operations {
     };
     post__api_v2_accounting_ai_query: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20236,6 +20274,7 @@ export interface operations {
     get__api_v2_accounting_ai_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20281,7 +20320,7 @@ export interface operations {
     };
     post__api_v2_accounting_ai_suggest_vat: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20327,7 +20366,7 @@ export interface operations {
     };
     post__api_v2_accounting_ai_vat_suggest: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20374,6 +20413,7 @@ export interface operations {
     get__api_v2_accounting_bank_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20419,7 +20459,7 @@ export interface operations {
     };
     get__api_v2_accounting_bank_transactions_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20461,7 +20501,7 @@ export interface operations {
     };
     put__api_v2_accounting_bank_transactions_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20510,7 +20550,7 @@ export interface operations {
     };
     put__api_v2_accounting_bank_transactions_uuid_categorize: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20559,7 +20599,7 @@ export interface operations {
     };
     post__api_v2_accounting_bank_transactions_uuid_reconcile: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20609,6 +20649,7 @@ export interface operations {
     get__api_v2_accounting_bank_transactions_by_category: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20655,6 +20696,7 @@ export interface operations {
     get__api_v2_accounting_bank_transactions_by_tag: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20700,7 +20742,7 @@ export interface operations {
     };
     post__api_v2_accounting_bank_transactions_import: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20747,6 +20789,7 @@ export interface operations {
     get__api_v2_accounting_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20785,6 +20828,7 @@ export interface operations {
     get__api_v2_accounting_expenses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -20830,7 +20874,7 @@ export interface operations {
     };
     post__api_v2_accounting_expenses: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20876,7 +20920,7 @@ export interface operations {
     };
     get__api_v2_accounting_expenses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20918,7 +20962,7 @@ export interface operations {
     };
     put__api_v2_accounting_expenses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -20967,7 +21011,7 @@ export interface operations {
     };
     delete__api_v2_accounting_expenses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21003,7 +21047,7 @@ export interface operations {
     };
     post__api_v2_accounting_expenses_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21057,7 +21101,7 @@ export interface operations {
     };
     post__api_v2_accounting_expenses_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21110,6 +21154,7 @@ export interface operations {
     get__api_v2_accounting_hmrc_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21156,6 +21201,7 @@ export interface operations {
     get__api_v2_accounting_journal_entries: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21201,7 +21247,7 @@ export interface operations {
     };
     post__api_v2_accounting_journal_entries: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21247,7 +21293,7 @@ export interface operations {
     };
     get__api_v2_accounting_journal_entries_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21289,7 +21335,7 @@ export interface operations {
     };
     post__api_v2_accounting_journal_entries_uuid_void: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21335,6 +21381,7 @@ export interface operations {
     get__api_v2_accounting_reports_balance_sheet: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21381,6 +21428,7 @@ export interface operations {
     get__api_v2_accounting_reports_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21427,6 +21475,7 @@ export interface operations {
     get__api_v2_accounting_reports_expense_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21473,6 +21522,7 @@ export interface operations {
     get__api_v2_accounting_reports_profit_and_loss: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21519,6 +21569,7 @@ export interface operations {
     get__api_v2_accounting_reports_profit_loss: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21565,6 +21616,7 @@ export interface operations {
     get__api_v2_accounting_reports_trial_balance: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21611,6 +21663,7 @@ export interface operations {
     get__api_v2_accounting_vat_returns: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21656,7 +21709,7 @@ export interface operations {
     };
     post__api_v2_accounting_vat_returns: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21702,7 +21755,7 @@ export interface operations {
     };
     get__api_v2_accounting_vat_returns_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21744,7 +21797,7 @@ export interface operations {
     };
     post__api_v2_accounting_vat_returns_uuid_submit: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -21790,6 +21843,7 @@ export interface operations {
     get__api_v2_admin_ai_usage: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21836,6 +21890,7 @@ export interface operations {
     get__api_v2_admin_bank_accounts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21882,6 +21937,7 @@ export interface operations {
     get__api_v2_admin_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -21927,7 +21983,7 @@ export interface operations {
     };
     post__api_v2_admin_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21973,7 +22029,7 @@ export interface operations {
     };
     put__api_v2_admin_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22022,7 +22078,7 @@ export interface operations {
     };
     delete__api_v2_admin_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22059,6 +22115,7 @@ export interface operations {
     get__api_v2_admin_custom_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22104,7 +22161,7 @@ export interface operations {
     };
     get__api_v2_admin_custom_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22146,7 +22203,7 @@ export interface operations {
     };
     put__api_v2_admin_custom_categories_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22200,7 +22257,7 @@ export interface operations {
     };
     post__api_v2_admin_custom_categories_uuid_promote: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22249,7 +22306,7 @@ export interface operations {
     };
     put__api_v2_admin_custom_categories_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22302,6 +22359,7 @@ export interface operations {
     get__api_v2_admin_custom_categories_duplicates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22348,6 +22406,7 @@ export interface operations {
     get__api_v2_admin_custom_categories_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22386,6 +22445,7 @@ export interface operations {
     get__api_v2_admin_dashboard: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22431,7 +22491,7 @@ export interface operations {
     };
     get__api_v2_admin_export_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -22474,6 +22534,7 @@ export interface operations {
     get__api_v2_admin_hmrc_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22519,7 +22580,7 @@ export interface operations {
     };
     post__api_v2_admin_hmrc_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22565,7 +22626,7 @@ export interface operations {
     };
     put__api_v2_admin_hmrc_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22614,7 +22675,7 @@ export interface operations {
     };
     delete__api_v2_admin_hmrc_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -22650,7 +22711,7 @@ export interface operations {
     };
     post__api_v2_admin_identity_lock_announce: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22697,6 +22758,7 @@ export interface operations {
     get__api_v2_admin_identity_lock_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22742,7 +22804,7 @@ export interface operations {
     };
     patch__api_v2_admin_identity_lock_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22789,6 +22851,7 @@ export interface operations {
     get__api_v2_admin_namespaces: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -22834,7 +22897,7 @@ export interface operations {
     };
     post__api_v2_admin_namespaces: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22880,7 +22943,7 @@ export interface operations {
     };
     get__api_v2_admin_namespaces_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -22922,7 +22985,7 @@ export interface operations {
     };
     put__api_v2_admin_namespaces_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -22971,7 +23034,7 @@ export interface operations {
     };
     delete__api_v2_admin_namespaces_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -23008,6 +23071,7 @@ export interface operations {
     get__api_v2_admin_namespaces_id_invitations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23056,7 +23120,7 @@ export interface operations {
     };
     post__api_v2_admin_namespaces_id_invitations: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -23106,6 +23170,7 @@ export interface operations {
     get__api_v2_admin_namespaces_id_redirect_origins: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23154,7 +23219,7 @@ export interface operations {
     };
     put__api_v2_admin_namespaces_id_redirect_origins: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -23204,6 +23269,7 @@ export interface operations {
     get__api_v2_admin_namespaces_id_roles: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23253,6 +23319,7 @@ export interface operations {
     get__api_v2_admin_namespaces_id_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23293,7 +23360,7 @@ export interface operations {
     };
     post__api_v2_admin_namespaces_id_transfer_ownership: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -23343,6 +23410,7 @@ export interface operations {
     get__api_v2_admin_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23388,7 +23456,7 @@ export interface operations {
     };
     get__api_v2_admin_settings_key: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -23430,7 +23498,7 @@ export interface operations {
     };
     put__api_v2_admin_settings_key: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -23480,6 +23548,7 @@ export interface operations {
     get__api_v2_admin_statements: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23525,7 +23594,7 @@ export interface operations {
     };
     post__api_v2_admin_tax_user_profiles_user_uuid_unlock: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -23575,6 +23644,7 @@ export interface operations {
     get__api_v2_admin_transactions_low_confidence: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23620,7 +23690,7 @@ export interface operations {
     };
     post__api_v2_admin_users_user_uuid_namespaces: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -23669,7 +23739,7 @@ export interface operations {
     };
     delete__api_v2_admin_users_user_uuid_namespaces_namespace_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace id */
@@ -23707,7 +23777,7 @@ export interface operations {
     };
     put__api_v2_admin_users_user_uuid_namespaces_namespace_id_roles: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace id */
@@ -23759,6 +23829,7 @@ export interface operations {
     get__api_v2_all_documents: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23805,6 +23876,7 @@ export interface operations {
     get__api_v2_api_keys: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23850,7 +23922,7 @@ export interface operations {
     };
     post__api_v2_api_keys: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23896,7 +23968,7 @@ export interface operations {
     };
     delete__api_v2_api_keys_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -23933,6 +24005,7 @@ export interface operations {
     get__api_v2_bank_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -23978,7 +24051,7 @@ export interface operations {
     };
     post__api_v2_bank_transactions: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24024,7 +24097,7 @@ export interface operations {
     };
     get__api_v2_bank_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -24066,7 +24139,7 @@ export interface operations {
     };
     put__api_v2_bank_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -24115,7 +24188,7 @@ export interface operations {
     };
     delete__api_v2_bank_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -24151,7 +24224,7 @@ export interface operations {
     };
     post__api_v2_billing_checkout: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24197,7 +24270,7 @@ export interface operations {
     };
     get__api_v2_billing_checkout_session_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Session id */
@@ -24239,7 +24312,7 @@ export interface operations {
     };
     post__api_v2_billing_checkout_payment_intent: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24286,6 +24359,7 @@ export interface operations {
     get__api_v2_billing_entitlements: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -24332,6 +24406,7 @@ export interface operations {
     get__api_v2_billing_payments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -24378,6 +24453,7 @@ export interface operations {
     get__api_v2_billing_plans: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -24423,7 +24499,7 @@ export interface operations {
     };
     post__api_v2_billing_plans: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24469,7 +24545,7 @@ export interface operations {
     };
     get__api_v2_billing_plans_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -24511,7 +24587,7 @@ export interface operations {
     };
     put__api_v2_billing_plans_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -24560,7 +24636,7 @@ export interface operations {
     };
     delete__api_v2_billing_plans_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -24596,7 +24672,7 @@ export interface operations {
     };
     post__api_v2_billing_plans_uuid_sync: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -24646,6 +24722,7 @@ export interface operations {
     get__api_v2_billing_subscription: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -24691,7 +24768,7 @@ export interface operations {
     };
     post__api_v2_billing_subscription_cancel: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24737,7 +24814,7 @@ export interface operations {
     };
     post__api_v2_billing_subscription_change_plan: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24784,6 +24861,7 @@ export interface operations {
     get__api_v2_buyer_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -24831,7 +24909,7 @@ export interface operations {
     };
     get__api_v2_buyer_orders_order_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order id */
@@ -24873,7 +24951,7 @@ export interface operations {
     };
     post__api_v2_buyer_orders_order_id_cancel: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order id */
@@ -24922,7 +25000,7 @@ export interface operations {
     };
     post__api_v2_buyer_orders_order_id_repeat: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order id */
@@ -24972,6 +25050,7 @@ export interface operations {
     get__api_v2_care_plans_due_for_review: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25018,6 +25097,7 @@ export interface operations {
     get__api_v2_cart: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25063,7 +25143,7 @@ export interface operations {
     };
     post__api_v2_cart_add: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25109,7 +25189,7 @@ export interface operations {
     };
     delete__api_v2_cart_clear: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25142,7 +25222,7 @@ export interface operations {
     };
     delete__api_v2_cart_remove_product_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Product uuid */
@@ -25179,6 +25259,7 @@ export interface operations {
     get__api_v2_cart_totals: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25225,6 +25306,7 @@ export interface operations {
     get__api_v2_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25270,7 +25352,7 @@ export interface operations {
     };
     post__api_v2_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25316,7 +25398,7 @@ export interface operations {
     };
     get__api_v2_categories_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -25358,7 +25440,7 @@ export interface operations {
     };
     put__api_v2_categories_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -25407,7 +25489,7 @@ export interface operations {
     };
     delete__api_v2_categories_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -25444,6 +25526,7 @@ export interface operations {
     get__api_v2_categories_check: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25490,6 +25573,7 @@ export interface operations {
     get__api_v2_categories_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25535,7 +25619,7 @@ export interface operations {
     };
     post__api_v2_checkout: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25581,7 +25665,7 @@ export interface operations {
     };
     post__api_v2_checkout_enhanced: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25628,6 +25712,7 @@ export interface operations {
     get__api_v2_cms_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25673,7 +25758,7 @@ export interface operations {
     };
     post__api_v2_cms_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25719,7 +25804,7 @@ export interface operations {
     };
     put__api_v2_cms_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -25768,7 +25853,7 @@ export interface operations {
     };
     delete__api_v2_cms_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -25805,6 +25890,7 @@ export interface operations {
     get__api_v2_cms_pages: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -25850,7 +25936,7 @@ export interface operations {
     };
     post__api_v2_cms_pages: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25896,7 +25982,7 @@ export interface operations {
     };
     get__api_v2_cms_pages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -25938,7 +26024,7 @@ export interface operations {
     };
     put__api_v2_cms_pages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -25987,7 +26073,7 @@ export interface operations {
     };
     delete__api_v2_cms_pages_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26024,6 +26110,7 @@ export interface operations {
     get__api_v2_cms_posts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -26069,7 +26156,7 @@ export interface operations {
     };
     post__api_v2_cms_posts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26115,7 +26202,7 @@ export interface operations {
     };
     get__api_v2_cms_posts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26157,7 +26244,7 @@ export interface operations {
     };
     put__api_v2_cms_posts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26206,7 +26293,7 @@ export interface operations {
     };
     delete__api_v2_cms_posts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26243,6 +26330,7 @@ export interface operations {
     get__api_v2_cms_tags: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -26288,7 +26376,7 @@ export interface operations {
     };
     post__api_v2_cms_tags: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26334,7 +26422,7 @@ export interface operations {
     };
     put__api_v2_cms_tags_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26383,7 +26471,7 @@ export interface operations {
     };
     delete__api_v2_cms_tags_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26420,6 +26508,7 @@ export interface operations {
     get__api_v2_cms_webhooks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -26465,7 +26554,7 @@ export interface operations {
     };
     post__api_v2_cms_webhooks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26511,7 +26600,7 @@ export interface operations {
     };
     get__api_v2_cms_webhooks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26553,7 +26642,7 @@ export interface operations {
     };
     put__api_v2_cms_webhooks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26602,7 +26691,7 @@ export interface operations {
     };
     delete__api_v2_cms_webhooks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26638,7 +26727,7 @@ export interface operations {
     };
     post__api_v2_cms_webhooks_uuid_trigger: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26688,6 +26777,7 @@ export interface operations {
     get__api_v2_crm_accounts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -26735,7 +26825,7 @@ export interface operations {
     };
     post__api_v2_crm_accounts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26781,7 +26871,7 @@ export interface operations {
     };
     get__api_v2_crm_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26823,7 +26913,7 @@ export interface operations {
     };
     put__api_v2_crm_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26872,7 +26962,7 @@ export interface operations {
     };
     delete__api_v2_crm_accounts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -26909,6 +26999,7 @@ export interface operations {
     get__api_v2_crm_activities: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -26956,7 +27047,7 @@ export interface operations {
     };
     post__api_v2_crm_activities: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -27002,7 +27093,7 @@ export interface operations {
     };
     get__api_v2_crm_activities_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27044,7 +27135,7 @@ export interface operations {
     };
     put__api_v2_crm_activities_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27093,7 +27184,7 @@ export interface operations {
     };
     delete__api_v2_crm_activities_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27129,7 +27220,7 @@ export interface operations {
     };
     put__api_v2_crm_activities_uuid_complete: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27178,7 +27269,7 @@ export interface operations {
     };
     post__api_v2_crm_activities_uuid_complete: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27228,6 +27319,7 @@ export interface operations {
     get__api_v2_crm_contacts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -27275,7 +27367,7 @@ export interface operations {
     };
     post__api_v2_crm_contacts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -27321,7 +27413,7 @@ export interface operations {
     };
     get__api_v2_crm_contacts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27363,7 +27455,7 @@ export interface operations {
     };
     put__api_v2_crm_contacts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27412,7 +27504,7 @@ export interface operations {
     };
     delete__api_v2_crm_contacts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27449,6 +27541,7 @@ export interface operations {
     get__api_v2_crm_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -27489,6 +27582,7 @@ export interface operations {
     get__api_v2_crm_deals: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -27536,7 +27630,7 @@ export interface operations {
     };
     post__api_v2_crm_deals: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -27582,7 +27676,7 @@ export interface operations {
     };
     get__api_v2_crm_deals_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27624,7 +27718,7 @@ export interface operations {
     };
     put__api_v2_crm_deals_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27673,7 +27767,7 @@ export interface operations {
     };
     delete__api_v2_crm_deals_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27709,7 +27803,7 @@ export interface operations {
     };
     get__api_v2_crm_deals_pipeline_pipeline_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Pipeline UUID */
@@ -27752,6 +27846,7 @@ export interface operations {
     get__api_v2_crm_leads: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -27799,7 +27894,7 @@ export interface operations {
     };
     post__api_v2_crm_leads: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -27845,7 +27940,7 @@ export interface operations {
     };
     get__api_v2_crm_leads_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27887,7 +27982,7 @@ export interface operations {
     };
     put__api_v2_crm_leads_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27936,7 +28031,7 @@ export interface operations {
     };
     delete__api_v2_crm_leads_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -27972,7 +28067,7 @@ export interface operations {
     };
     post__api_v2_crm_leads_uuid_convert: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28022,6 +28117,7 @@ export interface operations {
     get__api_v2_crm_leads_notification_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28069,7 +28165,7 @@ export interface operations {
     };
     put__api_v2_crm_leads_notification_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28115,7 +28211,7 @@ export interface operations {
     };
     post__api_v2_crm_leads_notification_settings_test_telegram: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28162,6 +28258,7 @@ export interface operations {
     get__api_v2_crm_leads_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28202,6 +28299,7 @@ export interface operations {
     get__api_v2_crm_pipelines: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28249,7 +28347,7 @@ export interface operations {
     };
     post__api_v2_crm_pipelines: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28296,6 +28394,7 @@ export interface operations {
     get__api_v2_crm_pipelines_pipeline_uuid_deals: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28346,7 +28445,7 @@ export interface operations {
     };
     get__api_v2_crm_pipelines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28388,7 +28487,7 @@ export interface operations {
     };
     put__api_v2_crm_pipelines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28437,7 +28536,7 @@ export interface operations {
     };
     delete__api_v2_crm_pipelines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28474,6 +28573,7 @@ export interface operations {
     get__api_v2_customers: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28519,7 +28619,7 @@ export interface operations {
     };
     post__api_v2_customers: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28565,7 +28665,7 @@ export interface operations {
     };
     get__api_v2_customers_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -28607,7 +28707,7 @@ export interface operations {
     };
     put__api_v2_customers_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -28656,7 +28756,7 @@ export interface operations {
     };
     delete__api_v2_customers_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -28692,7 +28792,7 @@ export interface operations {
     };
     post__api_v2_delivery_assignments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28738,7 +28838,7 @@ export interface operations {
     };
     get__api_v2_delivery_assignments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28780,7 +28880,7 @@ export interface operations {
     };
     put__api_v2_delivery_assignments_uuid_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -28830,6 +28930,7 @@ export interface operations {
     get__api_v2_delivery_partner_assignment_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28878,6 +28979,7 @@ export interface operations {
     get__api_v2_delivery_partner_assignments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28926,6 +29028,7 @@ export interface operations {
     get__api_v2_delivery_partner_available_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -28974,6 +29077,7 @@ export interface operations {
     get__api_v2_delivery_partner_dashboard: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29022,6 +29126,7 @@ export interface operations {
     get__api_v2_delivery_partner_earnings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29070,6 +29175,7 @@ export interface operations {
     get__api_v2_delivery_partner_nearby_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29118,6 +29224,7 @@ export interface operations {
     get__api_v2_delivery_partner_notifications: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29165,7 +29272,7 @@ export interface operations {
     };
     put__api_v2_delivery_partner_notifications_id_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -29214,7 +29321,7 @@ export interface operations {
     };
     post__api_v2_delivery_partner_request_delivery: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29260,7 +29367,7 @@ export interface operations {
     };
     post__api_v2_delivery_partner_request_order: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29306,7 +29413,7 @@ export interface operations {
     };
     post__api_v2_delivery_partners_areas: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29353,6 +29460,7 @@ export interface operations {
     get__api_v2_delivery_partners_by_area: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29400,7 +29508,7 @@ export interface operations {
     };
     put__api_v2_delivery_partners_location: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29447,6 +29555,7 @@ export interface operations {
     get__api_v2_delivery_partners_profile: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29494,7 +29603,7 @@ export interface operations {
     };
     put__api_v2_delivery_partners_profile: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29540,7 +29649,7 @@ export interface operations {
     };
     post__api_v2_delivery_partners_register: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29587,6 +29696,7 @@ export interface operations {
     get__api_v2_delivery_partners_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29634,7 +29744,7 @@ export interface operations {
     };
     post__api_v2_delivery_partners_verification_send_otp: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29681,6 +29791,7 @@ export interface operations {
     get__api_v2_delivery_partners_verification_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -29728,7 +29839,7 @@ export interface operations {
     };
     post__api_v2_delivery_partners_verification_verify_otp: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29774,7 +29885,7 @@ export interface operations {
     };
     post__api_v2_delivery_requests: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29820,7 +29931,7 @@ export interface operations {
     };
     put__api_v2_delivery_requests_uuid_accept: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -29869,7 +29980,7 @@ export interface operations {
     };
     put__api_v2_delivery_requests_uuid_cancel: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -29918,7 +30029,7 @@ export interface operations {
     };
     put__api_v2_delivery_requests_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -29971,6 +30082,7 @@ export interface operations {
     get__api_v2_delivery_requests_partner: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30018,7 +30130,7 @@ export interface operations {
     };
     get__api_v2_delivery_requests_store_store_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Store slug */
@@ -30061,6 +30173,7 @@ export interface operations {
     get__api_v2_delivery_active: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30108,7 +30221,7 @@ export interface operations {
     };
     put__api_v2_delivery_assignments_assignment_id_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Assignment id */
@@ -30158,6 +30271,7 @@ export interface operations {
     get__api_v2_delivery_fee_estimate: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30205,7 +30319,7 @@ export interface operations {
     };
     post__api_v2_delivery_fee_estimate: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30252,6 +30366,7 @@ export interface operations {
     get__api_v2_delivery_history: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30299,7 +30414,7 @@ export interface operations {
     };
     post__api_v2_delivery_orders_order_id_accept: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order id */
@@ -30349,6 +30464,7 @@ export interface operations {
     get__api_v2_delivery_pricing_config: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30396,7 +30512,7 @@ export interface operations {
     };
     put__api_v2_delivery_pricing_config_update: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30442,7 +30558,7 @@ export interface operations {
     };
     post__api_v2_delivery_validate_fee: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30489,6 +30605,7 @@ export interface operations {
     get__api_v2_dementia_due_for_reassessment: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30535,6 +30652,7 @@ export interface operations {
     get__api_v2_dementia_high_risk_wandering: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30581,6 +30699,7 @@ export interface operations {
     get__api_v2_device_tokens: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30626,7 +30745,7 @@ export interface operations {
     };
     post__api_v2_device_tokens: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30672,7 +30791,7 @@ export interface operations {
     };
     delete__api_v2_device_tokens: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30705,7 +30824,7 @@ export interface operations {
     };
     delete__api_v2_device_tokens_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -30741,7 +30860,7 @@ export interface operations {
     };
     delete__api_v2_device_tokens_all: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30775,6 +30894,7 @@ export interface operations {
     get__api_v2_documents: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -30820,7 +30940,7 @@ export interface operations {
     };
     post__api_v2_documents: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30866,7 +30986,7 @@ export interface operations {
     };
     delete__api_v2_documents: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30899,7 +31019,7 @@ export interface operations {
     };
     get__api_v2_documents_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -30941,7 +31061,7 @@ export interface operations {
     };
     put__api_v2_documents_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -30990,7 +31110,7 @@ export interface operations {
     };
     delete__api_v2_documents_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -31026,7 +31146,7 @@ export interface operations {
     };
     get__api_v2_documents_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31068,7 +31188,7 @@ export interface operations {
     };
     post__api_v2_documents_uuid_email: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31123,6 +31243,7 @@ export interface operations {
     get__api_v2_documents_buckets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31169,6 +31290,7 @@ export interface operations {
     get__api_v2_documents_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31214,7 +31336,7 @@ export interface operations {
     };
     post__api_v2_documents_generate_invoice_invoice_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Invoice UUID */
@@ -31263,7 +31385,7 @@ export interface operations {
     };
     post__api_v2_documents_generate_timesheet_timesheet_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Timesheet UUID */
@@ -31313,6 +31435,7 @@ export interface operations {
     "get__api_v2_documents_presigned_*": {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31358,7 +31481,7 @@ export interface operations {
     };
     post__api_v2_documents_upload: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -31404,7 +31527,7 @@ export interface operations {
     };
     post__api_v2_documents_upload_bucket_name: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Bucket name */
@@ -31454,6 +31577,7 @@ export interface operations {
     get__api_v2_domains: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31499,7 +31623,7 @@ export interface operations {
     };
     post__api_v2_domains: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -31545,7 +31669,7 @@ export interface operations {
     };
     get__api_v2_domains_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31587,7 +31711,7 @@ export interface operations {
     };
     put__api_v2_domains_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31636,7 +31760,7 @@ export interface operations {
     };
     delete__api_v2_domains_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31673,6 +31797,7 @@ export interface operations {
     get__api_v2_domains_uuid_cloudflare_records: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31721,7 +31846,7 @@ export interface operations {
     };
     post__api_v2_domains_uuid_cloudflare_records: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31770,7 +31895,7 @@ export interface operations {
     };
     put__api_v2_domains_uuid_cloudflare_records_record_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Record id */
@@ -31821,7 +31946,7 @@ export interface operations {
     };
     delete__api_v2_domains_uuid_cloudflare_records_record_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Record id */
@@ -31859,7 +31984,7 @@ export interface operations {
     };
     post__api_v2_domains_uuid_refresh_expiry: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -31909,6 +32034,7 @@ export interface operations {
     get__api_v2_domains_all: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -31955,6 +32081,7 @@ export interface operations {
     get__api_v2_domains_cloudflare_zones: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32001,6 +32128,7 @@ export interface operations {
     get__api_v2_domains_credentials: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32046,7 +32174,7 @@ export interface operations {
     };
     post__api_v2_domains_credentials: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32092,7 +32220,7 @@ export interface operations {
     };
     delete__api_v2_domains_credentials_provider: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Provider */
@@ -32128,7 +32256,7 @@ export interface operations {
     };
     post__api_v2_domains_credentials_verify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32175,6 +32303,7 @@ export interface operations {
     get__api_v2_domains_export: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32221,6 +32350,7 @@ export interface operations {
     get__api_v2_domains_github_integrations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32266,7 +32396,7 @@ export interface operations {
     };
     post__api_v2_domains_pipeline_run: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32313,6 +32443,7 @@ export interface operations {
     get__api_v2_domains_pipeline_runs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32358,7 +32489,7 @@ export interface operations {
     };
     get__api_v2_domains_pipeline_runs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32400,7 +32531,7 @@ export interface operations {
     };
     post__api_v2_domains_refresh_expiry: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32447,6 +32578,7 @@ export interface operations {
     get__api_v2_domains_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32485,6 +32617,7 @@ export interface operations {
     get__api_v2_domains_sync_configs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32530,7 +32663,7 @@ export interface operations {
     };
     post__api_v2_domains_sync_configs: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32576,7 +32709,7 @@ export interface operations {
     };
     get__api_v2_domains_sync_configs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32618,7 +32751,7 @@ export interface operations {
     };
     put__api_v2_domains_sync_configs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32667,7 +32800,7 @@ export interface operations {
     };
     delete__api_v2_domains_sync_configs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32704,6 +32837,7 @@ export interface operations {
     get__api_v2_domains_sync_configs_uuid_manifest: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32752,7 +32886,7 @@ export interface operations {
     };
     post__api_v2_domains_sync_configs_uuid_run_now: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32802,6 +32936,7 @@ export interface operations {
     get__api_v2_domains_sync_repos: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -32847,7 +32982,7 @@ export interface operations {
     };
     post__api_v2_domains_sync_repos: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -32893,7 +33028,7 @@ export interface operations {
     };
     put__api_v2_domains_sync_repos_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32942,7 +33077,7 @@ export interface operations {
     };
     delete__api_v2_domains_sync_repos_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -32979,6 +33114,7 @@ export interface operations {
     get__api_v2_domains_sync_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33024,7 +33160,7 @@ export interface operations {
     };
     put__api_v2_domains_sync_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33070,7 +33206,7 @@ export interface operations {
     };
     post__api_v2_domains_sync_to_repo: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33116,7 +33252,7 @@ export interface operations {
     };
     post__api_v2_domains_wslproxy_connect: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33162,7 +33298,7 @@ export interface operations {
     };
     delete__api_v2_domains_wslproxy_disconnect: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33196,6 +33332,7 @@ export interface operations {
     get__api_v2_domains_wslproxy_rules: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33242,6 +33379,7 @@ export interface operations {
     get__api_v2_domains_wslproxy_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33288,6 +33426,7 @@ export interface operations {
     get__api_v2_email_config: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33333,7 +33472,7 @@ export interface operations {
     };
     post__api_v2_email_preview: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33382,7 +33521,7 @@ export interface operations {
     };
     post__api_v2_email_send: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33425,6 +33564,7 @@ export interface operations {
     get__api_v2_email_templates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33471,6 +33611,7 @@ export interface operations {
     get__api_v2_employees_candidates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33516,7 +33657,7 @@ export interface operations {
     };
     post__api_v2_employees_team_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33563,6 +33704,7 @@ export interface operations {
     get__api_v2_enquiries: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33608,7 +33750,7 @@ export interface operations {
     };
     post__api_v2_enquiries: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33654,7 +33796,7 @@ export interface operations {
     };
     get__api_v2_enquiries_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -33696,7 +33838,7 @@ export interface operations {
     };
     put__api_v2_enquiries_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -33745,7 +33887,7 @@ export interface operations {
     };
     delete__api_v2_enquiries_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -33782,6 +33924,7 @@ export interface operations {
     get__api_v2_field_service_asset_types: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33827,7 +33970,7 @@ export interface operations {
     };
     post__api_v2_field_service_asset_types: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33873,7 +34016,7 @@ export interface operations {
     };
     put__api_v2_field_service_asset_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -33923,6 +34066,7 @@ export interface operations {
     get__api_v2_field_service_assets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -33968,7 +34112,7 @@ export interface operations {
     };
     post__api_v2_field_service_assets: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -34014,7 +34158,7 @@ export interface operations {
     };
     get__api_v2_field_service_assets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34056,7 +34200,7 @@ export interface operations {
     };
     put__api_v2_field_service_assets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34105,7 +34249,7 @@ export interface operations {
     };
     delete__api_v2_field_service_assets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34141,7 +34285,7 @@ export interface operations {
     };
     post__api_v2_field_service_assets_uuid_service_levels: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34191,6 +34335,7 @@ export interface operations {
     get__api_v2_field_service_assets_uuid_tests: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34239,7 +34384,7 @@ export interface operations {
     };
     post__api_v2_field_service_assets_uuid_tests: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34289,6 +34434,7 @@ export interface operations {
     get__api_v2_field_service_contracts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34334,7 +34480,7 @@ export interface operations {
     };
     post__api_v2_field_service_contracts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -34380,7 +34526,7 @@ export interface operations {
     };
     get__api_v2_field_service_contracts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34422,7 +34568,7 @@ export interface operations {
     };
     put__api_v2_field_service_contracts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34471,7 +34617,7 @@ export interface operations {
     };
     delete__api_v2_field_service_contracts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34508,6 +34654,7 @@ export interface operations {
     get__api_v2_field_service_employees_uuid_licences: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34556,7 +34703,7 @@ export interface operations {
     };
     post__api_v2_field_service_employees_uuid_licences: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34606,6 +34753,7 @@ export interface operations {
     get__api_v2_field_service_engineers: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34652,6 +34800,7 @@ export interface operations {
     get__api_v2_field_service_fault_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34697,7 +34846,7 @@ export interface operations {
     };
     put__api_v2_field_service_job_items_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34746,7 +34895,7 @@ export interface operations {
     };
     delete__api_v2_field_service_job_items_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34782,7 +34931,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_items_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34837,6 +34986,7 @@ export interface operations {
     get__api_v2_field_service_job_items_uuid_photos: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -34885,7 +35035,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_items_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34937,7 +35087,7 @@ export interface operations {
     };
     put__api_v2_field_service_job_phases_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -34986,7 +35136,7 @@ export interface operations {
     };
     delete__api_v2_field_service_job_phases_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35022,7 +35172,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_phases_uuid_checklist_index: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Index */
@@ -35073,7 +35223,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_phases_uuid_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35122,7 +35272,7 @@ export interface operations {
     };
     delete__api_v2_field_service_job_photos_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35159,6 +35309,7 @@ export interface operations {
     get__api_v2_field_service_job_types: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -35204,7 +35355,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_types: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -35250,7 +35401,7 @@ export interface operations {
     };
     get__api_v2_field_service_job_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35292,7 +35443,7 @@ export interface operations {
     };
     put__api_v2_field_service_job_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35341,7 +35492,7 @@ export interface operations {
     };
     delete__api_v2_field_service_job_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35377,7 +35528,7 @@ export interface operations {
     };
     post__api_v2_field_service_job_types_uuid_phases: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35426,7 +35577,7 @@ export interface operations {
     };
     put__api_v2_field_service_job_types_uuid_phases_reorder: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35476,6 +35627,7 @@ export interface operations {
     get__api_v2_field_service_jobs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -35521,7 +35673,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -35567,7 +35719,7 @@ export interface operations {
     };
     get__api_v2_field_service_jobs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35609,7 +35761,7 @@ export interface operations {
     };
     put__api_v2_field_service_jobs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35658,7 +35810,7 @@ export interface operations {
     };
     delete__api_v2_field_service_jobs_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35694,7 +35846,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_comments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35743,7 +35895,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_invoice: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35793,6 +35945,7 @@ export interface operations {
     get__api_v2_field_service_jobs_uuid_invoice_preview: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -35841,7 +35994,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_items: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35890,7 +36043,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_part_proposals: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35939,7 +36092,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_phases: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -35988,7 +36141,7 @@ export interface operations {
     };
     put__api_v2_field_service_jobs_uuid_phases_reorder: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36038,6 +36191,7 @@ export interface operations {
     get__api_v2_field_service_jobs_uuid_photos: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -36086,7 +36240,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_photos: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36135,7 +36289,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_quote_email: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36184,7 +36338,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36233,7 +36387,7 @@ export interface operations {
     };
     post__api_v2_field_service_jobs_uuid_visits: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36282,7 +36436,7 @@ export interface operations {
     };
     put__api_v2_field_service_licences_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36331,7 +36485,7 @@ export interface operations {
     };
     delete__api_v2_field_service_licences_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36368,6 +36522,7 @@ export interface operations {
     get__api_v2_field_service_parts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -36413,7 +36568,7 @@ export interface operations {
     };
     post__api_v2_field_service_parts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -36459,7 +36614,7 @@ export interface operations {
     };
     get__api_v2_field_service_parts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36501,7 +36656,7 @@ export interface operations {
     };
     put__api_v2_field_service_parts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36550,7 +36705,7 @@ export interface operations {
     };
     delete__api_v2_field_service_parts_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36586,7 +36741,7 @@ export interface operations {
     };
     put__api_v2_field_service_phase_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36635,7 +36790,7 @@ export interface operations {
     };
     delete__api_v2_field_service_phase_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36672,6 +36827,7 @@ export interface operations {
     get__api_v2_field_service_reports: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -36717,7 +36873,7 @@ export interface operations {
     };
     get__api_v2_field_service_reports_key: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -36759,7 +36915,7 @@ export interface operations {
     };
     put__api_v2_field_service_service_levels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36808,7 +36964,7 @@ export interface operations {
     };
     delete__api_v2_field_service_service_levels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36845,6 +37001,7 @@ export interface operations {
     get__api_v2_field_service_service_requests: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -36890,7 +37047,7 @@ export interface operations {
     };
     post__api_v2_field_service_service_requests: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -36936,7 +37093,7 @@ export interface operations {
     };
     get__api_v2_field_service_service_requests_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -36978,7 +37135,7 @@ export interface operations {
     };
     put__api_v2_field_service_service_requests_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37027,7 +37184,7 @@ export interface operations {
     };
     delete__api_v2_field_service_service_requests_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37063,7 +37220,7 @@ export interface operations {
     };
     post__api_v2_field_service_service_requests_uuid_assign: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37112,7 +37269,7 @@ export interface operations {
     };
     post__api_v2_field_service_service_requests_uuid_convert_to_job: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37161,7 +37318,7 @@ export interface operations {
     };
     post__api_v2_field_service_service_requests_uuid_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37210,7 +37367,7 @@ export interface operations {
     };
     put__api_v2_field_service_simpro_connection: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37257,6 +37414,7 @@ export interface operations {
     get__api_v2_field_service_simpro_log: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -37302,7 +37460,7 @@ export interface operations {
     };
     post__api_v2_field_service_simpro_pull: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37348,7 +37506,7 @@ export interface operations {
     };
     post__api_v2_field_service_simpro_push: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37395,6 +37553,7 @@ export interface operations {
     get__api_v2_field_service_simpro_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -37440,7 +37599,7 @@ export interface operations {
     };
     post__api_v2_field_service_simpro_test: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37487,6 +37646,7 @@ export interface operations {
     get__api_v2_field_service_sites: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -37532,7 +37692,7 @@ export interface operations {
     };
     post__api_v2_field_service_sites: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37578,7 +37738,7 @@ export interface operations {
     };
     get__api_v2_field_service_sites_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37620,7 +37780,7 @@ export interface operations {
     };
     put__api_v2_field_service_sites_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37669,7 +37829,7 @@ export interface operations {
     };
     delete__api_v2_field_service_sites_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37706,6 +37866,7 @@ export interface operations {
     get__api_v2_field_service_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -37743,7 +37904,7 @@ export interface operations {
     };
     post__api_v2_field_service_team_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -37790,6 +37951,7 @@ export interface operations {
     get__api_v2_field_service_visits: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -37835,7 +37997,7 @@ export interface operations {
     };
     get__api_v2_field_service_visits_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37877,7 +38039,7 @@ export interface operations {
     };
     put__api_v2_field_service_visits_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37926,7 +38088,7 @@ export interface operations {
     };
     delete__api_v2_field_service_visits_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -37962,7 +38124,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_cancel: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38011,7 +38173,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_check_in: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38060,7 +38222,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_check_out: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38109,7 +38271,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_en_route: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38158,7 +38320,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_log_timesheet: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38207,7 +38369,7 @@ export interface operations {
     };
     post__api_v2_field_service_visits_uuid_no_access: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -38257,6 +38419,7 @@ export interface operations {
     get__api_v2_groups: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38302,7 +38465,7 @@ export interface operations {
     };
     post__api_v2_groups: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38348,7 +38511,7 @@ export interface operations {
     };
     get__api_v2_groups_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -38390,7 +38553,7 @@ export interface operations {
     };
     put__api_v2_groups_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -38439,7 +38602,7 @@ export interface operations {
     };
     delete__api_v2_groups_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -38475,7 +38638,7 @@ export interface operations {
     };
     post__api_v2_groups_id_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -38525,6 +38688,7 @@ export interface operations {
     get__api_v2_hmrc_businesses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38570,7 +38734,7 @@ export interface operations {
     };
     post__api_v2_hmrc_businesses_fetch: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38617,6 +38781,7 @@ export interface operations {
     get__api_v2_hmrc_nino: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38662,7 +38827,7 @@ export interface operations {
     };
     post__api_v2_hmrc_nino: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38708,7 +38873,7 @@ export interface operations {
     };
     delete__api_v2_hmrc_nino: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38742,6 +38907,7 @@ export interface operations {
     get__api_v2_hmrc_obligations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38787,7 +38953,7 @@ export interface operations {
     };
     post__api_v2_hmrc_obligations_fetch: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38833,7 +38999,7 @@ export interface operations {
     };
     post__api_v2_hmrc_sandbox_create_test_user: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -38880,6 +39046,7 @@ export interface operations {
     get__api_v2_hmrc_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38926,6 +39093,7 @@ export interface operations {
     get__api_v2_hospitals_hospital_id_alerts_active: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -38975,6 +39143,7 @@ export interface operations {
     get__api_v2_hospitals_hospital_id_alerts_critical: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -39024,6 +39193,7 @@ export interface operations {
     get__api_v2_hospitals_hospital_id_departments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -39072,7 +39242,7 @@ export interface operations {
     };
     post__api_v2_hospitals_hospital_id_departments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39121,7 +39291,7 @@ export interface operations {
     };
     get__api_v2_hospitals_hospital_id_departments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39165,7 +39335,7 @@ export interface operations {
     };
     put__api_v2_hospitals_hospital_id_departments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39216,7 +39386,7 @@ export interface operations {
     };
     delete__api_v2_hospitals_hospital_id_departments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39255,6 +39425,7 @@ export interface operations {
     get__api_v2_hospitals_hospital_id_wards: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -39303,7 +39474,7 @@ export interface operations {
     };
     post__api_v2_hospitals_hospital_id_wards: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39352,7 +39523,7 @@ export interface operations {
     };
     get__api_v2_hospitals_hospital_id_wards_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39396,7 +39567,7 @@ export interface operations {
     };
     put__api_v2_hospitals_hospital_id_wards_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39447,7 +39618,7 @@ export interface operations {
     };
     delete__api_v2_hospitals_hospital_id_wards_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Hospital id */
@@ -39485,7 +39656,7 @@ export interface operations {
     };
     get__api_v2_invitations_token: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Token */
@@ -39527,7 +39698,7 @@ export interface operations {
     };
     post__api_v2_invitations_token_accept: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Token */
@@ -39576,7 +39747,7 @@ export interface operations {
     };
     post__api_v2_invitations_token_decline: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Token */
@@ -39626,6 +39797,7 @@ export interface operations {
     get__api_v2_invoices: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -39673,7 +39845,7 @@ export interface operations {
     };
     post__api_v2_invoices: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -39719,7 +39891,7 @@ export interface operations {
     };
     get__api_v2_invoices_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -39761,7 +39933,7 @@ export interface operations {
     };
     put__api_v2_invoices_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -39810,7 +39982,7 @@ export interface operations {
     };
     delete__api_v2_invoices_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -39846,7 +40018,7 @@ export interface operations {
     };
     post__api_v2_invoices_uuid_email: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -39900,7 +40072,7 @@ export interface operations {
     };
     post__api_v2_invoices_uuid_items: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -39950,6 +40122,7 @@ export interface operations {
     get__api_v2_invoices_uuid_payments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -40000,7 +40173,7 @@ export interface operations {
     };
     post__api_v2_invoices_uuid_payments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40049,7 +40222,7 @@ export interface operations {
     };
     post__api_v2_invoices_uuid_send: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40094,7 +40267,7 @@ export interface operations {
     };
     post__api_v2_invoices_uuid_void: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40140,6 +40313,7 @@ export interface operations {
     get__api_v2_invoices_customer_billable: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -40188,6 +40362,7 @@ export interface operations {
     get__api_v2_invoices_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -40227,7 +40402,7 @@ export interface operations {
     };
     post__api_v2_invoices_from_customer: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -40273,7 +40448,7 @@ export interface operations {
     };
     post__api_v2_invoices_from_timesheet: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -40324,7 +40499,7 @@ export interface operations {
     };
     put__api_v2_invoices_items_item_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Line item UUID */
@@ -40373,7 +40548,7 @@ export interface operations {
     };
     delete__api_v2_invoices_items_item_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Line item UUID */
@@ -40409,7 +40584,7 @@ export interface operations {
     };
     delete__api_v2_invoices_payments_payment_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Payment UUID */
@@ -40446,6 +40621,7 @@ export interface operations {
     get__api_v2_invoices_tax_rates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -40493,7 +40669,7 @@ export interface operations {
     };
     post__api_v2_invoices_tax_rates: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -40539,7 +40715,7 @@ export interface operations {
     };
     put__api_v2_invoices_tax_rates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40588,7 +40764,7 @@ export interface operations {
     };
     delete__api_v2_invoices_tax_rates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40624,7 +40800,7 @@ export interface operations {
     };
     delete__api_v2_kanban_attachments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40661,6 +40837,7 @@ export interface operations {
     get__api_v2_kanban_boards_board_uuid_tasks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -40711,7 +40888,7 @@ export interface operations {
     };
     post__api_v2_kanban_boards_board_uuid_tasks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Board uuid */
@@ -40760,7 +40937,7 @@ export interface operations {
     };
     get__api_v2_kanban_boards_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40802,7 +40979,7 @@ export interface operations {
     };
     put__api_v2_kanban_boards_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40851,7 +41028,7 @@ export interface operations {
     };
     delete__api_v2_kanban_boards_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40887,7 +41064,7 @@ export interface operations {
     };
     post__api_v2_kanban_boards_uuid_columns: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40936,7 +41113,7 @@ export interface operations {
     };
     put__api_v2_kanban_boards_uuid_columns_reorder: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -40986,6 +41163,7 @@ export interface operations {
     get__api_v2_kanban_boards_uuid_full: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41036,7 +41214,7 @@ export interface operations {
     };
     put__api_v2_kanban_boards_uuid_reorder: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41086,6 +41264,7 @@ export interface operations {
     get__api_v2_kanban_boards_uuid_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41128,7 +41307,7 @@ export interface operations {
     };
     delete__api_v2_kanban_checklist_items_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41164,7 +41343,7 @@ export interface operations {
     };
     put__api_v2_kanban_checklist_items_uuid_toggle: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41213,7 +41392,7 @@ export interface operations {
     };
     delete__api_v2_kanban_checklists_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41249,7 +41428,7 @@ export interface operations {
     };
     post__api_v2_kanban_checklists_uuid_items: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41298,7 +41477,7 @@ export interface operations {
     };
     put__api_v2_kanban_columns_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41347,7 +41526,7 @@ export interface operations {
     };
     delete__api_v2_kanban_columns_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41383,7 +41562,7 @@ export interface operations {
     };
     put__api_v2_kanban_comments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41432,7 +41611,7 @@ export interface operations {
     };
     delete__api_v2_kanban_comments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41468,7 +41647,7 @@ export interface operations {
     };
     get__api_v2_kanban_epics_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41510,7 +41689,7 @@ export interface operations {
     };
     put__api_v2_kanban_epics_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41559,7 +41738,7 @@ export interface operations {
     };
     delete__api_v2_kanban_epics_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41596,6 +41775,7 @@ export interface operations {
     get__api_v2_kanban_epics_uuid_tasks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41646,7 +41826,7 @@ export interface operations {
     };
     post__api_v2_kanban_epics_uuid_tasks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41695,7 +41875,7 @@ export interface operations {
     };
     delete__api_v2_kanban_epics_uuid_tasks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41731,7 +41911,7 @@ export interface operations {
     };
     put__api_v2_kanban_labels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41780,7 +41960,7 @@ export interface operations {
     };
     delete__api_v2_kanban_labels_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -41817,6 +41997,7 @@ export interface operations {
     get__api_v2_kanban_my_tasks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41865,6 +42046,7 @@ export interface operations {
     get__api_v2_kanban_namespace_projects: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41913,6 +42095,7 @@ export interface operations {
     get__api_v2_kanban_notification_preferences: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -41960,7 +42143,7 @@ export interface operations {
     };
     put__api_v2_kanban_notification_preferences: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -42007,6 +42190,7 @@ export interface operations {
     get__api_v2_kanban_notifications: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42054,7 +42238,7 @@ export interface operations {
     };
     delete__api_v2_kanban_notifications_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -42090,7 +42274,7 @@ export interface operations {
     };
     put__api_v2_kanban_notifications_uuid_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -42139,7 +42323,7 @@ export interface operations {
     };
     post__api_v2_kanban_notifications_mark_all_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -42186,6 +42370,7 @@ export interface operations {
     get__api_v2_kanban_notifications_unread_count: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42234,6 +42419,7 @@ export interface operations {
     get__api_v2_kanban_projects: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42281,7 +42467,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -42328,6 +42514,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_backlog: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42379,6 +42566,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_boards: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42429,7 +42617,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_project_uuid_boards: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Project uuid */
@@ -42479,6 +42667,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_epics: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42529,7 +42718,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_project_uuid_epics: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Project uuid */
@@ -42579,6 +42768,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_labels: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42629,7 +42819,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_project_uuid_labels: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Project uuid */
@@ -42679,6 +42869,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_sprints: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42729,7 +42920,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_project_uuid_sprints: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Project uuid */
@@ -42779,6 +42970,7 @@ export interface operations {
     get__api_v2_kanban_projects_project_uuid_velocity: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -42829,7 +43021,7 @@ export interface operations {
     };
     get__api_v2_kanban_projects_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -42871,7 +43063,7 @@ export interface operations {
     };
     put__api_v2_kanban_projects_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -42920,7 +43112,7 @@ export interface operations {
     };
     delete__api_v2_kanban_projects_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -42957,6 +43149,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_activity: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43008,6 +43201,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_activity_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43059,6 +43253,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_analytics: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43110,6 +43305,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_completion_trend: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43161,6 +43357,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_cycle_time: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43212,6 +43409,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_label_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43263,6 +43461,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_member_activity: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43314,6 +43513,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_members: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43364,7 +43564,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_uuid_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43413,7 +43613,7 @@ export interface operations {
     };
     delete__api_v2_kanban_projects_uuid_members_user_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -43451,7 +43651,7 @@ export interface operations {
     };
     put__api_v2_kanban_projects_uuid_members_user_uuid_role: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -43503,6 +43703,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_notification_preferences: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43553,7 +43754,7 @@ export interface operations {
     };
     put__api_v2_kanban_projects_uuid_notification_preferences: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43603,6 +43804,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_priority_distribution: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43653,7 +43855,7 @@ export interface operations {
     };
     post__api_v2_kanban_projects_uuid_star: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43703,6 +43905,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43746,6 +43949,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_team_workload: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43797,6 +44001,7 @@ export interface operations {
     get__api_v2_kanban_projects_uuid_time_report: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -43847,7 +44052,7 @@ export interface operations {
     };
     get__api_v2_kanban_sprints_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43889,7 +44094,7 @@ export interface operations {
     };
     put__api_v2_kanban_sprints_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43938,7 +44143,7 @@ export interface operations {
     };
     delete__api_v2_kanban_sprints_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -43975,6 +44180,7 @@ export interface operations {
     get__api_v2_kanban_sprints_uuid_burndown: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44025,7 +44231,7 @@ export interface operations {
     };
     post__api_v2_kanban_sprints_uuid_cancel: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44074,7 +44280,7 @@ export interface operations {
     };
     post__api_v2_kanban_sprints_uuid_complete: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44123,7 +44329,7 @@ export interface operations {
     };
     post__api_v2_kanban_sprints_uuid_start: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44173,6 +44379,7 @@ export interface operations {
     get__api_v2_kanban_sprints_uuid_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44216,6 +44423,7 @@ export interface operations {
     get__api_v2_kanban_sprints_uuid_tasks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44266,7 +44474,7 @@ export interface operations {
     };
     post__api_v2_kanban_sprints_uuid_tasks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44315,7 +44523,7 @@ export interface operations {
     };
     delete__api_v2_kanban_sprints_uuid_tasks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44351,7 +44559,7 @@ export interface operations {
     };
     get__api_v2_kanban_tasks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44393,7 +44601,7 @@ export interface operations {
     };
     put__api_v2_kanban_tasks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44442,7 +44650,7 @@ export interface operations {
     };
     delete__api_v2_kanban_tasks_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44479,6 +44687,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_activities: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44530,6 +44739,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_assignees: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44580,7 +44790,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_assignees: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44629,7 +44839,7 @@ export interface operations {
     };
     delete__api_v2_kanban_tasks_uuid_assignees_user_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description User uuid */
@@ -44668,6 +44878,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_attachments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44718,7 +44929,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_attachments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44768,6 +44979,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_checklists: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44818,7 +45030,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_checklists: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44868,6 +45080,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_comments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -44918,7 +45131,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_comments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -44968,6 +45181,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_labels: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45018,7 +45232,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_labels: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45067,7 +45281,7 @@ export interface operations {
     };
     delete__api_v2_kanban_tasks_uuid_labels_label_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Label ID */
@@ -45105,7 +45319,7 @@ export interface operations {
     };
     put__api_v2_kanban_tasks_uuid_move: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45155,6 +45369,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_time_entries: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45205,7 +45420,7 @@ export interface operations {
     };
     post__api_v2_kanban_tasks_uuid_time_entries: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45255,6 +45470,7 @@ export interface operations {
     get__api_v2_kanban_tasks_uuid_time_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45305,7 +45521,7 @@ export interface operations {
     };
     put__api_v2_kanban_time_entries_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45354,7 +45570,7 @@ export interface operations {
     };
     delete__api_v2_kanban_time_entries_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45390,7 +45606,7 @@ export interface operations {
     };
     put__api_v2_kanban_time_entries_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45444,7 +45660,7 @@ export interface operations {
     };
     put__api_v2_kanban_time_entries_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -45497,6 +45713,7 @@ export interface operations {
     get__api_v2_kanban_timer_current: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45544,7 +45761,7 @@ export interface operations {
     };
     post__api_v2_kanban_timer_start: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -45590,7 +45807,7 @@ export interface operations {
     };
     post__api_v2_kanban_timer_stop: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -45637,6 +45854,7 @@ export interface operations {
     get__api_v2_kanban_timesheet: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45684,7 +45902,7 @@ export interface operations {
     };
     post__api_v2_menu: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -45730,7 +45948,7 @@ export interface operations {
     };
     get__api_v2_menu_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -45772,7 +45990,7 @@ export interface operations {
     };
     put__api_v2_menu_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -45821,7 +46039,7 @@ export interface operations {
     };
     delete__api_v2_menu_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -45858,6 +46076,7 @@ export interface operations {
     get__api_v2_menu_all: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45904,6 +46123,7 @@ export interface operations {
     get__api_v2_modules: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -45949,7 +46169,7 @@ export interface operations {
     };
     post__api_v2_modules: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -45995,7 +46215,7 @@ export interface operations {
     };
     get__api_v2_modules_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46037,7 +46257,7 @@ export interface operations {
     };
     put__api_v2_modules_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46086,7 +46306,7 @@ export interface operations {
     };
     delete__api_v2_modules_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46123,6 +46343,7 @@ export interface operations {
     get__api_v2_modules_available: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46169,6 +46390,7 @@ export interface operations {
     get__api_v2_my_stores: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46215,6 +46437,7 @@ export interface operations {
     get__api_v2_namespace: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46260,7 +46483,7 @@ export interface operations {
     };
     put__api_v2_namespace: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -46307,6 +46530,7 @@ export interface operations {
     get__api_v2_namespace_activity: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46353,6 +46577,7 @@ export interface operations {
     get__api_v2_namespace_activity_changes: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46399,6 +46624,7 @@ export interface operations {
     get__api_v2_namespace_activity_members: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46445,6 +46671,7 @@ export interface operations {
     get__api_v2_namespace_activity_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46483,6 +46710,7 @@ export interface operations {
     get__api_v2_namespace_ai_usage: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46529,6 +46757,7 @@ export interface operations {
     get__api_v2_namespace_audit_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46575,6 +46804,7 @@ export interface operations {
     get__api_v2_namespace_github_integrations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46620,7 +46850,7 @@ export interface operations {
     };
     post__api_v2_namespace_github_integrations: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -46666,7 +46896,7 @@ export interface operations {
     };
     get__api_v2_namespace_github_integrations_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46708,7 +46938,7 @@ export interface operations {
     };
     put__api_v2_namespace_github_integrations_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46757,7 +46987,7 @@ export interface operations {
     };
     delete__api_v2_namespace_github_integrations_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46794,6 +47024,7 @@ export interface operations {
     get__api_v2_namespace_invitations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -46839,7 +47070,7 @@ export interface operations {
     };
     post__api_v2_namespace_invitations: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -46885,7 +47116,7 @@ export interface operations {
     };
     get__api_v2_namespace_invitations_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46927,7 +47158,7 @@ export interface operations {
     };
     delete__api_v2_namespace_invitations_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -46963,7 +47194,7 @@ export interface operations {
     };
     post__api_v2_namespace_invitations_id_resend: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47012,7 +47243,7 @@ export interface operations {
     };
     post__api_v2_namespace_leave: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -47059,6 +47290,7 @@ export interface operations {
     get__api_v2_namespace_members: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47104,7 +47336,7 @@ export interface operations {
     };
     post__api_v2_namespace_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -47150,7 +47382,7 @@ export interface operations {
     };
     get__api_v2_namespace_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47192,7 +47424,7 @@ export interface operations {
     };
     put__api_v2_namespace_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47241,7 +47473,7 @@ export interface operations {
     };
     delete__api_v2_namespace_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47277,7 +47509,7 @@ export interface operations {
     };
     post__api_v2_namespace_members_id_transfer_ownership: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47327,6 +47559,7 @@ export interface operations {
     get__api_v2_namespace_menu_config: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47372,7 +47605,7 @@ export interface operations {
     };
     put__api_v2_namespace_menu_config: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -47418,7 +47651,7 @@ export interface operations {
     };
     put__api_v2_namespace_menu_config_key: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -47467,7 +47700,7 @@ export interface operations {
     };
     post__api_v2_namespace_menu_config_key_disable: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -47516,7 +47749,7 @@ export interface operations {
     };
     post__api_v2_namespace_menu_config_key_enable: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Key */
@@ -47566,6 +47799,7 @@ export interface operations {
     get__api_v2_namespace_plugins: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47611,7 +47845,7 @@ export interface operations {
     };
     put__api_v2_namespace_plugins_code: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Code */
@@ -47661,6 +47895,7 @@ export interface operations {
     get__api_v2_namespace_roles: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47706,7 +47941,7 @@ export interface operations {
     };
     post__api_v2_namespace_roles: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -47752,7 +47987,7 @@ export interface operations {
     };
     get__api_v2_namespace_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47794,7 +48029,7 @@ export interface operations {
     };
     put__api_v2_namespace_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47843,7 +48078,7 @@ export interface operations {
     };
     delete__api_v2_namespace_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -47880,6 +48115,7 @@ export interface operations {
     get__api_v2_namespace_roles_meta_permissions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47926,6 +48162,7 @@ export interface operations {
     get__api_v2_namespace_services: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -47971,7 +48208,7 @@ export interface operations {
     };
     post__api_v2_namespace_services: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -48017,7 +48254,7 @@ export interface operations {
     };
     get__api_v2_namespace_services_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48059,7 +48296,7 @@ export interface operations {
     };
     put__api_v2_namespace_services_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48108,7 +48345,7 @@ export interface operations {
     };
     delete__api_v2_namespace_services_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48144,7 +48381,7 @@ export interface operations {
     };
     post__api_v2_namespace_services_id_deploy: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48194,6 +48431,7 @@ export interface operations {
     get__api_v2_namespace_services_id_deployments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48242,7 +48480,7 @@ export interface operations {
     };
     get__api_v2_namespace_services_id_deployments_did: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Did */
@@ -48286,7 +48524,7 @@ export interface operations {
     };
     post__api_v2_namespace_services_id_deployments_did_sync: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Did */
@@ -48338,6 +48576,7 @@ export interface operations {
     get__api_v2_namespace_services_id_secrets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48386,7 +48625,7 @@ export interface operations {
     };
     post__api_v2_namespace_services_id_secrets: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48435,7 +48674,7 @@ export interface operations {
     };
     put__api_v2_namespace_services_id_secrets_sid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48486,7 +48725,7 @@ export interface operations {
     };
     delete__api_v2_namespace_services_id_secrets_sid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48525,6 +48764,7 @@ export interface operations {
     get__api_v2_namespace_services_id_variables: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48573,7 +48813,7 @@ export interface operations {
     };
     post__api_v2_namespace_services_id_variables: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48622,7 +48862,7 @@ export interface operations {
     };
     put__api_v2_namespace_services_id_variables_vid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48673,7 +48913,7 @@ export interface operations {
     };
     delete__api_v2_namespace_services_id_variables_vid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -48712,6 +48952,7 @@ export interface operations {
     get__api_v2_namespace_services_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48749,7 +48990,7 @@ export interface operations {
     };
     post__api_v2_namespace_services_sync_deployments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -48796,6 +49037,7 @@ export interface operations {
     get__api_v2_namespace_services_test_github_connectivity: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48842,6 +49084,7 @@ export interface operations {
     get__api_v2_namespace_settings_modules: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48887,7 +49130,7 @@ export interface operations {
     };
     put__api_v2_namespace_settings_modules: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -48934,6 +49177,7 @@ export interface operations {
     get__api_v2_namespace_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -48972,6 +49216,7 @@ export interface operations {
     get__api_v2_namespace_webhooks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49017,7 +49262,7 @@ export interface operations {
     };
     post__api_v2_namespace_webhooks: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -49063,7 +49308,7 @@ export interface operations {
     };
     get__api_v2_namespace_webhooks_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49105,7 +49350,7 @@ export interface operations {
     };
     put__api_v2_namespace_webhooks_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49154,7 +49399,7 @@ export interface operations {
     };
     delete__api_v2_namespace_webhooks_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49191,6 +49436,7 @@ export interface operations {
     get__api_v2_namespace_webhooks_id_deliveries: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49239,7 +49485,7 @@ export interface operations {
     };
     post__api_v2_namespace_webhooks_id_deliveries_delivery_id_redeliver: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Delivery id */
@@ -49290,7 +49536,7 @@ export interface operations {
     };
     post__api_v2_namespace_webhooks_id_rotate_secret: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49339,7 +49585,7 @@ export interface operations {
     };
     post__api_v2_namespace_webhooks_id_test: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49389,6 +49635,7 @@ export interface operations {
     get__api_v2_namespace_webhooks_events: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49435,6 +49682,7 @@ export interface operations {
     get__api_v2_notifications: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49480,7 +49728,7 @@ export interface operations {
     };
     delete__api_v2_notifications_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49516,7 +49764,7 @@ export interface operations {
     };
     put__api_v2_notifications_id_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49565,7 +49813,7 @@ export interface operations {
     };
     put__api_v2_notifications_mark_all_read: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -49612,6 +49860,7 @@ export interface operations {
     get__api_v2_orderitems: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49657,7 +49906,7 @@ export interface operations {
     };
     post__api_v2_orderitems: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -49703,7 +49952,7 @@ export interface operations {
     };
     get__api_v2_orderitems_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49745,7 +49994,7 @@ export interface operations {
     };
     put__api_v2_orderitems_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49794,7 +50043,7 @@ export interface operations {
     };
     delete__api_v2_orderitems_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49831,6 +50080,7 @@ export interface operations {
     get__api_v2_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -49878,7 +50128,7 @@ export interface operations {
     };
     post__api_v2_orders: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -49924,7 +50174,7 @@ export interface operations {
     };
     get__api_v2_orders_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -49966,7 +50216,7 @@ export interface operations {
     };
     put__api_v2_orders_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50015,7 +50265,7 @@ export interface operations {
     };
     delete__api_v2_orders_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50052,6 +50302,7 @@ export interface operations {
     get__api_v2_orders_id_available_transitions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50102,7 +50353,7 @@ export interface operations {
     };
     put__api_v2_orders_id_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50152,6 +50403,7 @@ export interface operations {
     get__api_v2_orders_id_status_history: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50202,7 +50454,7 @@ export interface operations {
     };
     put__api_v2_orders_id_update_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50251,7 +50503,7 @@ export interface operations {
     };
     put__api_v2_orders_bulk_update_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -50298,6 +50550,7 @@ export interface operations {
     get__api_v2_orders_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50338,6 +50591,7 @@ export interface operations {
     get__api_v2_orders_stores: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50386,6 +50640,7 @@ export interface operations {
     get__api_v2_patients_patient_id_access_controls: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50434,7 +50689,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_access_controls: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -50483,7 +50738,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_access_controls_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50527,7 +50782,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_access_controls_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50578,7 +50833,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_access_controls_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50616,7 +50871,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_access_controls_id_revoke: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50668,6 +50923,7 @@ export interface operations {
     get__api_v2_patients_patient_id_alerts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -50716,7 +50972,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_alerts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -50765,7 +51021,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_alerts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50809,7 +51065,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_alerts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50860,7 +51116,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_alerts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50898,7 +51154,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_alerts_id_acknowledge: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -50949,7 +51205,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_alerts_id_resolve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51001,6 +51257,7 @@ export interface operations {
     get__api_v2_patients_patient_id_audit_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51049,7 +51306,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_audit_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51094,6 +51351,7 @@ export interface operations {
     get__api_v2_patients_patient_id_audit_logs_access_history: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51143,6 +51401,7 @@ export interface operations {
     get__api_v2_patients_patient_id_audit_logs_failed_access: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51192,6 +51451,7 @@ export interface operations {
     get__api_v2_patients_patient_id_care_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51240,7 +51500,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_care_logs: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -51289,7 +51549,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_care_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51333,7 +51593,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_care_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51384,7 +51644,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_care_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51423,6 +51683,7 @@ export interface operations {
     get__api_v2_patients_patient_id_care_logs_incidents: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51472,6 +51733,7 @@ export interface operations {
     get__api_v2_patients_patient_id_care_plans: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51520,7 +51782,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_care_plans: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -51569,7 +51831,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_care_plans_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51613,7 +51875,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_care_plans_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51664,7 +51926,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_care_plans_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51703,6 +51965,7 @@ export interface operations {
     get__api_v2_patients_patient_id_daily_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51751,7 +52014,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_daily_logs: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -51800,7 +52063,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_daily_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51844,7 +52107,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_daily_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51895,7 +52158,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_daily_logs_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -51934,6 +52197,7 @@ export interface operations {
     get__api_v2_patients_patient_id_daily_logs_today: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -51983,6 +52247,7 @@ export interface operations {
     get__api_v2_patients_patient_id_dementia_assessments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52031,7 +52296,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_dementia_assessments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -52080,7 +52345,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_dementia_assessments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52124,7 +52389,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_dementia_assessments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52175,7 +52440,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_dementia_assessments_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52214,6 +52479,7 @@ export interface operations {
     get__api_v2_patients_patient_id_dementia_assessments_latest: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52263,6 +52529,7 @@ export interface operations {
     get__api_v2_patients_patient_id_family_members: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52311,7 +52578,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_family_members: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -52360,7 +52627,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_family_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52404,7 +52671,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_family_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52455,7 +52722,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_family_members_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52494,6 +52761,7 @@ export interface operations {
     get__api_v2_patients_patient_id_family_members_emergency: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52543,6 +52811,7 @@ export interface operations {
     get__api_v2_patients_patient_id_family_members_next_of_kin: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52592,6 +52861,7 @@ export interface operations {
     get__api_v2_patients_patient_id_medications: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52640,7 +52910,7 @@ export interface operations {
     };
     post__api_v2_patients_patient_id_medications: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Patient id */
@@ -52689,7 +52959,7 @@ export interface operations {
     };
     get__api_v2_patients_patient_id_medications_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52733,7 +53003,7 @@ export interface operations {
     };
     put__api_v2_patients_patient_id_medications_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52784,7 +53054,7 @@ export interface operations {
     };
     delete__api_v2_patients_patient_id_medications_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -52823,6 +53093,7 @@ export interface operations {
     get__api_v2_patients_patient_id_medications_active: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52872,6 +53143,7 @@ export interface operations {
     get__api_v2_patients_patient_id_medications_prn: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -52920,7 +53192,7 @@ export interface operations {
     };
     post__api_v2_payments_confirm: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -52966,7 +53238,7 @@ export interface operations {
     };
     post__api_v2_payments_create_checkout_session: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -53012,7 +53284,7 @@ export interface operations {
     };
     post__api_v2_payments_create_intent: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -53059,6 +53331,7 @@ export interface operations {
     get__api_v2_payments_test: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53105,6 +53378,7 @@ export interface operations {
     get__api_v2_payments_test_checkout: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53151,6 +53425,7 @@ export interface operations {
     get__api_v2_permissions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53196,7 +53471,7 @@ export interface operations {
     };
     post__api_v2_permissions: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -53242,7 +53517,7 @@ export interface operations {
     };
     get__api_v2_permissions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53284,7 +53559,7 @@ export interface operations {
     };
     put__api_v2_permissions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53333,7 +53608,7 @@ export interface operations {
     };
     delete__api_v2_permissions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53369,7 +53644,7 @@ export interface operations {
     };
     post__api_v2_permissions_batch: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -53416,6 +53691,7 @@ export interface operations {
     get__api_v2_plugins: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53461,7 +53737,7 @@ export interface operations {
     };
     get__api_v2_plugins_code: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Code */
@@ -53503,7 +53779,7 @@ export interface operations {
     };
     post__api_v2_plugins_code_events_retry: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Code */
@@ -53552,7 +53828,7 @@ export interface operations {
     };
     post__api_v2_plugins_code_jobs_job_run: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Code */
@@ -53603,7 +53879,7 @@ export interface operations {
     };
     get__api_v2_plugins_code_resources_resource: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Code */
@@ -53648,6 +53924,7 @@ export interface operations {
     get__api_v2_products: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53693,7 +53970,7 @@ export interface operations {
     };
     post__api_v2_products: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -53739,7 +54016,7 @@ export interface operations {
     };
     get__api_v2_products_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53781,7 +54058,7 @@ export interface operations {
     };
     put__api_v2_products_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53830,7 +54107,7 @@ export interface operations {
     };
     delete__api_v2_products_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -53867,6 +54144,7 @@ export interface operations {
     get__api_v2_products_product_id_variants: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -53915,7 +54193,7 @@ export interface operations {
     };
     post__api_v2_products_product_id_variants: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Product id */
@@ -53964,7 +54242,7 @@ export interface operations {
     };
     put__api_v2_products_currency: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -54011,6 +54289,7 @@ export interface operations {
     get__api_v2_projects: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54056,7 +54335,7 @@ export interface operations {
     };
     post__api_v2_projects: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -54102,7 +54381,7 @@ export interface operations {
     };
     get__api_v2_projects_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -54144,7 +54423,7 @@ export interface operations {
     };
     put__api_v2_projects_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -54193,7 +54472,7 @@ export interface operations {
     };
     delete__api_v2_projects_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -54229,7 +54508,7 @@ export interface operations {
     };
     post__api_v2_public_academy_namespace_checkout_course_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54280,7 +54559,7 @@ export interface operations {
     };
     post__api_v2_public_academy_namespace_checkout_subscription: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54330,6 +54609,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_courses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54378,7 +54658,7 @@ export interface operations {
     };
     get__api_v2_public_academy_namespace_courses_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54422,7 +54702,7 @@ export interface operations {
     };
     post__api_v2_public_academy_namespace_courses_slug_enroll: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54474,6 +54754,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_courses_slug_enrollment: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54525,6 +54806,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_courses_slug_progress: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54576,6 +54858,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_enrollments_me: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54625,6 +54908,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_instructors: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54673,7 +54957,7 @@ export interface operations {
     };
     get__api_v2_public_academy_namespace_instructors_username: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54717,7 +55001,7 @@ export interface operations {
     };
     post__api_v2_public_academy_namespace_lessons_uuid_progress: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -54769,6 +55053,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_lessons_uuid_stream_url: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54820,6 +55105,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_me_entitlements: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54869,6 +55155,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_me_learning: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54918,6 +55205,7 @@ export interface operations {
     get__api_v2_public_academy_namespace_plan: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -54966,7 +55254,7 @@ export interface operations {
     };
     post__api_v2_public_academy_stripe_webhook: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55013,6 +55301,7 @@ export interface operations {
     get__api_v2_public_billing_checkout_return: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55059,6 +55348,7 @@ export interface operations {
     get__api_v2_public_billing_plans: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55104,7 +55394,7 @@ export interface operations {
     };
     post__api_v2_public_billing_webhook: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55151,6 +55441,7 @@ export interface operations {
     get__api_v2_public_cms_namespace_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55200,6 +55491,7 @@ export interface operations {
     get__api_v2_public_cms_namespace_nav: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55249,6 +55541,7 @@ export interface operations {
     get__api_v2_public_cms_namespace_pages: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55297,7 +55590,7 @@ export interface operations {
     };
     get__api_v2_public_cms_namespace_pages_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -55342,6 +55635,7 @@ export interface operations {
     get__api_v2_public_cms_namespace_posts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55390,7 +55684,7 @@ export interface operations {
     };
     get__api_v2_public_cms_namespace_posts_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace */
@@ -55435,6 +55729,7 @@ export interface operations {
     get__api_v2_public_cms_namespace_tags: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55483,7 +55778,7 @@ export interface operations {
     };
     post__api_v2_public_leads_namespace_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Namespace slug */
@@ -55532,7 +55827,7 @@ export interface operations {
     };
     post__api_v2_public_shop_stripe_webhook: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55578,7 +55873,7 @@ export interface operations {
     };
     get__api_v2_public_stores_slug: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Slug */
@@ -55621,6 +55916,7 @@ export interface operations {
     get__api_v2_public_stores_slug_products: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55669,7 +55965,7 @@ export interface operations {
     };
     get__api_v2_public_stores_slug_products_product_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Product id */
@@ -55714,6 +56010,7 @@ export interface operations {
     get__api_v2_public_stores_slug_reviews: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55762,7 +56059,7 @@ export interface operations {
     };
     post__api_v2_register: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55809,6 +56106,7 @@ export interface operations {
     get__api_v2_render_templates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -55854,7 +56152,7 @@ export interface operations {
     };
     post__api_v2_render_templates: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -55900,7 +56198,7 @@ export interface operations {
     };
     get__api_v2_render_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -55942,7 +56240,7 @@ export interface operations {
     };
     put__api_v2_render_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -55991,7 +56289,7 @@ export interface operations {
     };
     delete__api_v2_render_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -56027,7 +56325,7 @@ export interface operations {
     };
     post__api_v2_render_templates_uuid_preview: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -56080,6 +56378,7 @@ export interface operations {
     get__api_v2_render_templates_defaults: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56125,7 +56424,7 @@ export interface operations {
     };
     post__api_v2_render_templates_preview: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -56175,6 +56474,7 @@ export interface operations {
     get__api_v2_roles: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56220,7 +56520,7 @@ export interface operations {
     };
     post__api_v2_roles: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -56266,7 +56566,7 @@ export interface operations {
     };
     get__api_v2_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56308,7 +56608,7 @@ export interface operations {
     };
     put__api_v2_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56357,7 +56657,7 @@ export interface operations {
     };
     delete__api_v2_roles_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56394,6 +56694,7 @@ export interface operations {
     get__api_v2_secrets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56439,7 +56740,7 @@ export interface operations {
     };
     post__api_v2_secrets: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -56485,7 +56786,7 @@ export interface operations {
     };
     get__api_v2_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56527,7 +56828,7 @@ export interface operations {
     };
     put__api_v2_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56576,7 +56877,7 @@ export interface operations {
     };
     delete__api_v2_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -56613,6 +56914,7 @@ export interface operations {
     get__api_v2_secrets_id_show: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56662,6 +56964,7 @@ export interface operations {
     get__api_v2_seller_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56702,6 +57005,7 @@ export interface operations {
     get__api_v2_seller_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56749,7 +57053,7 @@ export interface operations {
     };
     get__api_v2_seller_orders_order_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order uuid */
@@ -56791,7 +57095,7 @@ export interface operations {
     };
     put__api_v2_seller_orders_order_uuid_status: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Order uuid */
@@ -56841,6 +57145,7 @@ export interface operations {
     get__api_v2_settings_public: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56887,6 +57192,7 @@ export interface operations {
     get__api_v2_storeproducts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -56932,7 +57238,7 @@ export interface operations {
     };
     post__api_v2_storeproducts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -56978,7 +57284,7 @@ export interface operations {
     };
     get__api_v2_storeproducts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57020,7 +57326,7 @@ export interface operations {
     };
     put__api_v2_storeproducts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57069,7 +57375,7 @@ export interface operations {
     };
     delete__api_v2_storeproducts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57106,6 +57412,7 @@ export interface operations {
     get__api_v2_stores: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57151,7 +57458,7 @@ export interface operations {
     };
     post__api_v2_stores: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -57197,7 +57504,7 @@ export interface operations {
     };
     get__api_v2_stores_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57239,7 +57546,7 @@ export interface operations {
     };
     put__api_v2_stores_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57288,7 +57595,7 @@ export interface operations {
     };
     delete__api_v2_stores_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57325,6 +57632,7 @@ export interface operations {
     get__api_v2_stores_slug_delivery_partners: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57373,7 +57681,7 @@ export interface operations {
     };
     post__api_v2_stores_slug_delivery_partners: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Slug */
@@ -57422,7 +57730,7 @@ export interface operations {
     };
     delete__api_v2_stores_slug_delivery_partners_partner_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Partner uuid */
@@ -57460,7 +57768,7 @@ export interface operations {
     };
     put__api_v2_stores_slug_delivery_partners_partner_uuid_prefer: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Partner uuid */
@@ -57511,7 +57819,7 @@ export interface operations {
     };
     put__api_v2_stores_slug_delivery_partners_partner_uuid_toggle: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Partner uuid */
@@ -57563,6 +57871,7 @@ export interface operations {
     get__api_v2_stores_store_id_orders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57614,6 +57923,7 @@ export interface operations {
     get__api_v2_stores_store_id_products: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57662,7 +57972,7 @@ export interface operations {
     };
     post__api_v2_stores_store_id_products: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Store id */
@@ -57712,6 +58022,7 @@ export interface operations {
     get__api_v2_support_admin_conversations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57757,7 +58068,7 @@ export interface operations {
     };
     put__api_v2_support_admin_conversations_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -57807,6 +58118,7 @@ export interface operations {
     get__api_v2_support_conversations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57852,7 +58164,7 @@ export interface operations {
     };
     post__api_v2_support_conversations: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -57899,6 +58211,7 @@ export interface operations {
     get__api_v2_support_conversations_id_messages: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -57947,7 +58260,7 @@ export interface operations {
     };
     post__api_v2_support_conversations_id_messages: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -57997,6 +58310,7 @@ export interface operations {
     get__api_v2_support_unread_count: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58043,6 +58357,7 @@ export interface operations {
     get__api_v2_tags: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58088,7 +58403,7 @@ export interface operations {
     };
     post__api_v2_tags: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58134,7 +58449,7 @@ export interface operations {
     };
     get__api_v2_tags_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -58176,7 +58491,7 @@ export interface operations {
     };
     put__api_v2_tags_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -58225,7 +58540,7 @@ export interface operations {
     };
     delete__api_v2_tags_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -58261,7 +58576,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_cmi_export: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58307,7 +58622,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_cmi_import_apply: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58353,7 +58668,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_cmi_import_dry_run: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58400,6 +58715,7 @@ export interface operations {
     get__api_v2_tax_admin_form_sections: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58445,7 +58761,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_form_sections: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58491,7 +58807,7 @@ export interface operations {
     };
     put__api_v2_tax_admin_form_sections_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58540,7 +58856,7 @@ export interface operations {
     };
     delete__api_v2_tax_admin_form_sections_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58577,6 +58893,7 @@ export interface operations {
     get__api_v2_tax_admin_income_types: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58622,7 +58939,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_income_types: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58668,7 +58985,7 @@ export interface operations {
     };
     get__api_v2_tax_admin_income_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58710,7 +59027,7 @@ export interface operations {
     };
     put__api_v2_tax_admin_income_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58759,7 +59076,7 @@ export interface operations {
     };
     delete__api_v2_tax_admin_income_types_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58796,6 +59113,7 @@ export interface operations {
     get__api_v2_tax_admin_income_types_uuid_usage: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58845,6 +59163,7 @@ export interface operations {
     get__api_v2_tax_admin_profiles: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -58890,7 +59209,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_profiles: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -58936,7 +59255,7 @@ export interface operations {
     };
     get__api_v2_tax_admin_profiles_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -58978,7 +59297,7 @@ export interface operations {
     };
     put__api_v2_tax_admin_profiles_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59027,7 +59346,7 @@ export interface operations {
     };
     delete__api_v2_tax_admin_profiles_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59063,7 +59382,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_profiles_uuid_save_transactions: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59112,7 +59431,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_profiles_uuid_suggest_rules: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59162,6 +59481,7 @@ export interface operations {
     get__api_v2_tax_admin_profiles_uuid_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59210,7 +59530,7 @@ export interface operations {
     };
     delete__api_v2_tax_admin_profiles_uuid_transactions: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59246,7 +59566,7 @@ export interface operations {
     };
     put__api_v2_tax_admin_profiles_uuid_transactions_tx_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Tx uuid */
@@ -59297,7 +59617,7 @@ export interface operations {
     };
     post__api_v2_tax_admin_profiles_uuid_upload_csv: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -59347,6 +59667,7 @@ export interface operations {
     get__api_v2_tax_admin_profiles_uuid_usage: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59396,6 +59717,7 @@ export interface operations {
     get__api_v2_tax_admin_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59442,6 +59764,7 @@ export interface operations {
     get__api_v2_tax_admin_transactions_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59488,6 +59811,7 @@ export interface operations {
     get__api_v2_tax_admin_transactions_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59526,6 +59850,7 @@ export interface operations {
     get__api_v2_tax_bank_accounts: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59571,7 +59896,7 @@ export interface operations {
     };
     post__api_v2_tax_bank_accounts: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -59617,7 +59942,7 @@ export interface operations {
     };
     get__api_v2_tax_bank_accounts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -59659,7 +59984,7 @@ export interface operations {
     };
     put__api_v2_tax_bank_accounts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -59708,7 +60033,7 @@ export interface operations {
     };
     delete__api_v2_tax_bank_accounts_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -59744,7 +60069,7 @@ export interface operations {
     };
     post__api_v2_tax_bank_accounts_find_or_create: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -59791,6 +60116,7 @@ export interface operations {
     get__api_v2_tax_business_ca_catalogue: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59837,6 +60163,7 @@ export interface operations {
     get__api_v2_tax_business_line_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59883,6 +60210,7 @@ export interface operations {
     get__api_v2_tax_businesses: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -59928,7 +60256,7 @@ export interface operations {
     };
     post__api_v2_tax_businesses: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -59974,7 +60302,7 @@ export interface operations {
     };
     get__api_v2_tax_businesses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60016,7 +60344,7 @@ export interface operations {
     };
     put__api_v2_tax_businesses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60065,7 +60393,7 @@ export interface operations {
     };
     delete__api_v2_tax_businesses_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60102,6 +60430,7 @@ export interface operations {
     get__api_v2_tax_businesses_uuid_capital_allowances: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60150,7 +60479,7 @@ export interface operations {
     };
     put__api_v2_tax_businesses_uuid_capital_allowances: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60200,6 +60529,7 @@ export interface operations {
     get__api_v2_tax_businesses_uuid_values: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60248,7 +60578,7 @@ export interface operations {
     };
     put__api_v2_tax_businesses_uuid_values: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60297,7 +60627,7 @@ export interface operations {
     };
     get__api_v2_tax_calculate_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -60339,7 +60669,7 @@ export interface operations {
     };
     post__api_v2_tax_calculate_multi: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -60385,7 +60715,7 @@ export interface operations {
     };
     get__api_v2_tax_calculate_summary_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -60428,6 +60758,7 @@ export interface operations {
     get__api_v2_tax_calculate_year_statements: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60474,6 +60805,7 @@ export interface operations {
     get__api_v2_tax_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60519,7 +60851,7 @@ export interface operations {
     };
     post__api_v2_tax_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -60565,7 +60897,7 @@ export interface operations {
     };
     put__api_v2_tax_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60614,7 +60946,7 @@ export interface operations {
     };
     delete__api_v2_tax_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60650,7 +60982,7 @@ export interface operations {
     };
     post__api_v2_tax_classify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -60697,6 +61029,7 @@ export interface operations {
     get__api_v2_tax_classify_providers: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60742,7 +61075,7 @@ export interface operations {
     };
     post__api_v2_tax_classify_test: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -60789,6 +61122,7 @@ export interface operations {
     get__api_v2_tax_custom_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -60834,7 +61168,7 @@ export interface operations {
     };
     post__api_v2_tax_custom_categories: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -60880,7 +61214,7 @@ export interface operations {
     };
     get__api_v2_tax_custom_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60922,7 +61256,7 @@ export interface operations {
     };
     put__api_v2_tax_custom_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -60971,7 +61305,7 @@ export interface operations {
     };
     delete__api_v2_tax_custom_categories_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61008,6 +61342,7 @@ export interface operations {
     get__api_v2_tax_dashboard_statements_by_period: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61054,6 +61389,7 @@ export interface operations {
     get__api_v2_tax_dashboard_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61092,6 +61428,7 @@ export interface operations {
     get__api_v2_tax_dashboard_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61130,6 +61467,7 @@ export interface operations {
     get__api_v2_tax_dashboard_year_comparison: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61176,6 +61514,7 @@ export interface operations {
     get__api_v2_tax_employments: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61221,7 +61560,7 @@ export interface operations {
     };
     post__api_v2_tax_employments: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61267,7 +61606,7 @@ export interface operations {
     };
     get__api_v2_tax_employments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61309,7 +61648,7 @@ export interface operations {
     };
     put__api_v2_tax_employments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61358,7 +61697,7 @@ export interface operations {
     };
     delete__api_v2_tax_employments_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61394,7 +61733,7 @@ export interface operations {
     };
     post__api_v2_tax_extract: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61440,7 +61779,7 @@ export interface operations {
     };
     get__api_v2_tax_extract_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -61482,7 +61821,7 @@ export interface operations {
     };
     post__api_v2_tax_extract_bank_details: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61528,7 +61867,7 @@ export interface operations {
     };
     post__api_v2_tax_file: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61575,6 +61914,7 @@ export interface operations {
     get__api_v2_tax_file_statement_id_check_duplicate: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61624,6 +61964,7 @@ export interface operations {
     get__api_v2_tax_file_statement_id_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61673,6 +62014,7 @@ export interface operations {
     get__api_v2_tax_form_card_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61719,6 +62061,7 @@ export interface operations {
     get__api_v2_tax_form_items: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61764,7 +62107,7 @@ export interface operations {
     };
     post__api_v2_tax_form_items: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61810,7 +62153,7 @@ export interface operations {
     };
     put__api_v2_tax_form_items_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61859,7 +62202,7 @@ export interface operations {
     };
     delete__api_v2_tax_form_items_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -61896,6 +62239,7 @@ export interface operations {
     get__api_v2_tax_form_records: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -61941,7 +62285,7 @@ export interface operations {
     };
     post__api_v2_tax_form_records: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -61987,7 +62331,7 @@ export interface operations {
     };
     put__api_v2_tax_form_records_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -62036,7 +62380,7 @@ export interface operations {
     };
     delete__api_v2_tax_form_records_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -62073,6 +62417,7 @@ export interface operations {
     get__api_v2_tax_form_sections: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62119,6 +62464,7 @@ export interface operations {
     get__api_v2_tax_form_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62165,6 +62511,7 @@ export interface operations {
     get__api_v2_tax_hmrc_aggregate_preview: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62211,6 +62558,7 @@ export interface operations {
     get__api_v2_tax_hmrc_business_default: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62256,7 +62604,7 @@ export interface operations {
     };
     post__api_v2_tax_hmrc_business_select: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62302,7 +62650,7 @@ export interface operations {
     };
     post__api_v2_tax_hmrc_calculate_preview: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62348,7 +62696,7 @@ export interface operations {
     };
     post__api_v2_tax_hmrc_sandbox_provision: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62394,7 +62742,7 @@ export interface operations {
     };
     post__api_v2_tax_hmrc_submit_final_declaration: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62441,6 +62789,7 @@ export interface operations {
     get__api_v2_tax_my_incomes: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62486,7 +62835,7 @@ export interface operations {
     };
     post__api_v2_tax_my_incomes: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62532,7 +62881,7 @@ export interface operations {
     };
     get__api_v2_tax_my_incomes_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -62574,7 +62923,7 @@ export interface operations {
     };
     put__api_v2_tax_my_incomes_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -62623,7 +62972,7 @@ export interface operations {
     };
     delete__api_v2_tax_my_incomes_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -62660,6 +63009,7 @@ export interface operations {
     get__api_v2_tax_my_incomes_types: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62706,6 +63056,7 @@ export interface operations {
     get__api_v2_tax_overseas_line_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62752,6 +63103,7 @@ export interface operations {
     get__api_v2_tax_overseas_properties: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -62797,7 +63149,7 @@ export interface operations {
     };
     post__api_v2_tax_overseas_properties: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62843,7 +63195,7 @@ export interface operations {
     };
     get__api_v2_tax_overseas_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -62885,7 +63237,7 @@ export interface operations {
     };
     put__api_v2_tax_overseas_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -62934,7 +63286,7 @@ export interface operations {
     };
     delete__api_v2_tax_overseas_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -62971,6 +63323,7 @@ export interface operations {
     get__api_v2_tax_overseas_properties_uuid_lines: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63019,7 +63372,7 @@ export interface operations {
     };
     post__api_v2_tax_overseas_properties_uuid_lines: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63068,7 +63421,7 @@ export interface operations {
     };
     put__api_v2_tax_overseas_property_lines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63117,7 +63470,7 @@ export interface operations {
     };
     delete__api_v2_tax_overseas_property_lines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63154,6 +63507,7 @@ export interface operations {
     get__api_v2_tax_overseas_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63192,6 +63546,7 @@ export interface operations {
     get__api_v2_tax_profile: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63237,7 +63592,7 @@ export interface operations {
     };
     post__api_v2_tax_profile_nino: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -63283,7 +63638,7 @@ export interface operations {
     };
     delete__api_v2_tax_profile_nino: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -63316,7 +63671,7 @@ export interface operations {
     };
     post__api_v2_tax_profile_nino_verify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -63363,6 +63718,7 @@ export interface operations {
     get__api_v2_tax_profile_obligations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63408,7 +63764,7 @@ export interface operations {
     };
     put__api_v2_tax_profile_preferences: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -63455,6 +63811,7 @@ export interface operations {
     get__api_v2_tax_profiles: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63501,6 +63858,7 @@ export interface operations {
     get__api_v2_tax_properties: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63546,7 +63904,7 @@ export interface operations {
     };
     post__api_v2_tax_properties: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -63592,7 +63950,7 @@ export interface operations {
     };
     get__api_v2_tax_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63634,7 +63992,7 @@ export interface operations {
     };
     put__api_v2_tax_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63683,7 +64041,7 @@ export interface operations {
     };
     delete__api_v2_tax_properties_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63720,6 +64078,7 @@ export interface operations {
     get__api_v2_tax_properties_uuid_lines: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63768,7 +64127,7 @@ export interface operations {
     };
     post__api_v2_tax_properties_uuid_lines: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63818,6 +64177,7 @@ export interface operations {
     get__api_v2_tax_property_line_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63863,7 +64223,7 @@ export interface operations {
     };
     put__api_v2_tax_property_lines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63912,7 +64272,7 @@ export interface operations {
     };
     delete__api_v2_tax_property_lines_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -63949,6 +64309,7 @@ export interface operations {
     get__api_v2_tax_rates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -63994,7 +64355,7 @@ export interface operations {
     };
     put__api_v2_tax_rates_tax_year: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Tax year */
@@ -64044,6 +64405,7 @@ export interface operations {
     get__api_v2_tax_rates_all: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64089,7 +64451,7 @@ export interface operations {
     };
     post__api_v2_tax_reconcile: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64135,7 +64497,7 @@ export interface operations {
     };
     get__api_v2_tax_reconcile_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -64178,6 +64540,7 @@ export interface operations {
     get__api_v2_tax_rental_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64216,6 +64579,7 @@ export interface operations {
     get__api_v2_tax_reports_category_breakdown: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64262,6 +64626,7 @@ export interface operations {
     get__api_v2_tax_reports_hmrc_boxes: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64308,6 +64673,7 @@ export interface operations {
     get__api_v2_tax_reports_monthly_trend: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64353,7 +64719,7 @@ export interface operations {
     };
     post__api_v2_tax_reports_tax_calculation: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64400,6 +64766,7 @@ export interface operations {
     get__api_v2_tax_self_employment_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64437,7 +64804,7 @@ export interface operations {
     };
     delete__api_v2_tax_settings_account: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64470,7 +64837,7 @@ export interface operations {
     };
     post__api_v2_tax_settings_change_password: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64517,6 +64884,7 @@ export interface operations {
     get__api_v2_tax_settings_preferences: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64562,7 +64930,7 @@ export interface operations {
     };
     put__api_v2_tax_settings_preferences: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64609,6 +64977,7 @@ export interface operations {
     get__api_v2_tax_settings_profile: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64654,7 +65023,7 @@ export interface operations {
     };
     put__api_v2_tax_settings_profile: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64701,6 +65070,7 @@ export interface operations {
     get__api_v2_tax_statements: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64746,7 +65116,7 @@ export interface operations {
     };
     post__api_v2_tax_statements: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -64792,7 +65162,7 @@ export interface operations {
     };
     get__api_v2_tax_statements_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -64834,7 +65204,7 @@ export interface operations {
     };
     put__api_v2_tax_statements_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -64883,7 +65253,7 @@ export interface operations {
     };
     delete__api_v2_tax_statements_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -64920,6 +65290,7 @@ export interface operations {
     get__api_v2_tax_statements_id_audit: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -64968,7 +65339,7 @@ export interface operations {
     };
     patch__api_v2_tax_statements_id_workflow: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65018,6 +65389,7 @@ export interface operations {
     get__api_v2_tax_statements_statement_id_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65066,7 +65438,7 @@ export interface operations {
     };
     post__api_v2_tax_statements_statement_id_transactions_bulk: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -65115,7 +65487,7 @@ export interface operations {
     };
     post__api_v2_tax_statements_statement_id_transactions_bulk_confirm: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -65164,7 +65536,7 @@ export interface operations {
     };
     post__api_v2_tax_statements_statement_id_transactions_bulk_confirm_classification: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -65213,7 +65585,7 @@ export interface operations {
     };
     post__api_v2_tax_statements_statement_id_transactions_classify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -65263,6 +65635,7 @@ export interface operations {
     get__api_v2_tax_transactions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65308,7 +65681,7 @@ export interface operations {
     };
     get__api_v2_tax_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65350,7 +65723,7 @@ export interface operations {
     };
     put__api_v2_tax_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65399,7 +65772,7 @@ export interface operations {
     };
     patch__api_v2_tax_transactions_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65448,7 +65821,7 @@ export interface operations {
     };
     post__api_v2_tax_transactions_id_confirm: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65497,7 +65870,7 @@ export interface operations {
     };
     post__api_v2_tax_transactions_id_confirm_classification: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65547,6 +65920,7 @@ export interface operations {
     get__api_v2_tax_transactions_id_history: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65596,6 +65970,7 @@ export interface operations {
     get__api_v2_tax_transactions_categories: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65641,7 +66016,7 @@ export interface operations {
     };
     post__api_v2_tax_transactions_send_to_training: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -65688,6 +66063,7 @@ export interface operations {
     get__api_v2_tax_transactions_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65725,7 +66101,7 @@ export interface operations {
     };
     post__api_v2_tax_upload: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -65771,7 +66147,7 @@ export interface operations {
     };
     get__api_v2_tax_upload_presigned_statement_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Statement id */
@@ -65814,6 +66190,7 @@ export interface operations {
     get__api_v2_templates: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -65859,7 +66236,7 @@ export interface operations {
     };
     post__api_v2_templates: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -65905,7 +66282,7 @@ export interface operations {
     };
     get__api_v2_templates_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65947,7 +66324,7 @@ export interface operations {
     };
     put__api_v2_templates_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -65996,7 +66373,7 @@ export interface operations {
     };
     delete__api_v2_templates_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -66032,7 +66409,7 @@ export interface operations {
     };
     get__api_v2_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66074,7 +66451,7 @@ export interface operations {
     };
     put__api_v2_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66123,7 +66500,7 @@ export interface operations {
     };
     delete__api_v2_templates_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66159,7 +66536,7 @@ export interface operations {
     };
     post__api_v2_templates_uuid_clone: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66204,7 +66581,7 @@ export interface operations {
     };
     post__api_v2_templates_uuid_preview: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66256,7 +66633,7 @@ export interface operations {
     };
     post__api_v2_templates_uuid_restore_version: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66307,7 +66684,7 @@ export interface operations {
     };
     post__api_v2_templates_uuid_set_default: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66353,6 +66730,7 @@ export interface operations {
     get__api_v2_templates_uuid_versions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -66401,7 +66779,7 @@ export interface operations {
     };
     post__api_v2_templates_preview_raw: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -66451,7 +66829,7 @@ export interface operations {
     };
     get__api_v2_templates_variables_type: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource type */
@@ -66487,7 +66865,7 @@ export interface operations {
     };
     post__api_v2_test_notification: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -66534,6 +66912,7 @@ export interface operations {
     get__api_v2_test_notification_tokens: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -66580,6 +66959,7 @@ export interface operations {
     get__api_v2_themes: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -66625,7 +67005,7 @@ export interface operations {
     };
     post__api_v2_themes: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -66671,7 +67051,7 @@ export interface operations {
     };
     get__api_v2_themes_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66713,7 +67093,7 @@ export interface operations {
     };
     put__api_v2_themes_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66762,7 +67142,7 @@ export interface operations {
     };
     delete__api_v2_themes_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66798,7 +67178,7 @@ export interface operations {
     };
     post__api_v2_themes_uuid_activate: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66847,7 +67227,7 @@ export interface operations {
     };
     post__api_v2_themes_uuid_duplicate: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66897,6 +67277,7 @@ export interface operations {
     "get__api_v2_themes_uuid_preview.css": {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -66945,7 +67326,7 @@ export interface operations {
     };
     post__api_v2_themes_uuid_publish: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -66994,7 +67375,7 @@ export interface operations {
     };
     post__api_v2_themes_uuid_revert: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67044,6 +67425,7 @@ export interface operations {
     get__api_v2_themes_uuid_revisions: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67092,7 +67474,7 @@ export interface operations {
     };
     post__api_v2_themes_uuid_unpublish: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67142,6 +67524,7 @@ export interface operations {
     get__api_v2_themes_active: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67188,6 +67571,7 @@ export interface operations {
     "get__api_v2_themes_active_styles.css": {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67233,7 +67617,7 @@ export interface operations {
     };
     post__api_v2_themes_install_source_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Source uuid */
@@ -67283,6 +67667,7 @@ export interface operations {
     get__api_v2_themes_marketplace: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67329,6 +67714,7 @@ export interface operations {
     get__api_v2_themes_presets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67375,6 +67761,7 @@ export interface operations {
     get__api_v2_themes_schema: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67421,6 +67808,7 @@ export interface operations {
     get__api_v2_timesheets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67468,7 +67856,7 @@ export interface operations {
     };
     post__api_v2_timesheets: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -67514,7 +67902,7 @@ export interface operations {
     };
     get__api_v2_timesheets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67556,7 +67944,7 @@ export interface operations {
     };
     put__api_v2_timesheets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67605,7 +67993,7 @@ export interface operations {
     };
     delete__api_v2_timesheets_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67641,7 +68029,7 @@ export interface operations {
     };
     post__api_v2_timesheets_uuid_approve: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67696,6 +68084,7 @@ export interface operations {
     get__api_v2_timesheets_uuid_entries: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67746,7 +68135,7 @@ export interface operations {
     };
     post__api_v2_timesheets_uuid_entries: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67795,7 +68184,7 @@ export interface operations {
     };
     post__api_v2_timesheets_uuid_reject: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67847,7 +68236,7 @@ export interface operations {
     };
     post__api_v2_timesheets_uuid_reopen: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67892,7 +68281,7 @@ export interface operations {
     };
     post__api_v2_timesheets_uuid_submit: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -67938,6 +68327,7 @@ export interface operations {
     get__api_v2_timesheets_approval_queue: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -67983,7 +68373,7 @@ export interface operations {
     };
     put__api_v2_timesheets_entries_entry_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Entry UUID */
@@ -68032,7 +68422,7 @@ export interface operations {
     };
     delete__api_v2_timesheets_entries_entry_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Entry UUID */
@@ -68069,6 +68459,7 @@ export interface operations {
     get__api_v2_timesheets_lookups_customers: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68117,6 +68508,7 @@ export interface operations {
     get__api_v2_timesheets_lookups_tasks: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68165,6 +68557,7 @@ export interface operations {
     get__api_v2_timesheets_summary: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68204,7 +68597,7 @@ export interface operations {
     };
     post__api_v2_training_data_process_pending: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68250,7 +68643,7 @@ export interface operations {
     };
     post__api_v2_training_data_reembed_all: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68297,6 +68690,7 @@ export interface operations {
     get__api_v2_training_data_search_similar: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68343,6 +68737,7 @@ export interface operations {
     get__api_v2_training_data_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68381,6 +68776,7 @@ export interface operations {
     get__api_v2_user_user_uuid_namespace_memberships: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68429,7 +68825,7 @@ export interface operations {
     };
     post__api_v2_user_add_to_namespace: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68476,6 +68872,7 @@ export interface operations {
     get__api_v2_user_invitations: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68522,6 +68919,7 @@ export interface operations {
     get__api_v2_user_menu: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68568,6 +68966,7 @@ export interface operations {
     get__api_v2_user_namespace_settings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68613,7 +69012,7 @@ export interface operations {
     };
     put__api_v2_user_namespace_settings: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68660,6 +69059,7 @@ export interface operations {
     get__api_v2_user_namespaces: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68705,7 +69105,7 @@ export interface operations {
     };
     post__api_v2_user_namespaces: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68751,7 +69151,7 @@ export interface operations {
     };
     get__api_v2_user_namespaces_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -68793,7 +69193,7 @@ export interface operations {
     };
     post__api_v2_user_namespaces_id_switch: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -68843,6 +69243,7 @@ export interface operations {
     get__api_v2_users: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -68888,7 +69289,7 @@ export interface operations {
     };
     post__api_v2_users: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -68934,7 +69335,7 @@ export interface operations {
     };
     get__api_v2_users_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -68976,7 +69377,7 @@ export interface operations {
     };
     put__api_v2_users_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69025,7 +69426,7 @@ export interface operations {
     };
     delete__api_v2_users_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69062,6 +69463,7 @@ export interface operations {
     get__api_v2_users_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69107,7 +69509,7 @@ export interface operations {
     };
     get__api_v2_variants_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69149,7 +69551,7 @@ export interface operations {
     };
     put__api_v2_variants_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69198,7 +69600,7 @@ export interface operations {
     };
     delete__api_v2_variants_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69235,6 +69637,7 @@ export interface operations {
     get__api_v2_vault: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69280,7 +69683,7 @@ export interface operations {
     };
     post__api_v2_vault: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -69327,6 +69730,7 @@ export interface operations {
     get__api_v2_vault_export_env: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69373,6 +69777,7 @@ export interface operations {
     get__api_v2_vault_export_json: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69419,6 +69824,7 @@ export interface operations {
     get__api_v2_vault_folders: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69464,7 +69870,7 @@ export interface operations {
     };
     post__api_v2_vault_folders: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -69510,7 +69916,7 @@ export interface operations {
     };
     put__api_v2_vault_folders_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69559,7 +69965,7 @@ export interface operations {
     };
     delete__api_v2_vault_folders_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -69595,7 +70001,7 @@ export interface operations {
     };
     post__api_v2_vault_import_env: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -69641,7 +70047,7 @@ export interface operations {
     };
     put__api_v2_vault_key: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -69688,6 +70094,7 @@ export interface operations {
     get__api_v2_vault_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69734,6 +70141,7 @@ export interface operations {
     get__api_v2_vault_providers: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -69779,7 +70187,7 @@ export interface operations {
     };
     post__api_v2_vault_providers: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -69825,7 +70233,7 @@ export interface operations {
     };
     get__api_v2_vault_providers_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -69867,7 +70275,7 @@ export interface operations {
     };
     put__api_v2_vault_providers_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -69916,7 +70324,7 @@ export interface operations {
     };
     delete__api_v2_vault_providers_uuid: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -69953,6 +70361,7 @@ export interface operations {
     get__api_v2_vault_providers_uuid_logs: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70002,6 +70411,7 @@ export interface operations {
     get__api_v2_vault_providers_uuid_mappings: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70050,7 +70460,7 @@ export interface operations {
     };
     post__api_v2_vault_providers_uuid_sync: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Unique identifier (UUID) */
@@ -70099,7 +70509,7 @@ export interface operations {
     };
     post__api_v2_vault_providers_test_connection: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70146,6 +70556,7 @@ export interface operations {
     get__api_v2_vault_providers_types: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70192,6 +70603,7 @@ export interface operations {
     get__api_v2_vault_secrets: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70237,7 +70649,7 @@ export interface operations {
     };
     post__api_v2_vault_secrets: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70283,7 +70695,7 @@ export interface operations {
     };
     get__api_v2_vault_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70325,7 +70737,7 @@ export interface operations {
     };
     put__api_v2_vault_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70374,7 +70786,7 @@ export interface operations {
     };
     delete__api_v2_vault_secrets_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70410,7 +70822,7 @@ export interface operations {
     };
     post__api_v2_vault_secrets_id_rotate: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70459,7 +70871,7 @@ export interface operations {
     };
     post__api_v2_vault_secrets_id_share: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70509,6 +70921,7 @@ export interface operations {
     get__api_v2_vault_secrets_id_shares: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70558,6 +70971,7 @@ export interface operations {
     get__api_v2_vault_secrets_expiring: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70604,6 +71018,7 @@ export interface operations {
     get__api_v2_vault_shared: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70649,7 +71064,7 @@ export interface operations {
     };
     delete__api_v2_vault_shares_id: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description Resource ID */
@@ -70686,6 +71101,7 @@ export interface operations {
     get__api_v2_vault_stats: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70723,7 +71139,7 @@ export interface operations {
     };
     post__api_v2_vault_unlock: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70770,6 +71186,7 @@ export interface operations {
     get__api_v2_vault_users_search: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -70815,7 +71232,7 @@ export interface operations {
     };
     post__api_v2_webhooks_github: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70861,7 +71278,7 @@ export interface operations {
     };
     post__api_v2_webhooks_stripe: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70907,7 +71324,7 @@ export interface operations {
     };
     post_auth_2fa_resend: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70938,7 +71355,7 @@ export interface operations {
     };
     post_auth_2fa_verify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -70972,7 +71389,7 @@ export interface operations {
     };
     post__auth_change_password: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71018,7 +71435,7 @@ export interface operations {
     };
     post__auth_delete_account: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71064,7 +71481,7 @@ export interface operations {
     };
     post__auth_e2e_peek_otp: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71110,7 +71527,7 @@ export interface operations {
     };
     post__auth_forgot_password: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71156,7 +71573,7 @@ export interface operations {
     };
     get_auth_google: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71203,6 +71620,7 @@ export interface operations {
     get__auth_hmrc_callback: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -71248,7 +71666,7 @@ export interface operations {
     };
     delete__auth_hmrc_disconnect: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71282,6 +71700,7 @@ export interface operations {
     get__auth_hmrc_initiate: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -71327,7 +71746,7 @@ export interface operations {
     };
     post_auth_login: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71381,7 +71800,7 @@ export interface operations {
     };
     post_auth_logout: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71405,7 +71824,7 @@ export interface operations {
     };
     get_auth_me: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71435,7 +71854,7 @@ export interface operations {
     };
     post_auth_oauth_validate: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71467,7 +71886,7 @@ export interface operations {
     };
     post__auth_pin_setup: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71514,6 +71933,7 @@ export interface operations {
     get__auth_pin_status: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -71559,7 +71979,7 @@ export interface operations {
     };
     post__auth_pin_verify: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71605,7 +72025,7 @@ export interface operations {
     };
     post_auth_refresh: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71642,7 +72062,7 @@ export interface operations {
     };
     post__auth_reset_password: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71689,6 +72109,7 @@ export interface operations {
     get_health: {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Set to 'true' for comprehensive health check */
                 detailed?: "true" | "false";
             };
@@ -71723,7 +72144,7 @@ export interface operations {
     };
     get_live: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;
@@ -71747,7 +72168,7 @@ export interface operations {
     };
     get__plugin_ui_sdk_file: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path: {
                 /** @description File */
@@ -71790,6 +72211,7 @@ export interface operations {
     "get__plugin_ui_code_*": {
         parameters: {
             query?: {
+[key: string]: unknown;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -71838,7 +72260,7 @@ export interface operations {
     };
     get_ready: {
         parameters: {
-            query?: never;
+            query?: { [key: string]: unknown };
             header?: never;
             path?: never;
             cookie?: never;

@@ -156,7 +156,7 @@ await opsapi.POST('/api/v2/customers', {
 
 **Every endpoint is typed.** Paths, parameters, request bodies and responses are generated from OpsAPI's OpenAPI spec (over 870 API paths), so your editor completes them and the compiler catches a wrong path or field. To see what an endpoint does, open `/swagger` on your server.
 
-Requests use [openapi-fetch](https://openapi-ts.dev/openapi-fetch/): `GET`, `POST`, `PUT`, `PATCH` and `DELETE` with the API path. Path parameters go in `params.path`, query strings in `params.query` and JSON in `body`. The response is `{ data, response }`, where `data` is OpsAPI's `{ success, data, meta }` envelope.
+Requests use [openapi-fetch](https://openapi-ts.dev/openapi-fetch/): `GET`, `POST`, `PUT`, `PATCH` and `DELETE` with the API path. Path parameters go in `params.path`, query strings in `params.query` and JSON in `body`. `params.query` accepts any filter an endpoint supports, beyond the documented `page`, `per_page` and `search`. The response is `{ data, response }`, where `data` is OpsAPI's `{ success, data, meta }` envelope.
 
 ## Signing in
 
@@ -217,6 +217,8 @@ Prefer checking results instead of catching? Pass `throwOnError: false` and call
 
 ## Lists and pagination
 
+`paginate()` fetches the next page as you iterate and stops at the last one. It reads whichever paging info the endpoint returns (`total_pages`, `totalPages`, or `total` with the page size), and it also copes with lists that aren't paginated at all. It never loops, and every item comes back once.
+
 ```ts
 import { paginate, paginateCursor, collect } from '@opsapi/client';
 
@@ -231,6 +233,12 @@ const changes = await collect(
   paginateCursor((cursor) =>
     opsapi.GET('/api/v2/namespace/activity/changes', { params: { query: { cursor } } }).then((r) => r.data)),
   500, // stop after 500
+);
+
+// A few endpoints keep their items under another key: say where.
+const notifications = await collect(
+  paginate((page) => opsapi.GET('/api/v2/notifications', { params: { query: { page } } }).then((r) => r.data),
+    { items: (r) => r.notifications }),
 );
 ```
 
@@ -312,7 +320,7 @@ With Express, use `express.raw({ type: 'application/json' })` and pass `req.body
 | `400` "Namespace context required" | Pass `namespace` (slug or UUID) to `createClient`, or call `setNamespace()`. |
 | `404` for a whole module | The module isn't switched on: check `PROJECT_CODE` on the server. |
 | A CORS error in the browser | Allow your site's origin with `CORS_ALLOWED_DOMAINS` / `CORS_ALLOWED_ORIGINS` on the server. |
-| Sign-in fails with "identifier required" | `@opsapi/client` 0.1.0 sent the password in a format the server ignores. Use 0.1.1 or later. |
+| Sign-in fails with "identifier required" | `@opsapi/client` 0.1.0 sent the password in a format the server ignores. Use 1.0.0 or later. |
 | No sign-in code arrives | Configure SMTP on the server (see *Running it for real*). |
 
 ## Developing this package
@@ -338,6 +346,10 @@ Releases are published to npm by CI ([`sdk-typescript-release.yml`](../../.githu
 The workflow checks that the tag matches `package.json`, then type-checks, tests, builds and publishes. It needs the repository secret `NPM_TOKEN`: an npm **granular access token** with *Read and write* on the `@opsapi` scope and *Bypass two-factor authentication* ticked.
 
 npm then **stages** the release: it waits under **npmjs.com → Staged Packages** until a maintainer approves it with their 2FA code. Server builds ignore `sdk-v*` tags, so tagging a `main` commit doesn't change OpsAPI's own version.
+
+## Versioning
+
+`@opsapi/client` follows [SemVer](https://semver.org/) from 1.0.0: minor and patch releases never break your code, and the [CHANGELOG](CHANGELOG.md) lists every change. The typed endpoints follow the OpsAPI API, and a new endpoint arrives as a minor release.
 
 ## License
 
