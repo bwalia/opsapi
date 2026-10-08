@@ -227,5 +227,16 @@ check("the original key now carries Lifetime", st == 200 and claims(v["data"]["l
 st, r, _ = pub("POST", "/api/v2/public/billing/me/portal", {"pk": PK}, SESSION)
 check("portal without a subscription -> 404 no_subscription", st == 404 and r.get("code") == "no_subscription", r)
 
+print("privacy delete")
+s5 = session_event("cs_test_e2e_sub2_" + RUN, "pro", buyer("dee"), 1200, {"mode": "subscription", "subscription": "sub_e2e_2_" + RUN,
+                                                                        "customer": "cus_e2e_2_" + RUN})
+st, _, _ = hook("checkout.session.completed", s5); check("Dee subscribes", st == 200, st)
+st, subs, _ = req("GET", f"/api/v2/subscriptions?app={APP}")
+dee = [x for x in subs["data"] if x.get("customer_email") == buyer("dee")]
+st, r, _ = req("DELETE", f"/api/v2/customers/{dee[0]['customer_uuid']}/billing-data")
+check("delete: the Stripe subscription is cancelled at Stripe, then the customer erased", st == 200 and r["data"]["erased"], r)
+st, subs, _ = req("GET", f"/api/v2/subscriptions?app={APP}&status=canceled")
+check("her subscription is cancelled here too", any(x["uuid"] == dee[0]["uuid"] for x in subs["data"]), subs)
+
 json.dump({"app": APP, "pk": PK, "ws": WS}, open("/e2e/out/pay.json", "w"))  # for sdk.mjs
 print("\nFAILURES:", len(fails), fails)

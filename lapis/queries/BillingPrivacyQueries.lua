@@ -59,13 +59,20 @@ end
 function Privacy.erase(namespace_id, uuid)
     local c = customer(namespace_id, uuid)
     if not c then return nil, "Customer not found" end
+    -- Stop Stripe charging them first; if Stripe can't be reached, erase nothing.
+    for _, s in ipairs(db.query([[SELECT stripe_subscription_id FROM billing_subscriptions WHERE customer_id = ?
+            AND namespace_id = ? AND source = 'stripe' AND stripe_subscription_id IS NOT NULL
+            AND status IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')]], c.id, namespace_id)) do
+        local ok, perr = require("lib.billing-stripe").cancelNow(s.stripe_subscription_id)
+        if not ok then return nil, perr.message end
+    end
     return Common.transaction(function()
         local id = c.id
         db.query([[UPDATE billing_licenses SET status = 'revoked', revoked_at = NOW(), updated_at = NOW()
             WHERE customer_id = ? AND status <> 'revoked']], id)
         db.query([[DELETE FROM billing_license_activations x USING billing_licenses l
             WHERE l.id = x.license_id AND l.customer_id = ?]], id)
-        -- Stripe subscriptions are also cancelled at Stripe (phase 2).
+        -- (Stripe subscriptions were cancelled at Stripe above.)
         db.query([[UPDATE billing_subscriptions SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
             WHERE customer_id = ? AND status IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')]], id)
         db.query("DELETE FROM billing_grants WHERE customer_id = ?", id)

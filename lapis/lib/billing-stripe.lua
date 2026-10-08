@@ -364,6 +364,17 @@ function Pay.switchPlan(sub, to_plan)
     return true
 end
 
+--- End a Stripe subscription now (privacy delete). An already-ended one counts as done.
+function Pay.cancelNow(stripe_subscription_id)
+    local s, serr = stripe()
+    if not s then return err(503, "payments_not_configured", serr) end
+    local ok, cerr = s:_request("DELETE", "/subscriptions/" .. stripe_subscription_id)
+    if ok then return true end
+    local remote = s:_request("GET", "/subscriptions/" .. stripe_subscription_id)
+    if remote and (remote.status == "canceled" or remote.status == "incomplete_expired") then return true end
+    return err(502, "stripe_error", "Could not cancel the Stripe subscription: " .. tostring(cerr))
+end
+
 --- Refund a Stripe purchase (all of it, or `amount`). The webhook applies the result.
 function Pay.refund(namespace_id, uuid, amount)
     local p = db.query("SELECT * FROM billing_purchases WHERE namespace_id = ? AND uuid = ?", namespace_id, uuid)[1]
