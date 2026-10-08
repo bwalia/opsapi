@@ -25,6 +25,9 @@ return function(app)
     end))
 
     app:delete("/api/v2/customers/:uuid/billing-data", both("delete", function(self)
-        return Http.result(Privacy.erase(self.namespace.id, self.params.uuid))
+        local res, err, status = Privacy.erase(self.namespace.id, self.params.uuid)
+        -- Stripe unreachable: a gateway error (502), and nothing erased; retry later.
+        if not res and status then return Http.fail(status, err) end
+        return Http.result(res, err)
     end))
 end

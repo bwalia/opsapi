@@ -252,7 +252,8 @@ local function clean_feature(b, partial)
     end
     if b.released_at ~= nil then
         local v = Common.nilify(b.released_at)
-        if v ~= nil and (type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d")) then
+        if v ~= nil and (type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d")
+            or not pcall(db.query, "SELECT ?::timestamptz", v)) then
             return nil, "released_at must be an ISO-8601 date, or null"
         end
         f.released_at = v and db.raw(db.escape_literal(v) .. "::timestamptz") or db.NULL

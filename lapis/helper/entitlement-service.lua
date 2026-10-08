@@ -169,10 +169,7 @@ function EntitlementService.resolve(app, customer)
                extract(epoch FROM s.current_period_end)::bigint AS period_end,
                p.uuid AS plan_uuid, p.plan_key, p.name AS plan_name, p.features
         FROM billing_subscriptions s LEFT JOIN billing_plans p ON p.id = s.plan_id
-        WHERE s.app_id = ? AND s.customer_id = ?
-          AND (s.status IN ('active', 'trialing')
-               OR (s.status = 'past_due' AND (s.current_period_end IS NULL
-                   OR s.current_period_end + make_interval(days => ?) > (NOW() AT TIME ZONE 'UTC'))))
+        WHERE s.app_id = ? AND s.customer_id = ? AND ]] .. EntitlementService.liveSubscriptionSql("s") .. [[
         ORDER BY s.created_at DESC LIMIT 1]], app.id, customer.id, settings.past_due_grace_days)[1]
     if sub then
         EntitlementService.merge(features, catalog, sub.features)
@@ -275,19 +272,33 @@ function EntitlementService.bust(app_or_id, customer_id)
     local app = type(app_or_id) == "table" and app_or_id
         or db.query("SELECT id, cache_generation FROM billing_apps WHERE id = ?", app_or_id)[1]
     if not app or not customer_id then return end
-    local RedisClient = require("helper.redis-client")
-    local red = RedisClient.connect()
-    if red then
-        red:del(cache_key(app, customer_id))
-        RedisClient.release(red)
-    end
+    local key = cache_key(app, customer_id)
+    -- After the write commits: dropped earlier, a read in between would cache the old access.
+    require("queries.FieldServiceCommon").afterCommit(function()
+        local RedisClient = require("helper.redis-client")
+        local red = RedisClient.connect()
+        if red then
+            red:del(key)
+            RedisClient.release(red)
+        end
+    end)
 end
 
---- Who signs: OPSAPI_PUBLIC_URL, else this request's origin.
+--- SQL: does subscription row `a` still entitle? One `?` = the app's past-due grace in days.
+-- active/trialing until the paid period ends (Stripe ones get a day for the renewal
+-- webhook to land); past_due for the grace, counted from when the payment failed.
+function EntitlementService.liveSubscriptionSql(a)
+    return (([[((%s.status IN ('active', 'trialing') AND (%s.current_period_end IS NULL
+            OR %s.current_period_end + CASE WHEN %s.source = 'stripe' THEN interval '1 day' ELSE interval '0' END
+               > (NOW() AT TIME ZONE 'UTC')))
+        OR (%s.status = 'past_due' AND COALESCE(%s.past_due_since, %s.updated_at) + make_interval(days => ?)
+               > (NOW() AT TIME ZONE 'UTC')))]]):gsub("%%s", a))
+end
+
+--- Who signs: OPSAPI_PUBLIC_URL (required for signing, lib/billing-signing.lua);
+-- never the request's Host header, which clients that pin the issuer would reject.
 function EntitlementService.issuer()
-    local url = os.getenv("OPSAPI_PUBLIC_URL")
-    if url and url ~= "" then return (url:gsub("/+$", "")) end
-    return ngx.var.scheme .. "://" .. (ngx.var.http_host or ngx.var.host)
+    return ((os.getenv("OPSAPI_PUBLIC_URL") or ""):gsub("/+$", ""))
 end
 
 local function nullable(v) if v == nil then return NULL end return v end

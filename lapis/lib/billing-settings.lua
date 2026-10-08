@@ -49,6 +49,11 @@ Settings.SCHEMA = {
     { key = "max_activations", group = "licences", type = "integer", min = 1, max = 10000, nullable = true,
       default = by_kind(cjson.null, 3), label = "Devices per licence",
       help = "Default for new licences (each licence can override it). Empty = unlimited." },
+    { key = "released_seat_hold_days", group = "licences", type = "integer", min = 0, max = 3650, nullable = true,
+      label = "Released devices keep their seat for (days)",
+      help = "A device given back still counts for this long, so a licence can't be shared by activating and "
+          .. "releasing machines in turn. Empty = refresh interval + grace period (as long as the released "
+          .. "machine's licence file keeps working). 0 = free at once. Seats you free here never count." },
     { key = "activation_auto_release_days", group = "licences", type = "integer", min = 0, max = 3650,
       default = by_kind(0, 90), label = "Free devices not seen for (days)", help = "0 = never." },
     { key = "fingerprint_salt", group = "licences", type = "string", readonly = true,
@@ -81,8 +86,6 @@ Settings.SCHEMA = {
     { key = "refund_policy", group = "payments", type = "enum", values = { "revoke", "keep" }, default = "revoke",
       label = "On a full refund", help = "Partial refunds always keep access." },
     { key = "automatic_tax", group = "payments", type = "boolean", default = false, label = "Stripe Tax" },
-    { key = "allow_promotion_codes", group = "payments", type = "boolean", default = false,
-      label = "Allow Stripe promotion codes at checkout" },
 }
 
 local BY_KEY = {}
@@ -125,9 +128,24 @@ local function origin_ok(o)
             or o:match("^http://127%.0%.0%.1:?%d*$")) ~= nil
 end
 
+-- https://<host with a dot>[:port][/...], or http on localhost / 127.0.0.1. The
+-- host must end where it should (http://localhost.evil.com is not localhost).
 local function url_ok(u)
-    return type(u) == "string" and #u <= 500 and not u:find("%s")
-        and (u:match("^https://[%w%-%.]+%.[%w%-]+") or u:match("^http://localhost") or u:match("^http://127%.0%.0%.1")) ~= nil
+    if type(u) ~= "string" or #u > 500 or u:find("[%s\\]") then return false end
+    local scheme, host, rest = u:match("^(https?)://([%w%-%.]+)(.*)$")
+    if not scheme then return false end
+    rest = rest:gsub("^:%d+", "")
+    if rest ~= "" and not rest:match("^[/?#]") then return false end
+    if scheme == "https" then return host:match("^[%w%-]+%.[%w%-%.]*[%w%-]$") ~= nil end
+    return host == "localhost" or host == "127.0.0.1"
+end
+Settings._url_ok = url_ok
+
+local function is_array(v)
+    if type(v) ~= "table" then return false end
+    local n = 0
+    for _ in pairs(v) do n = n + 1 end
+    return n == #v
 end
 
 local function check_value(spec, v)
@@ -158,7 +176,7 @@ local function check_value(spec, v)
             return nil, spec.key .. " must be a colour like #2563eb"
         end
     elseif t == "origins" or t == "urls" then
-        if type(v) ~= "table" or #v > 50 then return nil, spec.key .. " must be a list (max 50)" end
+        if not is_array(v) or #v > 50 then return nil, spec.key .. " must be a list (max 50)" end
         local ok = t == "origins" and origin_ok or url_ok
         for _, x in ipairs(v) do
             if not ok(x) then
@@ -199,6 +217,8 @@ function Settings.merge(stored, input)
             for a, b in pairs(v) do merged[a] = b end
             v = merged
         end
+        -- An empty list is stored as [] (not {}).
+        if (spec.type == "origins" or spec.type == "urls") and #v == 0 then v = setmetatable({}, cjson.array_mt) end
         out[k] = v
     end
     return out

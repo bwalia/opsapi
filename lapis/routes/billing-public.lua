@@ -221,22 +221,14 @@ return function(app)
             { "link_email", email, r.access_link_per_email_per_hour, 3600 } })
         if limited then return limited end
         return Guard.idempotent(self, ("app:%s:access-link"):format(app.id), body, function()
-            -- Only customers with billing records in this app get a link; the
-            -- answer is the same either way, so emails can't be enumerated.
-            local c = db.query([[
-                SELECT c.id FROM customers c WHERE c.namespace_id = ? AND lower(c.email) = ?
-                  AND (EXISTS (SELECT 1 FROM billing_licenses WHERE customer_id = c.id AND app_id = ?)
-                    OR EXISTS (SELECT 1 FROM billing_purchases WHERE customer_id = c.id AND app_id = ?)
-                    OR EXISTS (SELECT 1 FROM billing_subscriptions WHERE customer_id = c.id AND app_id = ?)
-                    OR EXISTS (SELECT 1 FROM billing_grants WHERE customer_id = c.id AND app_id = ?))
-                LIMIT 1]], app.namespace_id, email, app.id, app.id, app.id, app.id)[1]
-            if c then
-                local uuid = Common.uuid()
-                db.insert("billing_access_links", { uuid = uuid, namespace_id = app.namespace_id, app_id = app.id,
-                    customer_id = c.id, return_url = return_url or db.NULL,
-                    expires_at = db.raw(("NOW() + interval '%d minutes'"):format(require("lib.billing-jobs").LINK_MINUTES)) })
-                require("helper.plugin-events").emit(app.namespace_id, "billing.access_link.requested", { link = uuid })
-            end
+            -- The same work for every email (a row + an outbox event): whether it
+            -- belongs to a customer of this app is decided by the job, so neither
+            -- the answer nor its timing tells emails apart.
+            local uuid = Common.uuid()
+            db.insert("billing_access_links", { uuid = uuid, namespace_id = app.namespace_id, app_id = app.id,
+                email_norm = email, return_url = return_url or db.NULL,
+                expires_at = db.raw(("NOW() + interval '%d minutes'"):format(require("lib.billing-jobs").LINK_MINUTES)) })
+            require("helper.plugin-events").emit(app.namespace_id, "billing.access_link.requested", { link = uuid })
             return { status = 202, json = { success = true,
                 data = { message = "If that email has a licence or purchase, a link is on its way." } } }
         end)
@@ -277,7 +269,7 @@ return function(app)
 
     app:post("/api/v2/public/billing/me/licenses/:uuid/reissue", with_session(function(self, app, body, s)
         return Guard.idempotent(self, ("app:%s:reissue:%s"):format(app.id, s.customer_id), body, function()
-            local res, err = Licenses.reissue(app.namespace_id, self.params.uuid, s.customer_id)
+            local res, err = Licenses.reissue(app.namespace_id, self.params.uuid, s.customer_id, app.id)
             if not res then return Guard.fail(404, "not_found", err) end
             res.license.customer_email, res.license.customer_external_id = nil, nil
             return Http.ok(res)
@@ -287,7 +279,7 @@ return function(app)
     app:delete("/api/v2/public/billing/me/licenses/:uuid/activations/:activation", with_session(
         function(self, app, _, s)
             local ok, err = Licenses.removeActivation(app.namespace_id, self.params.uuid, self.params.activation,
-                s.customer_id)
+                s.customer_id, app.id)
             if not ok then return Guard.fail(404, "not_found", err) end
             return Http.ok({ freed = true })
         end))

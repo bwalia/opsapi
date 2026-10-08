@@ -47,6 +47,9 @@ end
 
 local function err(status, code, message) return nil, { status = status, code = code, message = message } end
 
+-- Checkout sessions expire after the minimum Stripe allows (30 min) plus a minute.
+local SESSION_SECONDS = 31 * 60
+
 -- ---------------------------------------------------------------------------
 -- Connected accounts
 -- ---------------------------------------------------------------------------
@@ -150,9 +153,11 @@ end
 
 -- The Stripe coupon for an OpsAPI coupon (keyed by mode and terms, so edited terms get a new one).
 local function coupon_for(s, c)
-    local terms = table.concat({ c.discount_type, tostring(c.percent_off ~= db.NULL and c.percent_off or ""),
-        tostring(c.amount_off ~= db.NULL and c.amount_off or ""), tostring(c.currency ~= db.NULL and c.currency or ""),
-        c.duration or "once", tostring(c.duration_months ~= db.NULL and c.duration_months or "") }, ":")
+    local function v(x) return tostring(x ~= db.NULL and x or "") end
+    local redeem_by = c.expires_at ~= db.NULL and c.expires_at and tonumber(db.query(
+        "SELECT extract(epoch FROM ?::timestamptz)::bigint AS t", c.expires_at)[1].t) or nil
+    local terms = table.concat({ c.discount_type, v(c.percent_off), v(c.amount_off), v(c.currency), c.duration or "once",
+        v(c.duration_months), v(c.max_redemptions), tostring(redeem_by or "") }, ":")
     local key = Pay.mode() .. ":" .. ngx.md5(terms)
     local refs = type(c.stripe_refs) == "table" and c.stripe_refs or {}
     if refs[key] then return refs[key] end
@@ -163,6 +168,9 @@ local function coupon_for(s, c)
         body.amount_off, body.currency = tonumber(c.amount_off), tostring(c.currency):lower()
     end
     if body.duration == "repeating" then body.duration_in_months = tonumber(c.duration_months) end
+    -- Stripe enforces these too (OpsAPI reserves a use per checkout: §13).
+    if c.max_redemptions ~= db.NULL and c.max_redemptions then body.max_redemptions = tonumber(c.max_redemptions) end
+    if redeem_by then body.redeem_by = redeem_by end
     local coupon, cerr = s:_request("POST", "/coupons", body, "opsapi-coupon-" .. c.uuid .. "-" .. key)
     if not coupon then return nil, cerr end
     refs[key] = coupon.id
@@ -205,11 +213,16 @@ function Pay.checkout(app, plan, o)
     end
     if not o.success_url then success = success .. "?session_id={CHECKOUT_SESSION_ID}" end
 
-    local coupon
+    local Offers = require("queries.BillingOfferQueries")
+    local email = o.email or (o.customer and o.customer.email ~= db.NULL and o.customer.email) or nil
+    local coupon, reservation
     if o.coupon and o.coupon ~= "" then
-        local res, code, msg = require("queries.BillingOfferQueries").checkCoupon(app.namespace_id, app, o.coupon, plan,
-            amount, plan.currency, o.customer and o.customer.id)
+        local res, code, msg = Offers.checkCoupon(app.namespace_id, app, o.coupon, plan, amount, plan.currency,
+            o.customer and o.customer.id, email)
         if not res then return err(422, code, msg) end
+        if res.coupon.per_customer_limit ~= db.NULL and res.coupon.per_customer_limit and not o.customer and not email then
+            return err(422, "email_required", "Enter your email to use this coupon")
+        end
         coupon = res
     end
 
@@ -225,9 +238,10 @@ function Pay.checkout(app, plan, o)
     if sc then
         params.customer = sc
     else
-        local email = o.email or (o.customer and o.customer.email ~= db.NULL and o.customer.email) or nil
-        params.customer_email = email
+        params.customer_email = email -- fixed on Stripe's page, so a coupon's per-email limit holds
     end
+    -- The shortest Stripe allows: an abandoned checkout gives its coupon use back sooner.
+    params.expires_at = ngx.time() + SESSION_SECONDS
     if recurring then
         local price, perr = price_for(s, plan)
         if not price then return err(502, "stripe_error", perr) end
@@ -241,8 +255,9 @@ function Pay.checkout(app, plan, o)
         local id, cerr = coupon_for(s, coupon.coupon)
         if not id then return err(502, "stripe_error", cerr) end
         params.discounts = { { coupon = id } }
-    elseif settings.allow_promotion_codes then
-        params.allow_promotion_codes = true
+        reservation = Offers.reserve(coupon.coupon, o.customer and o.customer.id, email,
+            params.expires_at + 600)
+        if not reservation then return err(422, "coupon_exhausted", "This coupon has been used up") end
     end
     if settings.automatic_tax then
         params.automatic_tax = { enabled = true, liability = { type = "account", account = acct.stripe_account_id } }
@@ -264,7 +279,11 @@ function Pay.checkout(app, plan, o)
     end
     local session, cerr = s:_request("POST", "/checkout/sessions", params,
         o.idempotency_key and ("opsapi-checkout-%s-%s"):format(app.id, o.idempotency_key) or nil)
-    if not session then return err(502, "stripe_error", cerr) end
+    if not session then
+        if reservation then Offers.release(reservation) end
+        return err(502, "stripe_error", cerr)
+    end
+    if reservation then Offers.attachSession(reservation, session.id) end
     return { url = session.url, session_id = session.id }
 end
 
@@ -357,9 +376,12 @@ function Pay.switchPlan(sub, to_plan)
     if not item then return err(502, "stripe_error", "the subscription has no items") end
     local price, perr = price_for(s, to_plan)
     if not price then return err(502, "stripe_error", perr) end
+    -- Charged now, applied only once paid: the new plan arrives with
+    -- customer.subscription.updated (sync_subscription), never before payment.
     local ok, uerr = s:_request("POST", "/subscriptions/" .. sub.stripe_subscription_id, {
-        items = { { id = item.id, price = price } }, proration_behavior = "create_prorations",
-        metadata = { plan = to_plan.uuid } }, ("opsapi-switch-%s-%s"):format(sub.uuid, to_plan.uuid))
+        items = { { id = item.id, price = price } }, proration_behavior = "always_invoice",
+        payment_behavior = "pending_if_incomplete" },
+        ("opsapi-switch-%s-%s-%s"):format(sub.uuid, item.price and item.price.id or "", price))
     if not ok then return err(502, "stripe_error", uerr) end
     return true
 end
@@ -376,7 +398,8 @@ function Pay.cancelNow(stripe_subscription_id)
 end
 
 --- Refund a Stripe purchase (all of it, or `amount`). The webhook applies the result.
-function Pay.refund(namespace_id, uuid, amount)
+-- idem: the caller's Idempotency-Key (the same key never refunds twice).
+function Pay.refund(namespace_id, uuid, amount, idem)
     local p = db.query("SELECT * FROM billing_purchases WHERE namespace_id = ? AND uuid = ?", namespace_id, uuid)[1]
     if not p then return err(404, "not_found", "Purchase not found") end
     if p.source ~= "stripe" or p.stripe_payment_intent_id == db.NULL or not p.stripe_payment_intent_id then
@@ -390,7 +413,8 @@ function Pay.refund(namespace_id, uuid, amount)
     if not s then return err(503, "payments_not_configured", serr) end
     local r, rerr = s:_request("POST", "/refunds", { payment_intent = p.stripe_payment_intent_id, amount = amount,
         reverse_transfer = true, refund_application_fee = true },
-        ("opsapi-refund-%s-%s-%s"):format(p.uuid, amount or "full", tonumber(p.refunded_amount) or 0))
+        idem and ("opsapi-refund-%s-key-%s"):format(p.uuid, idem)
+            or ("opsapi-refund-%s-%s-%s"):format(p.uuid, amount or "full", tonumber(p.refunded_amount) or 0))
     if not r then return err(502, "stripe_error", rerr) end
     return { refund = r.id, status = r.status, amount = r.amount }
 end
@@ -406,6 +430,9 @@ local function customer_for(namespace_id, meta, details)
     end
     local email = details and details.email
     if type(email) ~= "string" or email == "" then return nil, "the checkout session has no customer email" end
+    if not require("queries.CustomerQueries").validEmail(email) then
+        return nil, "the buyer's email from Stripe can't be stored as a customer email"
+    end
     local c = db.query("SELECT * FROM customers WHERE namespace_id = ? AND lower(email) = lower(?) LIMIT 1",
         namespace_id, email)[1]
     if c then return c end
@@ -456,16 +483,24 @@ local function fulfil_session(s)
             source = "stripe", external_transaction_id = s.id,
             original_transaction_id = plan.purchase_type == "recurring" and s.subscription or nil,
             amount = (tonumber(s.amount_total) or 0) - (tonumber(totals.amount_tax) or 0), currency = s.currency,
-            coupon = coupon, discount = tonumber(totals.amount_discount) or 0, force_coupon = true,
+            coupon = coupon, discount = tonumber(totals.amount_discount) or 0, checkout_session = s.id,
             expires_at = expires_at, kind = meta.kind == "upgrade" and "upgrade" or "new", from_plan = from_plan,
             stripe = { subscription_id = s.subscription, customer_id = s.customer, payment_intent = s.payment_intent },
             actor = "stripe",
         })
         if not out then return nil, e end
+        -- Refunded before we got here: apply it now.
+        local early = s.payment_intent and db.query("DELETE FROM billing_stripe_refunds WHERE payment_intent_id = ? RETURNING *",
+            s.payment_intent)[1]
+        if early and out.purchase then
+            local row = db.query("SELECT * FROM billing_purchases WHERE uuid = ?", out.purchase.uuid)[1]
+            Pay.applyRefund(app, row, tonumber(early.amount_refunded), early.full_refund == true)
+            if early.full_refund == true and Settings.resolve(app).refund_policy == "revoke" then out.key = nil end
+        end
         if out.key then
             local email = Settings.resolve(app).email_licence_keys == true
             local lic = db.query("SELECT id FROM billing_licenses WHERE uuid = ?", out.license.uuid)[1]
-            local ok, derr = require("lib.billing-delivery").store(lic.id, s.id, out.key, email)
+            local ok, derr = require("lib.billing-delivery").store(lic.id, out.key, { session = s.id, email = email })
             if not ok then return nil, derr end
             if email then
                 require("helper.plugin-events").emit(app.namespace_id, "billing.licence_key.requested",
@@ -481,20 +516,38 @@ end
 local SUB_STATUS = { incomplete = true, incomplete_expired = true, trialing = true, active = true, past_due = true,
     canceled = true, unpaid = true, paused = true }
 
-local function sync_subscription(sub, deleted)
+-- The OpsAPI plan behind a Stripe price (stripe_refs), for this app.
+local function plan_for_price(app_id, price_id)
+    if not price_id then return nil end
+    return db.query([[SELECT id, amount FROM billing_plans WHERE app_id = ? AND stripe_refs -> ? ->> 'price' = ? LIMIT 1]],
+        app_id, Pay.mode(), price_id)[1]
+end
+
+-- A subscription event, applied in order: an event older than the last one
+-- applied is skipped, and an ended subscription never comes back (Stripe can
+-- deliver a late `updated` after `deleted`).
+local function sync_subscription(sub, event)
     if (sub.metadata or {}).opsapi ~= "billing" then return "ignored" end
-    local row = db.query("SELECT * FROM billing_subscriptions WHERE stripe_subscription_id = ?", sub.id)[1]
+    local row = db.query([[SELECT *, extract(epoch FROM last_event_at)::bigint AS last_event_epoch
+        FROM billing_subscriptions WHERE stripe_subscription_id = ?]], sub.id)[1]
     if not row then return "ignored" end -- not fulfilled yet: the checkout event reads the subscription itself
-    local app = db.query("SELECT * FROM billing_apps WHERE id = ?", row.app_id)[1]
-    local plan_id = row.plan_id
-    if sub.metadata.plan then
-        local p = db.query("SELECT id FROM billing_plans WHERE uuid = ? AND app_id = ?", sub.metadata.plan, row.app_id)[1]
-        if p then plan_id = p.id end
+    local created = tonumber(event and event.created)
+    if created and row.last_event_epoch and tonumber(row.last_event_epoch) and created < tonumber(row.last_event_epoch) then
+        return "ignored"
     end
-    local status = deleted and "canceled" or (SUB_STATUS[sub.status] and sub.status or row.status)
+    if row.status == "canceled" and row.ended_at and row.ended_at ~= db.NULL then return "ignored" end
+    local app = db.query("SELECT * FROM billing_apps WHERE id = ?", row.app_id)[1]
+    -- The plan: from the subscription's price (a switch), else its metadata, else unchanged.
+    local item = sub.items and sub.items.data and sub.items.data[1]
+    local plan = plan_for_price(row.app_id, item and item.price and item.price.id)
+    if not plan and (sub.metadata or {}).plan then
+        plan = db.query("SELECT id, amount FROM billing_plans WHERE uuid = ? AND app_id = ?", sub.metadata.plan, row.app_id)[1]
+    end
+    local plan_id = plan and plan.id or row.plan_id
+    local status = SUB_STATUS[sub.status] and sub.status or row.status
     local finish = period_end(sub)
     local ended = tonumber(sub.ended_at)
-    Common.transaction(function()
+    local ok, terr = Common.transaction(function()
         db.update("billing_subscriptions", {
             status = status, plan_id = plan_id, cancel_at_period_end = sub.cancel_at_period_end == true,
             current_period_end = finish and db.raw(("to_timestamp(%d) AT TIME ZONE 'UTC'"):format(finish))
@@ -502,8 +555,21 @@ local function sync_subscription(sub, deleted)
             canceled_at = tonumber(sub.canceled_at) and db.raw(("to_timestamp(%d) AT TIME ZONE 'UTC'"):format(sub.canceled_at))
                 or db.NULL,
             ended_at = ended and db.raw(("to_timestamp(%d) AT TIME ZONE 'UTC'"):format(ended)) or db.NULL,
+            last_event_id = event and event.id or db.NULL,
+            last_event_at = created and db.raw(("to_timestamp(%d) AT TIME ZONE 'UTC'"):format(created)) or db.NULL,
+            -- The past-due grace counts from the failed payment (Stripe moves the period end on regardless).
+            past_due_since = status == "past_due"
+                and (row.past_due_since ~= db.NULL and row.past_due_since or db.raw("NOW() AT TIME ZONE 'UTC'")) or db.NULL,
             updated_at = db.raw("NOW()"),
         }, { id = row.id })
+        -- A switch takes effect here, once Stripe has applied (and charged) it.
+        if tonumber(plan_id) ~= tonumber(row.plan_id) then
+            local old = db.query("SELECT id, amount FROM billing_plans WHERE id = ?", row.plan_id)[1]
+            require("queries.BillingPurchaseQueries").recordChange({ app = app, customer_id = row.customer_id,
+                from_plan = old, to_plan = { id = plan_id },
+                kind = old and tonumber(plan.amount) < tonumber(old.amount) and "downgrade" or "upgrade",
+                source = "stripe", subscription_id = row.id, note = "Prorated by Stripe" })
+        end
         -- The licence of a subscription runs to the end of the paid period (or when it ended).
         local until_ = ended or (status ~= "canceled" and finish) or nil
         if until_ then
@@ -511,50 +577,83 @@ local function sync_subscription(sub, deleted)
                     status = CASE WHEN status = 'expired' AND to_timestamp(?) > NOW() THEN 'active' ELSE status END
                 WHERE subscription_id = ? AND status <> 'revoked']], plan_id, until_, until_, row.id)
         end
+        require("helper.entitlement-service").bust(app, row.customer_id)
+        return true
     end)
-    require("helper.entitlement-service").bust(app, row.customer_id)
+    if not ok then error("subscription sync failed: " .. tostring(terr)) end
     return true
 end
 
-local function refunded(ch)
+-- Apply a Stripe refund to the purchase it paid for (inside a transaction).
+local function apply_refund(app, p, amount_refunded, full)
     local Purchases = require("queries.BillingPurchaseQueries")
-    local p = ch.payment_intent and db.query("SELECT * FROM billing_purchases WHERE stripe_payment_intent_id = ?",
-        ch.payment_intent)[1]
-    local full = ch.refunded == true
+    if full and p.status == "active" then
+        Purchases.refund(app, p, amount_refunded)
+    else
+        -- Partial refunds keep access.
+        db.query("UPDATE billing_purchases SET refunded_amount = ?, refunded_at = NOW(), updated_at = NOW() WHERE id = ?",
+            amount_refunded or 0, p.id)
+        require("helper.entitlement-service").bust(app, p.customer_id)
+    end
+end
+Pay.applyRefund = apply_refund
+
+local function refunded(ch)
+    local pi_id = ch.payment_intent
+    if not pi_id then return "ignored" end
+    local full, amount = ch.refunded == true, tonumber(ch.amount_refunded) or 0
+    local p = db.query("SELECT * FROM billing_purchases WHERE stripe_payment_intent_id = ?", pi_id)[1]
     if p then
         local app = db.query("SELECT * FROM billing_apps WHERE id = ?", p.app_id)[1]
-        Common.transaction(function()
-            if full and p.status == "active" then
-                Purchases.refund(app, p, tonumber(ch.amount_refunded))
-            else
-                db.query("UPDATE billing_purchases SET refunded_amount = ?, refunded_at = NOW(), updated_at = NOW() WHERE id = ?",
-                    tonumber(ch.amount_refunded) or 0, p.id)
-                require("helper.entitlement-service").bust(app, p.customer_id)
-            end
-        end)
+        local ok, terr = Common.transaction(function() apply_refund(app, p, amount, full); return true end)
+        if not ok then error("refund failed: " .. tostring(terr)) end
+        return true
+    end
+    -- Not a purchase (yet). Is the payment ours? Our requests pin the API
+    -- version, so the PaymentIntent still names its invoice.
+    local s = stripe() or error("Stripe is not configured")
+    local pi, perr = s:_request("GET", "/payment_intents/" .. pi_id)
+    if not pi then error("could not read the payment: " .. tostring(perr)) end
+    if (pi.metadata or {}).opsapi == "billing" then
+        -- A checkout paid and refunded before its fulfilment: fulfilment applies it.
+        db.query([[INSERT INTO billing_stripe_refunds (payment_intent_id, amount_refunded, full_refund) VALUES (?, ?, ?)
+            ON CONFLICT (payment_intent_id) DO UPDATE SET amount_refunded = EXCLUDED.amount_refunded,
+                full_refund = EXCLUDED.full_refund]], pi_id, amount, full)
         return true
     end
     -- A subscription payment: a full refund under "revoke" ends the subscription now.
-    if not (full and ch.invoice) then return "ignored" end
-    local s = stripe()
-    local inv = s and s:_request("GET", "/invoices/" .. ch.invoice)
-    local sub_id = inv and (inv.subscription or (inv.parent and inv.parent.subscription_details
-        and inv.parent.subscription_details.subscription))
+    local invoice_id = ch.invoice or pi.invoice
+    if not (full and invoice_id) then return "ignored" end
+    local inv, ierr = s:_request("GET", "/invoices/" .. invoice_id)
+    if not inv then error("could not read the invoice: " .. tostring(ierr)) end
+    local sub_id = inv.subscription or (inv.parent and inv.parent.subscription_details
+        and inv.parent.subscription_details.subscription)
     local row = sub_id and db.query("SELECT * FROM billing_subscriptions WHERE stripe_subscription_id = ?", sub_id)[1]
     if not row then return "ignored" end
     local app = db.query("SELECT * FROM billing_apps WHERE id = ?", row.app_id)[1]
     if Settings.resolve(app).refund_policy ~= "revoke" then return true end
-    local ok, cerr = s:_request("DELETE", "/subscriptions/" .. sub_id)
-    if not ok then error("could not cancel the subscription: " .. tostring(cerr)) end
+    local ok, cerr = Pay.cancelNow(sub_id)
+    if not ok then error(cerr.message) end
     return true -- customer.subscription.deleted follows and ends access
 end
 
 local HANDLERS = {
     ["checkout.session.completed"] = fulfil_session,
     ["checkout.session.async_payment_succeeded"] = fulfil_session,
-    ["customer.subscription.updated"] = function(o) return sync_subscription(o, false) end,
-    ["customer.subscription.deleted"] = function(o) return sync_subscription(o, true) end,
+    -- Abandoned: give its coupon use back.
+    ["checkout.session.expired"] = function(o)
+        if (o.metadata or {}).opsapi ~= "billing" then return "ignored" end
+        require("queries.BillingOfferQueries").release(o.id)
+        return true
+    end,
+    ["customer.subscription.updated"] = sync_subscription,
+    ["customer.subscription.deleted"] = sync_subscription,
     ["charge.refunded"] = refunded,
+    -- A lost dispute is a full refund as far as access goes (refund_policy decides).
+    ["charge.dispute.closed"] = function(d)
+        if d.status ~= "lost" then return "ignored" end
+        return refunded({ payment_intent = d.payment_intent, refunded = true, amount_refunded = tonumber(d.amount) })
+    end,
     ["account.updated"] = function(o)
         if not db.query("SELECT 1 FROM billing_connect_accounts WHERE stripe_account_id = ?", o.id)[1] then
             return "ignored"
@@ -568,7 +667,7 @@ local HANDLERS = {
 function Pay.handle(event)
     local h = HANDLERS[event.type]
     if not h then return "ignored" end
-    return h(event.data and event.data.object or {})
+    return h(event.data and event.data.object or {}, event)
 end
 
 Pay.present_account = present_account

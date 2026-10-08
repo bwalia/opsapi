@@ -151,6 +151,10 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local app_id
             if self.params.app and self.params.app ~= "" and ProjectConfig.isFeatureEnabled("billing") then
+                -- An app's plans are billing data (billing.read); the tax app's plans stay as they were.
+                if not require("helper.field-service-http").has_perm(self, "billing", "read") then
+                    return api_response(403, nil, "Permission denied")
+                end
                 local app_row = require("queries.BillingAppQueries").find(self.namespace.id, self.params.app)
                 if not app_row then return api_response(404, nil, "App not found") end
                 app_id = app_row.id
@@ -173,8 +177,14 @@ return function(app)
             if not plan then
                 return api_response(404, nil, "Plan not found")
             end
+            local app_plan = plan.app_id and plan.app_id ~= ngx.null
             if tonumber(plan.namespace_id) ~= tonumber(self.namespace.id) then
+                -- Another workspace's app plan doesn't exist here (the tax app keeps its 403).
+                if app_plan then return api_response(404, nil, "Plan not found") end
                 return api_response(403, nil, "Access denied")
+            end
+            if app_plan and not require("helper.field-service-http").has_perm(self, "billing", "read") then
+                return api_response(403, nil, "Permission denied")
             end
             return api_response(200, BillingPlanQueries.decode_row(plan))
         end)
@@ -201,8 +211,6 @@ return function(app)
             if not extra then
                 return api_response(400, nil, aerr)
             end
-            if plan.app_id then require("queries.BillingAppQueries").bump(plan.app_id) end
-
             -- Validate the merged result so partial updates stay consistent.
             local merged = {
                 name = body.name ~= nil and body.name or plan.name,
@@ -246,6 +254,8 @@ return function(app)
             if not updated then
                 return api_response(500, nil, "Failed to update plan")
             end
+            -- After the save: bumped before it, a read in between caches the old plan.
+            if plan.app_id then require("queries.BillingAppQueries").bump(plan.app_id) end
 
             -- Reconcile Stripe (best-effort): update the product, and when a
             -- price-affecting field changed, archive the old (immutable) price

@@ -60,6 +60,12 @@ return function(app)
             ngx.log(ngx.WARN, "[billing] rejected Stripe webhook: ", tostring(verr))
             return { status = 400, json = { success = false, error = "invalid signature" } }
         end
+        -- Test events to a live deployment (or the reverse) are a misconfigured endpoint.
+        if event.livemode ~= nil and (event.livemode == true) ~= (Pay.mode() == "live") then
+            ngx.log(ngx.WARN, "[billing] Stripe event ", tostring(event.id), " is livemode=", tostring(event.livemode),
+                " but this deployment runs in ", Pay.mode(), " mode")
+            return { status = 400, json = { success = false, error = "event mode does not match this deployment" } }
+        end
         -- Its own id space: the tax app's webhook may see the same platform events.
         local id = "billing:" .. tostring(event.id)
         local status = Webhooks.beginProcessing({ event_id = id, event_type = event.type,

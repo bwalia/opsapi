@@ -39,7 +39,9 @@ function Purchases.windows(plan, app_id, customer_id)
         local d = tonumber(plan.updates_days)
         return nil, d and now + d * 86400 or nil
     end
-    -- fixed_term: stacks on the latest end of this plan's active purchases.
+    -- fixed_term: stacks on the latest end of this plan's active purchases. Locked
+    -- first, so two purchases at once can't both stack on the same end.
+    db.query("SELECT pg_advisory_xact_lock(hashtext(?))", ("opsapi.billing.stack:%s:%s:%s"):format(app_id, customer_id, plan.id))
     local col = plan.term_covers == "updates" and "updates_until" or "access_until"
     local cur = db.query(("SELECT extract(epoch FROM max(%s))::bigint AS t FROM billing_purchases "
         .. "WHERE app_id = ? AND customer_id = ? AND plan_id = ? AND status = 'active'"):format(col),
@@ -54,8 +56,8 @@ end
 function Purchases.currentPlan(app, customer_id)
     return db.query([[
         SELECT p.* FROM (
-            SELECT plan_id, 1 AS rank, created_at FROM billing_subscriptions
-             WHERE app_id = ? AND customer_id = ? AND status IN ('active', 'trialing', 'past_due')
+            SELECT plan_id, 1 AS rank, created_at FROM billing_subscriptions s
+             WHERE app_id = ? AND customer_id = ? AND ]] .. EntitlementService.liveSubscriptionSql("s") .. [[
             UNION ALL
             SELECT plan_id, 2, created_at FROM billing_purchases
              WHERE app_id = ? AND customer_id = ? AND status = 'active' AND (access_until IS NULL OR access_until > NOW())
@@ -63,7 +65,8 @@ function Purchases.currentPlan(app, customer_id)
             SELECT plan_id, 3, created_at FROM billing_licenses
              WHERE app_id = ? AND customer_id = ? AND status = 'active' AND plan_id IS NOT NULL
         ) x JOIN billing_plans p ON p.id = x.plan_id
-        ORDER BY x.rank, x.created_at DESC LIMIT 1]], app.id, customer_id, app.id, customer_id, app.id, customer_id)[1]
+        ORDER BY x.rank, x.created_at DESC LIMIT 1]], app.id, customer_id, Settings.resolve(app).past_due_grace_days,
+        app.id, customer_id, app.id, customer_id)[1]
 end
 
 --- Record a plan change. f: { app, customer_id, from_plan?, to_plan?, kind, source, amount?, currency?,
@@ -88,7 +91,13 @@ local function licence_for(app, customer, plan, access_until, updates_until, pur
     local lic = db.query([[SELECT * FROM billing_licenses WHERE app_id = ? AND customer_id = ? AND plan_id IN ?
         AND status <> 'revoked' ORDER BY created_at DESC LIMIT 1]], app.id, customer.id, db.list(plan_ids))[1]
     if lic then
-        db.update("billing_licenses", { plan_id = plan.id, access_until = at(access_until), updates_until = at(updates_until),
+        -- Extending never shortens: each window keeps the later end (no end = forever).
+        local function later(col, t)
+            if not t then return db.NULL end
+            return db.raw(("CASE WHEN %s IS NULL THEN NULL ELSE GREATEST(%s, to_timestamp(%d)) END"):format(col, col, t))
+        end
+        db.update("billing_licenses", { plan_id = plan.id, access_until = later("access_until", access_until),
+            updates_until = later("updates_until", updates_until),
             purchase_id = purchase_id or db.NULL, subscription_id = subscription_id or db.NULL,
             status = lic.status == "expired" and "active" or lic.status, updated_at = db.raw("NOW()") }, { id = lic.id })
         return lic, nil
@@ -99,9 +108,9 @@ local function licence_for(app, customer, plan, access_until, updates_until, pur
 end
 
 --- Fulfil a sale. opts: { source, external_transaction_id?, original_transaction_id?, amount?, currency?,
--- coupon? (from checkCoupon), discount?, force_coupon? (paid already: record it even past its limit), actor?,
--- note?, expires_at? (recurring), metadata?, issue_licence? (default: licensed apps), kind? ('new'|'upgrade'|...),
--- from_plan?, stripe? { subscription_id, customer_id, payment_intent } }
+-- coupon? (from checkCoupon), discount?, checkout_session? (a paid Stripe checkout: confirms its coupon
+-- reservation), actor?, note?, expires_at? (recurring), metadata?, issue_licence? (default: licensed apps),
+-- kind? ('new'|'upgrade'|...), from_plan?, stripe? { subscription_id, customer_id, payment_intent } }
 -- @return { purchase?, subscription?, license?, key? } | nil, err   (run inside a transaction)
 function Purchases.fulfil(app, customer, plan, opts)
     local source = opts.source
@@ -126,8 +135,8 @@ function Purchases.fulfil(app, customer, plan, opts)
             updated_at = db.raw("NOW()"),
         }
         local existing = opts.original_transaction_id and db.query([[SELECT id FROM billing_subscriptions
-            WHERE namespace_id = ? AND source = ? AND original_transaction_id = ?]],
-            app.namespace_id, source, opts.original_transaction_id)[1]
+            WHERE namespace_id = ? AND app_id = ? AND source = ? AND original_transaction_id = ?]],
+            app.namespace_id, app.id, source, opts.original_transaction_id)[1]
         if existing then
             db.update("billing_subscriptions", f, { id = existing.id })
             subscription_id = existing.id
@@ -161,15 +170,21 @@ function Purchases.fulfil(app, customer, plan, opts)
         if issue then
             local lic, key = licence_for(app, customer, plan, access_until, updates_until, purchase_id, source,
                 opts.from_plan)
+            db.query("UPDATE billing_purchases SET license_id = ? WHERE id = ?", lic.id, purchase_id)
             out.license = Licenses.get(app.namespace_id, lic.uuid)
             out.key = key
         end
     end
 
     if opts.coupon then
-        local ok, cerr = Offers.redeem(opts.coupon, customer.id, opts.discount or 0, currency,
-            { purchase_id = purchase_id, subscription_id = subscription_id, force = opts.force_coupon })
-        if not ok then return nil, cerr end
+        local refs = { purchase_id = purchase_id, subscription_id = subscription_id }
+        local confirmed = opts.checkout_session
+            and Offers.confirm(opts.checkout_session, customer.id, opts.discount or 0, currency, refs)
+        if not confirmed then
+            local ok, cerr = Offers.redeem(opts.coupon, customer.id, opts.discount or 0, currency, refs,
+                opts.checkout_session ~= nil)
+            if not ok then return nil, cerr end
+        end
     end
     Purchases.recordChange({ app = app, customer_id = customer.id, from_plan = opts.from_plan, to_plan = plan,
         kind = opts.kind or "new", source = source, amount = amount, currency = currency,
@@ -196,7 +211,15 @@ local function resolve_customer(app, b)
     end
     local ext = b.customer_external_id or b.external_id
     if Common.nilify(ext) then
-        local c, err = CustomerQueries.upsertExternal(app.namespace_id, ext, { email = b.email })
+        -- email_collection: none drops a given email; a new customer without one gets
+        -- a placeholder unique to them (never emailed) unless the app requires emails.
+        local mode = Settings.resolve(app).email_collection
+        local email = mode ~= "none" and b.email or nil
+        if not email and mode ~= "required" and not db.query(
+            "SELECT 1 FROM customers WHERE namespace_id = ? AND external_id = ?", app.namespace_id, tostring(ext))[1] then
+            email = ("%s+%s@customers.invalid"):format(ngx.md5(tostring(ext)):sub(1, 16), app.uuid:sub(1, 8))
+        end
+        local c, err = CustomerQueries.upsertExternal(app.namespace_id, ext, { email = email })
         if not c then return nil, err end
         return c
     end
@@ -223,7 +246,9 @@ function Purchases.sell(namespace_id, actor, b)
     local expires_at
     if plan.purchase_type == "recurring" then
         if not Common.nilify(b.expires_at) then return nil, "a recurring plan sold by hand needs expires_at (period end)" end
-        expires_at = db.query("SELECT extract(epoch FROM ?::timestamptz)::bigint AS t", b.expires_at)[1].t
+        local ok, rows = pcall(db.query, "SELECT extract(epoch FROM ?::timestamptz)::bigint AS t", tostring(b.expires_at))
+        if not ok then return nil, "expires_at must be an ISO-8601 date-time" end
+        expires_at = rows[1].t
     end
     return Common.transaction(function()
         return Purchases.fulfil(app, customer, plan, { source = "manual", amount = amount, coupon = coupon,
@@ -263,10 +288,13 @@ function Purchases.upgrade(namespace_id, actor, b, quote)
         return nil, "The customer has no subscription to switch: sell the plan instead"
     end
     if sub and sub.source == "stripe" then
-        -- Stripe switches the price (prorated); its webhook confirms the new period.
+        -- Stripe invoices the prorated difference now and applies the switch once
+        -- it is paid; the webhook then moves the plan and records the change.
         if coupon then return nil, "Coupons can't be applied when switching a Stripe subscription", "coupon_not_allowed" end
         local ok, serr = require("lib.billing-stripe").switchPlan(sub, to_plan)
         if not ok then return nil, serr.message, serr.code end
+        summary.pending = true
+        return summary
     end
     return Common.transaction(function()
         local res, ferr
@@ -275,11 +303,8 @@ function Purchases.upgrade(namespace_id, actor, b, quote)
             db.query([[UPDATE billing_licenses SET plan_id = ?, updated_at = NOW() WHERE app_id = ? AND customer_id = ?
                 AND plan_id = ? AND status <> 'revoked']], to_plan.id, app.id, customer.id, from_plan.id)
             Purchases.recordChange({ app = app, customer_id = customer.id, from_plan = from_plan, to_plan = to_plan,
-                kind = kind, source = sub.source == "stripe" and "stripe" or "manual",
-                -- Stripe prorates the difference on the next invoice.
-                amount = sub.source == "stripe" and 0 or amount, currency = price.currency,
-                coupon_id = coupon and coupon.id, subscription_id = sub.id, actor = actor,
-                note = b.note or (sub.source == "stripe" and "Prorated by Stripe" or nil) })
+                kind = kind, source = "manual", amount = amount, currency = price.currency,
+                coupon_id = coupon and coupon.id, subscription_id = sub.id, actor = actor, note = b.note })
             if coupon then Offers.redeem(coupon, customer.id, discount, price.currency, { subscription_id = sub.id }) end
             EntitlementService.bust(app, customer.id)
             res = {}
@@ -318,8 +343,8 @@ function Purchases.recordExternal(app, b)
     local status = b.status or "active"
     return Common.transaction(function()
         if plan.purchase_type ~= "recurring" then
-            local existing = db.query([[SELECT * FROM billing_purchases WHERE namespace_id = ? AND source = ?
-                AND external_transaction_id = ?]], app.namespace_id, source, b.external_transaction_id)[1]
+            local existing = db.query([[SELECT * FROM billing_purchases WHERE app_id = ? AND source = ?
+                AND external_transaction_id = ?]], app.id, source, b.external_transaction_id)[1]
             if existing then
                 if status == "refunded" and existing.status == "active" then
                     Purchases.refund(app, existing)
@@ -343,18 +368,39 @@ function Purchases.recordExternal(app, b)
     end)
 end
 
---- A full refund: the app's refund_policy decides (revoke: purchase refunded,
--- its licences revoked; keep: recorded only).
+-- Undo what an ended purchase granted on its licence: the licence falls back
+-- to the newest purchase still active on it, or is revoked when none is left
+-- (unless a live subscription backs it). Purchases record their licence
+-- (license_id), so an upgrade or a renewal never moves what a refund undoes.
+local function release_licence(app, purchase)
+    local lic = db.query([[SELECT * FROM billing_licenses WHERE status <> 'revoked'
+        AND id = COALESCE(?, (SELECT id FROM billing_licenses WHERE purchase_id = ? LIMIT 1))]],
+        purchase.license_id ~= db.NULL and purchase.license_id or db.NULL, purchase.id)[1]
+    if not lic then return end
+    local left = db.query([[SELECT * FROM billing_purchases WHERE license_id = ? AND status = 'active' AND id <> ?
+        ORDER BY created_at DESC LIMIT 1]], lic.id, purchase.id)[1]
+    if left then
+        db.update("billing_licenses", { plan_id = left.plan_id, access_until = left.access_until or db.NULL,
+            updates_until = left.updates_until or db.NULL, purchase_id = left.id, updated_at = db.raw("NOW()") },
+            { id = lic.id })
+        return
+    end
+    if lic.subscription_id ~= db.NULL and lic.subscription_id then
+        local live = db.query("SELECT 1 FROM billing_subscriptions s WHERE s.id = ? AND "
+            .. EntitlementService.liveSubscriptionSql("s"), lic.subscription_id, Settings.resolve(app).past_due_grace_days)[1]
+        if live then return end
+    end
+    Licenses.revoke(app.namespace_id, lic.uuid)
+end
+
+--- A full refund: the app's refund_policy decides (revoke: purchase refunded and
+-- what it granted undone; keep: recorded only).
 function Purchases.refund(app, purchase, refunded_amount)
     local policy = Settings.resolve(app).refund_policy
     db.query([[UPDATE billing_purchases SET status = CASE WHEN ? = 'revoke' THEN 'refunded' ELSE status END,
         refunded_amount = ?, refunded_at = NOW(), updated_at = NOW() WHERE id = ?]],
         policy, refunded_amount or purchase.amount, purchase.id)
-    if policy == "revoke" then
-        for _, l in ipairs(db.query("SELECT uuid FROM billing_licenses WHERE purchase_id = ? AND status <> 'revoked'", purchase.id)) do
-            Licenses.revoke(app.namespace_id, l.uuid)
-        end
-    end
+    if policy == "revoke" then release_licence(app, purchase) end
     EntitlementService.bust(app, purchase.customer_id)
 end
 
@@ -365,10 +411,8 @@ function Purchases.revoke(namespace_id, uuid, actor)
             namespace_id, uuid)[1]
         if not p then return nil, "Purchase not found" end
         db.query("UPDATE billing_purchases SET status = 'revoked', updated_at = NOW() WHERE id = ?", p.id)
-        for _, l in ipairs(db.query("SELECT uuid FROM billing_licenses WHERE purchase_id = ? AND status <> 'revoked'", p.id)) do
-            Licenses.revoke(namespace_id, l.uuid)
-        end
         local app = db.query("SELECT * FROM billing_apps WHERE id = ?", p.app_id)[1]
+        release_licence(app, p)
         Purchases.recordChange({ app = app, customer_id = p.customer_id,
             from_plan = { id = p.plan_id }, kind = "cancel", source = "manual", actor = actor })
         EntitlementService.bust(app, p.customer_id)

@@ -236,7 +236,23 @@ end
 
 --- Does `code` apply to `plan` (for `customer_id`, optional) at `amount`?
 -- @return { coupon, discount, total } | nil, code, message
-function Offers.checkCoupon(namespace_id, app, code, plan, amount, currency, customer_id)
+--- Uses that count against a coupon's per-customer limit: confirmed and
+-- reserved (an open checkout), by customer or, for buyers not known yet, by email.
+local function uses_by(coupon_id, customer_id, email)
+    if not customer_id and not email then return 0 end
+    return db.query([[SELECT count(*)::int AS n FROM billing_coupon_redemptions
+        WHERE coupon_id = ? AND status <> 'released' AND (customer_id = ? OR email_norm = ?)]],
+        coupon_id, customer_id or db.NULL, email or db.NULL)[1].n
+end
+
+function Offers.normEmail(email)
+    if type(email) ~= "string" then return nil end
+    email = email:lower():match("^%s*(.-)%s*$")
+    return email ~= "" and email or nil
+end
+
+--- opts.email: the buyer's email when the customer isn't known yet (per-customer limits).
+function Offers.checkCoupon(namespace_id, app, code, plan, amount, currency, customer_id, email)
     code = type(code) == "string" and code:upper():gsub("%s", "") or ""
     local c = db.query([[SELECT *, (starts_at IS NOT NULL AND starts_at > NOW()) AS not_started,
             (expires_at IS NOT NULL AND expires_at <= NOW()) AS expired
@@ -255,10 +271,8 @@ function Offers.checkCoupon(namespace_id, app, code, plan, amount, currency, cus
         for _, id in ipairs(c.plan_ids) do ok = ok or tonumber(id) == tonumber(plan.id) end
         if not ok then return nil, "coupon_not_for_plan", "This coupon doesn't apply to this plan" end
     end
-    if customer_id and c.per_customer_limit ~= db.NULL and c.per_customer_limit then
-        local used = db.query("SELECT count(*)::int AS n FROM billing_coupon_redemptions WHERE coupon_id = ? AND customer_id = ?",
-            c.id, customer_id)[1].n
-        if used >= tonumber(c.per_customer_limit) then
+    if c.per_customer_limit ~= db.NULL and c.per_customer_limit then
+        if uses_by(c.id, customer_id, Offers.normEmail(email)) >= tonumber(c.per_customer_limit) then
             return nil, "coupon_customer_limit", "You've already used this coupon"
         end
     end
@@ -277,11 +291,75 @@ function Offers.checkCoupon(namespace_id, app, code, plan, amount, currency, cus
 end
 
 --- Record a use (atomic against max_redemptions). refs = { purchase_id?, subscription_id? }.
-function Offers.redeem(coupon, customer_id, discount, currency, refs)
-    local claimed = db.query([[UPDATE billing_coupons SET redemptions_count = redemptions_count + 1, updated_at = NOW()
-        WHERE id = ? AND (? OR max_redemptions IS NULL OR redemptions_count < max_redemptions) RETURNING id]],
-        coupon.id, refs.force == true)[1]
-    if not claimed then return nil, "coupon_exhausted" end
+local function claim(coupon_id)
+    return db.query([[UPDATE billing_coupons SET redemptions_count = redemptions_count + 1, updated_at = NOW()
+        WHERE id = ? AND (max_redemptions IS NULL OR redemptions_count < max_redemptions) RETURNING id]], coupon_id)[1]
+end
+
+--- Reserve a use for an open checkout (counted at once, so parallel checkouts
+-- can't exceed max_redemptions). Confirmed by confirm(), given back by release().
+-- @return reservation uuid | nil, "coupon_exhausted"
+function Offers.reserve(coupon, customer_id, email, expires_at)
+    if not claim(coupon.id) then return nil, "coupon_exhausted" end
+    local uuid = Common.uuid()
+    db.insert("billing_coupon_redemptions", {
+        uuid = uuid, coupon_id = coupon.id, namespace_id = coupon.namespace_id, customer_id = customer_id or db.NULL,
+        email_norm = Offers.normEmail(email) or db.NULL, status = "reserved",
+        expires_at = db.raw(("to_timestamp(%d)"):format(expires_at)),
+    })
+    return uuid
+end
+
+function Offers.attachSession(reservation, session_id)
+    db.query("UPDATE billing_coupon_redemptions SET checkout_session_id = ? WHERE uuid = ?", session_id, reservation)
+end
+
+--- Give a reserved use back (checkout expired or never opened). By reservation uuid or Stripe session id.
+function Offers.release(ref)
+    local row = db.query([[UPDATE billing_coupon_redemptions SET status = 'released'
+        WHERE (uuid = ? OR checkout_session_id = ?) AND status = 'reserved' RETURNING coupon_id]], ref, ref)[1]
+    if row then
+        db.query([[UPDATE billing_coupons SET redemptions_count = GREATEST(redemptions_count - 1, 0), updated_at = NOW()
+            WHERE id = ?]], row.coupon_id)
+    end
+    return row ~= nil
+end
+
+--- Confirm the use reserved for a paid checkout. @return true | false (no reservation)
+function Offers.confirm(session_id, customer_id, discount, currency, refs)
+    local function mark(from)
+        return db.query([[UPDATE billing_coupon_redemptions SET status = 'redeemed', redeemed_at = NOW(),
+                customer_id = ?, amount_off = ?, currency = ?, purchase_id = ?, subscription_id = ?, expires_at = NULL
+            WHERE checkout_session_id = ? AND status = ? RETURNING coupon_id]],
+            customer_id, discount or 0, currency or db.NULL, refs.purchase_id or db.NULL, refs.subscription_id or db.NULL,
+            session_id, from)[1]
+    end
+    if mark("reserved") then return true end
+    -- Given back already (it shouldn't be, for a paid session): count it again.
+    local row = mark("released")
+    if not row then return false end
+    db.query("UPDATE billing_coupons SET redemptions_count = redemptions_count + 1, updated_at = NOW() WHERE id = ?",
+        row.coupon_id)
+    return true
+end
+
+--- Housekeeping: give back uses whose checkout was abandoned (session expired, webhook missed).
+function Offers.releaseExpired()
+    for _, r in ipairs(db.query([[SELECT uuid FROM billing_coupon_redemptions WHERE status = 'reserved'
+        AND expires_at < NOW() - interval '1 hour' LIMIT 500]])) do
+        Offers.release(r.uuid)
+    end
+end
+
+--- Record a use. `paid`: the order is paid already, so it is recorded even
+-- past the limit (only when a paid checkout has no reservation to confirm).
+function Offers.redeem(coupon, customer_id, discount, currency, refs, paid)
+    if paid then
+        db.query("UPDATE billing_coupons SET redemptions_count = redemptions_count + 1, updated_at = NOW() WHERE id = ?",
+            coupon.id)
+    elseif not claim(coupon.id) then
+        return nil, "coupon_exhausted"
+    end
     db.insert("billing_coupon_redemptions", {
         uuid = Common.uuid(), coupon_id = coupon.id, namespace_id = coupon.namespace_id, customer_id = customer_id,
         purchase_id = refs.purchase_id or db.NULL, subscription_id = refs.subscription_id or db.NULL,
@@ -307,12 +385,15 @@ end
 
 local function clean_path(app, b, current)
     local f = {}
+    local to
     if not current then
         local from = Subs.appPlan(app.id, tostring(b.from_plan or ""))
-        local to = Subs.appPlan(app.id, tostring(b.to_plan or ""))
+        to = Subs.appPlan(app.id, tostring(b.to_plan or ""))
         if not from or not to then return nil, "from_plan and to_plan must be plans of this app" end
         if from.id == to.id then return nil, "from_plan and to_plan must differ" end
         f.from_plan_id, f.to_plan_id = from.id, to.id
+    else
+        to = db.query("SELECT * FROM billing_plans WHERE id = ?", current.to_plan_id)[1]
     end
     local pricing = b.pricing or (current and current.pricing) or "difference"
     if pricing ~= "difference" and pricing ~= "fixed" and pricing ~= "free" then
@@ -325,6 +406,10 @@ local function clean_path(app, b, current)
         f.amount = amt
         local cur = b.currency or (current and current.currency ~= db.NULL and current.currency)
         if cur ~= nil and (type(cur) ~= "string" or not cur:match("^%a%a%a$")) then return nil, "currency must be a 3-letter code" end
+        -- The upgrade is paid in the plan's currency.
+        if cur and to and to.currency and cur:lower() ~= tostring(to.currency):lower() then
+            return nil, "currency must be the plan's currency (" .. tostring(to.currency):upper() .. ")"
+        end
         f.currency = cur and cur:lower() or db.NULL
     else
         f.amount, f.currency = db.NULL, db.NULL

@@ -111,7 +111,7 @@ return function(app)
 
     app:post("/api/v2/subscriptions/purchases/:uuid/refund", Http.guard("subscriptions", "update", function(self)
         local body = Http.json_body() or {}
-        local res, err = Pay.refund(self.namespace.id, self.params.uuid, body.amount)
+        local res, err = Pay.refund(self.namespace.id, self.params.uuid, body.amount, self.req.headers["idempotency-key"])
         if not res then return Guard.fail(err.status, err.code, err.message) end
         return Http.ok(res)
     end))
@@ -236,7 +236,7 @@ return function(app)
     app:post("/api/v2/entitlements/:app/purchases", runtime("create", function(self, a)
         local body, err = Http.json_body()
         if not body then return Http.fail(400, err) end
-        return Guard.idempotent(self, "ns:" .. self.namespace.id .. ":purchases", body, function()
+        return Guard.idempotent(self, ("app:%s:purchases"):format(a.id), body, function()
             local res, rerr = Purchases.recordExternal(a, body)
             return Http.result(res, rerr, 201)
         end)

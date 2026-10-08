@@ -150,16 +150,38 @@ function Guard.cors(self, app)
     return nil
 end
 
---- A return/success/cancel URL must start with one of allowed_redirect_urls
--- (same scheme, host and port) or with the hosted pages' base URL.
+-- scheme, host, port (default by scheme) and path of an http(s) URL; nil for
+-- anything else (userinfo, backslashes, encoded or literal dot segments).
+local function parse_url(u)
+    if type(u) ~= "string" or u == "" or #u > 1000 or u:find("[%s\\]") then return nil end
+    local scheme, authority, rest = u:match("^(https?)://([^/?#]+)(.*)$")
+    if not scheme or authority:find("@", 1, true) then return nil end
+    local host, port = authority:match("^([^:]+):(%d+)$")
+    if not host then host, port = authority, (scheme == "https" and "443" or "80") end
+    local path = rest:match("^([^?#]*)")
+    if path == "" then path = "/" end
+    local lower = path:lower()
+    if lower:find("%2e", 1, true) or lower:find("%2f", 1, true) or lower:find("%5c", 1, true)
+        or ("/" .. path .. "/"):find("/%.%.?/") then
+        return nil
+    end
+    return { scheme = scheme:lower(), host = host:lower(), port = port, path = path }
+end
+
+--- A return/success/cancel URL must be on one of allowed_redirect_urls (or the
+-- hosted pages' base URL): same scheme, host and port, and a path at or below the
+-- allowed one, on a "/" boundary (/account allows /account and /account/x, not /accounts).
 function Guard.redirectAllowed(app, url)
-    if type(url) ~= "string" or url == "" or #url > 1000 or url:find("%s") then return false end
-    local origin = url:match("^(https?://[^/?#]+)")
-    if not origin then return false end
+    local u = parse_url(url)
+    if not u then return false end
     local prefixes = { os.getenv("BILLING_HOSTED_BASE_URL") }
     for _, p in ipairs(Settings.resolve(app).allowed_redirect_urls or {}) do prefixes[#prefixes + 1] = p end
     for _, p in ipairs(prefixes) do
-        if p and p ~= "" and url:sub(1, #p) == p and origin == p:match("^(https?://[^/?#]+)") then return true end
+        local a = parse_url(p)
+        if a and a.scheme == u.scheme and a.host == u.host and a.port == u.port then
+            local base = a.path:gsub("/+$", "")
+            if base == "" or u.path == base or u.path:sub(1, #base + 1) == base .. "/" then return true end
+        end
     end
     return false
 end
@@ -167,6 +189,20 @@ end
 -- ---------------------------------------------------------------------------
 -- Idempotency keys
 -- ---------------------------------------------------------------------------
+
+-- What is kept for replays never holds a raw licence key (docs §10): a replay
+-- gets the same answer without it (key_redacted = true); a lost key is reissued.
+local function redact(json)
+    local data = type(json) == "table" and json.data
+    if type(data) ~= "table" or data.key == nil then return json end
+    local copy, d = {}, {}
+    for k, v in pairs(json) do copy[k] = v end
+    for k, v in pairs(data) do d[k] = v end
+    d.key, d.key_redacted = nil, true
+    copy.data = d
+    return copy
+end
+Guard._redact = redact
 
 --- Run `fn` at most once per Idempotency-Key within 24 h. The same key with
 -- the same body replays the stored response; a different body is a 409.
@@ -178,7 +214,10 @@ function Guard.idempotent(self, scope, body, fn, required)
         return fn()
     end
     if #key > 255 then return fail(400, "bad_idempotency_key", "Idempotency-Key is at most 255 characters") end
-    local hash = ngx.md5(cjson.encode(body or {}))
+    -- The caller is part of the request: another session or user reusing the key gets a 409, not this answer.
+    local who = (self.req.headers["x-billing-session"] or "") .. "|"
+        .. tostring(self.current_user and (self.current_user.key_uuid or self.current_user.uuid) or "")
+    local hash = ngx.md5(cjson.encode(body or {}) .. "|" .. ngx.md5(who))
     local inserted = db.query([[
         INSERT INTO billing_idempotency (scope, idem_key, request_hash, expires_at)
         VALUES (?, ?, ?, NOW() + interval '24 hours')
@@ -209,7 +248,7 @@ function Guard.idempotent(self, scope, body, fn, required)
         return res
     end
     db.query("UPDATE billing_idempotency SET status = ?, response = ? WHERE id = ?",
-        res.status or 200, cjson.encode(res.json or {}), inserted.id)
+        res.status or 200, cjson.encode(redact(res.json or {})), inserted.id)
     return res
 end
 

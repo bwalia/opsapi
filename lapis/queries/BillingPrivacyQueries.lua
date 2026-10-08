@@ -64,7 +64,7 @@ function Privacy.erase(namespace_id, uuid)
             AND namespace_id = ? AND source = 'stripe' AND stripe_subscription_id IS NOT NULL
             AND status IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')]], c.id, namespace_id)) do
         local ok, perr = require("lib.billing-stripe").cancelNow(s.stripe_subscription_id)
-        if not ok then return nil, perr.message end
+        if not ok then return nil, perr.message, perr.status or 502 end
     end
     return Common.transaction(function()
         local id = c.id
@@ -76,11 +76,23 @@ function Privacy.erase(namespace_id, uuid)
         db.query([[UPDATE billing_subscriptions SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
             WHERE customer_id = ? AND status IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')]], id)
         db.query("DELETE FROM billing_grants WHERE customer_id = ?", id)
+        db.query([[DELETE FROM billing_key_deliveries d USING billing_licenses l
+            WHERE l.id = d.license_id AND l.customer_id = ?]], id)
+        -- No way back to the person through Stripe or a login (the Stripe customer
+        -- itself is deleted from the seller's Stripe dashboard if wanted: docs §16).
+        db.query("UPDATE billing_subscriptions SET stripe_customer_id = NULL WHERE customer_id = ?", id)
         db.query("DELETE FROM billing_access_links WHERE customer_id = ?", id)
+        db.query("DELETE FROM billing_access_links WHERE namespace_id = ? AND email_norm = lower(?)", namespace_id,
+            c.email or "")
         db.query("DELETE FROM billing_customer_sessions WHERE customer_id = ?", id)
         db.query([[UPDATE customers SET email = ?, first_name = NULL, last_name = NULL, phone = NULL,
             date_of_birth = NULL, addresses = '[]', notes = NULL, tags = NULL, external_id = NULL, state = 'disabled',
             accepts_marketing = FALSE, updated_at = NOW() WHERE id = ?]], "deleted+" .. c.uuid .. "@invalid.example", id)
+        -- Links some deployments' customers table has (ecommerce): cleared too.
+        for _, r in ipairs(db.query([[SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'customers' AND column_name IN ('stripe_customer_id', 'user_id')]])) do
+            db.query("UPDATE customers SET " .. db.escape_identifier(r.column_name) .. " = NULL WHERE id = ?", id)
+        end
         for _, a in ipairs(db.query([[SELECT DISTINCT a.id, a.cache_generation FROM billing_apps a
             WHERE a.namespace_id = ?]], namespace_id)) do
             EntitlementService.bust(a, id)

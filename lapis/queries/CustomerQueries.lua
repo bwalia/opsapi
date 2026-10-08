@@ -175,13 +175,19 @@ end
 -- customer with the same email (and no external_id yet) is adopted.
 -- b = { email, first_name, last_name } (email is required to create).
 -- @return row | nil, err
+--- An email the customers table accepts (its customers_email_format check:
+-- letters, digits and . _ % + - before the @, a dotted domain, a 2+ letter TLD).
+function CustomerQueries.validEmail(email)
+    return type(email) == "string" and #email <= 254 and email:match("^[%w%._%%%+%-]+@[%w%.%-]+%.%a%a+$") ~= nil
+end
+
 function CustomerQueries.upsertExternal(namespace_id, external_id, b)
     local db = require("lapis.db")
     if type(external_id) ~= "string" or not external_id:match("^[%w%-_.:@|]+$") or #external_id > 255 then
         return nil, "external_id must be 1-255 characters: letters, digits and - _ . : @ |"
     end
     local email = b.email ~= nil and b.email ~= cjson.null and tostring(b.email) or nil
-    if email and (#email > 254 or not email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$")) then
+    if email and not CustomerQueries.validEmail(email) then
         return nil, "email is not a valid address"
     end
     local set = {}

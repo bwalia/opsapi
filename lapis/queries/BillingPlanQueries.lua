@@ -170,6 +170,17 @@ function BillingPlanQueries.appFields(namespace_id, body, current)
 
     -- Purchase type (docs §3): it also sets the legacy plan_type, so the
     -- existing validation (billing_interval for subscriptions) applies.
+    -- plan_type is derived from purchase_type for app plans: they must never disagree.
+    local function implied(pt) return pt == "recurring" and "subscription" or "one_time" end
+    if body.plan_type ~= nil then
+        if body.purchase_type ~= nil and body.plan_type ~= implied(body.purchase_type) then
+            return nil, "plan_type contradicts purchase_type (app plans: send purchase_type only)"
+        end
+        if body.purchase_type == nil and current and current.purchase_type and current.purchase_type ~= db.NULL
+            and body.plan_type ~= implied(current.purchase_type) then
+            return nil, "app plans change type through purchase_type, not plan_type"
+        end
+    end
     local ptype = body.purchase_type
     if ptype == nil and not current then ptype = (body.plan_type == "one_time") and "one_time" or "recurring" end
     if ptype ~= nil then

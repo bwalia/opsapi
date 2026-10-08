@@ -158,8 +158,16 @@ end
 local function emit(namespace_id, name, lic, app, key)
     local data = { uuid = lic.uuid, key_prefix = lic.key_prefix, app = app.uuid, plan_id = lic.plan_id,
         customer_id = lic.customer_id }
-    -- The raw key only when the app opted in (docs §10). Phase 2 encrypts it in the outbox.
-    if key and Settings.resolve(app).webhook_include_licence_key then data.key = key end
+    -- The raw key never goes into the event (it is stored, and audited). When the
+    -- app opted in (docs §10), it waits encrypted and the webhook sender adds it.
+    if key and Settings.resolve(app).webhook_include_licence_key then
+        local Delivery = require("lib.billing-delivery")
+        if Delivery.configured() and Delivery.store(lic.id, key, { webhook = true }) then
+            data.key_in_delivery = true
+        else
+            ngx.log(ngx.WARN, "[billing] licence key not added to ", name, ": LICENCE_DELIVERY_KEY is not set")
+        end
+    end
     pcall(require("helper.plugin-events").emitCore, namespace_id, name, data)
 end
 
@@ -243,10 +251,12 @@ end
 
 --- A lost key: a new key for the same licence. The old key stops working at
 -- once; activations are kept. @return { license, key } | nil, err
-function Licenses.reissue(namespace_id, uuid, customer_id)
+--- customer_id / app_id: limit to one customer's licences in one app (the account page).
+function Licenses.reissue(namespace_id, uuid, customer_id, app_id)
     local lic = db.query([[SELECT l.*, a.uuid AS app_uuid FROM billing_licenses l JOIN billing_apps a ON a.id = l.app_id
-        WHERE l.namespace_id = ? AND l.uuid = ? AND (?::int IS NULL OR l.customer_id = ?::int)]],
-        namespace_id, uuid, customer_id or db.NULL, customer_id or db.NULL)[1]
+        WHERE l.namespace_id = ? AND l.uuid = ? AND (?::int IS NULL OR l.customer_id = ?::int)
+          AND (?::bigint IS NULL OR l.app_id = ?::bigint)]],
+        namespace_id, uuid, customer_id or db.NULL, customer_id or db.NULL, app_id or db.NULL, app_id or db.NULL)[1]
     if not lic then return nil, "Licence not found" end
     if lic.status == "revoked" then return nil, "a revoked licence can't be reissued" end
     local key = Licenses.generateKey()
@@ -259,11 +269,15 @@ function Licenses.reissue(namespace_id, uuid, customer_id)
 end
 
 --- Free a seat (e.g. a lost laptop).
-function Licenses.removeActivation(namespace_id, uuid, activation_uuid, customer_id)
-    local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
+--- Free a device. With customer_id (+ app_id): the customer, from the account page
+-- (the seat keeps counting for the hold period); without: an admin (free at once).
+function Licenses.removeActivation(namespace_id, uuid, activation_uuid, customer_id, app_id)
+    local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW(), released_by = ?
         FROM billing_licenses l WHERE l.id = x.license_id AND l.namespace_id = ? AND l.uuid = ?
-          AND x.uuid = ? AND x.deactivated_at IS NULL AND (?::int IS NULL OR l.customer_id = ?::int)]],
-        namespace_id, uuid, activation_uuid, customer_id or db.NULL, customer_id or db.NULL)
+          AND x.uuid = ? AND x.deactivated_at IS NULL AND (?::int IS NULL OR l.customer_id = ?::int)
+          AND (?::bigint IS NULL OR l.app_id = ?::bigint)]],
+        customer_id and "customer" or "admin", namespace_id, uuid, activation_uuid, customer_id or db.NULL,
+        customer_id or db.NULL, app_id or db.NULL, app_id or db.NULL)
     if (res.affected_rows or 0) == 0 then return nil, "Activation not found" end
     return true
 end
@@ -329,8 +343,10 @@ local function usable(app, raw_key)
         return failure(403, "license_" .. lic.status, "This licence is " .. lic.status)
     end
     if lic.subscription_id then
-        local sub = db.query("SELECT status FROM billing_subscriptions WHERE id = ?", lic.subscription_id)[1]
-        if not sub or (sub.status ~= "active" and sub.status ~= "trialing" and sub.status ~= "past_due") then
+        local live = db.query("SELECT 1 FROM billing_subscriptions s WHERE s.id = ? AND "
+            .. require("helper.entitlement-service").liveSubscriptionSql("s"),
+            lic.subscription_id, Settings.resolve(app).past_due_grace_days)[1]
+        if not live then
             return failure(403, "subscription_inactive", "The subscription behind this licence is not active")
         end
     end
@@ -367,10 +383,31 @@ local function public_call(app, b, need_version, fn)
     return result
 end
 
+-- At most `max` bytes, cut on a UTF-8 character boundary.
+local function utf8_cut(s, max)
+    if #s <= max then return s end
+    local cut = max
+    while cut > 0 do
+        local nxt = s:byte(cut + 1)
+        if not nxt or nxt < 0x80 or nxt >= 0xC0 then break end -- not a continuation byte
+        cut = cut - 1
+    end
+    return s:sub(1, cut)
+end
+Licenses._utf8_cut = utf8_cut
+
 local function info(b, field, max)
     local v = b[field]
     if type(v) ~= "string" or v == "" then return db.NULL end
-    return v:sub(1, max)
+    return utf8_cut(v, max)
+end
+
+-- How long a released seat still counts (released_seat_hold_days; empty = refresh + grace).
+local function hold_days(app)
+    local s = Settings.resolve(app)
+    local d = s.released_seat_hold_days
+    if type(d) == "number" then return d end
+    return (tonumber(s.refresh_interval_days) or 0) + (tonumber(s.grace_days) or 0)
 end
 
 function Licenses.activate(app, b)
@@ -382,11 +419,17 @@ function Licenses.activate(app, b)
                 name = COALESCE(?, name), platform = COALESCE(?, platform), app_version = ?
                 WHERE id = ?]], info(b, "name", 120), info(b, "platform", 60), info(b, "app_version", 40), live.id)
         else
-            local used = db.query([[SELECT count(*)::int AS n FROM billing_license_activations
-                WHERE license_id = ? AND deactivated_at IS NULL]], lic.id)[1].n
+            -- Seats taken: live devices, plus devices released (by the device or the
+            -- customer) within the hold period, whose licence files still work offline.
+            local hold = hold_days(app)
+            local used = db.query([[SELECT count(DISTINCT fingerprint_hash)::int AS n FROM billing_license_activations
+                WHERE license_id = ? AND fingerprint_hash <> ? AND (deactivated_at IS NULL
+                   OR (released_by IN ('device', 'customer') AND deactivated_at > NOW() - make_interval(days => ?)))]],
+                lic.id, b.fingerprint_hash, hold)[1].n
             if lic.max_activations and lic.max_activations ~= db.NULL and used >= tonumber(lic.max_activations) then
-                return failure(409, "activation_limit",
-                    "This licence is already active on " .. used .. " device(s), its limit")
+                return failure(409, "activation_limit", "This licence is already in use on " .. used
+                    .. " device(s), its limit" .. (hold > 0 and (" (devices released in the last " .. hold
+                    .. " days still count)") or ""))
             end
             db.insert("billing_license_activations", {
                 uuid = Common.uuid(), license_id = lic.id, fingerprint_hash = b.fingerprint_hash,
@@ -417,7 +460,7 @@ function Licenses.deactivate(app, b)
     if not ok_in then return nil, in_err end
     local key = Licenses.normalize(b.license_key)
     if not key then return failure(unpack(INVALID)) end
-    local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
+    local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW(), released_by = 'device'
         FROM billing_licenses l WHERE l.id = x.license_id AND l.key_hash = ? AND l.app_id = ?
           AND x.fingerprint_hash = ? AND x.deactivated_at IS NULL]], ApiKey.hash(key), app.id, b.fingerprint_hash)
     if (res.affected_rows or 0) == 0 then
@@ -436,7 +479,7 @@ function Licenses.maintain()
     for _, app in ipairs(db.query("SELECT * FROM billing_apps WHERE deleted_at IS NULL")) do
         local s = Settings.resolve(app)
         if (s.activation_auto_release_days or 0) > 0 then
-            db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
+            db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW(), released_by = 'auto'
                 FROM billing_licenses l WHERE l.id = x.license_id AND l.app_id = ? AND x.deactivated_at IS NULL
                   AND x.last_seen_at < NOW() - make_interval(days => ?)]], app.id, s.activation_auto_release_days)
         end

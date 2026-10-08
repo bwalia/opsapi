@@ -46,11 +46,31 @@ end
 
 Jobs.handlers = {
     ["billing.access_link.requested"] = function(event)
+        local ref = event.data and event.data.link or ""
+        -- Requested by email: only a customer with billing records in this app gets a
+        -- link; otherwise the row goes and nothing is sent (the API said the same).
+        local pending = db.query([[SELECT l.id, l.app_id, l.namespace_id, l.email_norm FROM billing_access_links l
+            WHERE l.uuid = ? AND l.customer_id IS NULL]], ref)[1]
+        if pending then
+            local c = db.query([[
+                SELECT c.id FROM customers c WHERE c.namespace_id = ? AND lower(c.email) = ?
+                  AND (EXISTS (SELECT 1 FROM billing_licenses WHERE customer_id = c.id AND app_id = ?)
+                    OR EXISTS (SELECT 1 FROM billing_purchases WHERE customer_id = c.id AND app_id = ?)
+                    OR EXISTS (SELECT 1 FROM billing_subscriptions WHERE customer_id = c.id AND app_id = ?)
+                    OR EXISTS (SELECT 1 FROM billing_grants WHERE customer_id = c.id AND app_id = ?))
+                LIMIT 1]], pending.namespace_id, pending.email_norm or "", pending.app_id, pending.app_id,
+                pending.app_id, pending.app_id)[1]
+            if not c then
+                db.query("DELETE FROM billing_access_links WHERE id = ?", pending.id)
+                return true
+            end
+            db.query("UPDATE billing_access_links SET customer_id = ?, email_norm = NULL WHERE id = ?", c.id, pending.id)
+        end
         local link = db.query([[
             SELECT l.id, l.return_url, l.used_at, l.sent_at, l.expires_at > NOW() AS live, c.email AS customer_email,
                    a.id AS app_id, a.uuid, a.name, a.kind, a.settings, a.namespace_id
             FROM billing_access_links l JOIN customers c ON c.id = l.customer_id JOIN billing_apps a ON a.id = l.app_id
-            WHERE l.uuid = ?]], event.data and event.data.link or "")[1]
+            WHERE l.uuid = ?]], ref)[1]
         -- Gone, used or expired: nothing to send.
         if not link or link.used_at ~= db.NULL and link.used_at or not link.live then return true end
         local app = { id = link.app_id, uuid = link.uuid, name = link.name, kind = link.kind, settings = link.settings }
@@ -97,23 +117,37 @@ Jobs.handlers = {
 
 Jobs.LINK_MINUTES = LINK_MINUTES
 
+--- Subscriptions OpsAPI doesn't hear about from Stripe (manual sales, stores,
+-- external) end with their paid period: mark them canceled (which emits
+-- subscription.canceled) and drop the cached answers. Stripe's own come from webhooks.
+function Jobs.lapseSubscriptions()
+    local EntitlementService = require("helper.entitlement-service")
+    for _, r in ipairs(db.query([[
+        UPDATE billing_subscriptions SET status = 'canceled', ended_at = current_period_end, updated_at = NOW()
+        WHERE id IN (SELECT id FROM billing_subscriptions WHERE app_id IS NOT NULL AND source <> 'stripe'
+            AND status IN ('active', 'trialing') AND current_period_end IS NOT NULL
+            AND current_period_end < (NOW() AT TIME ZONE 'UTC') LIMIT 500)
+        RETURNING app_id, customer_id]])) do
+        EntitlementService.bust(r.app_id, r.customer_id)
+    end
+end
+
 function Jobs.maintain(premature)
     if premature then return end
-    local ok, err = pcall(function()
-        db.query("BEGIN")
+    -- One transaction (the advisory lock lives in it); cache drops run after it commits.
+    local ok, err = require("queries.FieldServiceCommon").transaction(function()
         if db.query("SELECT pg_try_advisory_xact_lock(hashtext('opsapi.billing.maintain')) AS l")[1].l then
             db.query("DELETE FROM billing_access_links WHERE expires_at < NOW() - interval '1 day'")
             db.query("DELETE FROM billing_customer_sessions WHERE expires_at < NOW()")
             db.query("DELETE FROM billing_idempotency WHERE expires_at < NOW()")
             require("lib.billing-delivery").purge()
+            require("queries.BillingOfferQueries").releaseExpired()
+            Jobs.lapseSubscriptions()
             require("queries.BillingLicenseQueries").maintain()
         end
-        db.query("COMMIT")
+        return true
     end)
-    if not ok then
-        pcall(db.query, "ROLLBACK")
-        ngx.log(ngx.ERR, "[billing] maintenance failed: ", tostring(err))
-    end
+    if not ok then ngx.log(ngx.ERR, "[billing] maintenance failed: ", tostring(err)) end
     pcall(require("helper.plugin-events").releaseConnection)
 end
 
