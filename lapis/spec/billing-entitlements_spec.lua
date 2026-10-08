@@ -82,6 +82,14 @@ check("subjects stay plain, one line", NamespaceMail.fill("Hi {{name}}", { name 
 check("unknown placeholders are empty", NamespaceMail.fill("{{nope}}!", {}) == "!")
 check("every template names its variables and default file",
     (function() for _, t in pairs(NamespaceMail.TEMPLATES) do if not (t.file and t.subject and #t.variables > 0) then return false end end return true end)())
+local PC = require("helper.project-config")
+local enabled = PC.isFeatureEnabled
+PC.isFeatureEnabled = function(f) return f ~= "billing" end
+check("billing templates are hidden where billing isn't deployed",
+    #NamespaceMail.listTemplates(1) == 0 and NamespaceMail.preview(1, "billing.access_link") == nil)
+PC.isFeatureEnabled = function() return true end
+check("and listed where it is", #NamespaceMail.listTemplates(1) == 2)
+PC.isFeatureEnabled = enabled
 
 print("licence keys")
 local Licenses = require("queries.BillingLicenseQueries")

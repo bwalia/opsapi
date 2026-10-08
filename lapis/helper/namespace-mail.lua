@@ -14,14 +14,17 @@
 local db = require("lapis.db")
 local Global = require("helper.global")
 local Mail = require("helper.mail")
+local ProjectConfig = require("helper.project-config")
 
 local NamespaceMail = {}
 
 --- Every email a workspace can customise: its default subject, the etlua file
--- of its default body, the variables it can use, and sample data for previews.
+-- of its default body, the variables it can use, sample data for previews, and
+-- the feature that sends it (hidden where that feature isn't deployed).
 NamespaceMail.TEMPLATES = {
     ["billing.access_link"] = {
         name = "Billing: account link",
+        feature = "billing",
         file = "billing_access_link",
         subject = "Your {{app_name}} account link",
         variables = { "app_name", "customer_email", "link", "expires_minutes", "support_email" },
@@ -31,6 +34,7 @@ NamespaceMail.TEMPLATES = {
     },
     ["billing.licence_key"] = {
         name = "Billing: licence key",
+        feature = "billing",
         file = "billing_licence_key",
         subject = "Your {{app_name}} licence key",
         variables = { "app_name", "customer_email", "licence_key", "plan_name", "account_link", "support_email" },
@@ -165,6 +169,12 @@ function NamespaceMail.fill(text, data, plain)
     end))
 end
 
+-- The template for `key`, if the feature that sends it is deployed.
+local function template(key)
+    local t = NamespaceMail.TEMPLATES[key]
+    if t and (not t.feature or ProjectConfig.isFeatureEnabled(t.feature)) then return t end
+end
+
 local function override(namespace_id, key)
     return namespace_id and db.query([[SELECT subject, html, updated_at FROM namespace_email_templates
         WHERE namespace_id = ? AND template_key = ?]], namespace_id, key)[1]
@@ -172,18 +182,21 @@ end
 
 function NamespaceMail.listTemplates(namespace_id)
     local out = {}
-    for key, t in pairs(NamespaceMail.TEMPLATES) do
-        local o = override(namespace_id, key)
-        out[#out + 1] = { key = key, name = t.name, variables = t.variables, default_subject = t.subject,
-            customised = o ~= nil, subject = o and o.subject or t.subject, html = o and o.html or nil,
-            updated_at = o and o.updated_at or nil }
+    for key in pairs(NamespaceMail.TEMPLATES) do
+        local t = template(key)
+        if t then
+            local o = override(namespace_id, key)
+            out[#out + 1] = { key = key, name = t.name, variables = t.variables, default_subject = t.subject,
+                customised = o ~= nil, subject = o and o.subject or t.subject, html = o and o.html or nil,
+                updated_at = o and o.updated_at or nil }
+        end
     end
     table.sort(out, function(a, b) return a.key < b.key end)
     return out
 end
 
 function NamespaceMail.saveTemplate(namespace_id, key, b, actor)
-    if not NamespaceMail.TEMPLATES[key] then return nil, "Template not found" end
+    if not template(key) then return nil, "Template not found" end
     if type(b.subject) ~= "string" or b.subject == "" or #b.subject > 200 then return nil, "subject is required (max 200)" end
     if type(b.html) ~= "string" or b.html == "" or #b.html > 100000 then return nil, "html is required (max 100 kB)" end
     db.query([[INSERT INTO namespace_email_templates (namespace_id, template_key, subject, html, updated_by)
@@ -194,7 +207,7 @@ function NamespaceMail.saveTemplate(namespace_id, key, b, actor)
 end
 
 function NamespaceMail.resetTemplate(namespace_id, key)
-    if not NamespaceMail.TEMPLATES[key] then return nil, "Template not found" end
+    if not template(key) then return nil, "Template not found" end
     db.query("DELETE FROM namespace_email_templates WHERE namespace_id = ? AND template_key = ?", namespace_id, key)
     return true
 end
@@ -217,7 +230,7 @@ end
 
 --- Render a template (for previews). @return { subject, html } | nil, err
 function NamespaceMail.preview(namespace_id, key, draft)
-    local t = NamespaceMail.TEMPLATES[key]
+    local t = template(key)
     if not t then return nil, "Template not found" end
     local m = message(namespace_id, key, t.sample, { app_name = t.sample.app_name }, draft)
     m.to, m.preview = "preview@example.com", true

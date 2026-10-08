@@ -334,37 +334,39 @@ function EmailContent() {
       </Link>
       <PageHeader title="Email" description="Your own email server and the emails this workspace sends." icon={<Mail className="w-5 h-5" />} />
       <SmtpCard editable={editable} />
-      <Card className="shadow-sm">
-        <h2 className="text-base font-semibold text-secondary-900">Templates</h2>
-        <p className="text-sm text-secondary-500">Every email has a built-in design. Change the subject or body to make it yours.</p>
-        <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
-          {templates.map((t) => (
-            <li key={t.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0">
-                <p className="font-medium text-secondary-900">
-                  {t.name}{' '}
-                  {t.customised ? (
-                    <Pill className="bg-primary-50 text-primary-700">Customised</Pill>
-                  ) : (
-                    <Pill className="bg-secondary-100 text-secondary-600">Built-in</Pill>
+      {templates.length > 0 && (
+        <Card className="shadow-sm">
+          <h2 className="text-base font-semibold text-secondary-900">Templates</h2>
+          <p className="text-sm text-secondary-500">Every email has a built-in design. Change the subject or body to make it yours.</p>
+          <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
+            {templates.map((t) => (
+              <li key={t.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-secondary-900">
+                    {t.name}{' '}
+                    {t.customised ? (
+                      <Pill className="bg-primary-50 text-primary-700">Customised</Pill>
+                    ) : (
+                      <Pill className="bg-secondary-100 text-secondary-600">Built-in</Pill>
+                    )}
+                  </p>
+                  <p className="text-xs text-secondary-500 truncate">Subject: {t.subject}</p>
+                </div>
+                <div className="flex gap-2">
+                  {t.customised && editable && (
+                    <Button size="sm" variant="ghost" onClick={() => setResetTarget(t)}>
+                      <RotateCcw className="w-4 h-4 mr-1" /> Reset
+                    </Button>
                   )}
-                </p>
-                <p className="text-xs text-secondary-500 truncate">Subject: {t.subject}</p>
-              </div>
-              <div className="flex gap-2">
-                {t.customised && editable && (
-                  <Button size="sm" variant="ghost" onClick={() => setResetTarget(t)}>
-                    <RotateCcw className="w-4 h-4 mr-1" /> Reset
+                  <Button size="sm" variant="outline" onClick={() => setEditing(t)} disabled={!editable}>
+                    {t.customised ? 'Edit' : 'Customise'}
                   </Button>
-                )}
-                <Button size="sm" variant="outline" onClick={() => setEditing(t)} disabled={!editable}>
-                  {t.customised ? 'Edit' : 'Customise'}
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Card>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <TemplateEditor
         template={editing}
         onClose={() => setEditing(null)}
