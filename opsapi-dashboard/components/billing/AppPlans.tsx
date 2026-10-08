@@ -182,8 +182,8 @@ function PlanModal({
             <div className="grid grid-cols-2 gap-3">
               <Input label="Term (days)" type="number" min={1} value={termDays} onChange={(e) => setTermDays(e.target.value)} required />
               <Select label="The term covers" value={termCovers} onChange={(e) => setTermCovers(e.target.value as 'access' | 'updates')}>
-                <option value="access">Access to the app</option>
-                <option value="updates">Updates (access stays)</option>
+                <option value="access">Access</option>
+                <option value="updates">Updates only</option>
               </Select>
             </div>
           )}
