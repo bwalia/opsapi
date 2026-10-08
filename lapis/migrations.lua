@@ -59,8 +59,10 @@ end
 -- =============================================================================
 
 -- Ecommerce
-local ecommerce_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "ecommerce-migrations") or {}
-local production_schema_upgrade = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "production-schema-upgrade") or {}
+-- Billing reuses the customers table (docs/BILLING_ENTITLEMENTS.md): the customers
+-- chain below loads for ecommerce OR billing; everything else stays ecommerce-only.
+local ecommerce_migrations = load_if_enabled({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, "ecommerce-migrations") or {}
+local production_schema_upgrade = load_if_enabled({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, "production-schema-upgrade") or {}
 local order_management_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE,
     "migrations.order-management-enhancement") or {}
 -- payment-tracking holds the standalone `payments` table (steps 1-2) AND
@@ -70,11 +72,11 @@ local order_management_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMM
 local payment_tracking_migrations = load_if_enabled(
     { ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT },
     "migrations.payment-tracking") or {}
-local stripe_integration_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.stripe-integration") or
+local stripe_integration_migrations = load_if_enabled({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, "migrations.stripe-integration") or
     {}
 local multi_currency_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.multi-currency-support") or
     {}
-local customer_user_link_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.customer-user-link") or
+local customer_user_link_migrations = load_if_enabled({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, "migrations.customer-user-link") or
     {}
 
 -- Delivery
@@ -307,7 +309,7 @@ local interest_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
-local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.billing-system") or {}
+local billing_system_migrations = load_if_enabled({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, "migrations.billing-system") or {}
 
 -- Config-as-Code (CMI) — backfill UNIQUE indexes on composite business keys
 -- so `lapis config export|import` can safely upsert by stable key. See the
@@ -367,6 +369,7 @@ local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE
 local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.audit-trail") or {}
 local namespace_module_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-module") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
+local billing_ent_migrations = load_if_enabled(ProjectConfig.FEATURES.BILLING, "migrations.billing-entitlements") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
 local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
@@ -873,7 +876,7 @@ local _migrations = {
     ['12_create_stores'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 1),
     ['13_create_categories'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 2),
     ['14_create_storeproducts'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 3),
-    ['15_create_customers'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 4),
+    ['15_create_customers'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, ecommerce_migrations, 4),
     ['16_create_orders'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 5),
     ['17_create_orderitems'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 6),
     ['18_create_product_variants'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, ecommerce_migrations, 7),
@@ -912,7 +915,7 @@ local _migrations = {
         '29_enhance_products_table'),
     ['30_enhance_orders_tracking'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, production_schema_upgrade,
         '30_enhance_orders_tracking'),
-    ['31_enhance_customers_table'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, production_schema_upgrade,
+    ['31_enhance_customers_table'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, production_schema_upgrade,
         '31_enhance_customers_table'),
     ['32_create_inventory_analytics'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, production_schema_upgrade,
         '32_create_inventory_analytics'),
@@ -993,17 +996,17 @@ local _migrations = {
     ['70_add_product_review_indexes'] = conditional_array(ProjectConfig.FEATURES.REVIEWS, review_migrations, 4),
 
     -- Customer-User Link (conditional on ecommerce)
-    ['71_add_user_id_to_customers'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, customer_user_link_migrations,
+    ['71_add_user_id_to_customers'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, customer_user_link_migrations,
         1),
-    ['72_add_customer_user_id_index'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, customer_user_link_migrations,
+    ['72_add_customer_user_id_index'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, customer_user_link_migrations,
         2),
-    ['73_migrate_customer_user_data'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, customer_user_link_migrations,
+    ['73_migrate_customer_user_data'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, customer_user_link_migrations,
         3),
 
     -- Stripe Integration (conditional on ecommerce)
-    ['74_add_stripe_customer_id_to_customers'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE,
+    ['74_add_stripe_customer_id_to_customers'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING },
         stripe_integration_migrations, 1),
-    ['75_add_stripe_customer_id_index'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE,
+    ['75_add_stripe_customer_id_index'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING },
         stripe_integration_migrations, 2),
 
     -- Delivery Partner System (conditional)
@@ -1153,7 +1156,7 @@ local _migrations = {
     ['163_add_user_namespace_settings_indexes'] = namespace_system_migrations[12],
     ['164_add_namespace_id_to_stores'] = conditional(ProjectConfig.FEATURES.ECOMMERCE, namespace_system_migrations[13]),
     ['165_add_namespace_id_to_orders'] = conditional(ProjectConfig.FEATURES.ECOMMERCE, namespace_system_migrations[14]),
-    ['166_add_namespace_id_to_customers'] = conditional(ProjectConfig.FEATURES.ECOMMERCE, namespace_system_migrations
+    ['166_add_namespace_id_to_customers'] = conditional({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.BILLING }, namespace_system_migrations
         [15]),
     ['167_add_namespace_id_to_categories'] = conditional(ProjectConfig.FEATURES.ECOMMERCE,
         namespace_system_migrations[16]),
@@ -2021,16 +2024,16 @@ local _migrations = {
     -- Keys are numeric so they run before the zz* finalizers. See
     -- migrations/billing-system.lua.
     -- =========================================================================
-    ['700_billing_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 1),
-    ['701_billing_plans'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 2),
-    ['702_billing_subscriptions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 3),
-    ['703_billing_payments'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 4),
-    ['704_billing_refunds'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 5),
-    ['705_billing_webhook_events'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 6),
-    ['706_billing_usage_meters'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 7),
-    ['707_billing_audit_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 8),
-    ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
-    ['709_billing_payments_invoice_unique'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 10),
+    ['700_billing_payment_accounts'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 1),
+    ['701_billing_plans'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 2),
+    ['702_billing_subscriptions'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 3),
+    ['703_billing_payments'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 4),
+    ['704_billing_refunds'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 5),
+    ['705_billing_webhook_events'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 6),
+    ['706_billing_usage_meters'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 7),
+    ['707_billing_audit_columns'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 8),
+    ['708_billing_drop_payment_accounts'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 9),
+    ['709_billing_payments_invoice_unique'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 10),
     ['710_tax_profile_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_profile_guidance_migrations, 1),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
@@ -2514,6 +2517,17 @@ local _migrations = {
     ['zzemp3_employees_core_grants'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 3),
 
     -- Workspace (outbound) webhooks — core; rides on the plugin-events outbox
+    -- Billing & Entitlements phase 1 (docs/BILLING_ENTITLEMENTS.md): after the
+    -- customers chain and billing-system 700-709 (zz sorts after numerics).
+    ['zzbe1_billing_customers'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 1),
+    ['zzbe2_billing_apps'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 2),
+    ['zzbe3_billing_features'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 3),
+    ['zzbe4_billing_plans_app'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 4),
+    ['zzbe5_billing_subscriptions'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 5),
+    ['zzbe6_billing_grants'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 6),
+    ['zzbe7_billing_licenses'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 7),
+    ['zzbe8_billing_modules_menu'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 8),
+
     ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
     ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),
     -- Audit trail of business-record changes (rides on the same event triggers)
