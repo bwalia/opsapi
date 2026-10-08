@@ -487,8 +487,5 @@ return {
         ]])
         db.query("CREATE UNIQUE INDEX IF NOT EXISTS billing_idempotency_key_uidx ON billing_idempotency (scope, idem_key)")
         db.query("CREATE INDEX IF NOT EXISTS billing_idempotency_expiry_idx ON billing_idempotency (expires_at)")
-        -- The core billing jobs (lib/billing-jobs.lua) run from the event outbox.
-        db.query([[INSERT INTO plugin_event_subscriptions (event, subscriber) VALUES
-            ('billing.access_link.requested', 'core.billing') ON CONFLICT DO NOTHING]])
     end,
 }

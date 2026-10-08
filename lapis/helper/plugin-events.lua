@@ -522,6 +522,23 @@ end
 --- The "core.audit" subscriptions: every source (core and plugin) while the
 -- audit trail is on, none when OPSAPI_AUDIT_ENABLED=false. Run syncTriggers
 -- after it.
+--- Core subscribers that are code, not plugins: Billing & Entitlements
+-- emails and jobs (lib/billing-jobs.lua). Synced on every migrate.
+local CORE_SUBSCRIPTIONS = {
+    { feature = "billing", subscriber = "core.billing", events = { "billing.access_link.requested" } },
+}
+function PluginEvents.syncCore()
+    local ProjectConfig = require("helper.project-config")
+    for _, c in ipairs(CORE_SUBSCRIPTIONS) do
+        if ProjectConfig.isFeatureEnabled(c.feature) then
+            for _, e in ipairs(c.events) do
+                db().query([[INSERT INTO plugin_event_subscriptions (event, subscriber) VALUES (?, ?)
+                    ON CONFLICT DO NOTHING]], e, c.subscriber)
+            end
+        end
+    end
+end
+
 function PluginEvents.syncAudit()
     local d = db()
     if PluginEvents.auditEnabled() then
