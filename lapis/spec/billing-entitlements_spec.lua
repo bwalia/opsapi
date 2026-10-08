@@ -49,6 +49,40 @@ check("limits: null = unlimited beats any number", out.seats == cjson.null)
 check("features outside the catalogue are dropped", out.unknown == nil)
 check("non-table values are ignored", Ent.merge({ projects = 1 }, catalog, "x").projects == 1)
 
+print("features released after the updates window")
+local cat = { old = { type = "boolean", released = 100 }, new = { type = "boolean", released = 300 }, plain = "boolean" }
+local got = Ent.merge({ old = false, new = false, plain = false }, cat, { old = true, new = true, plain = true }, 200)
+check("released before updates_until: included", got.old == true and got.plain == true)
+check("released after updates_until: left out", got.new == false)
+check("no updates_until (subscription / unlimited): everything", Ent.merge({ new = false }, cat, { new = true }).new == true)
+
+print("app settings (lib/billing-settings.lua)")
+local Settings = require("lib.billing-settings")
+local desk = Settings.resolve({ kind = "desktop", name = "D", settings = {} })
+local web = Settings.resolve({ kind = "web", name = "W", settings = {} })
+check("defaults by kind: desktop 30 days grace / 3 devices / fail_closed",
+    desk.grace_days == 30 and desk.max_activations == 3 and desk.offline_policy == "fail_closed")
+check("defaults by kind: web 3 days grace / unlimited devices / email required",
+    web.grace_days == 3 and web.max_activations == cjson.null and web.email_collection == "required")
+check("stored values win; objects merge with their defaults",
+    Settings.resolve({ kind = "web", name = "W", settings = { grace_days = 9, rate_limits = { app_per_min = 5 } } }).grace_days == 9
+    and Settings.resolve({ kind = "web", name = "W", settings = { rate_limits = { app_per_min = 5 } } }).rate_limits.licence_per_ip_per_min == 30)
+check("unknown setting refused", select(2, Settings.merge({}, { nope = 1 })) ~= nil)
+check("read-only setting refused", select(2, Settings.merge({}, { fingerprint_salt = "x" })) ~= nil)
+check("out of range refused", select(2, Settings.merge({}, { grace_days = 999 })) ~= nil)
+check("bad origin refused", select(2, Settings.merge({}, { allowed_origins = { "javascript:alert(1)" } })) ~= nil)
+check("good origin accepted", Settings.merge({}, { allowed_origins = { "https://app.example.com" } }) ~= nil)
+check("unknown rate-limit field refused", select(2, Settings.merge({}, { rate_limits = { nope = 1 } })) ~= nil)
+check("public view has no secrets", Settings.public({ kind = "web", name = "W", settings = {} }).rate_limits == nil)
+
+print("workspace email templates")
+local NamespaceMail = require("helper.namespace-mail")
+check("placeholders are HTML-escaped", NamespaceMail.fill("<p>{{name}}</p>", { name = "<b>x</b>" }) == "<p>&lt;b&gt;x&lt;/b&gt;</p>")
+check("subjects stay plain, one line", NamespaceMail.fill("Hi {{name}}", { name = "a\nb" }, true) == "Hi a b")
+check("unknown placeholders are empty", NamespaceMail.fill("{{nope}}!", {}) == "!")
+check("every template names its variables and default file",
+    (function() for _, t in pairs(NamespaceMail.TEMPLATES) do if not (t.file and t.subject and #t.variables > 0) then return false end end return true end)())
+
 print("licence keys")
 local Licenses = require("queries.BillingLicenseQueries")
 check("typed keys normalise (case, dashes, spaces)",
@@ -116,6 +150,10 @@ for _, e in ipairs(PluginEvents.CATALOG) do entities[e.entity] = e end
 check("subscription events", entities.subscription and entities.subscription.module == "subscriptions"
     and entities.subscription.verbs.activated ~= nil)
 check("licence events hide the key hash", entities.license and entities.license.hide == "key_hash")
+check("computed license.issued / license.reissued events", (function()
+    local ev = table.concat(PluginEvents.entityEvents("license", {}), ",")
+    return ev:find("license.issued", 1, true) and ev:find("license.reissued", 1, true)
+end)())
 check("activations hide the fingerprint", entities["license.activation"]
     and entities["license.activation"].hide == "fingerprint_hash" and entities["license.activation"].ns_sql ~= nil)
 
