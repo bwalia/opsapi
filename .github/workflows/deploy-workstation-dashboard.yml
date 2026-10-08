@@ -37,6 +37,14 @@ on:
         required: false
         default: "int"
         type: string
+      VERSION:
+        # Ring Promoter sends the release it promotes (a git tag, e.g. 1.0.184):
+        # the image is built from exactly that code for the target ring (the
+        # API URL is baked into the bundle, so each ring needs its own build).
+        description: "Git ref to build: a release tag (e.g. 1.0.184), branch or sha. Blank = the dispatched branch."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: deploy-workstation-dashboard-${{ github.ref }}
@@ -71,6 +79,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.VERSION || github.sha }}
           fetch-depth: 0
 
       - name: Login to Docker Hub
@@ -163,6 +172,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.VERSION || github.sha }}
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

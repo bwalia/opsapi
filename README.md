@@ -678,6 +678,15 @@ curl -X POST http://localhost/opsapi/auth/reset-password \
 
 ## Deployment
 
+### Workstation OpsAPI: int → prod with Ring Promoter
+
+A merge to `main` builds the image, cuts the next release tag (`1.0.x`) and deploys **int** automatically (API and dashboard). **Prod** is promoted from the workstation Ring Promoter. There, apps **Workstation OpsAPI** (the API) and **Workstation OpsAPI UI** (the dashboard) each have an int and a prod ring. To ship a release, seed each app's **prod** ring with the release tag that int runs, e.g. `1.0.184`. Prod seeding asks for the prod password.
+
+- **API:** Ring Promoter runs **Build and Deploy OpsAPI to K3s** with `TARGET_ENV=prod`, `DEPLOYMENT_TYPE=deploy` and `IMAGE_TAG=<release>`, the same image int ran (releases are also tagged `bwalia/opsapi:<release>`). The workflow runs migrations, rolls out, and then Ring Promoter checks that `https://opsapi.workstation.co.uk/ready` reports that `version`.
+- **Dashboard:** Ring Promoter runs **Deploy Workstation Dashboard** with `TARGET_ENV=prod` and `VERSION=<release>`, which builds the UI from exactly that tag for prod (its API URL is baked in).
+
+You can still run both workflows by hand from the Actions tab with the same inputs.
+
 ### GitHub Actions (Self-Hosted Runner)
 
 Deploy using Docker Compose on a self-hosted runner.

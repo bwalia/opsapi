@@ -140,7 +140,9 @@ app:get("/ready", function(self)
         return { status = 503, json = { ready = false, reason = "Plugin failed to load: " .. table.concat(codes, ", ") } }
     end
 
-    return { status = 200, json = { ready = true, timestamp = ngx.time() } }
+    -- `version` is the release this pod runs (e.g. 1.0.183): Ring Promoter
+    -- checks it after a deploy, so an old pod still answering 200 isn't success.
+    return { status = 200, json = { ready = true, version = APP_VERSION, timestamp = ngx.time() } }
 end)
 
 -- Liveness probe (for Kubernetes)
