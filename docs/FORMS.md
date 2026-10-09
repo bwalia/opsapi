@@ -42,7 +42,7 @@ Who can do what is set by the RBAC module `forms`:
 | `forms.create` | Create and duplicate forms |
 | `forms.update` | Edit, publish, close, retry and mark responses as spam |
 | `forms.delete` | Delete forms and responses |
-| `forms.manage` | All of the above, plus the workspace's spam-check (Turnstile) keys |
+| `forms.manage` | All of the above, plus the workspace's custom domain and spam-check (Turnstile) keys |
 
 Workspace owners and admins get `forms` when the feature is installed.
 
@@ -171,12 +171,54 @@ The **Share** tab has:
   number, date and choice questions can be prefilled; a choice must match one of its options.
 
 **Branding** (**Settings → Branding**): the main colour (buttons, highlights), the page
-background, a logo (an `https://` image address; empty uses the workspace logo), the submit
-button's text, and hiding "Powered by OpsAPI".
+background, a logo (an `https://` image address; empty uses the workspace logo) and the submit
+button's text. Every form shows "Powered by OpsAPI"; for now no plan can hide it (§11).
 
-> **Embedding:** the dashboard's `/f/*` pages must not be sent with `X-Frame-Options` or a
-> `frame-ancestors` CSP that blocks other sites, or the embed shows an empty frame. Check the
-> edge proxy if you add one.
+**Embedding** works on any website. The dashboard sends `Content-Security-Policy: frame-ancestors *`
+on public form pages (`/f/*`) only. Every other page sends `X-Frame-Options: SAMEORIGIN` and
+`frame-ancestors 'self'`, so other sites can't frame the dashboard (clickjacking). A proxy in front
+of the dashboard must not add its own `X-Frame-Options` to `/f/*`.
+
+### Custom domain
+
+**Forms → Custom domain** (needs `forms.manage`) puts the workspace's form links on its own
+address, e.g. `https://forms.acme.com/f/<id>`. One domain per workspace.
+
+1. Enter the domain. A subdomain such as `forms.acme.com` works best.
+2. Add the two DNS records shown:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | CNAME | `forms.acme.com` | the platform's edge (`FORMS_DOMAIN_TARGET`); an `A` record if that is an IP address |
+   | TXT | `_opsapi-challenge.forms.acme.com` | `opsapi-verify=<token>` |
+
+3. **Check now**, or wait: pending domains are re-checked every hour for a week.
+
+Both records must be found. The TXT record proves the domain is yours: the edge is shared with
+other sites, so pointing a domain at it proves nothing. If a second workspace proves control of
+the same domain, the domain moves to it, and the first workspace sees why.
+
+Once connected:
+- share links, the embed code, the QR code and the agent use the domain. Links shared before keep
+  working;
+- the domain serves **only this workspace's forms**. The public API refuses requests for other
+  workspaces' forms from that origin, and the dashboard answers 404 there for everything except
+  `/f/*`;
+- connected domains are re-checked daily. If the records disappear, the domain goes back to
+  pending and links return to the dashboard's address instead of breaking.
+
+DNS tips: on Cloudflare, set the record to **DNS only** (grey cloud). A root domain (`acme.com`)
+can't have a CNAME, so use the provider's ALIAS/ANAME record or a subdomain.
+
+**For the platform operator:** custom domains are off until `FORMS_DOMAIN_TARGET` is set (§12).
+The edge must then:
+1. route those hosts to the dashboard, keeping the original `Host` or sending `X-Forwarded-Host`;
+2. get a certificate for each one. Ask `GET /api/v2/public/form-domains/check?domain=<host>` before
+   issuing it: **200** means it is a connected domain. This is the hook for Caddy's
+   `on_demand_tls ask` or lua-resty-auto-ssl's `allow_domain`.
+
+A deployment on its own address (e.g. a single-workspace dashboard at `my.example.com`) needs
+none of this: its links already use that address.
 
 ## 5. Responses
 
@@ -328,6 +370,10 @@ by the `forms` permissions above. Bodies are JSON.
 | POST | `/api/v2/forms/generate` | `{prompt}` → a draft `{title, description, fields, targets, dropped}`. Nothing is saved |
 | GET | `/api/v2/forms/responses?entity_type=&entity_uuid=` | Responses linked to a record (`customer`, `lead`, `user` or `invitation`) |
 | GET / PUT | `/api/v2/forms/workspace-settings` | Turnstile keys. `PUT` needs `forms.manage`; the secret is write-only |
+| GET | `/api/v2/forms/domain` | The custom domain: `{available, target, domain?, status, records, last_error?}` |
+| PUT | `/api/v2/forms/domain` | `{domain}`: connect (replaces the current one) and check DNS. Needs `forms.manage` |
+| POST | `/api/v2/forms/domain/check` | Check DNS now (10 a minute). Needs `forms.manage` |
+| DELETE | `/api/v2/forms/domain` | Disconnect. Needs `forms.manage` |
 
 `targets` is a list such as `[{"type": "customer"}, {"type": "lead"}, {"type": "user", "role": "member"}]`.
 
@@ -339,6 +385,7 @@ by the `forms` permissions above. Bodies are JSON.
 | POST | `/api/v2/public/forms/{public_id}/uploads?field={key}` | Multipart `file`, header `X-Render-Token`. Returns **201** `{id, name, size, type}`; send the `id`s as the field's answer |
 | POST | `/api/v2/public/forms/{public_id}/events` | `{type: "start"}` or `{type: "step", step: n}`. Always **204** |
 | POST | `/api/v2/public/forms/{public_id}/submissions` | Header `Idempotency-Key`. Body `{answers, render_token, _hp: "", captcha_token?, context: {page_url, referrer, utm, duration_ms}}`. Returns **201** `{message, redirect_url?}`, **400** `{errors: {key: message}}`, **409** (full, or the monthly plan limit), **410** (closed), **413** or **429** |
+| GET | `/api/v2/public/form-domains/check?domain={host}` | For the edge: **200** if the host is a connected custom domain, else **404** |
 | GET | `/api/v2/public/invitations/{token}` | The invitation behind an email link |
 | POST | `/api/v2/public/invitations/{token}/accept` | `{first_name, last_name, password}`: create the account and join (emails without an account) |
 
@@ -385,7 +432,9 @@ can try again.
   clean-up.
 
 **Plan limits:** a workspace's plan can cap its forms, its responses per month, and whether it
-may hide "Powered by OpsAPI" (`lapis/lib/forms/limits.lua`). Every plan is unlimited for now.
+may hide "Powered by OpsAPI" (`lapis/lib/forms/limits.lua`). **For now everything is free:** no
+plan has limits, and no plan may hide "Powered by OpsAPI". A setting saved earlier that hides it
+is ignored.
 
 **Privacy:**
 - The visitor's IP is stored only as a keyed hash.
@@ -407,3 +456,5 @@ responses.
 | `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` | AI drafts and summaries (same settings as the chat agent). If no model answers, a draft shows an error and a summary shows only the counts; everything else works |
 | `OPENSSL_SECRET_KEY`, `OPENSSL_SECRET_IV` | Encrypt the Turnstile secret |
 | `TURNSTILE_VERIFY_URL` | Tests only: a stand-in for Cloudflare's check |
+| `FORMS_DOMAIN_TARGET` | The edge that custom domains point at (a host name for a CNAME, or an IP for an A record). Unset = custom domains are off |
+| `DOMAIN_VERIFY_RESOLVERS` | DNS servers the domain check asks (default `1.1.1.1,8.8.8.8`) |
