@@ -60,11 +60,19 @@ and free of the usual scale traps.
     fire-and-forget) — other pods' users catch up through the 25–30 s poll.
   - **`REDIS_ENABLED=false`:** local-only, exactly as before: no subscriber, no
     publish. Correct only for a single pod with a single worker.
+  - **Replicas:** the `diytaxreturn-lapis` chart runs **2** pods in int, acc,
+    prod, workstation-test and workstation-acc, with its own Redis
+    (`templates/redis.yaml`: password-protected, no persistence, 128 MB LRU).
+    It refuses `replicaCount > 1` without `redis.enabled`. `/ready` answers 503
+    while a pod's subscriber is down (`CHAT_REQUIRE_REDIS=true`, set by the
+    chart), so that pod gets no traffic until it reconnects. dev (in-pod
+    migrations) and workstation-int/prod (pinned to one full node, `Recreate`)
+    stay at 1 replica.
   - **Proof:** `lapis/spec/chat-pubsub-e2e/run.sh` runs two app processes on one
     Redis (plus a third with `REDIS_ENABLED=false`), a WebSocket client on each:
     a send on one pod reaches the other exactly once, a Redis stop degrades to
-    local delivery without failing the send, and a Redis restart recovers on its
-    own. `lapis/spec/chat-pubsub_spec.lua` guards the invariants in CI.
+    local delivery without failing the send (and `/ready` goes 503), and a Redis
+    restart recovers on its own. `lapis/spec/chat-pubsub_spec.lua` guards the invariants in CI.
 
 ---
 
@@ -127,7 +135,11 @@ trigger fires.
 - **Real-time:** WS connection count per pod, dropped/rejected handshakes
   (`[chat-ws]` in the error log), reconnect rate.
 - **Cross-pod delivery:** `[chat-ws] Redis subscriber down` / `PUBLISH failed`
-  WARNs; `redis-cli client list | grep -c ' psub=1 '` should equal pods × workers.
+  WARNs; `redis-cli client list | grep -c ' psub=1 '` should equal pods × workers;
+  pods NotReady with `"reason": "Chat Redis subscriber not connected"` on `/ready`.
+  **A Redis outage longer than the readiness grace (3 × 15 s) takes every pod out
+  of rotation** — restore Redis first (`kubectl -n <ns> rollout restart
+  deploy/<release>-redis`).
 - **App:** p95 latency on `GET /api/chat/channels` (unread fan-out) and
   `GET /api/chat/channels/:uuid/messages` (list).
 
