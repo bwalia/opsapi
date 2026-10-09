@@ -59,6 +59,7 @@ local MAX_BACKOFF_S = 30
 local worker_id             -- tags what this worker publishes; its subscriber skips those
 local subscribed = false
 local publish_warned_at = 0
+local relays = {}           -- other hubs riding on this link: relays[name] = deliver(id, frame)
 
 local function register(conn)
     local set = connections[conn.user_uuid]
@@ -117,12 +118,12 @@ end
 
 -- Hand a frame to the other pods. Never raises: the caller has already
 -- delivered on this pod, so a Redis failure only costs cross-pod delivery.
-local function publish(key, users, frame)
+local function publish(key, users, frame, relay)
     if not RedisClient.enabled() then return end
     local red = RedisClient.connect()
     local ok, err = false, "Redis unreachable"
     if red then
-        ok, err = red:publish(PREFIX .. key, cjson.encode({ o = origin(), u = users, f = frame }))
+        ok, err = red:publish(PREFIX .. key, cjson.encode({ o = origin(), u = users, f = frame, r = relay }))
         if ok then RedisClient.release(red) else red:close() end
     end
     if not ok and ngx.now() - publish_warned_at >= 60 then
@@ -181,10 +182,28 @@ function _M.broadcast_message(channel_uuid, namespace_id, message, channel)
     })
 end
 
+--- Let another WebSocket hub reach sockets held by other pods over this
+-- worker's one Redis link (lib/kanban-ws.lua). `deliver(id, frame)` must only
+-- enqueue, like everything here; it runs for frames another pod sent with
+-- relay_publish(name, id, frame).
+function _M.relay(name, deliver_fn)
+    relays[name] = deliver_fn
+end
+
+function _M.relay_publish(name, id, frame)
+    publish("relay:" .. name .. ":" .. tostring(id), nil, frame, { name, id })
+end
+
 -- Subscriber side: a frame another worker published. Enqueue only.
 local function deliver(payload)
     local m = cjson.decode(payload)
-    if type(m) ~= "table" or m.o == origin() or type(m.f) ~= "string" or type(m.u) ~= "table" then return end
+    if type(m) ~= "table" or m.o == origin() or type(m.f) ~= "string" then return end
+    if type(m.r) == "table" then
+        local relay = relays[m.r[1]]
+        if relay then relay(m.r[2], m.f) end
+        return
+    end
+    if type(m.u) ~= "table" then return end
     for _, user_uuid in ipairs(m.u) do
         push_to_user(user_uuid, m.f)
     end

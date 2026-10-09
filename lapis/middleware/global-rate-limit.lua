@@ -73,6 +73,7 @@ function GlobalRateLimit.enable(app)
             rate = cached_limit.rate,
             window = cached_limit.window,
             prefix = "global",
+            local_only = true, -- every request: count in this pod, no Redis hop
         }) then
             -- checkBefore already wrote the 429; abort further filters/handlers
             return false
