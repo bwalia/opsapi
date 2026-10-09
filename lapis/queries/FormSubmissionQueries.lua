@@ -217,6 +217,38 @@ function FormSubmissionQueries.get(form, uuid)
     return out
 end
 
+--- Responses that created or matched a record (a customer's or lead's page).
+-- @param entity_type "customer" | "lead" | "user" | "invitation"
+function FormSubmissionQueries.forEntity(namespace_id, entity_type, entity_uuid)
+    if not ENTITY_SQL[entity_type] or type(entity_uuid) ~= "string" or #entity_uuid > 64 then
+        return nil, "entity_type must be customer, lead, user or invitation, with entity_uuid"
+    end
+    local rows = db.query([[
+        SELECT s.uuid, s.status, s.created_at, s.data, l.target, l.outcome, f.uuid AS form_uuid, f.title AS form_title,
+               v.schema AS version_schema
+        FROM form_submission_links l
+        JOIN form_submissions s ON s.id = l.submission_id
+        JOIN forms f ON f.id = s.form_id AND f.deleted_at IS NULL
+        JOIN form_versions v ON v.id = s.version_id
+        WHERE l.namespace_id = ? AND l.entity_type = ? AND l.entity_uuid = ? AND s.status <> 'spam'
+        ORDER BY s.created_at DESC, s.id DESC LIMIT 20
+    ]], namespace_id, entity_type, entity_uuid)
+    local out = {}
+    for i, r in ipairs(rows) do
+        local schema = decode(r.version_schema, { fields = {} })
+        local answers, shown = decode(r.data, {}), {}
+        for _, f in ipairs(schema.fields or {}) do
+            local def = Fields.TYPES[f.type]
+            if def and def.input ~= false and answers[f.key] ~= nil and #shown < 12 then
+                shown[#shown + 1] = { label = f.label, value = Fields.show(f, answers[f.key]) }
+            end
+        end
+        out[i] = { uuid = r.uuid, status = r.status, created_at = r.created_at, outcome = r.outcome,
+            target = r.target, form_uuid = r.form_uuid, form_title = r.form_title, answers = arr(shown) }
+    end
+    return arr(out)
+end
+
 -- ---------------------------------------------------------------------------
 -- Writes
 -- ---------------------------------------------------------------------------
@@ -256,6 +288,20 @@ local function process(form, row)
     local clean, errors = Fields.validate(schema, answers)
     if not clean then return nil, "this response doesn't fit the form, so no records can be created from it", 422,
         errors end
+    -- Files: a stored response already holds their details; spam holds the
+    -- raw upload ids, attached now if they haven't been purged (else dropped).
+    local Uploads = require("lib.forms.uploads")
+    for _, f in ipairs(schema.fields or {}) do
+        if f.type == "file_upload" and clean[f.key] then
+            local stored = answers[f.key]
+            if type(stored) == "table" and type(stored[1]) == "table" then
+                clean[f.key] = stored
+            else
+                local resolved = Uploads.resolve(form.id, { fields = { f } }, { [f.key] = clean[f.key] })
+                clean[f.key] = resolved and resolved[f.key] or nil
+            end
+        end
+    end
     local done = {}
     for _, l in ipairs(db.query([[SELECT target FROM form_submission_links
         WHERE submission_id = ? AND outcome <> 'failed']], row.id)) do
@@ -274,6 +320,7 @@ local function process(form, row)
         local links, failed = Submit.run_targets(form, version, clean, row.uuid, decode(row.meta, {}),
             namespace_of(form), function(fn) hooks[#hooks + 1] = fn end)
         Submit.save_links(row.id, form.namespace_id, links)
+        Uploads.claim(row.id, schema, clean)
         if row.status == "spam" then
             db.query("UPDATE forms SET submission_count = submission_count + 1 WHERE id = ?", form.id)
         end

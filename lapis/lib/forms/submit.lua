@@ -46,15 +46,17 @@ function Submit.render_token(form_id, now)
     return now .. "." .. hmac_hex("forms.render:" .. form_id .. ":" .. now):sub(1, 32)
 end
 
---- @return true | nil, reason
-function Submit.check_token(form_id, token, now)
+--- @param min_age seconds the page must have been open (default MIN_FILL_SECONDS;
+--   0 for file uploads, which happen while the visitor fills the form in)
+-- @return true | nil, reason
+function Submit.check_token(form_id, token, now, min_age)
     now = now or ngx.time()
     local issued, mac = tostring(token or ""):match("^(%d+)%.(%x+)$")
     issued = tonumber(issued)
     if not issued or mac ~= hmac_hex("forms.render:" .. form_id .. ":" .. issued):sub(1, 32) then
         return nil, "bad_token"
     end
-    if now - issued < Submit.MIN_FILL_SECONDS then return nil, "too_fast" end
+    if now - issued < (min_age or Submit.MIN_FILL_SECONDS) then return nil, "too_fast" end
     if now - issued > Submit.TOKEN_TTL_SECONDS then return nil, "token_expired" end
     return true
 end
@@ -193,11 +195,34 @@ function Submit.handle(form, version, body, client)
         return { status = 400, json = { success = false, error = "Please check the highlighted answers.",
             errors = errors } }
     end
+    -- The form's "I'm not a robot" check, when the owner turned it on.
+    if settings.captcha then
+        local _, secret = require("lib.forms.workspace").turnstile(form.namespace_id)
+        local ok = secret and require("lib.forms.workspace").verify(secret, body.captcha_token, client.ip)
+        if not ok then
+            return { status = 400, json = { success = false, code = "captcha",
+                error = "Please complete the security check and try again." } }
+        end
+    end
+    -- The workspace's monthly responses, when its plan has a limit.
+    local full = require("lib.forms.limits").month_full(form.namespace_id)
+    if full then
+        return { status = 409, json = { success = false, code = "plan_limit",
+            error = settings.closed_message or "This form can't take more responses right now." } }
+    end
 
     -- A repeat of a response already stored: answer like the first time.
     if idem and db.query("SELECT 1 FROM form_submissions WHERE form_id = ? AND idempotency_key = ?",
             form.id, idem)[1] then
         return done
+    end
+    -- Attached files: this form's, unused, and swapped for their details.
+    local Uploads = require("lib.forms.uploads")
+    local file_errors
+    answers, file_errors = Uploads.resolve(form.id, schema, answers)
+    if not answers then
+        return { status = 400, json = { success = false, error = "Please check the highlighted answers.",
+            errors = file_errors } }
     end
 
     -- 3. One transaction
@@ -229,6 +254,7 @@ function Submit.handle(form, version, body, client)
             contact.email and contact.email:lower() or db.NULL, failed and "needs_attention" or "complete",
             idem or db.NULL, cjson.encode(meta), next(links) ~= nil)[1]
         if not row then return "duplicate" end
+        if not Uploads.claim(row.id, schema, answers) then return "files_taken" end
         Submit.save_links(row.id, form.namespace_id, links)
         return "saved"
     end)
@@ -236,6 +262,10 @@ function Submit.handle(form, version, body, client)
         pcall(db.query, "ROLLBACK")
         if not ok then error(res, 0) end
         if res == "duplicate" then return done end
+        if res == "files_taken" then
+            return { status = 409, json = { success = false, error = "A file was already sent with another response. "
+                .. "Please attach it again.", code = "files_taken" } }
+        end
         -- Closed or full: say which.
         local max = tonumber(settings.max_submissions)
         local now = db.query("SELECT submission_count FROM forms WHERE id = ?", form.id)[1]

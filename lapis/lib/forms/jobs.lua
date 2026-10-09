@@ -75,8 +75,7 @@ local function deliver(event)
     if not s or s.status == "spam" then return true end
 
     local NamespaceMail = require("helper.namespace-mail")
-    -- No SMTP anywhere: nothing can be sent, and retrying won't change that.
-    if not NamespaceMail.smtp(s.namespace_id) and not require("helper.mail").isConfigured() then return true end
+    local mail_ok = NamespaceMail.smtp(s.namespace_id) ~= nil or require("helper.mail").isConfigured()
 
     local sent = decode(s.notifications, {})
     local settings = decode(s.settings, {})
@@ -85,6 +84,12 @@ local function deliver(event)
     local brand = { app_name = s.namespace_name }
     local origin = origin_of(s)
     local list, text = answer_lines(schema, answers)
+
+    -- 4/5 (no email needed): the in-app alert and the chat channel post.
+    local alerts_ok, alerts_err = pcall(FormJobs.alerts, s, settings, sent, list, origin)
+    if not alerts_ok then return nil, "alerts: " .. tostring(alerts_err) end
+    -- No SMTP anywhere: no email can be sent, and retrying won't change that.
+    if not mail_ok then return true end
 
     -- 1. New-response alert
     local recipients = settings.notify_emails
@@ -138,6 +143,48 @@ local function deliver(event)
     return true
 end
 
+--- The in-app notification (the header bell) and the chat channel post.
+function FormJobs.alerts(s, settings, sent, list, origin)
+    local link = "/dashboard/forms/" .. s.form_uuid .. "?response=" .. s.uuid
+    local who = nonnull(s.respondent_email) or "Someone"
+    if settings.notify_in_app ~= false and not sent.in_app
+        and db.query("SELECT to_regclass('notifications') IS NOT NULL AS ok")[1].ok then
+        -- The form's creator, and the notify addresses that are members here.
+        local users = db.query([[
+            SELECT DISTINCT u.id FROM users u JOIN namespace_members m ON m.user_id = u.id
+            WHERE m.namespace_id = ? AND m.status = 'active'
+              AND (u.uuid = ? OR lower(u.email) IN ?)
+        ]], s.namespace_id, nonnull(s.created_by_uuid) or "",
+            db.list(#(settings.notify_emails or {}) > 0 and settings.notify_emails or { "" }))
+        local Notify = require("helper.notification-helper")
+        for _, u in ipairs(users) do
+            Notify.create(u.id, "form_response", "New response: " .. s.title, who .. " answered " .. s.title,
+                { form_uuid = s.form_uuid, submission_uuid = s.uuid, namespace_id = tonumber(s.namespace_id),
+                  url = link })
+        end
+        mark(s.id, "in_app")
+    end
+    local channel = settings.chat_channel_uuid
+    if channel and not sent.chat and require("helper.project-config").isFeatureEnabled("chat") then
+        local ch = db.query("SELECT uuid, name, type, namespace_id FROM chat_channels WHERE uuid = ? AND namespace_id = ?",
+            channel, s.namespace_id)[1]
+        if ch then
+            local lines = { ("New response to \"%s\" from %s"):format(s.title, who) }
+            for i = 1, math.min(#list, 6) do
+                lines[#lines + 1] = "• " .. list[i].label .. ": " .. tostring(list[i].value):sub(1, 200)
+            end
+            if origin then lines[#lines + 1] = origin .. link end
+            local ChatMessageQueries = require("queries.ChatMessageQueries")
+            local msg = ChatMessageQueries.createSystemMessage(ch.uuid, table.concat(lines, "\n"))
+            pcall(function()
+                require("lib.chat-ws").broadcast_message(ch.uuid, ch.namespace_id,
+                    ChatMessageQueries.show(msg.uuid) or msg, ch)
+            end)
+        end
+        mark(s.id, "chat")
+    end
+end
+
 FormJobs.handlers = {
     ["form.submission.created"] = deliver,
     ["form.submission.updated"] = deliver,
@@ -181,6 +228,14 @@ function FormJobs.purge()
         for id in pairs(touched) do
             db.query([[UPDATE forms SET submission_count = (SELECT COUNT(*) FROM form_submissions
                 WHERE form_id = ? AND status <> 'spam') WHERE id = ?]], id, id)
+        end
+
+        -- Files never attached within a day, or whose response is gone.
+        local Uploads = require("lib.forms.uploads")
+        for _ = 1, 20 do
+            local gone = Uploads.purge(500)
+            n = n + gone
+            if gone < 500 then break end
         end
 
         -- Deleted forms: their responses in batches, then the form.

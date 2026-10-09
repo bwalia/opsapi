@@ -107,6 +107,33 @@ return function(app)
         return ok(setmetatable(out, J.array_mt))
     end))
 
+    -- Responses linked to a record (?entity_type=customer|lead|user|invitation&entity_uuid=).
+    app:get("/api/v2/forms/responses", guard("read", function(self)
+        local items, err = FormSubmissionQueries.forEntity(self.namespace.id, self.params.entity_type,
+            self.params.entity_uuid)
+        if not items then return fail(400, err) end
+        return ok(items)
+    end))
+
+    -- Draft a form from a description with AI (nothing saved).
+    app:post("/api/v2/forms/generate", guard("create", function(self)
+        local b, err = body()
+        if not b then return fail(400, err) end
+        local draft, gerr, status = require("lib.forms.ai").generate(self.namespace.id, actor(self), b.prompt,
+            FormQueries.auth(self))
+        return result(draft, gerr, status)
+    end))
+
+    -- Workspace-wide forms settings (Turnstile keys). The secret is write-only.
+    app:get("/api/v2/forms/workspace-settings", guard("read", function(self)
+        return ok(require("lib.forms.workspace").get(self.namespace.id))
+    end))
+    app:put("/api/v2/forms/workspace-settings", guard("manage", function(self)
+        local b, err = body()
+        if not b then return fail(400, err) end
+        return result(require("lib.forms.workspace").save(self.namespace.id, actor(self), b))
+    end))
+
     app:get("/api/v2/forms/:uuid", guard("read", function(self)
         local form = FormQueries.get(self.namespace.id, self.params.uuid)
         if not form then return NOT_FOUND end
@@ -183,6 +210,32 @@ return function(app)
         local done, err, status = FormSubmissionQueries.delete(form, self.params.sid)
         if not done then return fail(status or 422, err) end
         return ok({ deleted = true })
+    end))
+
+    -- A short-lived link to a file attached to a response.
+    app:get("/api/v2/forms/:uuid/submissions/:sid/files/:file", guard("read", function(self)
+        local form = form_of(self)
+        if not form then return NOT_FOUND end
+        local s = FormSubmissionQueries.get(form, self.params.sid)
+        if not s then return fail(404, "Response not found") end
+        local row = require("lapis.db").query("SELECT id FROM form_submissions WHERE uuid = ?", s.uuid)[1]
+        local url, err = require("lib.forms.uploads").link(row.id, self.params.file)
+        if not url then return fail(404, err) end
+        return ok({ url = url, expires_in = require("lib.forms.uploads").LINK_SECONDS })
+    end))
+
+    -- Numbers about the responses plus an AI-written summary (?numbers_only=true skips the AI).
+    app:post("/api/v2/forms/:uuid/summary", guard("read", function(self)
+        local form = form_of(self)
+        if not form then return NOT_FOUND end
+        return ok(require("lib.forms.ai").summarise(form, actor(self),
+            { numbers_only = self.params.numbers_only == "true" }))
+    end))
+
+    app:get("/api/v2/forms/:uuid/analytics", guard("read", function(self)
+        local form = form_of(self)
+        if not form then return NOT_FOUND end
+        return ok(require("lib.forms.stats").report(form, self.params.days))
     end))
 
     -- Streamed: never builds the whole file in memory.

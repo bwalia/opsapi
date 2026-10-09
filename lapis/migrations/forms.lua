@@ -214,4 +214,62 @@ return {
             ON namespace_invitations (namespace_id, lower(email)) WHERE status = 'pending']])
         index("users", [[CREATE INDEX IF NOT EXISTS users_lower_email_idx ON users (lower(email))]])
     end,
+
+    -- [4] Phase 2: uploaded files and daily analytics.
+    [4] = function()
+        -- A file goes up before the response: submission_id stays NULL until
+        -- the response claims it. The hourly purge deletes files never claimed
+        -- within a day and files whose response is gone (lib/forms/jobs.lua),
+        -- so there's no foreign key: the row must outlive its response long
+        -- enough to delete the object in storage.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS form_uploads (
+                id BIGSERIAL PRIMARY KEY,
+                uuid TEXT NOT NULL UNIQUE,
+                namespace_id BIGINT NOT NULL,
+                form_id BIGINT NOT NULL,
+                field_key VARCHAR(40) NOT NULL,
+                submission_id BIGINT,
+                object_key TEXT NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                content_type VARCHAR(120) NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                ip_hash VARCHAR(32),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE INDEX IF NOT EXISTS form_uploads_submission_idx ON form_uploads (submission_id)]])
+        db.query([[CREATE INDEX IF NOT EXISTS form_uploads_unclaimed_idx ON form_uploads (created_at)
+            WHERE submission_id IS NULL]])
+
+        -- Views / starts / steps reached per form per day (UTC). Counted in
+        -- each worker's memory and added here every 30 s (lib/forms/stats.lua);
+        -- responses are counted from form_submissions itself.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS form_daily_stats (
+                form_id BIGINT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+                day DATE NOT NULL,
+                views INTEGER NOT NULL DEFAULT 0,
+                starts INTEGER NOT NULL DEFAULT 0,
+                steps JSONB NOT NULL DEFAULT '{}'::jsonb,
+                PRIMARY KEY (form_id, day)
+            )
+        ]])
+    end,
+
+    -- [5] Phase 2: workspace-wide forms settings (Cloudflare Turnstile keys;
+    -- the secret encrypted) and the index the monthly response count uses.
+    [5] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS form_workspace_settings (
+                namespace_id BIGINT PRIMARY KEY REFERENCES namespaces(id) ON DELETE CASCADE,
+                turnstile_site_key VARCHAR(100),
+                turnstile_secret_encrypted TEXT,
+                updated_by_uuid TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE INDEX IF NOT EXISTS form_submissions_ns_time_idx
+            ON form_submissions (namespace_id, created_at) WHERE status <> 'spam']])
+    end,
 }

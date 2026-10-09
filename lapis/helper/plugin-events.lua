@@ -1009,6 +1009,9 @@ function PluginEvents.start(projects_root)
         if ok_forms then
             _handlers["core.forms"] = forms_jobs.handlers
             if ngx.worker.id() == 0 then ngx.timer.every(3600, forms_jobs.maintain) end
+            -- Each worker adds its view/start/step counts every 30 s.
+            local Stats = require("lib.forms.stats")
+            ngx.timer.every(Stats.FLUSH_SECONDS, Stats.tick)
         else
             ngx.log(ngx.ERR, "[plugin-events] forms jobs failed to load: ", tostring(forms_jobs))
         end
