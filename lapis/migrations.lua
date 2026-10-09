@@ -1232,6 +1232,8 @@ local _migrations = {
     ['207_create_user_channels_view'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 16),
     ['208_add_channel_mention_support'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 17),
     ['209_add_chat_metrics_table'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 18),
+    ['zzchat1_drop_unread_counts_function'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations,
+        19),
 
     -- Kanban (conditional)
     ['210_create_kanban_projects_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN, kanban_project_migrations, 1),

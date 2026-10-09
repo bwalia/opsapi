@@ -313,38 +313,11 @@ return {
         end)
     end,
 
-    -- 10. Create optimized function for getting unread counts (bulk)
-    [10] = function()
-        pcall(function()
-            db.query([[
-                CREATE OR REPLACE FUNCTION get_user_unread_counts(p_user_uuid VARCHAR)
-                RETURNS TABLE (
-                    channel_uuid VARCHAR,
-                    unread_count BIGINT,
-                    unread_mentions BIGINT
-                ) AS $$
-                BEGIN
-                    RETURN QUERY
-                    SELECT
-                        cm.channel_uuid,
-                        COUNT(m.id) FILTER (
-                            WHERE m.created_at > COALESCE(cm.last_read_at, '1970-01-01')
-                            AND m.user_uuid != p_user_uuid
-                        ) as unread_count,
-                        COUNT(mt.id) FILTER (WHERE mt.is_read = false) as unread_mentions
-                    FROM chat_channel_members cm
-                    LEFT JOIN chat_messages m ON m.channel_uuid = cm.channel_uuid
-                        AND m.is_deleted = false
-                    LEFT JOIN chat_mentions mt ON mt.channel_uuid = cm.channel_uuid
-                        AND mt.mentioned_user_uuid = p_user_uuid
-                    WHERE cm.user_uuid = p_user_uuid
-                    AND cm.left_at IS NULL
-                    GROUP BY cm.channel_uuid;
-                END;
-                $$ LANGUAGE plpgsql STABLE
-            ]])
-        end)
-    end,
+    -- 10. (removed) get_user_unread_counts(): nothing called it, and it was both
+    -- slower and wrong — it joined every message to every mention of the channel
+    -- (counts multiplied) with no cap. [19] drops it where it was created.
+    -- Unread counts: ChatChannelQueries.getByUser (capped at 100).
+    [10] = function() end,
 
     -- 11. Add message edit history table
     [11] = function()
@@ -740,5 +713,10 @@ return {
                 $$ LANGUAGE plpgsql
             ]])
         end)
+    end,
+
+    -- 19. Drop the unused get_user_unread_counts() (see [10]).
+    [19] = function()
+        db.query("DROP FUNCTION IF EXISTS get_user_unread_counts(VARCHAR)")
     end
 }

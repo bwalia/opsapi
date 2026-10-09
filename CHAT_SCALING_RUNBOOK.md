@@ -33,7 +33,9 @@ and free of the usual scale traps.
   whole page (was an N+1: one query per message on every poll). Keep it batched.
 - **Unread count is bounded.** `ChatChannelQueries.getByUser` caps the unread
   `COUNT(*)` at 100 (`LIMIT 100` subquery). The UI renders `99+`. Don't turn it
-  back into an unbounded correlated count.
+  back into an unbounded correlated count. (The old `get_user_unread_counts()`
+  SQL function was dropped: on 1M messages it took 33.7 s against 3.9 ms for
+  this query, and it joined messages to mentions, multiplying both counts.)
 - **Hot paths don't log.** `ChatMessageQueries.create`/`show` run on every send
   and every WS broadcast — they carry no `NOTICE` logging (only ERR/WARN). Don't
   add debug logging there.
