@@ -42,6 +42,18 @@ function Http.body(self)
     return RequestParser.parse_request(self)
 end
 
+--- The JSON request body alone (Http.body also merges URL params, so a body
+-- can't then tell "sent" from "in the path"). {} when empty.
+-- @return table | nil, err
+function Http.json_body()
+    ngx.req.read_body()
+    local raw = ngx.req.get_body_data()
+    if not raw or raw == "" then return {} end
+    local ok, data = pcall(require("cjson").decode, raw)
+    if not ok or type(data) ~= "table" then return nil, "request body must be a JSON object" end
+    return data
+end
+
 function Http.actor(self)
     return self.current_user and self.current_user.uuid
 end

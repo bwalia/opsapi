@@ -1,0 +1,13 @@
+<h2>Your <%= app_name %> licence key</h2>
+
+<p>Thank you<% if plan_name then %> for buying <strong><%= plan_name %></strong><% end %>. Here is your licence key:</p>
+
+<div class="code-box"><%= licence_key %></div>
+
+<p>Enter it in <%= app_name %> to activate it on this device. Keep it safe: anyone with the key can use your licence.</p>
+
+<% if account_link then %>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="<%= account_link %>" class="btn">Manage my licences</a>
+</p>
+<% end %>

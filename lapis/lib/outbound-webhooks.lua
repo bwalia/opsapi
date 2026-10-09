@@ -129,6 +129,7 @@ local function resolve(host)
     if #ips == 0 then return nil, "host has no IPv4 address" end
     return ips
 end
+Webhooks.resolve = resolve -- also used for workspace SMTP hosts (helper/namespace-mail.lua)
 
 -- ---------------------------------------------------------------------------
 -- Signing + sending
@@ -282,12 +283,20 @@ function Webhooks.deliverEvent(webhook_uuid, e, delivery)
         if type(v) == "string" then return cjson.decode(v) end
         return v
     end
+    local data = decoded(e.data)
+    -- A licence key the app asked for (Billing & Entitlements): never stored in the
+    -- event, decrypted here at send time from its encrypted delivery (≤ 24 h).
+    if type(data) == "table" and data.key_in_delivery then
+        data.key_in_delivery = nil
+        local ok, key = pcall(function() return require("lib.billing-delivery").forWebhook(data.uuid) end)
+        data.key = ok and key or nil
+    end
     local body = Webhooks.payload({
         id = e.uuid,
         type = e.event,
         created_at = created_at,
         namespace = { id = webhook.namespace_uuid, slug = webhook.namespace_slug },
-        data = decoded(e.data),
+        data = data,
         changes = decoded(e.changes),
     })
     return Webhooks.post(webhook.url, webhook.secret, e.event, delivery.id, body)

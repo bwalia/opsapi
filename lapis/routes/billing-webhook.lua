@@ -358,6 +358,20 @@ local DISPATCH = {
     ["charge.refunded"] = handlers.charge_refunded,
 }
 
+-- An object of Billing & Entitlements (an app's checkout, subscription, invoice
+-- or payment): marked opsapi=billing in its metadata, or a subscription row
+-- belonging to an app. Tax-only deployments have neither.
+local function belongs_to_app_billing(object)
+    local meta = object.metadata
+    if type(meta) == "table" and meta.opsapi == "billing" then return true end
+    if object.object == "invoice" and invoice_metadata(object).opsapi == "billing" then return true end
+    local sub_id = (object.object == "subscription" and object.id)
+        or (object.object == "invoice" and invoice_subscription_id(object))
+    if not sub_id then return false end
+    local row = BillingSubscriptionQueries.getByStripeId(sub_id)
+    return row ~= nil and row.app_id ~= nil and row.app_id ~= ngx.null
+end
+
 return function(app)
     app:post("/api/v2/public/billing/webhook", function(self)
         local cfg = PaymentProvider.stripe_config()
@@ -399,6 +413,12 @@ return function(app)
         end
 
         local object = event.data and event.data.object or {}
+        -- Billing & Entitlements' own Stripe objects (their own webhook,
+        -- routes/billing-payments.lua) are never this handler's business.
+        if belongs_to_app_billing(object) then
+            StripeWebhookQueries.markIgnored(event.id)
+            return { status = 200, json = { received = true, ignored = "app billing" } }
+        end
         local ok, herr = pcall(handler, object, event)
         if not ok then
             ngx.log(ngx.ERR, "Stripe webhook handler error for ", event.type, ": ", tostring(herr))

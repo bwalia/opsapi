@@ -2,6 +2,22 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## 1.1.0
+
+- New subpath `@opsapi/client/billing` for OpsAPI's Billing & Entitlements module. It needs an OpsAPI server with that module and `BILLING_SIGNING_KEY` set. Tokens and licence files use format v1 (docs/LICENCE_FORMAT.md).
+  - `createBilling()`: `getEntitlements()`, `can()`, `limit()`, `upsertCustomer()`, `recordPurchase()` (verified App Store, Google Play or external purchases) and `invalidate()`.
+    - Answers are ES256-signed tokens, checked against the server's JWKS and cached until they expire.
+    - When OpsAPI can't be reached, each app's offline policy applies: fail open within the grace period, or fail closed.
+    - One request is shared between concurrent checks.
+  - `requireFeature()` (Express/Connect) and `withFeature()` (fetch-style handlers) answer 402 `feature_required`.
+  - `createLicensing()` for apps without a back end. It uses the publishable key: `appInfo()`, `activate()`, `validate()`, `deactivate()`, `requestAccessLink()`, `checkout()` (a Stripe Checkout URL, or an upgrade with `licenseKey`) and `order()` (the order for a success page; a new licence key is in it once). Every mutating call sends an Idempotency-Key.
+  - Payments on the server: `checkout()` and `portal()` (Stripe Customer Portal). They need an API key with the `subscriptions` scope.
+  - `fingerprintHash(salt, machineId)`.
+  - `verifyLicenseFile()` returns `state`, `allowed` and `needsCheckIn`. It is protected against the clock being turned back (`highWater`).
+  - `tokenState()`, `verifyToken()`, `BillingError` (with the server's `code`) and `sha256Hex()`.
+- Typed paths for the billing, subscriptions, entitlements, licences, payments (Stripe Connect, checkout, portal, refunds), workspace-email and public billing endpoints: 932 paths.
+- Tested against every case in docs/licence-format-vectors.json, and against a live server.
+
 ## 1.0.0
 
 The first stable release. From here the client follows [SemVer](https://semver.org/): breaking changes come only in a new major version.

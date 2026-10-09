@@ -296,6 +296,145 @@ export async function POST(req: Request) {
 
 With Express, use `express.raw({ type: 'application/json' })` and pass `req.body` (a Buffer) and `req.headers`. Deliveries can arrive more than once, so use `event.id` to skip duplicates.
 
+## Billing & entitlements
+
+`@opsapi/client/billing` checks what your customers may use, on a server running the Billing & Entitlements module (`PROJECT_CODE=billing`, or `all`). In the dashboard, under **Billing**, you create an app, its features (on/off like `advanced_reports`, or limits like `projects`) and flat-tier plans. Customers get access from the app's default (free) plan, from a subscription, or from a grant you give them by hand.
+
+The server needs `BILLING_SIGNING_KEY`, an EC P-256 key that signs every answer. The SDK checks the signature against the server's public keys.
+
+### In your web app's server
+
+Create a workspace API key scoped to `entitlements` (read + create). Keep it on the server.
+
+```ts
+import { createBilling } from '@opsapi/client/billing';
+
+const billing = createBilling({
+  baseUrl: 'https://api.example.com',
+  apiKey: process.env.OPSAPI_BILLING_KEY!, // opsk_…, scoped to `entitlements`
+  app: 'acme', // the app's id or slug
+});
+
+// When someone signs up (email is required the first time):
+await billing.upsertCustomer(user.id, { email: user.email, first_name: user.firstName });
+
+if (await billing.can(user.id, 'advanced_reports')) showReports();
+const maxProjects = await billing.limit(user.id, 'projects'); // a number; null = unlimited
+const { plan, status, features } = await billing.getEntitlements(user.id);
+```
+
+Answers are cached until their token expires (15 minutes by default, set per app). An unknown user id isn't an error: it gets the default plan.
+
+Gate routes with `requireFeature` (Express/Connect) or `withFeature` (Next.js route handlers, Hono, Bun, Deno). Both answer **402** `{ code: 'feature_required', feature }` when the plan doesn't include the feature:
+
+```ts
+app.get('/reports', billing.requireFeature('advanced_reports', (req) => req.user?.id), sendReports);
+
+export const GET = billing.withFeature('advanced_reports', getUserId, async (req) => Response.json(await reports()), {
+  upgradeUrl: '/pricing',
+});
+```
+
+**When OpsAPI can't be reached**, each app follows its own policy (the defaults for web apps: `fail_closed`, 15-minute tokens, 3 days of grace). With *fail closed*, `can()` returns `false` and `limit()` returns `0` once the cached answer expires. With *fail open*, the last answer keeps working for the offline grace period (72 hours by default), and `getEntitlements()` marks it `stale`. A 4xx answer always throws, so a wrong key or app id never fails quietly.
+
+To pick up changes at once, subscribe a webhook to `subscription.*`, `billing.grant.*` and `billing.plan.*` and call `billing.invalidate(userId)` (or `billing.invalidate()` for everyone).
+
+### Taking payments (Stripe Checkout)
+
+Connect the workspace's Stripe account first (dashboard: **Billing → Payments**). Customers then pay on
+Stripe's hosted checkout page; OpsAPI fulfils the order from Stripe's webhook (a subscription, a purchase, and
+for desktop apps a licence). Use an API key that also has the `subscriptions` scope:
+
+```ts
+// Send the signed-in user to Stripe. A customer on another plan with an upgrade path pays the path's price.
+const { url } = await billing.checkout({
+  plan: 'pro',
+  customerExternalId: user.id,
+  coupon: 'LAUNCH25', // optional
+  successUrl: 'https://app.example.com/billing/done',
+  cancelUrl: 'https://app.example.com/pricing',
+});
+res.redirect(303, url!);
+
+// Payment method, invoices and cancelling, on Stripe's Customer Portal:
+const { url: portal } = await billing.portal({ customerExternalId: user.id, returnUrl: 'https://app.example.com/account' });
+```
+
+Without your own pages, link to the app's hosted pricing page (`/b/<app id>/pricing` on the dashboard): it
+does the same, and the buyer lands on a hosted success page that shows a new licence key once.
+
+### Recording store purchases
+
+If you sell through the App Store or Google Play, verify the receipt on your own server, then record it. It
+resolves to the same entitlements as any other sale. Map store product ids to plans in the dashboard (plan →
+App store product ids):
+
+```ts
+await billing.recordPurchase({
+  customerExternalId: user.id,
+  source: 'app_store',
+  storeProductId: 'com.example.pro.yearly',
+  externalTransactionId: transaction.id,
+  originalTransactionId: transaction.originalId,
+  expiresAt: transaction.expiresAt, // unix seconds, for subscriptions
+});
+```
+
+### Desktop and self-hosted apps: licence keys
+
+These need no back end of your own. The app uses only the app's **publishable key**: it identifies the app,
+so it is safe to ship. The licence key is the credential. The licence file verifies offline, in any language
+(docs/LICENCE_FORMAT.md has the format, test vectors and Swift/Python verifiers).
+
+```ts
+import { createLicensing, fingerprintHash, verifyLicenseFile } from '@opsapi/client/billing';
+
+const licensing = createLicensing({ baseUrl: 'https://api.example.com', publishableKey: 'pk_live_…' });
+
+// The machine id is hashed with the app's salt on the device. Never send raw hardware ids.
+const { fingerprint_salt } = await licensing.appInfo(); // cache this
+const fp = await fingerprintHash(fingerprint_salt, machineId); // e.g. IOPlatformUUID / MachineGuid / /etc/machine-id
+
+// Once, when the customer enters their key:
+const { license_file } = await licensing.activate({ licenseKey, fingerprintHash: fp, appVersion: '3.2.0', name: os.hostname() });
+saveToDisk(license_file);
+
+// On every start, offline:
+const { state, allowed, needsCheckIn, claims } = await verifyLicenseFile(readFromDisk(), {
+  jwks: EMBEDDED_JWKS, // from GET /api/v2/public/billing/jwks.json, or pass baseUrl to fetch it
+  fingerprintHash: fp,
+  app: APP_ID,
+  highWater: lastSeenTime, // persist max(now, iat): turning the clock back doesn't extend the grace period
+});
+if (!allowed) showRenewOrActivate(state); // 'past_grace' (and fail_closed) or 'access_ended'
+if (needsCheckIn) refreshInBackground(); // licensing.validate({ licenseKey, fingerprintHash: fp, appVersion })
+if (claims.updates_until && BUILD_DATE > claims.updates_until) showUpgradeOffer(); // this version isn't covered
+```
+
+| `state` | Meaning | `allowed` |
+|---|---|---|
+| `valid` | Within the refresh interval | yes |
+| `refresh` | Past `exp`, inside the grace period: refresh when online | yes |
+| `past_grace` | Past the grace period | only if the app's `offline_policy` is `fail_open` |
+| `access_ended` | A fixed-term pass or paid period is over | no |
+
+Errors are `BillingError`s with a `code`:
+- from OpsAPI: `invalid_license`, `activation_limit`, `license_suspended`, `license_revoked`, `access_ended`, `not_activated`, `locked_out`, `rate_limited`;
+- from offline checks: `bad_signature`, `wrong_machine`, `wrong_app`, `bad_version`.
+
+To sell from inside the app, `licensing.checkout({ planKey })` returns a Stripe Checkout URL to open in the
+browser (pass `licenseKey` to upgrade the plan that key holds), and `licensing.order(sessionId)` reads the
+order on your own success page; a new key is in it once. Put `{CHECKOUT_SESSION_ID}` in your `successUrl`
+(e.g. `https://example.com/thanks?session_id={CHECKOUT_SESSION_ID}`) and Stripe fills it in.
+
+`licensing.deactivate()` gives a machine's seat back. `licensing.requestAccessLink(email)` emails the customer
+a link to the hosted "my licences" page, where they can see their licences, free devices and get a new key
+for a lost one.
+
+**Recommended settings for desktop apps:** `fail_closed`, refresh every 7 days, 30 days of grace (the
+defaults for desktop and self-hosted apps). Customers can stay offline for a month, and a revocation
+reaches them within 37 days.
+
 ## Options
 
 | Option | Default | |

@@ -43,6 +43,7 @@ ProjectConfig.FEATURES = {
     CMS = "cms",                       -- Content: website pages + blog (articles, categories, tags)
     FIELD_SERVICE = "field_service",   -- Service jobs, job phases, engineer site visits
     SHOP = "shop",                     -- AI hardware shop: configurable catalogue, carts, quotes, Stripe checkout, RAG
+    BILLING = "billing",               -- Billing & Entitlements: apps, flat-tier plans, entitlements, licences (docs/BILLING_ENTITLEMENTS.md)
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -73,6 +74,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CMS,
         ProjectConfig.FEATURES.FIELD_SERVICE,
         ProjectConfig.FEATURES.SHOP,
+        ProjectConfig.FEATURES.BILLING,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -108,6 +110,19 @@ ProjectConfig.PROJECT_FEATURES = {
     tax_copilot = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- Billing & Entitlements - a client registers their app, defines features
+    -- and flat-tier plans, and their app checks what each customer may use
+    -- (signed entitlement tokens; licence keys for desktop/self-hosted apps).
+    -- Brings the customers table it builds on. The hosted product runs as its
+    -- own deployment with PROJECT_CODE=billing (docs/BILLING_ENTITLEMENTS.md).
+    billing = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.BILLING,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
@@ -538,6 +553,16 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "fs_quotes", name = "Quotes", description = "Remedial and project quotations, and their conversion into jobs", category = "Field Service" },
         { machine_name = "fs_reports", name = "Reports", description = "Asset, compliance, labour and performance reports (CSV / PDF / Power BI)", category = "Field Service" },
         { machine_name = "simpro_sync", name = "Simpro Sync", description = "Connection to the Simpro build, and the push/pull audit trail", category = "Field Service" },
+    },
+
+    -- Billing & Entitlements. URL segment == module (/api/v2/<module>/...), so
+    -- API-key scopes line up with these permissions.
+    billing = {
+        { machine_name = "billing", name = "Billing", description = "Apps, features, flat-tier plans and billing reports", category = "Billing" },
+        { machine_name = "subscriptions", name = "Subscriptions", description = "Customers' subscriptions and manual access grants", category = "Billing" },
+        { machine_name = "entitlements", name = "Entitlements", description = "Check what a customer may use (server-to-server)", category = "Billing" },
+        { machine_name = "licenses", name = "Licences", description = "Licence keys and machine activations for desktop and self-hosted apps", category = "Billing" },
+        { machine_name = "customers", name = "Customers", description = "Customer management", category = "Commerce" },
     },
 
     -- Theme system (platform-level; always on)

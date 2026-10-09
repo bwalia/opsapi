@@ -272,6 +272,7 @@ function ProjectMigrator.migrateAll(projects_root)
         PluginEvents.ensureSchema()
         require("helper.plugin-jobs").ensureSchema()
         PluginEvents.syncAudit()
+        PluginEvents.syncCore()
         PluginEvents.syncTriggers()
     end)
     if not ok then

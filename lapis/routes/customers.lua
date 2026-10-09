@@ -210,6 +210,12 @@ return function(app)
             local ok2, result = pcall(CustomerQueries.destroy, customer_id)
 
             if not ok2 then
+                -- Purchases are kept for accounting (RESTRICT): the customer's billing
+                -- data is erased through its own endpoint instead.
+                if tostring(result):find("foreign key", 1, true) then
+                    return error_response(409, "This customer has billing records (purchases are kept for accounting). "
+                        .. "Erase their personal data with DELETE /api/v2/customers/" .. tostring(customer_id) .. "/billing-data")
+                end
                 return error_response(500, "Failed to delete customer", tostring(result))
             end
 

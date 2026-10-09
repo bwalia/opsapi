@@ -6,11 +6,13 @@ local Stripe = {}
 Stripe.__index = Stripe
 
 -- Construct a Stripe API client for the single platform merchant.
---   opts.api_key  override the secret key (defaults to STRIPE_SECRET_KEY env)
+--   opts.api_key     override the secret key (defaults to STRIPE_SECRET_KEY env)
+--   opts.ssl_verify  verify Stripe's certificate (default: STRIPE_SSL_VERIFY == "true"); also settable later
 function Stripe.new(opts)
     opts = opts or {}
     local self = setmetatable({}, Stripe)
     self.api_key = opts.api_key or Global.getEnvVar("STRIPE_SECRET_KEY")
+    self.ssl_verify = opts.ssl_verify
     self.base_url = "https://api.stripe.com/v1"
 
     if not self.api_key then
@@ -78,14 +80,12 @@ function Stripe:_request(method, endpoint, data, idempotency_key)
         body = table.concat(params, "&")
     end
 
-    -- TLS peer verification for outbound Stripe calls. Disabled by default to
-    -- match the current deployment, which has no CA trust store configured (no
-    -- lua_ssl_trusted_certificate in nginx.conf, no ca-certificates in the
-    -- image). Turning it on without that store would fail every Stripe call.
-    -- To enable — strongly recommended for production — configure the CA bundle
-    -- in the image + nginx, then set STRIPE_SSL_VERIFY=true. Kept as a config
-    -- switch so enabling it is a deploy-time change, not a code change.
-    local ssl_verify = Global.getEnvVar("STRIPE_SSL_VERIFY") == "true"
+    -- TLS peer verification for outbound Stripe calls. nginx.conf has the CA
+    -- store (lua_ssl_trusted_certificate). Clients that don't set ssl_verify
+    -- (the tax app's) keep the old default: verify only when
+    -- STRIPE_SSL_VERIFY=true. The billing module sets it on (lib/billing-stripe.lua).
+    local ssl_verify = self.ssl_verify
+    if ssl_verify == nil then ssl_verify = Global.getEnvVar("STRIPE_SSL_VERIFY") == "true" end
 
     -- Minimal logging by default; full request/response bodies (which can carry
     -- PII) are logged only when STRIPE_DEBUG=true.

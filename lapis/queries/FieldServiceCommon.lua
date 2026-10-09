@@ -203,6 +203,29 @@ end
 --- Run fn inside a transaction. Nest-safe per request: an inner call joins the
 -- outer transaction instead of issuing its own BEGIN/COMMIT.
 -- @return the values returned by fn, or nil + error message on failure
+--- Run `fn` after the current transaction commits (now, outside one). For
+-- side effects other readers must not see early, e.g. dropping a cache entry:
+-- done before COMMIT, a read in between re-caches the old state.
+function Common.afterCommit(fn)
+    local ctx = ngx and ngx.ctx
+    if ctx and (ctx.fs_tx_depth or 0) > 0 then
+        ctx.fs_after_commit = ctx.fs_after_commit or {}
+        table.insert(ctx.fs_after_commit, fn)
+        return
+    end
+    fn()
+end
+
+local function run_after_commit(ctx, committed)
+    local hooks = ctx.fs_after_commit
+    ctx.fs_after_commit = nil
+    if not committed or not hooks then return end
+    for _, fn in ipairs(hooks) do
+        local ok, err = pcall(fn)
+        if not ok then ngx.log(ngx.ERR, "[FieldService] after-commit hook failed: ", tostring(err)) end
+    end
+end
+
 function Common.transaction(fn)
     local ctx = ngx and ngx.ctx or {}
     local depth = ctx.fs_tx_depth or 0
@@ -212,10 +235,12 @@ function Common.transaction(fn)
 
     db.query("BEGIN")
     ctx.fs_tx_depth = 1
+    ctx.fs_after_commit = nil
     local results = { pcall(fn) }
     ctx.fs_tx_depth = 0
 
     if not results[1] then
+        run_after_commit(ctx, false)
         pcall(db.query, "ROLLBACK")
         -- Raised errors carry SQL/stack detail: log it, return a generic message.
         ngx.log(ngx.ERR, "[FieldService] transaction rolled back: ", tostring(results[2]))
@@ -223,10 +248,12 @@ function Common.transaction(fn)
     end
     -- fn signalled a handled failure (nil, err): roll back, pass it through.
     if results[2] == nil and results[3] ~= nil then
+        run_after_commit(ctx, false)
         pcall(db.query, "ROLLBACK")
         return nil, results[3]
     end
     db.query("COMMIT")
+    run_after_commit(ctx, true)
     return unpack(results, 2, table.maxn(results))
 end
 

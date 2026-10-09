@@ -182,6 +182,7 @@ The `start.sh` script handles the full setup: environment config, Docker build, 
 | `ecommerce` | E-commerce platform (core + stores, products, orders) |
 | `collaboration` | Chat + Kanban + Services |
 | `hospital` | Hospital CRM |
+| `billing` | Billing & Entitlements: sell your apps on flat-tier plans, entitlement checks, licence keys ([docs/BILLING_ENTITLEMENTS.md](docs/BILLING_ENTITLEMENTS.md), SDK `@opsapi/client/billing`) |
 | `core_only` | Just authentication tables |
 
 ### Environments
