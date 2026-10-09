@@ -272,6 +272,25 @@ Wrong field names, enum values, sort columns and missing required fields are all
 
 For an API key to call a plugin's API, scope the key to one of the plugin's modules, for example `helpdesk_tickets`.
 
+### Property Deals (ships typed)
+
+The Property Deals plugin (a back office for buying and selling homes) ships its types in this package, so you don't need to generate them:
+
+```ts
+import { createPropertyDealsClient, type Today } from '@opsapi/client/property-deals';
+
+const api = createPropertyDealsClient({ baseUrl, token, namespace: 'demo-buyers' });
+const { data } = await api.GET('/api/v2/property-deals/today');
+const today: Today = data!.data;   // my tasks by urgency, red deals, approvals waiting, £ at risk
+
+const res = await api.POST('/api/v2/property-deals/deals/{id}/stage', {
+  params: { path: { id: dealUuid } }, body: { to: 'exchange' },
+});
+// 409 when the stage's gate isn't met: res.error.details.missing lists every item.
+```
+
+The client also covers every core route. Endpoint-by-endpoint examples for each screen are in [docs/property-deals/API.md](../../docs/property-deals/API.md). Maintainers regenerate the types with `npm run generate:property-deals` against a server that has the plugin.
+
 ## Webhooks
 
 Verify OpsAPI webhook deliveries before trusting them. This needs the raw request body:
