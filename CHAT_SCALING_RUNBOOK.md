@@ -25,9 +25,12 @@ and free of the usual scale traps.
   with `before`/`after` message cursors + `created_at DESC` (keyset). Stays
   O(log n) at any depth. Never reintroduce `OFFSET`-based paging.
 - **Partial active-member indexes** (`WHERE left_at IS NULL`) back membership
-  checks and WS fan-out; **BRIN** on `created_at` for time ranges; **GIN**
-  (`search_vector`) for full-text search; unique constraints stop dup
-  reactions/members.
+  checks and WS fan-out; **BRIN** on `created_at` for time ranges; unique
+  constraints stop dup reactions/members. *(Correction: this used to say GIN
+  serves full-text search. Search (`ChatMessageQueries.search`) is
+  `content ILIKE '%term%'` within one channel; nothing queries the two GIN
+  indexes, `search_vector` and `to_tsvector(content)`. They only add write cost.
+  See §2a "Search".)*
 - **Reactions are batch-loaded.** `getByChannel` calls
   `getReactionsForMessages(uuids)` — one `message_uuid IN (…)` query for the
   whole page (was an N+1: one query per message on every poll). Keep it batched.
@@ -53,25 +56,105 @@ trigger fires.
 
 ### 2a. Partition (or archive) `chat_messages`
 
-- **Status:** `chat_messages` is a single regular table. `chat_messages_archive`
-  exists (created by `migrations/chat-system-production.lua`) but **nothing
-  rotates into it yet**.
+- **Status: unbuilt.** `chat_messages_archive` exists (`LIKE chat_messages
+  INCLUDING ALL`, from `migrations/chat-system-production.lua` [9]). So does
+  `archive_old_messages(days_old)`, but it is not an archival job and **nothing
+  calls it**:
+  - it moves only `is_deleted = true` rows;
+  - it does so in one unbatched `DELETE … RETURNING` (one long transaction, one
+    WAL burst);
+  - reactions cascade-delete with each moved message;
+  - the archive table has **no foreign keys**, so archived rows would outlive
+    their workspace.
+
+  Treat archival as not existing.
 - **Trigger:** approaching **~100M** rows in `chat_messages`, or when
-  vacuum/index-bloat/backup time on that table becomes a problem. Watch
-  `pg_stat_user_tables.n_live_tup` and table size.
-- **How (pick one):**
-  - *Archival job (lower risk):* a scheduled task (cron/RemoteTrigger) that moves
-    messages older than N months (and with no live thread refs) into
-    `chat_messages_archive`, in batches, off-peak. Keeps the hot table small
-    without changing its structure.
-  - *Declarative partitioning (bigger, better long-term):* recreate
-    `chat_messages` as `PARTITION BY RANGE (created_at)` with monthly partitions,
-    migrate rows, then swap. Search still works per-partition; the covering index
-    is created per-partition.
-- **Risk:** partitioning a live, populated table = create-new + migrate-all +
-  swap. Needs a maintenance window or a careful online migration (e.g. dual-write
-  + backfill). **Never run this casually against the shared prod DB.** Rehearse
-  on a copy; have a rollback.
+  vacuum/index-bloat/backup time on that table becomes a problem. **Do not build
+  either step before the trigger: it migrates a live table.** Check:
+  ```sql
+  SELECT n_live_tup, n_dead_tup, last_autovacuum,
+         pg_size_pretty(pg_total_relation_size('chat_messages')) AS total_size
+  FROM pg_stat_user_tables WHERE relname = 'chat_messages';
+  ```
+
+#### Decisions (2026-10-09)
+
+- **Retention.**
+  - Messages are kept for the life of the workspace. Deleting a workspace
+    already deletes its channels, messages and reactions (FK cascade). Archival
+    moves rows out of the hot table; it does not delete them.
+  - **Archive age: 12 months**, measured from `created_at`.
+  - **A deleted message is purged after 30 days.** Today "delete" only sets
+    `is_deleted`; the content stays forever. The purge blanks `content`,
+    `attachments` and `metadata`, deletes their objects, and keeps the row as a
+    tombstone so threads and reply counts stay intact. This is the privacy half
+    of retention, it is cheap, and it doesn't depend on the trigger.
+- **Attachments: object storage only, never Postgres blobs.** Already the case:
+  the dashboard uploads to MinIO (`/api/v2/documents/upload`, prefix
+  `chat-attachments/`), and messages store `file_url` references.
+  - Archiving a message leaves its objects alone.
+  - The deleted-message purge deletes them.
+  - Deleting a workspace should delete its `chat-attachments/` objects. Today
+    nothing does, so they are orphaned (a gap to close with the purge).
+- **Search covers the hot table only (the last 12 months).**
+  - Archived messages aren't searchable in the app; they're reachable by admin
+    SQL or an export.
+  - Today's search is a per-channel `ILIKE` (no index; cost grows with the
+    channel's size).
+  - Before archival, switch it to `search_vector @@ websearch_to_tsquery(...)`
+    (a generated column, always up to date), and drop the duplicate
+    `chat_messages_content_search_idx`. That is a query change: `EXPLAIN
+    (ANALYZE, BUFFERS)` before and after, in its own PR.
+
+#### How, when the trigger fires
+
+1. **Archival job (do this first).**
+   - **Which rows:** messages older than 12 months that have **no live thread
+     references**:
+     - they are not the parent of any hot reply;
+     - if they are a reply, their parent is archived or archiving in the same
+       batch.
+   - **Batches:** 10,000 rows, each batch its own transaction. Tried on a
+     1M-row sandbox (one batch, rolled back):
+     ```sql
+     WITH b AS (SELECT id FROM chat_messages m
+                WHERE created_at < now() - interval '12 months'
+                  AND NOT EXISTS (SELECT 1 FROM chat_messages r WHERE r.parent_message_uuid = m.uuid)
+                ORDER BY id LIMIT 10000 FOR UPDATE SKIP LOCKED),
+          m AS (DELETE FROM chat_messages USING b WHERE chat_messages.id = b.id
+                RETURNING chat_messages.*)
+     INSERT INTO chat_messages_archive (id, uuid, channel_uuid, user_uuid, content, content_type,
+         parent_message_uuid, mentions, attachments, metadata, is_edited, is_deleted, is_pinned,
+         reply_count, edited_at, deleted_at, created_at, updated_at)
+     SELECT id, uuid, channel_uuid, user_uuid, content, content_type,
+         parent_message_uuid, mentions, attachments, metadata, is_edited, is_deleted, is_pinned,
+         reply_count, edited_at, deleted_at, created_at, updated_at
+     FROM m ON CONFLICT (uuid) DO NOTHING;
+     ```
+     - The columns are listed because `search_vector` is a generated column, so
+       `SELECT *` fails.
+     - The reply check shown is the simple half (no hot replies). Add the
+       "parent archived too" half before using it.
+   - **Idempotent and resumable:** the data is the progress marker, and a rerun
+     just continues.
+   - **Single run:** `pg_try_advisory_lock`.
+   - **Off-peak:** scheduled (plugin job or k8s CronJob) at night, stopping
+     after a time budget.
+   - **Before it runs:**
+     - move reactions into a `chat_message_reactions_archive` in the same batch
+       (the FK cascades);
+     - add `chat_messages_archive.channel_uuid → chat_channels ON DELETE
+       CASCADE`, so workspace deletion still erases archived history;
+     - replace or drop `archive_old_messages()`.
+2. **Declarative partitioning, only if (1) is not enough.**
+   - Recreate `chat_messages` as `PARTITION BY RANGE (created_at)` with monthly
+     partitions.
+   - Backfill, then swap names. Dual-write, or a maintenance window, covers the
+     gap.
+   - The covering index and unique constraints become per partition. The unique
+     `uuid` must include `created_at`, or move to a lookup table.
+   - **Rehearse on a restored copy and keep a rollback (the old table, renamed
+     but kept).** **Never run this casually against the shared prod DB.**
 
 ### 2b. Redis pub/sub for the WebSocket hub
 
