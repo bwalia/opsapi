@@ -501,7 +501,8 @@ local function smtp_send(opts)
 
     local from_name = opts.from_name or cfg.from_name
     local from_email = opts.from_email or cfg.from_email
-    local from = from_name .. " <" .. from_email .. ">"
+    -- A workspace's own server may have no display name: send from the bare address.
+    local from = (from_name and from_name ~= "") and (from_name .. " <" .. from_email .. ">") or from_email
 
     local send_opts = {
         from    = from,
