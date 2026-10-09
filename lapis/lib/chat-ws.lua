@@ -21,20 +21,24 @@
     (browsers can't set headers on a WS handshake). Delivery authorization is
     channel membership, checked at broadcast time from chat_channel_members.
 
-    Scale: prod is a single worker in a single pod (worker_processes 1,
-    replicaCount 1) with lua_code_cache on, so this module-level registry sees
-    every connection — no Redis needed. If workers/replicas ever scale, keep
-    everything else and replace broadcast()'s fanout with Redis PUBLISH + a
-    per-connection SUBSCRIBE (the "send only from the owning coroutine" rule
-    still holds).
+    Scale: every pod (and every nginx worker) keeps its own registry of the
+    sockets it holds. A message reaches the other pods through Redis pub/sub
+    (CHAT_SCALING_RUNBOOK.md §1): the pod that handles the send delivers to its
+    own connections directly, then PUBLISHes the frame + recipient list to
+    opsapi:chat:<namespace_id>:<channel_uuid>. Every worker runs one subscriber
+    (start(), from init_worker) on opsapi:chat:* that enqueues onto ITS local
+    connections and skips what it published itself, so nothing arrives twice.
+    The single-writer rule holds on both paths: only enqueue + sem:post.
+    Redis down or REDIS_ENABLED=false: delivery stays on this pod (as before
+    pub/sub), a WARN says so, and a send never fails because of it.
 ]]
 
 local ws_server = require("resty.websocket.server")
 local semaphore = require("ngx.semaphore")
 local cjson = require("cjson.safe")
-local jwt = require("resty.jwt")
 local Global = require("helper.global")
 local db = require("lapis.db")
+local RedisClient = require("helper.redis-client")
 
 local _M = {}
 
@@ -46,6 +50,15 @@ local next_id = 0
 local MAX_QUEUE = 200
 local RECV_TIMEOUT_MS = 30000
 local PONG_FRAME = "\0pong"
+
+-- Cross-pod delivery (Redis pub/sub)
+local PREFIX = "opsapi:chat:"
+local HEARTBEAT_S = 10      -- the subscriber hears its own heartbeat this often...
+local STALE_MS = 35000      -- ...so this long without any traffic means a dead link
+local MAX_BACKOFF_S = 30
+local worker_id             -- tags what this worker publishes; its subscriber skips those
+local subscribed = false
+local publish_warned_at = 0
 
 local function register(conn)
     local set = connections[conn.user_uuid]
@@ -86,7 +99,31 @@ local function push_to_user(user_uuid, frame)
     end
 end
 
---- Fan an event out to every connected member of a channel.
+local function origin()
+    if not worker_id then
+        worker_id = string.format("%s:%d:%d", os.getenv("HOSTNAME") or "", ngx.worker.pid(),
+            math.floor(ngx.now() * 1000))
+    end
+    return worker_id
+end
+
+-- Hand a frame to the other pods. Never raises: the caller has already
+-- delivered on this pod, so a Redis failure only costs cross-pod delivery.
+local function publish(key, users, frame)
+    if not RedisClient.enabled() then return end
+    local red = RedisClient.connect()
+    local ok, err = false, "Redis unreachable"
+    if red then
+        ok, err = red:publish(PREFIX .. key, cjson.encode({ o = origin(), u = users, f = frame }))
+        if ok then RedisClient.release(red) else red:close() end
+    end
+    if not ok and ngx.now() - publish_warned_at >= 60 then
+        publish_warned_at = ngx.now()
+        ngx.log(ngx.WARN, "[chat-ws] PUBLISH failed (", tostring(err), "); delivering on this pod only")
+    end
+end
+
+--- Fan an event out to every connected member of a channel, on every pod.
 -- Called from a mutation request. Safe: only Lua tables + semaphores, never a
 -- foreign socket. @param event_type e.g. "message:new" | "reaction:update".
 function _M.broadcast(channel_uuid, event_type, data)
@@ -98,19 +135,27 @@ function _M.broadcast(channel_uuid, event_type, data)
         "SELECT user_uuid FROM chat_channel_members WHERE channel_uuid = ? AND left_at IS NULL",
         channel_uuid
     )
-    for _, m in ipairs(members or {}) do
-        if connections[m.user_uuid] then
-            push_to_user(m.user_uuid, frame)
-        end
+    local users = {}
+    for i, m in ipairs(members or {}) do
+        users[i] = m.user_uuid
+        push_to_user(m.user_uuid, frame)
+    end
+    -- ponytail: the recipient list rides in the message (subscribers do no DB
+    -- work); ~40 bytes a member, so switch to a per-pod membership lookup if
+    -- channels reach tens of thousands of members.
+    if #users > 0 then
+        publish(tostring(data and data.namespace_id or "-") .. ":" .. channel_uuid, users, frame)
     end
 end
 
---- Push an event to one user's open connections (all their tabs), e.g.
--- "agent:done" from the background agent run. Same enqueue-only safety as
--- broadcast(), so it's legal from a timer.
+--- Push an event to one user's open connections (all their tabs, any pod),
+-- e.g. "agent:done" from the background agent run. Same enqueue-only safety
+-- as broadcast(), so it's legal from a timer.
 function _M.push_user(user_uuid, event_type, data)
     local frame = user_uuid and cjson.encode({ type = event_type, data = data })
-    if frame then push_to_user(user_uuid, frame) end
+    if not frame then return end
+    push_to_user(user_uuid, frame)
+    publish("user:" .. user_uuid, { user_uuid }, frame)
 end
 
 --- Push a new message to a channel's connected members.
@@ -126,6 +171,66 @@ function _M.broadcast_message(channel_uuid, namespace_id, message, channel)
         channel_type = channel and channel.type or nil,
         message = message,
     })
+end
+
+-- Subscriber side: a frame another worker published. Enqueue only.
+local function deliver(payload)
+    local m = cjson.decode(payload)
+    if type(m) ~= "table" or m.o == origin() or type(m.f) ~= "string" or type(m.u) ~= "table" then return end
+    for _, user_uuid in ipairs(m.u) do
+        push_to_user(user_uuid, m.f)
+    end
+end
+
+-- One subscription, held until the link drops. A pubsub connection can't go
+-- back to the keepalive pool, so it is always closed. @return was_up, err
+local function subscribe()
+    local red = RedisClient.connect()
+    if not red then return false, "Redis unreachable" end
+    red:set_timeouts(1000, 1000, STALE_MS)
+    local ok, err = red:psubscribe(PREFIX .. "*")
+    if not ok then
+        red:close()
+        return false, "PSUBSCRIBE failed: " .. tostring(err)
+    end
+    subscribed = true
+    ngx.log(ngx.NOTICE, "[chat-ws] subscribed to Redis; chat delivery spans pods")
+    while not ngx.worker.exiting() do
+        local res, rerr = red:read_reply()
+        if not res then
+            err = rerr
+            break
+        end
+        if res[1] == "pmessage" then deliver(res[4]) end
+    end
+    subscribed = false
+    red:close()
+    return true, err
+end
+
+-- One WARN per outage; reconnect at once after a working link, then back off.
+local function run(premature, backoff)
+    if premature or ngx.worker.exiting() then return end
+    local was_up, err = subscribe()
+    if ngx.worker.exiting() then return end
+    if was_up or backoff == 0 then
+        ngx.log(ngx.WARN, "[chat-ws] Redis subscriber down (", tostring(err),
+            "); chat delivery is local to this pod until it reconnects")
+    end
+    backoff = was_up and 1 or math.min(math.max(backoff, 1) * 2, MAX_BACKOFF_S)
+    ngx.timer.at(was_up and 0 or backoff, run, backoff)
+end
+
+--- Start this worker's subscriber (init_worker). No-op when REDIS_ENABLED=false.
+function _M.start()
+    if not RedisClient.enabled() then return end
+    origin()
+    ngx.timer.at(0, run, 0)
+    -- Keeps the link provably alive: the subscriber hears this within
+    -- HEARTBEAT_S, or read_reply times out at STALE_MS and it reconnects.
+    ngx.timer.every(HEARTBEAT_S, function(premature)
+        if not premature and subscribed then publish("hb:" .. origin(), {}, "") end
+    end)
 end
 
 -- Verify the JWT from the ?token param. Mirrors middleware/auth.lua's core.

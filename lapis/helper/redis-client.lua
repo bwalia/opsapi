@@ -23,8 +23,13 @@ function RedisClient.connect()
     if not red:connect(os.getenv("REDIS_HOST") or "127.0.0.1", tonumber(os.getenv("REDIS_PORT")) or 6379) then
         return nil
     end
+    -- A pooled connection is already authenticated and on the right database.
+    if (red:get_reused_times() or 0) > 0 then return red end
     local password = os.getenv("REDIS_PASSWORD")
-    if password and password ~= "" and not red:auth(password) then return nil end
+    if password and password ~= "" and not red:auth(password) then
+        red:close()
+        return nil
+    end
     local dbnum = tonumber(os.getenv("REDIS_DB")) or 0
     if dbnum > 0 then red:select(dbnum) end
     return red
