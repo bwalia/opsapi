@@ -140,6 +140,13 @@ app:get("/ready", function(self)
         return { status = 503, json = { ready = false, reason = "Plugin failed to load: " .. table.concat(codes, ", ") } }
     end
 
+    -- With more than one replica (the Helm chart sets CHAT_REQUIRE_REDIS), a pod
+    -- whose Redis subscriber is down would miss chat events sent through the
+    -- other pods; keep it out of rotation until it reconnects.
+    if os.getenv("CHAT_REQUIRE_REDIS") == "true" and not require("lib.chat-ws").subscribed() then
+        return { status = 503, json = { ready = false, reason = "Chat Redis subscriber not connected" } }
+    end
+
     -- `version` is the release this pod runs (e.g. 1.0.183): Ring Promoter
     -- checks it after a deploy, so an old pod still answering 200 isn't success.
     return { status = 200, json = { ready = true, version = APP_VERSION, timestamp = ngx.time() } }

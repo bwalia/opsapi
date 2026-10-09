@@ -321,7 +321,9 @@ function ChatMessageQueries.getPinned(channel_uuid)
     return db.query(sql, channel_uuid)
 end
 
--- Search messages in a channel
+-- Search messages in a channel: words, not substrings (stemmed, so "meetings"
+-- finds "meeting"; quotes, OR and -word work), on the search_vector GIN index.
+-- A substring ILIKE scanned the whole channel when few messages matched.
 function ChatMessageQueries.search(channel_uuid, search_term, params)
     local limit = params.limit or 50
     local offset = params.offset or 0
@@ -332,13 +334,12 @@ function ChatMessageQueries.search(channel_uuid, search_term, params)
         INNER JOIN users u ON u.uuid = m.user_uuid
         WHERE m.channel_uuid = ?
           AND m.is_deleted = false
-          AND m.content ILIKE ?
+          AND m.search_vector @@ websearch_to_tsquery('english', ?)
         ORDER BY m.created_at DESC
         LIMIT ? OFFSET ?
     ]]
 
-    local search_pattern = "%" .. search_term .. "%"
-    return db.query(sql, channel_uuid, search_pattern, limit, offset)
+    return db.query(sql, channel_uuid, search_term, limit, offset)
 end
 
 -- Get unread messages count for a user in a channel

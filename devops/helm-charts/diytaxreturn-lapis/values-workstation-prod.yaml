@@ -26,6 +26,7 @@ image:
   tag: latest
   pullPolicy: Always
 
+# Stays 1: pinned to cloud003 with Recreate; un-pin before adding replicas.
 replicaCount: 1
 
 # Same as values-workstation-int.yaml: Recreate avoids surge deadlock on a

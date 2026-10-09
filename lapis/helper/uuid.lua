@@ -45,6 +45,25 @@ local function random_bytes(n)
     return nil
 end
 
+--- A secret string (passwords, codes) of `len` characters from `alphabet`,
+-- from the CSPRNG with no modulo bias. Raises rather than fall back to
+-- math.random: a guessable secret is worse than a failed request.
+function Uuid.random_string(len, alphabet)
+    local k, out = #alphabet, {}
+    local limit = 256 - 256 % k -- bytes at or above this would favour the first characters
+    while #out < len do
+        local bytes = random_bytes(len * 2) or error("no CSPRNG available")
+        for i = 1, #bytes do
+            local b = bytes:byte(i)
+            if b < limit then
+                out[#out + 1] = alphabet:sub(b % k + 1, b % k + 1)
+                if #out == len then break end
+            end
+        end
+    end
+    return table.concat(out)
+end
+
 local FORMAT = "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x"
 
 --- @return string lower-case RFC 4122 version 4 UUID

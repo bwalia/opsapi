@@ -1,12 +1,11 @@
 --[[
     Rate Limiting Middleware
 
-    Uses OpenResty's ngx.shared.DICT for distributed counters across workers.
-    Implements a sliding window counter per IP + route.
-
-    Shared dicts (declared in nginx.conf):
-      - rate_limit_store: main counter storage
-      - rate_limit_locks: lock storage for atomic operations
+    Fixed-window counter per IP + route. Per-route limits count in Redis, so
+    the limit holds across every pod; when Redis is off or unreachable they
+    count in this pod's shared memory (rate_limit_store). The global limit
+    (middleware/global-rate-limit.lua) runs on every request and stays in
+    shared memory (local_only): a per-pod DDoS guard needs no network hop.
 
     Returns standard rate limit headers:
       X-RateLimit-Limit     — max requests per window
@@ -15,9 +14,36 @@
       Retry-After           — seconds to wait (only on 429)
 ]]
 
+local RedisClient = require("helper.redis-client")
+
 local RateLimit = {}
 
 local DICT_NAME = "rate_limit_store"
+
+-- INCR and set the expiry on the first hit, atomically. @return {count, ttl}
+local INCR = "local n = redis.call('INCR', KEYS[1]) if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end "
+    .. "return {n, redis.call('TTL', KEYS[1])}"
+
+--- Count one hit on `key` in a `window`-second window: in Redis (one count for
+-- every pod) unless `local_only`, else in this pod's shared memory.
+-- @return count, seconds left in the window | nil when nothing can count
+function RateLimit.incr(key, window, local_only)
+    if not local_only then
+        local red = RedisClient.connect()
+        if red then
+            local res = red:eval(INCR, 1, key, window)
+            if type(res) == "table" then
+                RedisClient.release(red)
+                return tonumber(res[1]), tonumber(res[2])
+            end
+            red:close()
+        end
+    end
+    local dict = ngx.shared[DICT_NAME]
+    local n = dict and dict:incr(key, 1, 0, window)
+    if not n then return nil end
+    return n, dict:ttl(key)
+end
 
 --- The client's IP, as our own proxies saw it (helper/client-ip.lua: the
 -- right-most X-Forwarded-For hop that isn't a trusted proxy, trusted =
@@ -32,30 +58,18 @@ end
 -- @param key string Unique key (typically "prefix:ip")
 -- @param rate number Max requests per window
 -- @param window number Window duration in seconds
+-- @param local_only boolean count in this pod only (the global limit)
 -- @return boolean allowed
 -- @return number remaining requests
 -- @return number retry_after seconds (0 if allowed)
-function RateLimit.check(key, rate, window)
-    local dict = ngx.shared[DICT_NAME]
-    if not dict then
-        ngx.log(ngx.WARN, "rate-limit: shared dict '", DICT_NAME, "' not available, allowing request")
-        return true, rate, 0
-    end
-
-    -- incr(key, value, init, init_ttl)
-    -- Atomically increments. If key doesn't exist, initializes to init with init_ttl expiry.
-    local current, err = dict:incr(key, 1, 0, window)
+function RateLimit.check(key, rate, window, local_only)
+    local current, ttl = RateLimit.incr("rl:" .. key, window, local_only)
     if not current then
-        ngx.log(ngx.ERR, "rate-limit: incr failed for key=", key, " err=", err)
-        return true, rate, 0 -- fail open
+        return true, rate, 0 -- fail open: nothing to count with
     end
-
     if current > rate then
-        local ttl = dict:ttl(key)
-        local retry = math.ceil(ttl or window)
-        return false, 0, retry
+        return false, 0, math.ceil((ttl and ttl > 0) and ttl or window)
     end
-
     return true, rate - current, 0
 end
 
@@ -91,7 +105,7 @@ end
 --       ...
 --   end))
 --
--- @param config table { rate: number, window: number, prefix: string }
+-- @param config table { rate: number, window: number, prefix: string, local_only: boolean }
 -- @param handler function(self) The Lapis route handler
 -- @return function Wrapped handler
 function RateLimit.wrap(config, handler)
@@ -103,7 +117,7 @@ function RateLimit.wrap(config, handler)
         local ip = RateLimit.getClientIP()
         local key = prefix .. ":" .. ip
 
-        local allowed, remaining, retry_after = RateLimit.check(key, rate, window)
+        local allowed, remaining, retry_after = RateLimit.check(key, rate, window, config.local_only)
         set_headers(rate, remaining, retry_after)
 
         if not allowed then
@@ -136,7 +150,7 @@ function RateLimit.checkBefore(self, config)
     local ip = RateLimit.getClientIP()
     local key = prefix .. ":" .. ip
 
-    local allowed, remaining, retry_after = RateLimit.check(key, rate, window)
+    local allowed, remaining, retry_after = RateLimit.check(key, rate, window, config.local_only)
     set_headers(rate, remaining, retry_after)
 
     if not allowed then

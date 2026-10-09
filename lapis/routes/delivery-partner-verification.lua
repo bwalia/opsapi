@@ -2,54 +2,29 @@ local respond_to = require("lapis.application").respond_to
 local AuthMiddleware = require("middleware.auth")
 local db = require("lapis.db")
 local cjson = require("cjson")
+local Global = require("helper.global")
 
--- In-memory OTP storage (in production, use Redis or database with expiry)
-local otp_storage = {}
+-- Phone verification codes: one per user in delivery_partner_otps (shared by
+-- every pod), stored as an HMAC bound to the user and the phone, 5 tries.
+local OTP_TTL = 300
+local MAX_ATTEMPTS = 5
+local RESEND_SECONDS = 60
 
--- Generate a random 6-digit OTP
-local function generateOtp()
-    return tostring(math.random(100000, 999999))
+local function digits(s)
+    return (tostring(s or ""):gsub("%D", ""))
 end
 
--- Store OTP with expiry (5 minutes)
-local function storeOtp(phone_number, otp)
-    otp_storage[phone_number] = {
-        otp = otp,
-        created_at = os.time(),
-        expires_at = os.time() + 300 -- 5 minutes
-    }
+-- No SMS provider is wired in, so production cannot deliver a code. Outside
+-- production the code comes back in the response so the flow can be tested.
+local function is_production()
+    local env = os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
+    return env == "production" or env == "prod"
 end
 
--- Verify OTP
-local function verifyOtp(phone_number, otp)
-    local stored = otp_storage[phone_number]
-
-    if not stored then
-        return false, "OTP not found. Please request a new OTP."
-    end
-
-    if os.time() > stored.expires_at then
-        otp_storage[phone_number] = nil
-        return false, "OTP expired. Please request a new OTP."
-    end
-
-    if stored.otp ~= otp then
-        return false, "Invalid OTP. Please try again."
-    end
-
-    -- OTP is valid, remove it
-    otp_storage[phone_number] = nil
-    return true, "OTP verified successfully"
-end
-
--- Clean up expired OTPs (call this periodically)
-local function cleanupExpiredOtps()
-    local current_time = os.time()
-    for phone, data in pairs(otp_storage) do
-        if current_time > data.expires_at then
-            otp_storage[phone] = nil
-        end
-    end
+local function code_hash(user_id, phone, code)
+    local secret = Global.getEnvVar("JWT_SECRET_KEY") or error("JWT_SECRET_KEY not configured")
+    local h = assert(require("resty.openssl.hmac").new(secret, "sha256"))
+    return ngx.encode_base64(h:final(user_id .. ":" .. phone .. ":" .. code))
 end
 
 return function(app)
@@ -76,10 +51,6 @@ return function(app)
                 -- Parse JSON body first, fallback to form params
                 local params = parse_json_body()
 
-                -- Debug logging
-                ngx.log(ngx.INFO, "Parsed JSON params: ", cjson.encode(params))
-                ngx.log(ngx.INFO, "Form params: ", cjson.encode(self.params))
-
                 if not params or not params.phone_number then
                     params = self.params
                 end
@@ -87,7 +58,6 @@ return function(app)
                 local phone_number = params.phone_number
 
                 if not phone_number or phone_number == "" then
-                    ngx.log(ngx.ERR, "Phone number missing. Params: ", cjson.encode(params))
                     return { status = 400, json = { error = "Phone number is required" } }
                 end
 
@@ -111,26 +81,41 @@ return function(app)
                     return { status = 400, json = { error = "Account is already verified" } }
                 end
 
-                -- Generate OTP
-                local otp = generateOtp()
+                -- The code goes to the phone on the partner's profile, never to
+                -- a number the caller picks.
+                local phone = digits(delivery_partner.contact_person_phone)
+                if phone == "" then
+                    return { status = 400,
+                        json = { error = "Add a phone number to your delivery partner profile first" } }
+                end
+                if digits(phone_number) ~= phone then
+                    return { status = 400,
+                        json = { error = "That is not the phone number on your delivery partner profile" } }
+                end
+                if is_production() then
+                    return { status = 503, json = {
+                        error = "Phone verification is not available yet: no SMS provider is configured" } }
+                end
+                if db.query([[SELECT 1 FROM delivery_partner_otps
+                        WHERE user_id = ? AND created_at > NOW() - make_interval(secs => ?)]],
+                        user_id, RESEND_SECONDS)[1] then
+                    return { status = 429, json = { error = "Please wait a minute before requesting another code" } }
+                end
 
-                -- Store OTP
-                storeOtp(phone_number, otp)
-
-                -- Clean up expired OTPs
-                cleanupExpiredOtps()
-
-                -- In production, send SMS here using Twilio, AWS SNS, or other SMS service
-                -- For now, return OTP in response for testing
-                ngx.log(ngx.INFO, "OTP for " .. phone_number .. ": " .. otp)
+                local otp = require("helper.uuid").random_string(6, "0123456789")
+                db.query([[INSERT INTO delivery_partner_otps
+                        (user_id, phone, code_hash, attempts, expires_at, created_at)
+                    VALUES (?, ?, ?, 0, NOW() + make_interval(secs => ?), NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone, code_hash = EXCLUDED.code_hash,
+                        attempts = 0, expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at]],
+                    user_id, phone, code_hash(user_id, phone, otp), OTP_TTL)
 
                 return {
                     json = {
                         message = "OTP sent successfully",
-                        phone_number = phone_number,
-                        -- REMOVE THIS IN PRODUCTION - only for testing
-                        otp = otp,
-                        expires_in = 300 -- seconds
+                        phone_number = delivery_partner.contact_person_phone,
+                        otp = otp, -- outside production only (see is_production): there is no SMS sender
+                        expires_in = OTP_TTL
                     },
                     status = 200
                 }
@@ -165,17 +150,22 @@ return function(app)
                     return { status = 400, json = { error = "OTP is required" } }
                 end
 
-                -- Verify OTP
-                local is_valid, message = verifyOtp(phone_number, otp)
-
-                if not is_valid then
-                    return { status = 400, json = { error = message } }
-                end
-
-                -- Get user and delivery partner
                 local user_id = db.query([[
                     SELECT id FROM users WHERE uuid = ?
                 ]], self.current_user.uuid)[1].id
+
+                local row = db.query([[SELECT phone, code_hash, attempts FROM delivery_partner_otps
+                    WHERE user_id = ? AND expires_at > NOW()]], user_id)[1]
+                if not row or row.attempts >= MAX_ATTEMPTS then
+                    db.query("DELETE FROM delivery_partner_otps WHERE user_id = ?", user_id)
+                    return { status = 400, json = { error = "No valid OTP. Please request a new one." } }
+                end
+                db.query("UPDATE delivery_partner_otps SET attempts = attempts + 1 WHERE user_id = ?", user_id)
+                local given = code_hash(user_id, row.phone, tostring(otp))
+                if not require("lib.stripe")._secure_compare(given, row.code_hash) then
+                    return { status = 400, json = { error = "Invalid OTP. Please try again." } }
+                end
+                db.query("DELETE FROM delivery_partner_otps WHERE user_id = ?", user_id)
 
                 local delivery_partner = db.query([[
                     SELECT id, contact_person_phone, is_verified

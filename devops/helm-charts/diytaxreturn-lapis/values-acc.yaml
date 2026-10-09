@@ -23,7 +23,12 @@ image:
   tag: latest
   pullPolicy: Always
 
-replicaCount: 1
+# Two pods: a pod restart (deploy, crash, node drain) no longer takes the API
+# and chat down. Needs Redis (chat events cross pods through it); the chart
+# refuses replicaCount > 1 without it. See templates/redis.yaml.
+replicaCount: 2
+redis:
+  enabled: true
 
 service:
   type: ClusterIP

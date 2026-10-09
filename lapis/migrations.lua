@@ -109,10 +109,13 @@ local push_notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTI
 -- Reviews
 local review_migrations = load_if_enabled(ProjectConfig.FEATURES.REVIEWS, "migrations.reviews") or {}
 
+local delivery_otp_migrations = load_if_enabled(ProjectConfig.FEATURES.DELIVERY, "migrations.delivery-partner-otp") or {}
+
 -- Chat
 local chat_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system") or {}
 local chat_production_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system-production") or
     {}
+local chat_lifecycle_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-lifecycle") or {}
 
 -- Kanban
 local kanban_project_migrations = load_if_enabled(ProjectConfig.FEATURES.KANBAN, "migrations.kanban-project-system") or
@@ -1228,9 +1231,13 @@ local _migrations = {
     ['205_add_user_presence_functions'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 14),
     ['206_add_chat_data_quality_constraints'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations,
         15),
+    ['zzchat2_drop_unused_content_search_index'] = conditional_array(ProjectConfig.FEATURES.CHAT,
+        chat_lifecycle_migrations, 1),
     ['207_create_user_channels_view'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 16),
     ['208_add_channel_mention_support'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 17),
     ['209_add_chat_metrics_table'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 18),
+    ['zzchat1_drop_unread_counts_function'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations,
+        19),
 
     -- Kanban (conditional)
     ['210_create_kanban_projects_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN, kanban_project_migrations, 1),
@@ -2566,6 +2573,8 @@ local _migrations = {
     -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
     ['zzai1_namespace_ai_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 1),
     ['zzai2_idempotency_keys'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 2),
+    -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
+    ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

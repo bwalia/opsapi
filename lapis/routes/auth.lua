@@ -910,8 +910,11 @@ return function(app)
         local state_project_code = nil
         local ok_state, state_data = pcall(cJson.decode, raw_state)
         if ok_state and type(state_data) == "table" then
-            redirect_from = state_data.from or "/"
-            state_frontend_url = state_data.frontend_url
+            redirect_from = type(state_data.from) == "string" and state_data.from or "/"
+            -- The token is sent here, and anyone can forge `state` (the client
+            -- id is public): only a trusted origin, else FRONTEND_URL below.
+            state_frontend_url = require("middleware.cors").trustedFrontend(state_data.frontend_url,
+                get_allowed_reset_origins())
             state_project_code = state_data.project_code
         else
             redirect_from = raw_state

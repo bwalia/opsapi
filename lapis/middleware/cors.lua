@@ -100,6 +100,20 @@ local function isOriginAllowed(origin)
     return false, nil
 end
 
+--- Where a sign-in may send the user's token: `url` must be a bare origin
+-- (scheme, host, port; no path, no user@) that this API already trusts with
+-- credentialed requests, or one listed in `extra` ({ [origin] = true }).
+-- Callers fall back to FRONTEND_URL when this returns nil.
+-- @return the origin | nil
+function CorsMiddleware.trustedFrontend(url, extra)
+    if type(url) ~= "string" then return nil end
+    url = url:gsub("/+$", "")
+    if not url:match("^https?://[%w%.%-]+$") and not url:match("^https?://[%w%.%-]+:%d+$") then return nil end
+    if extra and extra[url] then return url end
+    local allowed, origin = isOriginAllowed(url)
+    return (allowed and origin) and url or nil
+end
+
 function CorsMiddleware.enable(app)
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]

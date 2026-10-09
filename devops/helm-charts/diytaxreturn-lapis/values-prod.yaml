@@ -39,12 +39,20 @@ corsAllowedDomains: "diytaxreturn.co.uk"
 # greppable and survives any future narrowing of corsAllowedDomains.
 corsAllowedOrigins: "https://diytaxreturn.co.uk,https://www.diytaxreturn.co.uk"
 
+# Shared Postgres from the Vault secret (templates/externalsecret.yaml needs the key).
+database: {}
+
 image:
   repository: bwalia/opsapi
   tag: latest
   pullPolicy: Always
 
-replicaCount: 1
+# Two pods: a pod restart (deploy, crash, node drain) no longer takes the API
+# and chat down. Needs Redis (chat events cross pods through it); the chart
+# refuses replicaCount > 1 without it. See templates/redis.yaml.
+replicaCount: 2
+redis:
+  enabled: true
 
 service:
   type: ClusterIP

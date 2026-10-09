@@ -16,35 +16,9 @@ local NamespaceInvitationQueries = {}
 local DEFAULT_EXPIRATION_DAYS = 7
 
 --- Generate a secure unique token for invitation
--- Uses multiple entropy sources to ensure uniqueness
--- @return string A unique 64-character token
+-- @return string A 64-character token from the CSPRNG
 local function generateToken()
-    -- Seed with multiple entropy sources for randomness
-    local time_seed = ngx.now() * 1000000 -- microseconds
-    local worker_pid = ngx.worker.pid() or 0
-    local random_seed = math.random(1, 2147483647)
-    math.randomseed(time_seed + worker_pid + random_seed)
-
-    -- Generate base using MD5 of unique data
-    local unique_data = string.format("%s-%s-%s-%s",
-        tostring(ngx.now()),
-        tostring(worker_pid),
-        tostring(math.random(1, 2147483647)),
-        Global.generateUUID()
-    )
-    local hash = ngx.md5(unique_data)
-
-    -- Expand to 64 characters using hash + random characters
-    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    local token = hash -- 32 characters from MD5
-
-    -- Add 32 more random characters
-    for _ = 1, 32 do
-        local idx = math.random(1, #chars)
-        token = token .. string.sub(chars, idx, idx)
-    end
-
-    return token
+    return require("helper.uuid").random_string(64, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 end
 
 --- Generate token with uniqueness check against database

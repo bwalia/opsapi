@@ -27,26 +27,11 @@ Guard.fail = fail
 -- Counters
 -- ---------------------------------------------------------------------------
 
--- INCR and set the expiry on the first hit, atomically.
-local INCR = "local n = redis.call('INCR', KEYS[1]) if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end "
-    .. "return {n, redis.call('TTL', KEYS[1])}"
-
-local function shared_incr(key, window)
-    local dict = ngx.shared.rate_limit_store
-    if not dict then return 1, window end
-    local n = dict:incr(key, 1, 0, window)
-    return n or 1, window
-end
-
---- Count one hit on `key`. @return count, seconds left in the window
+--- Count one hit on `key`: Redis (shared by every pod), else this pod's memory.
+-- @return count, seconds left in the window
 function Guard.incr(key, window)
-    local red = RedisClient.connect()
-    if red then
-        local res = red:eval(INCR, 1, "billing:" .. key, window)
-        RedisClient.release(red)
-        if type(res) == "table" then return tonumber(res[1]), tonumber(res[2]) end
-    end
-    return shared_incr("billing:" .. key, window)
+    local n, ttl = RateLimit.incr("billing:" .. key, window)
+    return n or 1, ttl or window
 end
 
 local function get(key)
