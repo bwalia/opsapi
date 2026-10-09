@@ -48,7 +48,7 @@ return function(app)
         return sdk.ok(deal)
     end))
 
-    app:post("/deals", sdk.handler({ permission = "property_deals_deals.create" }, U.guard(function(self)
+    app:post("/deals", sdk.handler({ permission = "property_deals_deals.create" }, U.guard_create(function(self)
         local body, err = sdk.body(self)
         if not body then return sdk.error(400, err) end
         local data, errors = sdk.validate(body, CREATE)

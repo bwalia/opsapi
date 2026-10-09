@@ -72,8 +72,8 @@ poly = expect("map polygon", call("GET", P + "/map?polygon=53.9,-1.2;54.0,-1.2;5
 check("map: polygon finds the deal", any(f.get("deal_uuid") == D for f in poly["features"]), poly)
 res = call("GET", P + "/map?lat=999&lng=0", "operator_s", S)
 check("map: bad centre 422", res[0] == 422, res)
-res = call("GET", P + "/map?lat=53.9&lng=-1.1&layers=sold_prices", "operator_s", S)
-check("map: unknown layer 422 (connector layers come later)", res[0] == 422, res)
+res = call("GET", P + "/map?lat=53.9&lng=-1.1&layers=rightmove", "operator_s", S)
+check("map: unknown layer 422", res[0] == 422, res)
 res = call("GET", P + "/map?lat=53.95&lng=-1.09&radius_miles=50", "owner_b", B)
 check("map: other workspace sees no pins", res[0] == 200 and not res[1]["data"]["features"], res)
 prop = sql(f"SELECT property_uuid FROM property_deals_deals WHERE uuid = '{D}'")[0]
@@ -97,7 +97,11 @@ check("reject needs a note (422)", res[0] == 422, res)
 edited = dict(draft, body="Please reply today to 1) FENSA 2) boundary dispute.")
 ok = expect("manager approves an edited version", call("POST", P + f"/approvals/{a['uuid']}/decide", "manager_s", S,
             {"decision": "approve", "payload": edited, "note": "Tightened wording"}), 200)["data"]
-check("approved; edit is version 2; original kept", ok["status"] == "approved" and ok["payload_version"] == 2
+# Approved actions run straight away (Phase 5). This workspace has no email server, so the send
+# fails cleanly and the approval says why (it can be retried once SMTP is set).
+check("approved and run: no SMTP here, so 'failed' with the reason", ok["status"] == "failed"
+      and "email server" in ok["execution_result"]["error"], ok)
+check("approved; edit is version 2; original kept", ok["payload_version"] == 2
       and ok["payload"]["body"] == edited["body"] and ok["original_payload"]["body"] == draft["body"], ok)
 check("decision logged with who and the hash", ok["decisions"][0]["user_uuid"] == USERS["manager_s"][0]
       and ok["decisions"][0]["edited"] and ok["decisions"][0]["payload_sha256"] == ok["payload_sha256"], ok["decisions"])
@@ -112,7 +116,8 @@ check("still pending after one approval", first["status"] == "pending" and first
 res = call("POST", P + f"/approvals/{two['uuid']}/decide", "manager_s", S, {"decision": "approve"})
 check("same person can't approve twice (409)", res[0] == 409, res)
 second = expect("second approver", call("POST", P + f"/approvals/{two['uuid']}/decide", "owner_s", S, {"decision": "approve"}), 200)["data"]
-check("approved by two different people", second["status"] == "approved" and len(second["decisions"]) == 2, second)
+check("approved by two different people (nothing automatic to run for this action)",
+      second["status"] == "executed" and len(second["decisions"]) == 2 and second.get("decided_at"), second)
 
 mgr = expect("manager-only approval", call("POST", P + "/approvals", "manager_s", S,
              {"subject_type": "offer", "action": "send_offer", "title": "Offer £140k", "payload": {"amount": 140000},

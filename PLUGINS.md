@@ -142,7 +142,9 @@ return {
     },
 
     -- Dashboard sidebar entries: each opens the generated page of an sdk.crud
-    -- resource, or a custom page (§6).
+    -- resource, a custom page (§6), or `route`: a native page the dashboard
+    -- itself ships for this plugin, under /dashboard/<plugin-with-hyphens>/
+    -- (e.g. { label = "Today", route = "/dashboard/helpdesk/today", module = ... }).
     menu = {
         { label = "Support overview", page = "overview", module = "helpdesk_tickets", icon = "LayoutDashboard" },
         { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
@@ -245,7 +247,7 @@ end
 |---|---|---|
 | `GET /tickets` | `helpdesk_tickets.read` | `?page=&per_page=` (max 100), `?q=`, `?sort=&order=`, filters. Returns `{ success, data: [...], meta: { page, per_page, total, total_pages } }`. |
 | `GET /tickets/:uuid` | `.read` | 404 if missing or in another namespace. |
-| `POST /tickets` | `.create` | 201. 422 with `details: { field: message }` on bad input. 409 on a unique-constraint clash. |
+| `POST /tickets` | `.create` | 201. 422 with `details: { field: message }` on bad input (also a CHECK constraint the row breaks). 409 on a unique-constraint clash. Honours `Idempotency-Key`: a retry with the same key gets the first answer back and creates nothing. |
 | `PUT /tickets/:uuid` | `.update` | Partial update of the fields sent. `null` clears an optional field. |
 | `DELETE /tickets/:uuid` | `.delete` | 200. 404 if missing. 409 if other rows still reference it. |
 
@@ -773,6 +775,7 @@ Each one is listed with its message in `GET /api/v2/plugins`.
 | `sdk.doc(app, "METHOD /path", doc)` | Exact OpenAPI operation for a hand-written route (§5.2). |
 | `sdk.validate(input, rules, partial)` | `clean` or `nil, { field = message }`. Rules: `type` (`string` `text` `integer` `number` `boolean` `date` `datetime` `email` `url` `uuid` `json`), `required`, `min`, `max`, `enum` (`label` is used by dashboard pages only). |
 | `sdk.body(self)` | Decoded JSON object, or `nil, message`. |
+| `sdk.idempotent(self, fn)` | Run a hand-written create once per `Idempotency-Key` header (workspace + user + key, 24 h): a retry with the same request replays `fn`'s first response (`Idempotent-Replayed: true`); a different body with the same key is 422. Without the header `fn` just runs. `sdk.crud` creates do this already. |
 | `sdk.page(params)` | `page, per_page, offset` (`per_page` clamped to 1..100). |
 | `sdk.namespace_id(self)` / `sdk.user(self)` | Caller's namespace id / user. |
 | `sdk.can(self, module, action)` | Boolean permission check. |

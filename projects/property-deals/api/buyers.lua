@@ -2,8 +2,32 @@
 -- /api/v2/property-deals/buyer-profiles (list/show/create/update/delete).
 -- Exactly one of contact_uuid / account_uuid; both must be in this workspace.
 local sdk = require("helper.plugin-sdk")
+local db = require("lapis.db")
 
 return function(app)
+    -- Buyers page list with who each buyer is (api-requests/web-buyer-directory.md).
+    -- Registered before sdk.crud so /:id doesn't capture it.
+    app:get("/buyer-profiles/directory", sdk.handler({ permission = "property_deals_buyers.read" }, function(self)
+        local where, args = { "b.namespace_id = ?" }, { sdk.namespace_id(self) }
+        local q = self.params.q
+        if type(q) == "string" and q ~= "" then
+            where[#where + 1] = "(COALESCE(c.first_name || ' ' || COALESCE(c.last_name, ''), a.name) ILIKE ? OR COALESCE(c.email, a.email) ILIKE ?)"
+            args[#args + 1], args[#args + 2] = "%" .. q .. "%", "%" .. q .. "%"
+        end
+        if type(self.params.pof_status) == "string" and self.params.pof_status ~= "" then
+            where[#where + 1] = "b.pof_status = ?"
+            args[#args + 1] = self.params.pof_status
+        end
+        local rows = db.query([[
+            SELECT b.*, TRIM(COALESCE(c.first_name || ' ' || COALESCE(c.last_name, ''), a.name)) AS name,
+                   COALESCE(NULLIF(c.email, ''), NULLIF(a.email, '')) AS email
+            FROM property_deals_buyer_profiles b
+            LEFT JOIN crm_contacts c ON c.uuid = b.contact_uuid LEFT JOIN crm_accounts a ON a.uuid = b.account_uuid
+            WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY b.updated_at DESC LIMIT 500", unpack(args))
+        for _, r in ipairs(rows) do r.id, r.namespace_id = nil, nil end
+        return sdk.ok(sdk.array(rows))
+    end))
+
     sdk.crud(app, "/buyer-profiles", {
         table = "property_deals_buyer_profiles",
         module = "property_deals_buyers",

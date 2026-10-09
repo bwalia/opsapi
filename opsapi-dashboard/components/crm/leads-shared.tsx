@@ -37,6 +37,7 @@ import { Modal, Switch as Toggle } from '@/components/ui';
 import { crmService, type CrmLead, type LeadNotificationSettings } from '@/services/crm.service';
 import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import PropertyDealsLeadPanel from '@/components/property-deals/LeadPanel';
 import RecordFormResponses from '@/components/forms/RecordFormResponses';
 
 
@@ -471,6 +472,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({ isOpen, lead, 
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" placeholder="What the lead submitted — edit or append your own notes..." />
           </div>
         </div>
+
+        {/* Property Deals fields + Create deal (renders nothing when the plugin is off). */}
+        <PropertyDealsLeadPanel leadUuid={lead.uuid} />
 
         {/* Actions */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-secondary-200">

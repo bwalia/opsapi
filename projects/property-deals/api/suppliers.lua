@@ -80,7 +80,7 @@ return function(app)
         return sdk.ok(row)
     end))
 
-    app:post("/suppliers", sdk.handler({ permission = "property_deals_suppliers.create" }, U.guard(function(self)
+    app:post("/suppliers", sdk.handler({ permission = "property_deals_suppliers.create" }, U.guard_create(function(self)
         local body, err = sdk.body(self)
         if not body then return sdk.error(400, err) end
         local rules = { account_uuid = { type = "uuid" } }

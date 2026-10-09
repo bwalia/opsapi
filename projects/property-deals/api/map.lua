@@ -4,8 +4,8 @@
 --   GET /properties/:id/card    the map's property card: summary, deal, yield/discount, top 3 matching buyers
 -- Radius: bounding-box prefilter on (namespace_id, lat, lng), then exact haversine
 -- distance. Polygon: Postgres' built-in polygon @> point (planar; fine at county
--- scale). Layers from data connectors (sold prices, EPC, listings, auction lots)
--- arrive with Phase 6 under the same `features` shape.
+-- scale). Market layers (sold_prices, epc, listings, auction_lots) come from data
+-- connectors and CSV imports (property_deals_market_records) in the same shape.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -16,7 +16,8 @@ local U = require("property_deals.util")
 
 local MAX_FEATURES = 2000
 local EARTH_MILES = 3958.8
-local LAYERS = { properties = true, deals = true, leads = true, holdings = true }
+local LAYERS = { properties = true, deals = true, leads = true, holdings = true,
+    sold_prices = "sold_price", epc = "epc", listings = "listing", auction_lots = "auction_lot" }
 
 local function haversine_sql(lat_col, lng_col, lat, lng)
     return string.format([[(%f * 2 * asin(sqrt(power(sin(radians(%s - %f) / 2), 2)
@@ -59,7 +60,10 @@ local function params(self)
     local q = self.params
     local p = { layers = {} }
     for name in tostring(q.layers or "properties,deals"):gmatch("[%w_]+") do
-        if not LAYERS[name] then return nil, { layers = "unknown layer '" .. name .. "' (properties, deals, leads, holdings)" } end
+        if not LAYERS[name] then
+            return nil, { layers = "unknown layer '" .. name .. "' (properties, deals, leads, holdings, sold_prices, epc, "
+                .. "listings, auction_lots)" }
+        end
         p.layers[name] = true
     end
     if q.polygon and q.polygon ~= "" then
@@ -133,6 +137,19 @@ return function(app)
                 WHERE b.namespace_id = ]] .. ns .. [[ AND (h->>'lat') IS NOT NULL AND (h->>'lng') IS NOT NULL AND ]] .. hw .. [[
                 LIMIT ]] .. MAX_FEATURES))
         end
+        for name, record_type in pairs(LAYERS) do
+            if p.layers[name] and type(record_type) == "string" then
+                local mw, md = area(p, "m.lat", "m.lng")
+                add(name, db.query([[
+                    SELECT m.uuid, m.lat, m.lng, COALESCE(m.address, m.postcode) AS title, m.postcode AS subtitle,
+                           m.record_type, m.price, m.previous_price, m.event_date, m.epc_rating, m.property_type, m.tenure,
+                           m.bedrooms, m.status, m.cash_only, m.url, m.source, ]] .. md .. [[ AS distance_miles
+                    FROM property_deals_market_records m
+                    WHERE m.namespace_id = ]] .. ns .. [[ AND m.record_type = ]] .. db.escape_literal(record_type)
+                        .. [[ AND m.lat IS NOT NULL AND ]] .. mw .. [[
+                    ORDER BY distance_miles NULLS LAST, m.event_date DESC NULLS LAST LIMIT ]] .. MAX_FEATURES))
+            end
+        end
         local truncated = #features > MAX_FEATURES
         while #features > MAX_FEATURES do table.remove(features) end
         return sdk.ok({
@@ -162,10 +179,22 @@ return function(app)
             LEFT JOIN crm_contacts c ON c.uuid = b.contact_uuid LEFT JOIN crm_accounts a ON a.uuid = b.account_uuid
             WHERE m.namespace_id = ? AND m.property_uuid = ? ORDER BY m.score DESC LIMIT 3
         ]], ns, prop.uuid)
+        -- Comparables: sold prices within a mile over two years (same type when known).
+        local Market = require("property_deals.market")
+        local comps = Market.comps(ns, tonumber(prop.lat), tonumber(prop.lng),
+            { property_type = prop.property_type ~= db.NULL and prop.property_type or nil })
+        if comps and comps.count == 0 and prop.property_type ~= db.NULL then
+            comps = Market.comps(ns, tonumber(prop.lat), tonumber(prop.lng))
+        end
+        local median = comps and comps.median
+        local ask = price or value
         return sdk.ok({
             property = prop, deal = deal or cjson.null,
             gross_yield_pct = (rent and (price or value)) and math.floor(rent * 12 / (price or value) * 1000 + 0.5) / 10 or cjson.null,
             discount_pct = (price and value and value > 0) and math.floor((1 - price / value) * 1000 + 0.5) / 10 or cjson.null,
+            comps = comps or cjson.null,
+            discount_vs_comps_pct = (ask and median and median > 0) and math.floor((1 - ask / median) * 1000 + 0.5) / 10
+                or cjson.null,
             top_matches = sdk.array(matches),
         })
     end))

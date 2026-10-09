@@ -273,7 +273,12 @@ local function openai_chat(cfg, messages, tools, opts)
         max_tokens = opts.max_tokens or 2048, response_format = opts.json and { type = "json_object" } or nil }
     if tools and #tools > 0 then body.tools = tools end
     local headers = { ["Authorization"] = cfg.key and ("Bearer " .. cfg.key) or nil }
-    local url = cfg.url .. "/chat/completions"
+    -- A workspace provider (lib/ai-providers.lua) may bring its own URL and
+    -- auth header, e.g. Azure OpenAI: .../deployments/<name>/chat/completions?api-version=…
+    -- with `api-key` instead of a bearer token.
+    for k, v in pairs(cfg.headers or {}) do headers[k] = v or nil end
+    if cfg.headers and cfg.headers["api-key"] then headers["Authorization"] = nil end
+    local url = cfg.chat_url or (cfg.url .. "/chat/completions")
     local data, err, status = post(cfg, url, headers, body, opts.timeout_ms)
     -- Newer OpenAI models reject max_tokens / a custom temperature: retry once
     -- with what they accept.

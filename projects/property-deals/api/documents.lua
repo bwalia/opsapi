@@ -50,7 +50,7 @@ return function(app)
         return sdk.ok(sdk.array(rows), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) })
     end))
 
-    app:post("/documents", sdk.handler({ permission = "property_deals_properties.create" }, U.guard(function(self)
+    app:post("/documents", sdk.handler({ permission = "property_deals_properties.create" }, U.guard_create(function(self)
         local file = self.params.file
         if type(file) ~= "table" or not file.content or file.content == "" then
             return sdk.error(400, "Send the file as multipart/form-data field 'file'")

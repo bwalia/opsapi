@@ -122,14 +122,16 @@ local function screens(app)
         local Store = require("property_deals.templates_store")
         local key = self.params.template
         if not key or key == "" then
-            -- Default: the template most active deals use.
+            -- Default: the template most active deals use; on a tie (e.g. no deals yet)
+            -- the workspace's default_template setting, then by name.
+            local preferred = tostring((sdk.settings(self) or {}).default_template or "uk_guaranteed_sale")
             local first = U.one([[
                 SELECT t.key FROM property_deals_workflow_templates t
                 LEFT JOIN property_deals_workflow_template_versions v ON v.template_uuid = t.uuid
                 LEFT JOIN property_deals_deals d ON d.template_version_uuid = v.uuid AND d.status = 'active'
                 WHERE t.namespace_id = ? AND t.is_active
-                GROUP BY t.key, t.name ORDER BY COUNT(d.id) DESC, t.name LIMIT 1
-            ]], ns)
+                GROUP BY t.key, t.name ORDER BY COUNT(d.id) DESC, (t.key = ?) DESC, t.name LIMIT 1
+            ]], ns, preferred)
             key = first and first.key
         end
         if not key then return sdk.not_found("Template") end

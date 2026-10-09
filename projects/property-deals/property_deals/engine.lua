@@ -211,7 +211,8 @@ function E.create_task(ctx, stage_key, tdef, actor, done)
         approval_rule = tdef.approval == "none" and "none" or tdef.approval,
         owner_user_uuid = owner_for(ctx, tdef.owner),
         owner_agent_key = tdef.owner == "agent" and tdef.agent and tdef.agent.agent_key or nil,
-        metadata = { depends_on_keys = U.array(keys), waiting_on = U.array(waiting), template_task = tdef.key },
+        metadata = { depends_on_keys = U.array(keys), waiting_on = U.array(waiting), template_task = tdef.key,
+                     agent_auto = tdef.agent and tdef.agent.auto == true or nil },
     }
     local why
     if #waiting == 0 then
@@ -281,6 +282,13 @@ function E.enter_stage(ns, deal_uuid, stage_key, actor, settings)
     ]], stage_key, ns, deal_uuid)
     db.query("UPDATE crm_deals SET stage = ?, updated_at = NOW() WHERE uuid = ? AND namespace_id = ?",
         stage_key, ctx.deal.crm_deal_uuid, ns)
+    -- Stage history for the reports (time per stage).
+    if from ~= stage_key or not U.one("SELECT 1 FROM property_deals_stage_history WHERE deal_uuid = ? AND left_at IS NULL", deal_uuid) then
+        db.query("UPDATE property_deals_stage_history SET left_at = NOW() WHERE deal_uuid = ? AND left_at IS NULL", deal_uuid)
+        db.query([[INSERT INTO property_deals_stage_history (namespace_id, deal_uuid, stage_key, from_stage_key,
+            entered_by_user_uuid) VALUES (?, ?, ?, ?, ?)]], ns, deal_uuid, stage_key,
+            (from and from ~= stage_key) and from or db.NULL, actor or db.NULL)
+    end
     ctx.deal.stage_key = stage_key
     local created = E.create_stage_tasks(ctx, stage, actor)
     -- Parallel stages that follow run alongside this one (e.g. EPC and survey

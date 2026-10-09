@@ -195,15 +195,28 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     manifest.pages = pages
 
     -- Dashboard sidebar entries, each opening the generated page of one
-    -- sdk.crud resource or one custom page (/dashboard/plugins/<plugin>/<key>).
+    -- sdk.crud resource or one custom page (/dashboard/plugins/<plugin>/<key>),
+    -- or (`route`) a native page the dashboard ships for this plugin, which must
+    -- live under /dashboard/<plugin-with-hyphens>/.
     manifest.menu = manifest.menu or {}
+    local route_root = "/dashboard/" .. tostring(manifest.code):gsub("_", "-")
     for _, e in ipairs(manifest.menu) do
         local target = type(e) == "table" and (e.page or e.resource)
-        if type(e) ~= "table" or type(e.label) ~= "string" or (e.page and e.resource)
-            or type(target) ~= "string" or not target:match("^[%w_%-]+$") then
-            return nil, manifest_path .. ": every menu entry needs a label and either a resource "
-                .. "(the sdk.crud path without /) or a page (a pages key)"
+        local kinds = type(e) == "table" and ((e.page and 1 or 0) + (e.resource and 1 or 0) + (e.route and 1 or 0)) or 0
+        if type(e) == "table" and e.route then
+            if type(e.route) ~= "string" or (e.route ~= route_root and e.route:sub(1, #route_root + 1) ~= route_root .. "/")
+                or not e.route:match("^[%w_%-/]+$") then
+                return nil, manifest_path .. ": menu entry '" .. tostring(e.label) .. "' route must be under " .. route_root
+            end
+            target = e.route:sub(#route_root + 2):gsub("/", "_")
+            if target == "" then target = "home" end
         end
+        if type(e) ~= "table" or type(e.label) ~= "string" or kinds ~= 1
+            or type(target) ~= "string" or not target:match("^[%w_%-]+$") then
+            return nil, manifest_path .. ": every menu entry needs a label and one of: a resource "
+                .. "(the sdk.crud path without /), a page (a pages key) or a route (a native dashboard page)"
+        end
+        e.key = e.key or target
         if e.page and not pages[e.page] then
             return nil, manifest_path .. ": menu entry '" .. e.label .. "' links to page '" .. e.page
                 .. "', which isn't in pages"

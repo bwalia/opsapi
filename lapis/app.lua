@@ -483,6 +483,8 @@ safe_load_routes("routes.plugins")
 safe_load_routes("routes.namespace-webhooks")
 -- Workspace email: own SMTP + template overrides (helper/namespace-mail.lua).
 safe_load_routes("routes.namespace-mail")
+-- Workspace AI providers: own model keys (sealed), local LLMs, JobShout link (lib/ai-providers.lua).
+safe_load_routes("routes.namespace-ai-providers")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)

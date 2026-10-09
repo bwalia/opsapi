@@ -13,7 +13,8 @@
     "cy:run:login": "cypress run --spec 'cypress/e2e/login.cy.ts'",
     "cy:run:headless": "cypress run --browser chrome --headless",
     "test:e2e": "start-server-and-test start http://127.0.0.1:8039 cy:run",
-    "test:e2e:login": "start-server-and-test start http://127.0.0.1:8039 cy:run:login"
+    "test:e2e:login": "start-server-and-test start http://127.0.0.1:8039 cy:run:login",
+    "sync:property-deals-types": "node scripts/sync-property-deals-types.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -43,6 +44,7 @@
     "idb": "^8.0.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.555.0",
     "next": "16.2.3",
     "next-themes": "^0.4.6",
@@ -50,6 +52,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-hot-toast": "^2.6.0",
+    "react-leaflet": "^5.0.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.5.1",
     "remark-gfm": "^4.0.1",
@@ -57,6 +60,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

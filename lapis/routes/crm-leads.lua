@@ -64,6 +64,8 @@ return function(app)
     -- POST /api/v2/crm/leads - Create lead manually
     app:post("/api/v2/crm/leads", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
+          -- Idempotency-Key: an offline client's retry replays the first answer.
+          return require("helper.idempotency").run(self, self.namespace.id, self.current_user.uuid, function()
             local data = parse_json_body()
 
             if (not data.first_name or data.first_name == "") and (not data.email or data.email == "") then
@@ -101,6 +103,7 @@ return function(app)
             end
 
             return api_response(201, lead)
+          end)
         end)
     ))
 
