@@ -57,7 +57,8 @@ return {
                              emits = { "expiring", "expired" } },
         approval = { table = "property_deals_approvals",
                      verbs = { requested = { status = "pending" }, approved = { status = "approved" },
-                               rejected = { status = "rejected" } } },
+                               rejected = { status = "rejected" } },
+                     emits = { "decided" } },
         match = { table = "property_deals_matches" },
         -- opsapi:publishes (make:resource adds entries above this line)
     },

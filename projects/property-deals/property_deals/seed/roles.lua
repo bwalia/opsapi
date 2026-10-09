@@ -12,7 +12,7 @@ return {
         permissions = {
             property_deals_deals = CRU, property_deals_properties = CRU, property_deals_buyers = CRU,
             property_deals_tasks = CRU, property_deals_suppliers = CRU, property_deals_compliance = CRU,
-            property_deals_approvals = { "read", "update" }, property_deals_ai = { "create", "read" },
+            property_deals_approvals = CRU, property_deals_ai = { "create", "read" },
             property_deals_settings = R, property_deals_reports = R,
         },
     },

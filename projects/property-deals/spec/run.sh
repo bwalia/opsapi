@@ -60,7 +60,7 @@ done
 
 PORT=$(docker port pd-api-$ID 80/tcp | head -1 | sed 's/.*://')
 export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
-{ python3 -I "$HERE/api_test.py" && python3 -I "$HERE/scenario_test.py"; } || {
+{ python3 -I "$HERE/api_test.py" && python3 -I "$HERE/scenario_test.py" && python3 -I "$HERE/contract_test.py"; } || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
     | grep -A2 "\[property_deals\]" | grep -v -E "^\s+/|^--" | sed 's/.*\[property_deals\] //' | cut -c1-400 | sort -u | tail -10
