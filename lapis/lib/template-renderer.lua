@@ -9,11 +9,12 @@ local _template_cache = {}
 local _cache_timestamps = {}
 local CACHE_TTL = 300 -- seconds
 
+-- The whole template is the key (Lua strings are interned, so this costs no
+-- hashing). It used to be length + first/last 16 characters, so two same-length
+-- documents with the same ends (<!DOCTYPE html>…</html>) shared a cache entry
+-- and one workspace's template rendered in another's documents.
 local function get_cache_key(template_str)
-    -- Simple hash: use string length + first/last chars + a few middle samples
-    local len = #template_str
-    if len < 32 then return template_str end
-    return len .. ":" .. template_str:sub(1,16) .. ":" .. template_str:sub(-16)
+    return template_str
 end
 
 -- Constants
