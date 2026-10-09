@@ -99,6 +99,14 @@ local function push_to_user(user_uuid, frame)
     end
 end
 
+-- Per-worker subscription state, in shared memory so /ready (served by any
+-- worker) sees every worker's subscriber (nginx.conf: lua_shared_dict chat_ws).
+local function set_subscribed(up)
+    subscribed = up
+    local dict = ngx.shared.chat_ws
+    if dict and ngx.worker.id() then dict:set("sub:" .. ngx.worker.id(), up) end
+end
+
 local function origin()
     if not worker_id then
         worker_id = string.format("%s:%d:%d", os.getenv("HOSTNAME") or "", ngx.worker.pid(),
@@ -193,7 +201,7 @@ local function subscribe()
         red:close()
         return false, "PSUBSCRIBE failed: " .. tostring(err)
     end
-    subscribed = true
+    set_subscribed(true)
     ngx.log(ngx.NOTICE, "[chat-ws] subscribed to Redis; chat delivery spans pods")
     while not ngx.worker.exiting() do
         local res, rerr = red:read_reply()
@@ -203,7 +211,7 @@ local function subscribe()
         end
         if res[1] == "pmessage" then deliver(res[4]) end
     end
-    subscribed = false
+    set_subscribed(false)
     red:close()
     return true, err
 end
@@ -225,12 +233,24 @@ end
 function _M.start()
     if not RedisClient.enabled() then return end
     origin()
+    set_subscribed(false)
     ngx.timer.at(0, run, 0)
     -- Keeps the link provably alive: the subscriber hears this within
     -- HEARTBEAT_S, or read_reply times out at STALE_MS and it reconnects.
     ngx.timer.every(HEARTBEAT_S, function(premature)
         if not premature and subscribed then publish("hb:" .. origin(), {}, "") end
     end)
+end
+
+--- Readiness (GET /ready): whether every worker of this pod holds its Redis
+-- subscription, i.e. receives chat events sent through other pods.
+function _M.subscribed()
+    local dict = ngx.shared.chat_ws
+    if not dict then return subscribed end
+    for id = 0, ngx.worker.count() - 1 do
+        if not dict:get("sub:" .. id) then return false end
+    end
+    return true
 end
 
 -- Verify the JWT from the ?token param. Mirrors middleware/auth.lua's core.

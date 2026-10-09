@@ -3,6 +3,7 @@
   check.py cross   alice@api-a, bob@api-b, carol@api-c (REDIS_ENABLED=false):
                    sends and reactions cross pods exactly once; api-c stays local-only
   check.py down    Redis stopped: a send still answers 201 and reaches its own pod
+  check.py ready N GET /ready answers N on api-a and api-b (CHAT_REQUIRE_REDIS=true), 200 on api-c
 """
 import base64, hashlib, hmac, json, os, socket, sys, threading, time, urllib.request
 
@@ -153,6 +154,25 @@ def down():
     check(not c["bob"].got("message:new", is_msg(m)), "bob on api-b does not (expected while Redis is down)")
 
 
-{"cross": cross, "down": down}[sys.argv[1]]()
+def ready():
+    want = int(sys.argv[2])
+
+    def status(host):
+        try:
+            with urllib.request.urlopen(f"http://{host}/ready", timeout=10) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    for host, expect in (("api-a", want), ("api-b", want), ("api-c", 200)):
+        end = time.time() + 20
+        got = status(host)
+        while got[0] != expect and time.time() < end:
+            time.sleep(0.5)
+            got = status(host)
+        check(got[0] == expect, f"{host} /ready answers {got[0]} (want {expect}) {got[1].get('reason') or ''}".rstrip())
+
+
+{"cross": cross, "down": down, "ready": ready}[sys.argv[1]]()
 print(f"  {sys.argv[1]}: {fails} failure(s)")
 sys.exit(1 if fails else 0)

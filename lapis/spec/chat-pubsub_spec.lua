@@ -84,5 +84,25 @@ end
 check("redis-client skips AUTH on a pooled connection",
     has(read("lapis/helper/redis-client.lua"), "get_reused_times()"))
 
+print("readiness (more than one replica):")
+local app = read("lapis/app.lua")
+local ready = app:sub(app:find('app:get("/ready"', 1, true) or 1)
+ready = ready:sub(1, ready:find("\nend)", 1, true) or #ready)
+check("/ready answers 503 while the subscriber is down (CHAT_REQUIRE_REDIS)",
+    has(ready, 'os.getenv("CHAT_REQUIRE_REDIS") == "true" and not require("lib.chat-ws").subscribed()')
+    and has(ready, "status = 503"))
+check("subscriber state is shared by all workers (lua_shared_dict chat_ws)",
+    has(body(ws, "_M.subscribed"), "ngx.worker.count() - 1") and has(read("lapis/nginx.conf"), "lua_shared_dict chat_ws ")
+    and has(read("lapis/nginx-values-template.conf"), "lua_shared_dict chat_ws "))
+for _, conf in ipairs({ "lapis/nginx.conf", "lapis/nginx-values-template.conf" }) do
+    check(conf .. " exposes CHAT_REQUIRE_REDIS to workers", has(read(conf), "\nenv CHAT_REQUIRE_REDIS;"))
+end
+local chart = "devops/helm-charts/diytaxreturn-lapis/"
+local dep = read(chart .. "templates/deployment.yaml")
+check("chart refuses replicaCount > 1 without Redis", has(dep, "(gt (int .Values.replicaCount) 1)") and has(dep, "fail "))
+check("chart wires Redis + CHAT_REQUIRE_REDIS into the app", has(dep, "name: CHAT_REQUIRE_REDIS")
+    and has(dep, 'value: "{{ .Release.Name }}-redis"'))
+check("chart's Redis has a password", has(read(chart .. "templates/redis.yaml"), "--requirepass"))
+
 print(failures == 0 and "\nall chat pub/sub checks passed" or ("\n" .. failures .. " check(s) FAILED"))
 os.exit(failures == 0 and 0 or 1)
