@@ -42,6 +42,29 @@ and free of the usual scale traps.
   socket); a stalled client's queue is capped (`MAX_QUEUE`). The client also
   **backs off polling to 25–30s when the socket is live** and drops the socket
   when the tab is backgrounded — so steady-state API load is low.
+- **WS delivery spans pods (Redis pub/sub).** Each pod/worker keeps its own
+  connection registry. The pod that handles a send (or reaction, or
+  `agent:done`) delivers to its own sockets directly, then `PUBLISH`es
+  `{origin, recipients, frame}` to `opsapi:chat:<namespace_id>:<channel_uuid>`
+  (`opsapi:chat:user:<uuid>` for `push_user`). Every nginx worker runs **one**
+  subscriber (`chat-ws.start()`, from `init_worker`) on `PSUBSCRIBE
+  opsapi:chat:*`; it enqueues onto its local connections and skips frames it
+  published itself, so nothing is delivered twice. The membership query runs
+  once per message on the sending pod; subscribers do no DB work. A heartbeat
+  every 10 s proves the subscription is alive (35 s of silence → reconnect).
+  Uses `helper/redis-client.lua` (`REDIS_ENABLED`/`HOST`/`PORT`/`PASSWORD`/`DB`).
+  - **Redis down:** sends still succeed; delivery stays on the sending pod; one
+    `[chat-ws] Redis subscriber down` WARN per outage per worker (plus at most one
+    `PUBLISH failed` WARN a minute); the subscriber reconnects by itself (backoff
+    to 30 s). Events published during the outage are not replayed (pub/sub is
+    fire-and-forget) — other pods' users catch up through the 25–30 s poll.
+  - **`REDIS_ENABLED=false`:** local-only, exactly as before: no subscriber, no
+    publish. Correct only for a single pod with a single worker.
+  - **Proof:** `lapis/spec/chat-pubsub-e2e/run.sh` runs two app processes on one
+    Redis (plus a third with `REDIS_ENABLED=false`), a WebSocket client on each:
+    a send on one pod reaches the other exactly once, a Redis stop degrades to
+    local delivery without failing the send, and a Redis restart recovers on its
+    own. `lapis/spec/chat-pubsub_spec.lua` guards the invariants in CI.
 
 ---
 
@@ -73,24 +96,7 @@ trigger fires.
   + backfill). **Never run this casually against the shared prod DB.** Rehearse
   on a copy; have a rollback.
 
-### 2b. Redis pub/sub for the WebSocket hub
-
-- **Status:** `chat-ws.lua` keeps an **in-process** connection registry. Correct
-  for the current deploy (`worker_processes 1`, `replicaCount 1`) — one process
-  sees every connection, no Redis needed.
-- **Trigger:** the moment chat runs on **2+ pods or workers**. Symptom if you
-  scale out without this: users on pod A stop receiving messages sent via pod B
-  (each process only knows its own connections).
-- **How:** keep everything in `chat-ws.lua`; replace the body of `broadcast()`
-  with a Redis `PUBLISH` (channel keyed by tenant/channel), and give each
-  connection a Redis `SUBSCRIBE`. The "send only from the owning coroutine" rule
-  still holds — the subscriber enqueues onto the connection's queue exactly like
-  the local path does today. Redis is already in the stack (`opsapi-redis`).
-- **Risk:** low, but adds a runtime dependency on Redis for real-time delivery
-  (fallback: the frontend already polls, so a Redis outage degrades to polling,
-  it doesn't break chat).
-
-### 2c. PgBouncer in front of Postgres
+### 2b. PgBouncer in front of Postgres
 
 - **Trigger:** connection pressure — total connections from all OpenResty workers
   (× replicas) approaching Postgres `max_connections`, or "too many connections"
@@ -101,7 +107,7 @@ trigger fires.
 - **Risk:** transaction-pooling caveats (no session-level features like
   `SET`/advisory locks across statements) — chat's simple query pattern is fine.
 
-### 2d. Cache channel membership on the send path (micro-opt)
+### 2c. Cache channel membership on the send path (micro-opt)
 
 - **Status:** each send does a couple of `SELECT user_uuid FROM
   chat_channel_members WHERE channel_uuid=? AND left_at IS NULL` (push-notif + WS
@@ -120,6 +126,8 @@ trigger fires.
   `n_live_tup`, index bloat, connection count vs `max_connections`.
 - **Real-time:** WS connection count per pod, dropped/rejected handshakes
   (`[chat-ws]` in the error log), reconnect rate.
+- **Cross-pod delivery:** `[chat-ws] Redis subscriber down` / `PUBLISH failed`
+  WARNs; `redis-cli client list | grep -c ' psub=1 '` should equal pods × workers.
 - **App:** p95 latency on `GET /api/chat/channels` (unread fan-out) and
   `GET /api/chat/channels/:uuid/messages` (list).
 
@@ -129,5 +137,8 @@ trigger fires.
 - Unread count stays **bounded** (`LIMIT 100`).
 - Hot paths (`create`/`show`/broadcast) stay **log-free** (ERR/WARN only).
 - WS `broadcast()` only **enqueues** — it never calls `send()` on a foreign
-  request's socket.
+  request's socket. The Redis subscriber obeys the same rule: it enqueues onto
+  local queues and posts their semaphores; only each connection's writer sends.
+- A Redis failure **never fails a send**: deliver locally first, publish after,
+  WARN on failure.
 - New per-message work is **O(1) per page**, never O(1) per message (no N+1).
