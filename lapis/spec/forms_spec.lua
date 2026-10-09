@@ -109,6 +109,45 @@ check("an unticked required consent is 'must be ticked'", e and e.terms == "must
 check("invalid UTF-8 is refused", select(2, Fields.validate(form, { company = "\255\254", name = "A", email = "a@b.co",
     subscribe = true, terms = true })).company ~= nil)
 
+print("logic and steps")
+local lf = assert(Fields.normalize({ fields = {
+    { type = "radio", label = "Plan", options = { "Basic", "Pro" }, required = true },
+    { type = "short_text", label = "Team size", required = true,
+      logic = { match = "all", rules = { { field = "plan", op = "eq", value = "pro" } } } },
+    { type = "page_break", label = "" },
+    { type = "multi_select", label = "Extras", options = { "A", "B" } },
+    { type = "short_text", label = "Why A", logic = { match = "any", rules = {
+        { field = "extras", op = "contains", value = "a" }, { field = "plan", op = "in", value = { "pro" } } } } },
+} }, {}))
+check("a page break needs no label", lf.fields[3].type == "page_break")
+local v1 = Fields.validate(lf, { plan = "basic", team_size = "9", extras = { "b" }, why_a = "x" })
+check("hidden questions take no answer", v1 and v1.team_size == nil and v1.why_a == nil)
+local _, e1 = Fields.validate(lf, { plan = "pro" })
+check("a shown required question is required", e1 and e1.team_size == "is required")
+local v2 = Fields.validate(lf, { plan = "basic", extras = { "a" }, why_a = "because" })
+check("'any' + contains on a multi-select", v2 and v2.why_a == "because")
+check("a rule can't point below its question", Fields.normalize({ fields = {
+    { type = "short_text", label = "One", logic = { rules = { { field = "two", op = "filled" } } } },
+    { type = "short_text", label = "Two" } } }, {}) == nil)
+check("a rule's value must be one of the options", Fields.normalize({ fields = {
+    { type = "radio", label = "R", options = { "X" } },
+    { type = "short_text", label = "T", logic = { rules = { { field = "r", op = "eq", value = "nope" } } } } } }, {}) == nil)
+check("locked contact fields can't be hidden", assert(Fields.normalize({ fields = {
+    { type = "boolean", label = "Q" },
+    { type = "email", label = "Email", system = "contact.email", logic = { rules = { { field = "q", op = "eq", value = true } } } },
+} }, { ["contact.email"] = true })).fields[2].logic == nil)
+
+print("file questions")
+local ff = assert(Fields.normalize({ fields = { { type = "file_upload", label = "CV", max_files = 2, accept = "documents" } } }, {}))
+check("file question settings", ff.fields[1].max_files == 2 and ff.fields[1].max_size_mb == 10 and ff.fields[1].accept == "documents")
+local U1 = "9e98ab27-846a-43c3-9473-64668b0c7859"
+check("the answer is upload ids", Fields.validate(ff, { cv = { U1 } }).cv[1] == U1)
+check("stored details are accepted again (retry)", Fields.validate(ff, { cv = { { id = U1, name = "cv.pdf" } } }).cv[1] == U1)
+check("too many files refused", select(2, Fields.validate(ff, { cv = { U1, U1, U1 } })).cv ~= nil)
+check("no SVG or HTML among allowed files", Fields.FILE_TYPES.svg == nil and Fields.FILE_TYPES.html == nil
+    and Fields.FILE_TYPES.png[2] == "images" and Fields.FILE_TYPES.pdf[2] == "documents")
+check("file answers show their names", Fields.show(ff.fields[1], { { id = U1, name = "cv.pdf" } }) == "cv.pdf")
+
 print("contact + display")
 local contact, mapped = Fields.contact(assert(Fields.normalize({ fields = {
     { type = "phone", label = "Phone", maps_to = "phone" } } }, ROLES)),

@@ -166,8 +166,8 @@ function FormJobs.alerts(s, settings, sent, list, origin)
     end
     local channel = settings.chat_channel_uuid
     if channel and not sent.chat and require("helper.project-config").isFeatureEnabled("chat") then
-        local ch = db.query("SELECT uuid, name, type, namespace_id FROM chat_channels WHERE uuid = ? AND namespace_id = ?",
-            channel, s.namespace_id)[1]
+        local ch = db.query([[SELECT uuid, name, type, namespace_id FROM chat_channels
+            WHERE uuid = ? AND namespace_id = ?]], channel, s.namespace_id)[1]
         if ch then
             local lines = { ("New response to \"%s\" from %s"):format(s.title, who) }
             for i = 1, math.min(#list, 6) do

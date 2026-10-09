@@ -108,8 +108,8 @@ function Stats.report(form, days)
         for k in pairs(totals) do totals[k] = totals[k] + row[k] end
     end
     totals.conversion = totals.views > 0 and math.floor(totals.responses / totals.views * 1000 + 0.5) / 10 or nil
-    totals.completion = totals.starts > 0 and math.floor(math.min(totals.responses / totals.starts, 1) * 1000 + 0.5) / 10
-        or nil
+    totals.completion = totals.starts > 0
+        and math.floor(math.min(totals.responses / totals.starts, 1) * 1000 + 0.5) / 10 or nil
     local extra = db.query([[
         SELECT ROUND(AVG((meta ->> 'duration_ms')::numeric) / 1000)::int AS avg_seconds
         FROM form_submissions WHERE form_id = ? AND status <> 'spam' AND created_at >= ?::date

@@ -1135,7 +1135,8 @@ if require("helper.project-config").isFeatureEnabled("forms") then
                     },
                 },
                 remove_fields = { type = "array", items = { type = "string" }, description = "Labels to remove." },
-                require_fields = { type = "array", items = { type = "string" }, description = "Labels to make required." },
+                require_fields = { type = "array", items = { type = "string" },
+                    description = "Labels to make required." },
                 create_records = {
                     type = "array",
                     items = { type = "string", enum = { "customer", "lead", "user" } },

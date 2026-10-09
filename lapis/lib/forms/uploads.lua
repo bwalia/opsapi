@@ -71,7 +71,8 @@ function Uploads.accept(form, schema, field_key, file, ip_hash)
     local kind = Fields.FILE_TYPES[ext]
     if not kind or (field.accept ~= "any" and kind[2] ~= field.accept) then
         return nil, field.accept == "images" and "Only images (JPG, PNG, GIF, WebP, HEIC) can be uploaded here."
-            or field.accept == "documents" and "Only documents (PDF, Word, Excel, PowerPoint, text, CSV) can be uploaded here."
+            or field.accept == "documents"
+                and "Only documents (PDF, Word, Excel, PowerPoint, text, CSV) can be uploaded here."
             or "That type of file can't be uploaded.", 415
     end
     if #file.content > field.max_size_mb * 1024 * 1024 then

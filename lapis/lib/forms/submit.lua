@@ -197,8 +197,9 @@ function Submit.handle(form, version, body, client)
     end
     -- The form's "I'm not a robot" check, when the owner turned it on.
     if settings.captcha then
-        local _, secret = require("lib.forms.workspace").turnstile(form.namespace_id)
-        local ok = secret and require("lib.forms.workspace").verify(secret, body.captcha_token, client.ip)
+        local _, captcha_secret = require("lib.forms.workspace").turnstile(form.namespace_id)
+        local ok = captcha_secret
+            and require("lib.forms.workspace").verify(captcha_secret, body.captcha_token, client.ip)
         if not ok then
             return { status = 400, json = { success = false, code = "captcha",
                 error = "Please complete the security check and try again." } }

@@ -583,7 +583,9 @@ local function rule_value(src, op, value, where)
         return nil, where .. ": 'greater/less than' needs a number, rating or date question"
     end
     if CHOICE[src.type] then
-        if not option_of(src, value) then return nil, where .. ": '" .. tostring(value) .. "' isn't one of its options" end
+        if not option_of(src, value) then
+            return nil, where .. ": '" .. tostring(value) .. "' isn't one of its options"
+        end
         return value
     end
     if src.type == "boolean" or src.type == "consent" then

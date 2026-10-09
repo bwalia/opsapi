@@ -160,7 +160,9 @@ function FormQueries.cleanSettings(raw, current, namespace_id)
             end
             if v.logo_url ~= nil and v.logo_url ~= cjson.null and v.logo_url ~= "" then
                 local u = setting_text(v.logo_url, 1000)
-                if not u or not u:match("^https://[%w%-%.]+[^%s\"'<>]*$") then return nil, "logo_url must be an https:// address" end
+                if not u or not u:match("^https://[%w%-%.]+[^%s\"'<>]*$") then
+                    return nil, "logo_url must be an https:// address"
+                end
                 t.logo_url = u
             end
             if v.submit_label ~= nil and v.submit_label ~= cjson.null and v.submit_label ~= "" then
