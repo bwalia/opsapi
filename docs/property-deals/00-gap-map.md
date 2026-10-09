@@ -1,6 +1,6 @@
 # Property Deals — Phase 1 gap map
 
-Status: **approved 2026-10-09** (all recommendations). Built so far: D1–D5, D7 (screens are native pages), D9 (`emits`), D10–D12 pending Phase 5, D13 (APNs, Phase 3), D6 (`@opsapi/client/property-deals`, Phase 4), D8 (baked into the image via a named build context, Phase 4), D15 (`PROJECT_CODE=property`). · Branch `bsw/property_deals_backoffice` · 2026-10-09
+Status: **approved 2026-10-09** (all recommendations). Built so far: D1–D5, D7 (screens are native pages), D9 (`emits`), D10 (AES-256-GCM `helper/secret-box.lua`) + D11 (core `namespace_ai_providers`) + D12 (plugin approvals, now executed) in Phase 5, D13 (APNs, Phase 3), D6 (`@opsapi/client/property-deals`, Phase 4), D8 (baked into the image via a named build context, Phase 4), D15 (`PROJECT_CODE=property`). · Branch `bsw/property_deals_backoffice` · 2026-10-09
 
 This maps every concept in [SPEC.md](SPEC.md) §3.1 to what already exists in OpsAPI, and says
 **reuse / extend / new** for each. Every new table has a reason. Nothing here is built yet.

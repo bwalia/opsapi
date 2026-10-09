@@ -1,4 +1,4 @@
-# Property Deals API (contract v1 — Phase 4)
+# Property Deals API (contract v1.1 — Phase 5)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -25,6 +25,7 @@ It goes screen by screen: which call fills each screen, and what it returns. Typ
 | Ids | uuids. Tasks use the **kanban task uuid** (`task_uuid`) |
 | Times | ISO 8601 UTC (`due_at`); plain dates (`target_completion_date`) are workspace-local. Show in the workspace `timezone` from `GET /me` |
 | Money | numbers in the deal `currency` (default GBP) |
+| **Retries** | Send `Idempotency-Key: <uuid>` on creates (every `POST` that makes a row, core `POST /api/v2/crm/leads` and kanban comments too). A retry with the same key — same workspace, user and body — gets the first answer back (header `Idempotent-Replayed: true`) and creates nothing. Same key + different body → 422; still running → 409. Keys live 24 h |
 
 Status codes: `401` not signed in · `403` role can't do it (show "you don't have access", hide the
 button next time) · `404` not in this workspace, **or the plugin is off** (`"code": "PLUGIN_DISABLED"`:
@@ -172,15 +173,18 @@ POST /api/v2/property-deals/approvals/{id}/decide
 ```
 ```jsonc
 // inbox item
-{ "uuid": "…", "title": "Chase seller's solicitor", "subject_type": "chase", "action": "send_email",
-  "rule": "any_operator", "payload": { "to": "…", "subject": "…", "body": "…" }, "payload_version": 1,
-  "deal_name": "7 Mill Lane", "agent_key": "legal_chaser", "provider": "local", "model": "llama3.1:8b",
-  "cost_usd": 0.0, "from_jobshout": false, "run_sources": [ … ], "can_decide": true, "decisions": [] }
+{ "uuid": "…", "title": "Chase seller solicitor — 7 Mill Lane", "subject_type": "chase", "action": "send_email",
+  "rule": "any_operator", "payload_version": 1, "payload_sha256": "…",
+  "payload": { "to": "sol@firm.example", "to_party": "seller_solicitor", "subject": "Open enquiries [PD-1a2b3c4d]",
+               "body": "…", "enquiry_uuids": ["…"], "enquiry_updates": [], "new_enquiries": [] },
+  "deal_name": "7 Mill Lane", "agent_key": "legal_chaser", "provider": "builtin", "model": "qwen3:8b",
+  "cost_usd": 0.0002, "from_jobshout": false, "run_steps": [ { "round": 1, "tool": "list_open_enquiries" } ],
+  "run_output": { "summary": "…", "blockers": ["…"] }, "can_decide": true, "decisions": [] }
 
-// decide: approve as is | approve an edited version | reject
-{ "decision": "approve" }
-{ "decision": "approve", "payload": { "to": "…", "subject": "…", "body": "edited text" }, "note": "Tightened wording" }
-{ "decision": "reject", "note": "Wrong solicitor" }          // note required
+// decide: approve as is | approve an edited version | reject. Always send the version you showed.
+{ "decision": "approve", "payload_version": 1 }
+{ "decision": "approve", "payload_version": 1, "payload": { "to": "…", "subject": "…", "body": "edited text" }, "note": "Tightened wording" }
+{ "decision": "reject", "note": "Mention the completion date" }   // note required; the agent's rerun follows it
 ```
 - **Diff:** compare `original_payload` (the agent's draft, kept after an edit) with `payload`.
 - **Rules:** `any_operator` (one person with approvals.update), `manager` (approvals.manage),
@@ -188,8 +192,27 @@ POST /api/v2/property-deals/approvals/{id}/decide
   `waiting_for: "a second person"`). Nobody decides their own request, and the AI account never
   decides.
 - Every decision is logged with who, when, payload version and SHA-256.
-- In v1 an approved item stays `approved`. From Phase 5 the system carries out the action (sends the
-  email, confirms the booking) and moves it to `executed` or `failed`.
+- **Version guard:** with `payload_version` (or `payload_sha256`), a decision on a draft that changed
+  since it was shown answers **409** `"The draft has changed since you opened it"` with
+  `details: { payload_version, payload_sha256 }` — re-fetch and show the new one.
+- **After approval the system acts** (property_deals/ai/executor.lua) and the approval moves to
+  `executed` (`execution_result`, e.g. `{ chase_uuid, sent_to }`) or `failed` (`execution_result.error`,
+  e.g. no email server). Managers retry a failed one with `POST /approvals/{id}/retry`.
+
+  | action | what runs | task afterwards |
+  |---|---|---|
+  | `send_email` | email `payload.to` (workspace SMTP), write a chase row, apply `enquiry_updates` / `new_enquiries` | done |
+  | `update_enquiries` | apply the proposed enquiry changes only | unchanged |
+  | `request_booking` | email each supplier in `payload.requests`, record bookings `requested` | waiting_third_party |
+  | `confirm_booking` | email the supplier, booking `confirmed`, other requests for the task `cancelled` | done |
+  | `jobshout:<tool>` | passed to JobShout, which runs its own tool (`execution_result.by = "jobshout"`) | done when JobShout finishes |
+  | anything else | recorded; nothing automatic | unchanged |
+- **Rejected** → the task goes back to `todo` with a comment; "Let AI do it" again redrafts using the note.
+- **JobShout:** when a JobShout agent asks for approval it shows up here once (`from_jobshout: true`,
+  `jobshout_approval_id`). Deciding here decides it in JobShout too; a decision made in JobShout's own
+  UI is mirrored here. Nobody is asked twice.
+- Confirm one supplier's slot: `POST /bookings/{id}/confirm { slot_start?, slot_end?, cost?, body? }` creates
+  a `confirm_booking` approval (the booking turns `tentative` until it is approved).
 - People can ask for approval themselves (e.g. sending a deal pack): `POST /approvals { subject_type, action, title, payload, rule?, deal_uuid? }`.
 
 ### 2.6 Map / deal finder
@@ -249,11 +272,31 @@ GET /api/v2/property-deals/properties/{id}/card
 | Module on/off and scalar settings (time zone, digest time, SLA %, escalation, urgency weights, `red_min_working_days`, `due_time`, `expiring_within_days`, `digest_email`) | core `GET /api/v2/namespace/plugins` and `PUT /api/v2/namespace/plugins/property_deals { "settings": {…} }` |
 | Workflow templates | `GET /workflow-templates`, `GET /workflow-templates/{id}` (with the active `definition`), `GET …/{id}/versions`, `GET …/{id}/versions/{n}`, `POST …/{id}/versions { definition, notes }` (publish), `PUT …/{id} { is_active, active_version_uuid }` (roll back), `GET …/{id}/export`, `POST /workflow-templates/import { definition }` |
 | Bank holidays | `GET/POST/PUT/DELETE /holidays` (also a generated page at `/dashboard/plugins/property-deals/holidays`) |
-| Run checks now | `POST /engine/run { "checks": ["sla","health","compliance_expiry","digest"] }` (managers) |
-| AI providers, models, JobShout link, data connectors | **Phase 5/6** — see §4 |
+| Run checks now | `POST /engine/run { "checks": ["sla","health","compliance_expiry","digest","agents","mail"] }` (managers) |
+| **AI providers** (core, any workspace module can use them) | `GET/POST /api/v2/namespace/ai-providers`, `GET/PUT/DELETE …/{id}`, `POST …/{id}/test`, `GET …/{id}/agents` (JobShout). Body: `{ name, provider_type: anthropic\|openai\|gemini\|azure_openai\|mistral\|openai_compatible\|ollama\|jobshout, base_url?, default_model?, secret?, username? (JobShout), options? (Azure: deployment, api_version), is_local?, enabled?, input_cost_per_mtok?, output_cost_per_mtok? }`. **Keys go in, never out**: answers carry `has_secret` + `secret_hint` ("…a1b2"); `secret: ""` clears it. Needs `namespace.update` |
+| Model per job type + fallback order | `GET /ai/routes`, `PUT /ai/routes/{classify\|extract\|draft\|plan\|chat\|summarise} { chain: [{ provider_uuid, model? }], local_only?, max_tokens? }` — tried in order |
+| Agents | `GET /ai/agents` (catalogue + settings), `PUT /ai/agents/{key} { enabled, route: builtin\|jobshout, jobshout_provider_uuid, jobshout_agent_id, fallback_to_builtin, local_only, approval_rule, auto_pickup, auto_pickup_at: "08:00" }` |
+| Cost caps | plugin settings `ai_max_cost_run_usd` (stop a run), `ai_max_cost_day_usd` (no new runs today), `ai_max_tokens`; spend: `GET /ai/usage?days=30` |
+| Mailboxes (legal chaser reads replies) | `GET/POST /mail-connectors`, `GET/PUT/DELETE …/{id}`, `POST …/{id}/sync`; kinds `imap { host, port, ssl, username, mailbox }` + password, `gmail { client_id }` + `{ client_secret, refresh_token }`, `m365 { tenant_id, client_id, mailbox }` + client secret. Received mail: `GET /inbound-messages?deal_uuid=`; log one by hand: `POST /inbound-messages` |
+| Email server for approved sends | core `PUT /api/v2/namespace/mail-settings` (else the deployment's SMTP) |
+| Data connectors | **Phase 6** — see §4 |
 
 An invalid template returns 422 with `details` as a list like
 `["stages[3].tasks[1].due.from: stage_entry, deal_created, …"]`. Show it next to the editor.
+
+### 2.10a "Let AI do it" (task page, deal page)
+
+```http
+POST /api/v2/property-deals/tasks/{task_uuid}/agent-run      { "note"?: "extra instruction" }   → 202 { data: AgentRun }
+GET  /api/v2/property-deals/agent-runs/{id}                   poll until status is succeeded | failed | cancelled
+POST /api/v2/property-deals/agent-runs/{id}/cancel
+```
+Show the button when the task has `agent_eligible: true` and `GET /me` allows `ai.create`. The task goes
+`agent_running` → `awaiting_approval` (the draft is in the Approvals inbox) or back to `todo` with a comment
+("AI couldn't finish: …" / "AI found nothing to send"). Errors: 409 an agent is already on it · 422 not
+eligible / agent off / no AI provider · 429 today's AI budget is used up. The run (`AgentRun`) shows the
+model, tokens, cost, the tools it called (`steps`, refused ones marked `refused: true`) and the draft.
+Agents and what each may do: [agents.md](agents.md).
 
 ### 2.11 Reports — Phase 7
 
@@ -267,7 +310,8 @@ v1. Until then use `GET /deals` and `GET /agent-runs` for mocks.
 | Screen | Calls |
 |---|---|
 | Today | `GET /today`. Colour by `urgency_score`/`overdue`; cache the response for offline |
-| Task detail | `GET /tasks/{task_uuid}`. Complete: `PUT /tasks/{task_uuid} {"pd_status":"done","evidence":{…}}`. "Let AI do it": Phase 5 |
+| Task detail | `GET /tasks/{task_uuid}`. Complete: `PUT /tasks/{task_uuid} {"pd_status":"done","evidence":{…}}`. "Let AI do it": `POST /tasks/{task_uuid}/agent-run` (§2.10a). After a call / WhatsApp / email from the phone: `POST /tasks/{task_uuid}/contact-log { channel, outcome?, note?, to_name?, to_address? }` — works on lead-stage tasks too (no deal yet); the log moves to the deal when the lead becomes one |
+| Settings → Notifications | `GET/PUT /notification-preferences` — per category `{ push, email }` for `sla_warning, overdue, escalated, approval_requested, digest, compliance_expiring, agent_update`, plus `quiet_hours { from, to }` (workspace time; holds back push, not the digest). In-app always on |
 | Approvals | `GET /approvals/inbox`, `POST /approvals/{id}/decide` (Face ID before sending is client-side) |
 | Deal view | `GET /deals/{id}/overview` (stage, blockers = `enquiries` + `stage.next_gate.missing`, next tasks = `tasks.open`, contact phone in `parties`) |
 | Quick capture | lead: core `POST /api/v2/crm/leads`, then `PUT /leads/{uuid}/details`. Property: `POST /properties { address_line1, lat, lng }` (GPS). Photos: `POST /documents` multipart, `category: "photo"`, `property_uuid`. Voice note: send the transcript as `notes` (on-device transcription in v1) |
@@ -275,11 +319,13 @@ v1. Until then use `GET /deals` and `GET /agent-runs` for mocks.
 
 **Offline:** cache `GET /today` and each `GET /deals/{id}/overview`. Queue `PUT /tasks/…` and
 `POST /approvals/{id}/decide`; replays are safe, because a second decide answers 409 `Already approved`.
+Send `Idempotency-Key` on queued creates (leads, properties, photos, contact logs, comments) and
+`payload_version` on decides.
 
 **Push** (native APNs):
 - Register the token: `POST /api/v2/device-tokens { "token": "<hex>", "token_type": "apns", "apns_environment": "development|production", "bundle_id": "uk.co.workstation.wslcrm", "device_name" }`.
 - Payload: `{ aps: { alert: { title, body }, sound, "thread-id": <deal uuid> }, namespace_id, route: "task"|"approval"|"deal"|"digest", uuid, event, deal_uuid, plugin: "property_deals" }`.
-- Sent for: SLA warning (`Due soon`), overdue (`Overdue`), escalation (`Escalated to you`), daily digest (`Your day`), compliance expiring. Approval requests are added in Phase 5.
+- Sent for: SLA warning (`Due soon`), overdue (`Overdue`), escalation (`Escalated to you`), daily digest (`Your day`), compliance expiring, approval needed (`Approval needed`, route `approval`), and "AI couldn't finish" (route `task`) — each subject to the person's notification preferences.
 - Switch to `namespace_id` before opening `route` / `uuid`.
 
 ---
@@ -288,9 +334,6 @@ v1. Until then use `GET /deals` and `GET /agent-runs` for mocks.
 
 | Phase | Endpoint (planned) | For |
 |---|---|---|
-| 5 | `POST /tasks/{task_uuid}/agent-run` → `{ agent_run, approval? }`; `GET /agent-runs/{id}` (exists, read-only today) | "Let AI do it" |
-| 5 | `GET/POST/PUT /ai/providers` (keys write-only: responses show `key_last4` only), `POST /ai/providers/{id}/test`, `GET/PUT /ai/agents` (model per job type, fallback order, cost caps, local-only), `GET/PUT /ai/jobshout` (URL, service user, agent mapping), `POST /ai/jobshout/test` | Settings → AI |
-| 5 | Approval execution: `approved` → `executed`/`failed`, `execution_result` | Approvals |
 | 6 | Map layers `sold_prices`, `epc`, `listings`, `auction_lots`; `GET/POST /saved-searches`; `GET/PUT /connectors`; `POST /matches/recompute` | Map, Buyers, Settings |
 | 6 | `POST /suppliers/nearest { task_uuid | lat,lng, kind }` | "Book nearest" |
 | 7 | `GET /reports/{stage-times|late-days|conversion|supplier-speed|ai-usage}` | Reports |
@@ -303,10 +346,10 @@ Exact shapes are fixed when each phase ships, and this table is updated.
 
 Workspace webhooks (`/api/v2/namespace/webhooks`) can subscribe to:
 - `property_deals.<entity>.created|updated|deleted` for deal, property, buyer_profile, task, enquiry,
-  chase, supplier, booking, compliance_check, approval, match.
+  chase, supplier, booking, compliance_check, approval, match, agent_run, inbound_message.
 - `deal.completed|fell_through|stage_changed|health_changed`.
 - `task.done|awaiting_approval|sla_warning|overdue|escalated`.
-- `approval.requested|approved|rejected|decided`.
+- `approval.requested|approved|rejected|decided|executed`; `agent_run.succeeded|failed`; `inbound_message.created`.
 - `compliance_check.passed|failed|expiring|expired`.
 - `booking.confirmed|cancelled`.
 
@@ -320,8 +363,23 @@ engine events). Use it for WhatsApp/Slack.
 | Request | Answer |
 |---|---|
 | [ios-apns-device-tokens](api-requests/ios-apns-device-tokens.md) | Done (Phase 3): APNs tokens, routing, payload contract (§3) |
+| [ios-approval-version-guard](api-requests/ios-approval-version-guard.md) | Done (Phase 5): `payload_version` / `payload_sha256` on decide → 409 when the draft changed (§2.5) |
+| [ios-contact-log-without-deal](api-requests/ios-contact-log-without-deal.md) | Done (Phase 5): option 1 + 2 — chases take `lead_uuid` (deal optional), `GET /chases?lead_uuid=`, `POST /tasks/{id}/contact-log`; moved onto the deal when the lead converts (§3) |
+| [ios-idempotent-creates](api-requests/ios-idempotent-creates.md) | Done (Phase 5): `Idempotency-Key` on every create, core leads and kanban comments included (§1) |
+| [ios-notification-preferences](api-requests/ios-notification-preferences.md) | Done (Phase 5): `GET/PUT /notification-preferences` + quiet hours; the workspace setting `escalations_always_notify` can make escalations unmutable (§3) |
 
 ## 7. Changes
+
+- **v1.1 (Phase 5):**
+  - AI layer: core workspace AI providers (`/api/v2/namespace/ai-providers`, AES-256-GCM sealed keys),
+    `/ai/routes`, `/ai/agents`, `/ai/usage`, `POST /tasks/{id}/agent-run`, `POST /agent-runs/{id}/cancel`.
+  - Approvals are carried out after approval (`executed` / `failed`), `POST /approvals/{id}/retry`,
+    version guard on decide, JobShout approvals mirrored both ways, `POST /bookings/{id}/confirm`.
+  - Mail connectors (IMAP, Gmail, Microsoft 365) and `/inbound-messages`; replies mark chases replied.
+  - iOS requests: `Idempotency-Key`, contact log on leads (`lead_uuid`, `outcome`, `/tasks/{id}/contact-log`),
+    `/notification-preferences`.
+  - Daily digest: `prose` (digest writer agent) when the workspace has a model.
+  - Plugin CRUD: a check-constraint violation is now 422 (was 500).
 
 - **v1 (Phase 4):**
   - Contract published.

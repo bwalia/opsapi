@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd); HERE="$ROOT/projects/property-deals/spec"
 # Under $HOME: Docker Desktop/colima share it, not always macOS's /var/folders temp dir.
 mkdir -p "$HOME/.cache"; W=$(mktemp -d "$HOME/.cache/pd-e2e.XXXXXX"); NET=pd-e2e-$$; ID=$$
-cleanup() { [ -n "${KEEP:-}" ] && { echo "KEEP: sandbox left running (pd-api-$ID, pd-pg-$ID, $W)"; return; }; docker rm -f pd-api-$ID pd-pg-$ID >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$W"; }
+cleanup() { [ -n "${KEEP:-}" ] && { echo "KEEP: sandbox left running (pd-api-$ID, pd-pg-$ID, pd-mock-$ID, $W)"; return; }; docker rm -f pd-api-$ID pd-pg-$ID pd-mock-$ID >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$W"; }
 trap cleanup EXIT
 
 mkdir -p "$W/src"
@@ -33,10 +33,14 @@ docker exec pd-pg-$ID psql -U postgres -d e2e -qc 'CREATE EXTENSION IF NOT EXIST
   CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS cube;
   CREATE EXTENSION IF NOT EXISTS earthdistance;'
 
+# The outside world for the AI tests: a local model, JobShout, SMTP, IMAP, Gmail and Microsoft 365 (spec/mocks.py).
+docker run -d --name pd-mock-$ID --network "$NET" --network-alias pd-mock -p 127.0.0.1::8080 \
+  -v "$HERE/mocks.py:/mocks.py:ro" python:3.12-alpine python -u /mocks.py >/dev/null
 docker run -d --name pd-api-$ID --network "$NET" -p 127.0.0.1::80 -v "$W/src/lapis:/app" -v "$W/src/projects:/app/projects" \
   -e POSTGRES_HOST=pd-pg -e POSTGRES_USER=pguser -e POSTGRES_PASSWORD=pgpassword -e POSTGRES_DB=e2e \
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=property -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
+  -e OPSAPI_AI_ALLOW_PRIVATE=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e AI_FALLBACK_PROVIDER=none \
   -e REDIS_ENABLED=false lapis-lapis >/dev/null
 sleep 6
 [ "$(docker inspect -f '{{.State.Running}}' pd-api-$ID)" = true ] || { docker logs pd-api-$ID 2>&1 | tail -40; exit 1; }
@@ -59,8 +63,12 @@ for u in 'a1111111-0000-4000-8000-000000000001 owner.a@pd.invalid' 'b2222222-000
 done
 
 PORT=$(docker port pd-api-$ID 80/tcp | head -1 | sed 's/.*://')
+MOCK_PORT=$(docker port pd-mock-$ID 8080/tcp | head -1 | sed 's/.*://')
 export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
-{ python3 -I "$HERE/api_test.py" && python3 -I "$HERE/scenario_test.py" && python3 -I "$HERE/contract_test.py"; } || {
+export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
+# ONLY=ai_test (etc.) runs one suite while iterating.
+SUITES=${ONLY:-api_test scenario_test contract_test ai_test}
+( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
     | grep -A2 "\[property_deals\]" | grep -v -E "^\s+/|^--" | sed 's/.*\[property_deals\] //' | cut -c1-400 | sort -u | tail -10

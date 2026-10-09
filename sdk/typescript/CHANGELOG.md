@@ -2,6 +2,10 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## Unreleased
+
+- `@opsapi/client/property-deals`: the AI layer (Phase 5) — "Let AI do it" (`POST /tasks/{id}/agent-run`), agent runs, `/ai/agents`, `/ai/routes`, `/ai/usage`, approval retry and booking confirmation, mail connectors and inbound messages, notification preferences, the task contact log; `ApprovalDecision` gains `payload_version` / `payload_sha256`. New named types `Agent`, `AgentConfig`, `AiRoute`, `MailConnector`, `MailConnectorWrite`, `InboundMessage`, `NotificationPreferences`; more events in `PROPERTY_DEALS_EVENTS`.
+
 ## 1.2.0
 
 - New subpath `@opsapi/client/property-deals` for the Property Deals plugin (a back office for buying and selling homes; guide: docs/property-deals/API.md). It needs an OpsAPI server with the plugin installed and switched on for the workspace.
