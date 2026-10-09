@@ -53,6 +53,8 @@ and free of the usual scale traps.
   once per message on the sending pod; subscribers do no DB work. A heartbeat
   every 10 s proves the subscription is alive (35 s of silence → reconnect).
   Uses `helper/redis-client.lua` (`REDIS_ENABLED`/`HOST`/`PORT`/`PASSWORD`/`DB`).
+  The kanban board hub (`lib/kanban-ws.lua`) rides the same link through
+  `chat-ws.relay()`, without a second subscription.
   - **Redis down:** sends still succeed; delivery stays on the sending pod; one
     `[chat-ws] Redis subscriber down` WARN per outage per worker (plus at most one
     `PUBLISH failed` WARN a minute); the subscriber reconnects by itself (backoff
