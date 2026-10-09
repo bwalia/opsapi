@@ -225,6 +225,9 @@ return {
     [6] = function()
         local MigrationUtils = require("helper.migration-utils")
         local ts = MigrationUtils.getCurrentTimestamp()
+        -- Only the billing / tax_copilot migrations add this column; this core
+        -- migration runs for every PROJECT_CODE, so make sure it exists first.
+        db.query("ALTER TABLE modules ADD COLUMN IF NOT EXISTS allowed_actions TEXT")
         if #db.select("1 FROM modules WHERE machine_name = 'activity'") == 0 then
             db.insert("modules", {
                 uuid = MigrationUtils.generateUUID(),

@@ -199,9 +199,11 @@ function KanbanProjectQueries.create(params)
         end
 
         -- Create chat channel for the project and add owner as admin
-        -- Get namespace for chat channel (requires both id and uuid)
+        -- Get namespace for chat channel (requires both id and uuid). Only when
+        -- the chat feature is deployed: presets like business/property have
+        -- kanban without chat, so chat_channels doesn't exist there.
         local namespace = NamespaceQueries.show(params.namespace_id)
-        if namespace then
+        if namespace and require("helper.project-config").isChatEnabled() then
             createProjectChatChannel(project, params.owner_user_uuid, namespace)
         end
     end
