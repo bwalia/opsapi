@@ -1,0 +1,234 @@
+import apiClient, { buildQueryString } from '@/lib/api-client';
+
+/**
+ * Forms API client (lapis/routes/forms.lua, docs/FORMS.md). The server is the
+ * authority: every save goes through its normalize(), which adds and locks the
+ * contact fields a form's targets need, so the builder always renders what the
+ * server returns rather than what it sent.
+ */
+
+export type FieldType =
+  | 'short_text' | 'long_text' | 'email' | 'phone' | 'url' | 'number' | 'date' | 'time'
+  | 'single_select' | 'radio' | 'multi_select' | 'boolean' | 'rating' | 'consent'
+  | 'name' | 'address' | 'hidden' | 'heading' | 'paragraph';
+
+export type MapsTo = 'phone' | 'company' | 'job_title' | 'address' | 'notes' | 'marketing_consent';
+
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
+export interface FormField {
+  key?: string;
+  type: FieldType;
+  label: string;
+  help?: string;
+  placeholder?: string;
+  required?: boolean;
+  width?: 'full' | 'half';
+  options?: FieldOption[];
+  validation?: {
+    min_length?: number; max_length?: number; min?: number | string; max?: number | string;
+    integer?: boolean; min_selected?: number; max_selected?: number;
+  };
+  scale?: 5 | 10;
+  text?: string;
+  param?: string;
+  maps_to?: MapsTo;
+  /** Set by the server: a contact field a target needs. Locked in the builder. */
+  system?: 'contact.name' | 'contact.email';
+}
+
+export type TargetType = 'customer' | 'lead' | 'user';
+
+export interface FormTarget {
+  type: TargetType;
+  role?: string;
+}
+
+export interface FormSettings {
+  success_message?: string;
+  redirect_url?: string;
+  close_at?: string;
+  max_submissions?: number;
+  closed_message?: string;
+  notify_emails?: string[];
+  auto_reply?: { enabled: boolean; subject?: string; body?: string };
+  retention_days?: number;
+}
+
+export type FormStatus = 'draft' | 'published' | 'closed' | 'archived';
+
+export interface FormSummary {
+  uuid: string;
+  public_id: string;
+  title: string;
+  description?: string;
+  status: FormStatus;
+  question_count: number;
+  submission_count: number;
+  last_submission_at?: string;
+  published_version?: number;
+  published_at?: string;
+  has_unpublished_changes: boolean;
+  share_url?: string;
+  share_path: string;
+  targets: FormTarget[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Form extends FormSummary {
+  schema: { fields: FormField[] };
+  settings: FormSettings;
+  /** Answer keys of the published version: these never change. */
+  published_keys: string[];
+}
+
+export interface TargetOption {
+  key: TargetType;
+  label: string;
+  description: string;
+  requires: string[];
+  allowed: boolean;
+  permission: string;
+  roles?: { name: string; label: string }[];
+}
+
+export interface FormTemplate {
+  key: string;
+  title: string;
+  description: string;
+  targets: TargetType[];
+  question_count: number;
+}
+
+export interface SubmissionLink {
+  target: TargetType;
+  outcome: 'created' | 'matched' | 'invited' | 'failed';
+  entity_type?: 'customer' | 'lead' | 'user' | 'invitation';
+  entity_uuid?: string;
+  error_code?: string;
+  record?: { name?: string; email?: string; status?: string; expires_at?: string };
+  missing?: boolean;
+}
+
+export type SubmissionStatus = 'complete' | 'needs_attention' | 'spam';
+
+export interface Submission {
+  uuid: string;
+  status: SubmissionStatus;
+  respondent_email?: string;
+  answers: Record<string, unknown>;
+  version: number;
+  links: SubmissionLink[];
+  utm?: Record<string, string>;
+  referrer?: string;
+  page_url?: string;
+  spam_reason?: string;
+  duration_ms?: number;
+  created_at: string;
+  processed_at?: string;
+  /** Only on a single response: the fields of the version it answered. */
+  fields?: FormField[];
+}
+
+export interface Column {
+  key: string;
+  label: string;
+  type: FieldType;
+  options?: FieldOption[];
+  scale?: number;
+}
+
+export interface FormInput {
+  title?: string;
+  description?: string;
+  template?: string;
+  fields?: FormField[];
+  targets?: FormTarget[];
+  settings?: FormSettings;
+  expected_updated_at?: string;
+}
+
+const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
+const BASE = '/api/v2/forms';
+
+function unwrap<T>(response: { data: unknown }): T {
+  return (response.data as { data: T }).data;
+}
+
+export const formsService = {
+  async list(params: { status?: string; q?: string; cursor?: string; limit?: number } = {}) {
+    const res = await apiClient.get(`${BASE}${buildQueryString(params)}`);
+    const body = res.data as { data: FormSummary[]; meta?: { next_cursor?: string } };
+    return { items: body.data ?? [], nextCursor: body.meta?.next_cursor };
+  },
+  async get(uuid: string): Promise<Form> {
+    return unwrap<Form>(await apiClient.get(`${BASE}/${uuid}`));
+  },
+  async create(input: FormInput): Promise<Form> {
+    return unwrap<Form>(await apiClient.post(BASE, input, JSON_BODY));
+  },
+  async update(uuid: string, input: FormInput): Promise<Form> {
+    return unwrap<Form>(await apiClient.put(`${BASE}/${uuid}`, input, JSON_BODY));
+  },
+  async remove(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/${uuid}`);
+  },
+  async publish(uuid: string): Promise<Form> {
+    return unwrap<Form>(await apiClient.post(`${BASE}/${uuid}/publish`, {}, JSON_BODY));
+  },
+  async setOpen(uuid: string, open: boolean): Promise<Form> {
+    return unwrap<Form>(await apiClient.post(`${BASE}/${uuid}/${open ? 'reopen' : 'close'}`, {}, JSON_BODY));
+  },
+  async duplicate(uuid: string): Promise<Form> {
+    return unwrap<Form>(await apiClient.post(`${BASE}/${uuid}/duplicate`, {}, JSON_BODY));
+  },
+  async targets(): Promise<TargetOption[]> {
+    return unwrap<TargetOption[]>(await apiClient.get(`${BASE}/targets`));
+  },
+  async templates(): Promise<FormTemplate[]> {
+    return unwrap<FormTemplate[]>(await apiClient.get(`${BASE}/templates`));
+  },
+  async submissions(
+    uuid: string,
+    params: { status?: string; from?: string; to?: string; q?: string; cursor?: string; limit?: number } = {}
+  ) {
+    const res = await apiClient.get(`${BASE}/${uuid}/submissions${buildQueryString(params)}`);
+    const body = res.data as { data: Submission[]; meta: { next_cursor?: string; columns: Column[] } };
+    return { items: body.data ?? [], nextCursor: body.meta?.next_cursor, columns: body.meta?.columns ?? [] };
+  },
+  async submission(uuid: string, sid: string): Promise<Submission> {
+    return unwrap<Submission>(await apiClient.get(`${BASE}/${uuid}/submissions/${sid}`));
+  },
+  async setSubmissionStatus(uuid: string, sid: string, status: 'spam' | 'complete'): Promise<Submission> {
+    return unwrap<Submission>(await apiClient.put(`${BASE}/${uuid}/submissions/${sid}`, { status }, JSON_BODY));
+  },
+  async retry(uuid: string, sid: string): Promise<Submission> {
+    return unwrap<Submission>(await apiClient.post(`${BASE}/${uuid}/submissions/${sid}/retry`, {}, JSON_BODY));
+  },
+  async removeSubmission(uuid: string, sid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/${uuid}/submissions/${sid}`);
+  },
+  async exportCsv(uuid: string, params: { status?: string; from?: string; to?: string; q?: string } = {}) {
+    const res = await apiClient.get(`${BASE}/${uuid}/export${buildQueryString(params)}`, { responseType: 'blob' });
+    const cd = String(res.headers['content-disposition'] || '');
+    const filename = /filename="([^"]+)"/.exec(cd)?.[1] || 'responses.csv';
+    return { blob: res.data as Blob, filename };
+  },
+};
+
+/** The public link for a form (the API knows the dashboard origin, else this one). */
+export function shareUrl(form: Pick<FormSummary, 'share_url' | 'share_path'>): string {
+  if (typeof window !== 'undefined') return window.location.origin + form.share_path;
+  return form.share_url || form.share_path;
+}
+
+/** A Postgres timestamp ("2026-10-09 14:04:42.4+00") as a Date (browsers reject the short "+00" offset). */
+export function parseTs(v?: string | null): Date | null {
+  if (!v) return null;
+  const d = new Date(v.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00'));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
