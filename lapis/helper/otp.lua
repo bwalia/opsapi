@@ -10,6 +10,10 @@
     - Max 5 verification attempts per code
     - Old codes invalidated on new code generation
     - Expired codes cleaned up automatically
+    - Stored as an HMAC (code_hash), never in plain text; a copy (peek_code)
+      only for E2E test mailboxes outside production (routes/e2e-otp.lua)
+    - Per user, whatever the IP: at most OTP_SEND codes sent and OTP_FAIL wrong
+      codes per hour (helper/auth-throttle.lua)
     - 2FA session tokens: short-lived JWTs that prove password was verified
       (required by /auth/2fa/verify and /auth/2fa/resend to prevent abuse)
 ]]
@@ -17,6 +21,7 @@
 local db = require("lapis.db")
 local Mail = require("helper.mail")
 local Global = require("helper.global")
+local Throttle = require("helper.auth-throttle")
 
 local OTP = {}
 
@@ -89,7 +94,7 @@ function OTP.verifySessionToken(token)
         return nil, "Server configuration error"
     end
 
-    local result = jwt:verify(secret, token)
+    local result = require("helper.jwt-verify")(secret, token)
     if not result or not result.verified then
         return nil, "Invalid or expired 2FA session. Please login again."
     end
@@ -145,11 +150,35 @@ local function cleanup_expired()
     ]])
 end
 
+local function deploy_env()
+    return os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
+end
+
+-- HMAC of the code, keyed with the server secret and bound to the user, so a
+-- copy of the table doesn't give codes away (6 digits are trivial to brute-force
+-- from a plain hash).
+local function code_hash(user_id, code)
+    local secret = Global.getEnvVar("JWT_SECRET_KEY") or error("JWT_SECRET_KEY not configured")
+    local h = assert(require("resty.openssl.hmac").new(secret, "sha256"))
+    local mac = h:final(tostring(user_id) .. ":" .. code)
+    return (mac:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+
+-- The E2E peek route may read a code only for test mailboxes outside production.
+local function peekable(email)
+    if os.getenv("E2E_OTP_PEEK_ENABLED") ~= "true" or not email then return false end
+    local env = deploy_env()
+    if env == "production" or env == "prod" then return false end
+    local pattern = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
+    return pattern ~= nil and pattern ~= "" and ngx.re.match(email, pattern, "jo") ~= nil
+end
+
 --- Create and store a new OTP for a user. Invalidates any existing codes.
 -- @param user_id number The user's internal ID
+-- @param email string|nil The user's email (decides whether the E2E peek may read it)
 -- @return string The generated OTP code
 -- @return string|nil Error message
-function OTP.create(user_id)
+function OTP.create(user_id, email)
     if not user_id then
         return nil, "user_id is required"
     end
@@ -157,15 +186,18 @@ function OTP.create(user_id)
     -- Invalidate previous codes
     invalidate_existing(user_id)
 
-    -- Clean up old expired codes (opportunistic)
+    -- Clean up old expired codes and throttle windows (opportunistic)
     pcall(cleanup_expired)
+    pcall(Throttle.purge)
 
     local code = generate_code()
     local expires_at = db.raw("NOW() + INTERVAL '" .. EXPIRY_SECONDS .. " seconds'")
 
     db.insert("admin_otp_codes", {
         user_id = user_id,
-        code = code,
+        code = db.NULL,
+        code_hash = code_hash(user_id, code),
+        peek_code = peekable(email) and code or db.NULL,
         expires_at = expires_at,
         verified = false,
         attempts = 0,
@@ -212,9 +244,15 @@ function OTP.verify(user_id, code)
         end
     end
 
+    -- Too many wrong codes for this user (from any address): wait.
+    local fail_key = Throttle.key("otp_fail", user_id)
+    if Throttle.blocked(fail_key, Throttle.OTP_FAIL) then
+        return false, "Too many incorrect codes. Please wait before trying again."
+    end
+
     -- Find the latest non-expired, non-verified code for this user
     local rows = db.query([[
-        SELECT id, code, attempts FROM admin_otp_codes
+        SELECT id, code_hash, attempts FROM admin_otp_codes
         WHERE user_id = ? AND verified = false AND expires_at > NOW()
         ORDER BY created_at DESC LIMIT 1
     ]], user_id)
@@ -236,8 +274,9 @@ function OTP.verify(user_id, code)
         UPDATE admin_otp_codes SET attempts = attempts + 1 WHERE id = ?
     ]], otp_row.id)
 
-    -- Compare codes
-    if otp_row.code ~= code then
+    -- Compare codes (constant time)
+    if not require("lib.stripe")._secure_compare(code_hash(user_id, code), otp_row.code_hash or "") then
+        Throttle.hit(fail_key, Throttle.OTP_FAIL.window)
         local remaining = MAX_ATTEMPTS - otp_row.attempts - 1
         if remaining <= 0 then
             db.query("DELETE FROM admin_otp_codes WHERE id = ?", otp_row.id)
@@ -276,7 +315,14 @@ function OTP.sendToEmail(user, brand)
             " — OTP row will be created; SMTP may still be suppressed")
     end
 
-    local code, err = OTP.create(user.id)
+    -- Codes sent to this user (sign-ins + resends), from any address.
+    local send_key = Throttle.key("otp_send", user.id)
+    if Throttle.blocked(send_key, Throttle.OTP_SEND) then
+        return false, "rate_limited"
+    end
+    Throttle.hit(send_key, Throttle.OTP_SEND.window)
+
+    local code, err = OTP.create(user.id, user.email)
     if not code then
         return false, err
     end

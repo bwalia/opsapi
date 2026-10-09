@@ -1,7 +1,7 @@
 --[[
     Spec: Billing & Entitlements (docs/BILLING_ENTITLEMENTS.md).
 
-    Run inside the API container:
+    Run inside the API container (or from the repo root: luajit lapis/spec/billing-entitlements_spec.lua):
         docker exec -w /app opsapi /usr/local/openresty/luajit/bin/luajit spec/billing-entitlements_spec.lua
 
     Static/unit checks only (ES256 needs nginx's OpenSSL; the signing and
@@ -28,8 +28,9 @@ for _, m in ipairs({ "models.BillingSubscriptionModel", "models.BillingPlanModel
     package.loaded[m] = {}
 end
 
+-- Paths are relative to lapis/; CI runs specs from the repo root.
 local function read(path)
-    local f = assert(io.open(path))
+    local f = assert(io.open(path) or io.open("lapis/" .. path), path)
     local s = f:read("*a")
     f:close()
     return s

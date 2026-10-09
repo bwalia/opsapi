@@ -897,9 +897,14 @@ return function(app)
 
         ngx.log(ngx.INFO, "Received GitHub webhook: event=", tostring(event_type))
 
-        -- Verify webhook signature if secret is configured
+        -- The signature is this endpoint's only authentication (it needs no
+        -- login): without a secret nothing is accepted.
         local webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
-        if webhook_secret and webhook_secret ~= "" then
+        if not webhook_secret or webhook_secret == "" then
+            ngx.log(ngx.ERR, "GitHub webhook refused: GITHUB_WEBHOOK_SECRET is not set")
+            return error_response(503, "Webhook not configured")
+        end
+        do
             if not signature then
                 ngx.log(ngx.WARN, "GitHub webhook received without signature")
                 return error_response(401, "Missing signature")
@@ -918,7 +923,7 @@ return function(app)
             hmac_sha256:update(payload_raw)
             local computed_signature = "sha256=" .. resty_string.to_hex(hmac_sha256:final())
 
-            if computed_signature ~= signature then
+            if not require("lib.stripe")._secure_compare(computed_signature, signature) then
                 ngx.log(ngx.WARN, "GitHub webhook signature mismatch")
                 return error_response(401, "Invalid signature")
             end

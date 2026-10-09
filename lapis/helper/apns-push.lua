@@ -213,6 +213,11 @@ function APNsPush.sendToDevice(device_token, notification, data, config)
     end
 
     local apns_host = get_apns_host(config.environment)
+    -- The token goes into a shell command line below: only an APNs token
+    -- (hex) may get there, never client-supplied shell syntax.
+    if type(device_token) ~= "string" or not device_token:match("^%x+$") or #device_token > 200 then
+        return false, "invalid device token"
+    end
     local url = "https://" .. apns_host .. "/3/device/" .. device_token
 
     -- Build APNs payload

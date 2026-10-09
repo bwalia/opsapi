@@ -1,0 +1,52 @@
+name: Lua specs and lint
+
+# The specs in lapis/spec are standalone LuaJIT scripts (exit 1 on a failed
+# check), run here in the OpenResty base image the app is built on.
+on:
+  pull_request:
+    paths: ["lapis/**", ".github/workflows/lapis-checks.yml"]
+  push:
+    branches: [main]
+    paths: ["lapis/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  specs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lapis/spec/*_spec.lua
+        run: |
+          docker pull -q bwalia/opsapi-base:latest
+          # Known to fail outside a running Lapis app (they also fail on main); listed so they stay visible.
+          skip=" llm-providers_spec.lua openapi-coverage_spec.lua plugin-platform_spec.lua "
+          failed=""
+          for f in lapis/spec/*_spec.lua; do
+            name=$(basename "$f")
+            if [[ "$skip" == *" $name "* ]]; then echo "::warning file=$f::skipped (needs a running Lapis app)"; continue; fi
+            echo "::group::$name"
+            docker run --rm -v "$PWD:/repo" -w /repo bwalia/opsapi-base:latest \
+              /usr/local/openresty/luajit/bin/luajit "$f" || failed="$failed $name"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
+
+  luacheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq lua-check
+      - name: luacheck the Lua files this change touches (errors fail; warnings are reported)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- 'lapis/*.lua' 'lapis/**/*.lua' | sed 's#^lapis/##')
+          if [ -z "$files" ]; then echo "no Lua changes"; exit 0; fi
+          cd lapis
+          set +e; luacheck --no-color $files; rc=$?; set -e
+          # 0 = clean, 1 = warnings only, 2+ = syntax or other errors
+          if [ "$rc" -ge 2 ]; then exit "$rc"; fi

@@ -369,6 +369,7 @@ local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE
 local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.audit-trail") or {}
 local namespace_module_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-module") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
+local auth_hardening_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.auth-hardening") or {}
 local billing_ent_migrations = load_if_enabled(ProjectConfig.FEATURES.BILLING, "migrations.billing-entitlements") or {}
 local namespace_mail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-mail") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
@@ -2558,6 +2559,9 @@ local _migrations = {
     ['zzua5_activity_daily_rollup'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 5),
     ['zzua6_activity_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 6),
     ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
+    -- Auth hardening: per-account throttles, hashed OTP codes (migrations/auth-hardening.lua)
+    ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
+    ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),
