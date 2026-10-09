@@ -111,6 +111,9 @@ local review_migrations = load_if_enabled(ProjectConfig.FEATURES.REVIEWS, "migra
 
 local delivery_otp_migrations = load_if_enabled(ProjectConfig.FEATURES.DELIVERY, "migrations.delivery-partner-otp") or {}
 
+-- Where an invitation came from (admin / form): seat counting (core)
+local invitation_source_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.invitation-source") or {}
+
 -- Form builder (docs/FORMS.md)
 local forms_migrations = load_if_enabled(ProjectConfig.FEATURES.FORMS, "migrations.forms") or {}
 
@@ -2578,6 +2581,7 @@ local _migrations = {
     ['zzform1_forms_tables'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 1),
     ['zzform2_forms_module_menu'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 2),
     ['zzform3_forms_lookup_indexes'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 3),
+    ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

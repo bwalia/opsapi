@@ -114,7 +114,12 @@ When the option is turned off, the fields unlock again.
   and choose a password. That proves they own the address, so a form can't create accounts for
   other people's emails.
   - An email that already has an account accepts the invitation by signing in.
-  - Pending invitations count towards the workspace's member limit.
+  - **Seats:** an invitation an admin sends from Members holds a seat while it is pending (like
+    GitHub). A request that comes from a form holds none until the person accepts (like Slack).
+    A request is created only while a seat is free, and accepting it needs a free seat too.
+    Otherwise the person is told the workspace is full, and you see **Needs attention** with the
+    reason "workspace full". Up to `max(50, 5 × the seat limit)` form requests can wait at once.
+    They expire after 7 days, and Members marks them "Requested via a form".
 
 Adding an option, or publishing a form that has one, needs that option's permission. Publishing
 lets the public create those records on your behalf.
@@ -167,8 +172,11 @@ sent at most once per response.
 - **Invitation:** goes out for each invitation a response creates. A repeat response from the
   same email doesn't send another.
 
-They use the workspace's own SMTP server when one is set up (**Workspace → Email**), and you can
-change their wording there:
+Each workspace can use its own SMTP server. The workspace owner sets it up in **Workspace →
+Email** (`/dashboard/namespace/email`): host, port, security, login (the password is stored
+encrypted) and the sender. **Send test** checks it. Without one, the platform's server is used.
+**Forms → Settings → Emails** says which applies, and warns when no email can be sent. You can
+change the wording of each email in Workspace → Email:
 - `forms.new_response`
 - `forms.auto_reply`
 - `namespace.invitation`

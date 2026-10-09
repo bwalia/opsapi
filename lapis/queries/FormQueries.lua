@@ -217,6 +217,10 @@ function FormQueries.get(namespace_id, uuid)
         for _, f in ipairs(v and decode(v.schema, { fields = {} }).fields or {}) do keys[#keys + 1] = f.key end
     end
     out.published_keys = setmetatable(keys, cjson.array_mt)
+    -- Where this workspace's emails go out from (the Settings tab says so).
+    local smtp_ok, smtp = pcall(require("helper.namespace-mail").smtp, namespace_id)
+    out.email_via = (smtp_ok and smtp) and "workspace"
+        or (require("helper.mail").isConfigured() and "platform" or "none")
     return out
 end
 

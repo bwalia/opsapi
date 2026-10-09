@@ -127,12 +127,12 @@ register({
 -- own the address, so a form can't create accounts for other people's
 -- emails, nor fill the workspace with fake members.
 -- ---------------------------------------------------------------------------
-local function seats_used(namespace_id)
-    return tonumber(db.query([[
-        SELECT (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = ? AND status = 'active')
-             + (SELECT COUNT(*) FROM namespace_invitations
-                WHERE namespace_id = ? AND status = 'pending' AND expires_at > NOW()) AS n
-    ]], namespace_id, namespace_id)[1].n)
+-- Requests from forms don't hold seats (see migrations/invitation-source.lua),
+-- so how many may wait at once is capped instead: a flood of them can't grow
+-- without bound. ponytail: fixed multiple of the seat limit; make it a setting
+-- if a workspace needs more.
+local function request_cap(max_users)
+    return math.max(50, (tonumber(max_users) or 10) * 5)
 end
 
 register({
@@ -175,19 +175,24 @@ register({
         return invite and { outcome = "matched", entity_uuid = invite.uuid }
     end,
     create = function(ctx, cfg)
-        if seats_used(ctx.namespace_id) >= (tonumber(ctx.namespace.max_users) or 10) then
+        local Invites = require("queries.NamespaceInvitationQueries")
+        if not Invites.hasFreeSeat(ctx.namespace_id, ctx.namespace.max_users) then
             return nil, "workspace_full"
+        end
+        if Invites.pendingFormRequests(ctx.namespace_id) >= request_cap(ctx.namespace.max_users) then
+            return nil, "too_many_requests"
         end
         local role = db.query("SELECT id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?",
             ctx.namespace_id, cfg.role or "member")[1]
         if not role then return nil, "role_missing" end
         local inviter = db.query("SELECT id FROM users WHERE uuid = ?", ctx.published_by_uuid)[1]
         if not inviter then return nil, "publisher_missing" end
-        local invite = require("queries.NamespaceInvitationQueries").create({
+        local invite = Invites.create({
             namespace_id = ctx.namespace_id,
             email = ctx.contact.email,
             role_id = role.id,
             invited_by = inviter.id,
+            source = "form", -- reserves no seat until accepted
             message = ("You asked to join through the form \"%s\"."):format(ctx.form.title),
         })
         return { outcome = "invited", entity_uuid = invite.uuid }

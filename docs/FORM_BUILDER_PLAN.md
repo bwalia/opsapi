@@ -11,6 +11,11 @@ Status: **Phase 1 built** (feat/forms; user guide: [FORMS.md](FORMS.md)) · Feat
 >   `PUT` (Lapis has no `app:patch`).
 > - **New:** the generic `confirm` option for agent tools (§10), a workspace invitation page
 >   `/invite/[token]`, and the invitation email for **Members → Invite**.
+> - **Seats (decided 2026-10-09):** an admin's pending invitation holds a seat (as GitHub does);
+>   a form request holds none until it is accepted (as Slack does).
+>   - Mechanics: the core column `namespace_invitations.source` (`admin` | `form`) and
+>     `NamespaceInvitationQueries.seatsUsed` / `seatAvailable`.
+>   - Pending form requests are capped at `max(50, 5 × max_users)`.
 
 ## 1. What we're building
 

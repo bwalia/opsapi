@@ -717,13 +717,9 @@ register({
         if not email:match("^[%w%._%+-]+@[%w%.%-]+%.[%w]+$") then
             return nil, "That doesn't look like a valid email address."
         end
-        local Members = q("NamespaceMemberQueries")
         local Invites = q("NamespaceInvitationQueries")
         -- Same member cap as the real route.
-        local members = Members.count(ctx.namespace_id, "active") or 0
-        local pending = Invites.count(ctx.namespace_id, "pending") or 0
-        local cap = (ctx.namespace and ctx.namespace.max_users) or 10
-        if (members + pending) >= cap then
+        if not Invites.hasFreeSeat(ctx.namespace_id, ctx.namespace and ctx.namespace.max_users) then
             return nil, "This workspace has reached its member limit."
         end
         local inviter = db.select("id FROM users WHERE uuid = ?", ctx.user_uuid)

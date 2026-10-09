@@ -1074,10 +1074,8 @@ return function(app)
                 return error_response(400, "Invalid email format")
             end
 
-            -- Check namespace member limit
-            local member_count = NamespaceMemberQueries.count(self.namespace.id, "active")
-            local pending_count = NamespaceInvitationQueries.count(self.namespace.id, "pending")
-            if (member_count + pending_count) >= (self.namespace.max_users or 10) then
+            -- Check namespace member limit (active members + admins' pending invitations)
+            if not NamespaceInvitationQueries.hasFreeSeat(self.namespace.id, self.namespace.max_users) then
                 return error_response(400, "Namespace has reached maximum member limit")
             end
 
@@ -1917,10 +1915,8 @@ return function(app)
             return error_response(400, "Invalid email format")
         end
 
-        -- Check namespace member limit
-        local member_count = NamespaceMemberQueries.count(namespace.id, "active")
-        local pending_count = NamespaceInvitationQueries.count(namespace.id, "pending")
-        if (member_count + pending_count) >= (namespace.max_users or 10) then
+        -- Check namespace member limit (active members + admins' pending invitations)
+        if not NamespaceInvitationQueries.hasFreeSeat(namespace.id, namespace.max_users) then
             return error_response(400, "Namespace has reached maximum member limit")
         end
 

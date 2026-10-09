@@ -27,7 +27,7 @@ local GONE = json(404, { success = false, error = "This invitation link isn't va
 local function pending(token)
     if type(token) ~= "string" or not token:match("^[%w]+$") or #token < 32 or #token > 128 then return nil end
     return db.query([[
-        SELECT ni.id, ni.namespace_id, ni.email, ni.message, ni.expires_at, n.name AS namespace_name,
+        SELECT ni.id, ni.namespace_id, ni.email, ni.message, ni.expires_at, ni.source, n.name AS namespace_name,
                n.logo_url AS namespace_logo, nr.role_name, nr.display_name AS role_display_name,
                NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS invited_by_name
         FROM namespace_invitations ni
@@ -89,11 +89,7 @@ return function(app)
                 return json(400, { success = false, error = "Please check the highlighted fields.", errors = errors })
             end
 
-            local active = tonumber(db.query([[SELECT COUNT(*) AS n FROM namespace_members
-                WHERE namespace_id = ? AND status = 'active']], inv.namespace_id)[1].n)
-            local max = tonumber(db.query("SELECT max_users FROM namespaces WHERE id = ?",
-                inv.namespace_id)[1].max_users)
-            if active >= (max or 10) then
+            if not require("queries.NamespaceInvitationQueries").seatAvailable(inv) then
                 return json(409, { success = false, code = "workspace_full",
                     error = "This workspace is full. Ask its owner to make room." })
             end

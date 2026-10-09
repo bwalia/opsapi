@@ -3,10 +3,32 @@
 /** The Settings tab: after-submit behaviour, limits, emails and retention. Saved explicitly. */
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
+import { AlertTriangle, MailCheck } from 'lucide-react';
 import { Button, Card, Input, Switch, Textarea } from '@/components/ui';
 import { apiError } from '@/components/field-service/shared';
 import type { Form, FormSettings } from '@/services/forms.service';
+
+/** Where this workspace's emails go out from, with the way to set up its own server. */
+function EmailVia({ via }: { via?: Form['email_via'] }) {
+  if (!via) return null;
+  const none = via === 'none';
+  return (
+    <div className={`flex items-start gap-2.5 rounded-lg p-3 text-sm ${none ? 'bg-warning-500/10 text-warning-600' : 'bg-secondary-50 text-secondary-600'}`}>
+      {none ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        : <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-success-600" aria-hidden="true" />}
+      <p>
+        {via === 'workspace' && 'Emails go out from your workspace\'s own email server. '}
+        {via === 'platform' && 'Emails go out from the platform\'s email server. Set up your own to send from your domain. '}
+        {none && 'No email server is set up, so none of these emails will be sent (responses are still saved). '}
+        <Link href="/dashboard/namespace/email" className="font-medium underline">
+          {via === 'workspace' ? 'Email settings' : 'Set up your email server'}
+        </Link>
+      </p>
+    </div>
+  );
+}
 
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -99,6 +121,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
       </Section>
 
       <Section title="Emails">
+        <EmailVia via={form.email_via} />
         <Input label="Tell these people about each new response" value={emails} error={errors.notify_emails}
           helperText="Comma-separated, up to 10. Empty = the person who created the form."
           placeholder="sales@example.com, owner@example.com" onChange={(e) => setEmails(e.target.value)} />

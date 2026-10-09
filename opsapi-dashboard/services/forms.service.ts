@@ -84,6 +84,8 @@ export interface Form extends FormSummary {
   settings: FormSettings;
   /** Answer keys of the published version: these never change. */
   published_keys: string[];
+  /** Where emails go out from: the workspace's own SMTP, the platform's, or nowhere. */
+  email_via?: 'workspace' | 'platform' | 'none';
 }
 
 export interface TargetOption {

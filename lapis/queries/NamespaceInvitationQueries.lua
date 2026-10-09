@@ -103,6 +103,8 @@ function NamespaceInvitationQueries.create(data)
 
     local invitation_data = {
         uuid = Global.generateUUID(),
+        -- Only set for form requests: older databases may not have the column yet.
+        source = data.source == "form" and "form" or nil,
         namespace_id = namespace_id,
         email = data.email:lower(),
         role_id = role_id,
@@ -117,6 +119,42 @@ function NamespaceInvitationQueries.create(data)
 
     local invitation = NamespaceInvitations:create(invitation_data, { returning = "*" })
     return invitation
+end
+
+-- ---------------------------------------------------------------------------
+-- Seats (migrations/invitation-source.lua): active members + admins' pending
+-- invitations. A form request (source 'form') reserves nothing until accepted.
+-- ---------------------------------------------------------------------------
+
+--- Seats taken in a workspace: active members plus pending, unexpired
+-- invitations an admin sent.
+function NamespaceInvitationQueries.seatsUsed(namespace_id)
+    return tonumber(db.query([[
+        SELECT (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = ? AND status = 'active')
+             + (SELECT COUNT(*) FROM namespace_invitations WHERE namespace_id = ? AND status = 'pending'
+                AND expires_at > NOW() AND COALESCE(source, 'admin') <> 'form') AS n
+    ]], namespace_id, namespace_id)[1].n)
+end
+
+--- Is there a seat for someone to send a new admin invitation / form request?
+function NamespaceInvitationQueries.hasFreeSeat(namespace_id, max_users)
+    return NamespaceInvitationQueries.seatsUsed(namespace_id) < (tonumber(max_users) or 10)
+end
+
+--- May this invitation be accepted now? An admin's invitation already holds
+-- its seat; a form request needs a free one.
+function NamespaceInvitationQueries.seatAvailable(invitation)
+    local ns = db.query("SELECT max_users FROM namespaces WHERE id = ?", invitation.namespace_id)[1]
+    local used = NamespaceInvitationQueries.seatsUsed(invitation.namespace_id)
+    if (invitation.source or "admin") ~= "form" then used = used - 1 end
+    return used < (tonumber(ns and ns.max_users) or 10)
+end
+
+--- Pending form requests in a workspace (capped by lib/forms/targets.lua).
+function NamespaceInvitationQueries.pendingFormRequests(namespace_id)
+    return tonumber(db.query([[SELECT COUNT(*) AS n FROM namespace_invitations
+        WHERE namespace_id = ? AND status = 'pending' AND expires_at > NOW() AND source = 'form']],
+        namespace_id)[1].n)
 end
 
 --- Email a pending invitation its accept link (<origin>/invite/<token>).
@@ -401,6 +439,10 @@ function NamespaceInvitationQueries.accept(token, user_id)
             updated_at = Global.getCurrentTimestamp()
         }, { id = invitation.id })
         return { success = false, error = "You are already a member of this namespace" }
+    end
+
+    if not NamespaceInvitationQueries.seatAvailable(invitation) then
+        return { success = false, error = "This workspace is full. Ask its owner to make room." }
     end
 
     local timestamp = Global.getCurrentTimestamp()

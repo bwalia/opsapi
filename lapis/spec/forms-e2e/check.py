@@ -418,6 +418,31 @@ s, _ = call("DELETE", "/api/v2/forms/" + F5, owner_a, NS_A)
 s1, _ = submit(P5, {"name": "x"}, t5, ip())
 check("a deleted form's link is gone (404)", s == 200 and s1 == 404, (s, s1))
 
+print("== seats: an admin's invitation holds one, a form request doesn't")
+active = int(one("SELECT COUNT(*) FROM namespace_members WHERE namespace_id = %s AND status = 'active'" % ID_A))
+check("form invitations are recorded as requests, not admin invitations",
+      count("namespace_invitations", "namespace_id = %s AND source = 'form'" % ID_A) >= 10
+      and count("namespace_invitations", "namespace_id = %s AND source = 'admin'" % ID_A) == 0)
+sql("UPDATE namespaces SET max_users = %d WHERE id = %s" % (active + 1, ID_A))
+s, j = submit(PUB, dict(ANS, email="seat1@x.test"), tok, ip())
+check("with one seat free, a form request is created",
+      one("""SELECT l.outcome FROM form_submission_links l JOIN form_submissions s ON s.id = l.submission_id
+             WHERE s.respondent_email = 'seat1@x.test' AND l.target = 'user'""") == "invited")
+s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin1@x.test"})
+check("a dozen pending form requests don't stop the admin inviting someone", s in (200, 201), (s, j))
+s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin2@x.test"})
+check("the admin's pending invitation holds the last seat", s == 400, (s, j))
+TOKEN_SEAT = one("SELECT token FROM namespace_invitations WHERE email = 'seat1@x.test'")
+pw2 = "Qz" + uuid.uuid4().hex[:14] + "7K"
+s, j = call("POST", "/api/v2/public/invitations/%s/accept" % TOKEN_SEAT,
+            body={"first_name": "Seat", "last_name": "One", "password": pw2})
+check("a form request can't be accepted while no seat is free (409)",
+      s == 409 and j.get("code") == "workspace_full", (s, j))
+sql("UPDATE namespaces SET max_users = 100 WHERE id = %s" % ID_A)
+s, j = call("POST", "/api/v2/public/invitations/%s/accept" % TOKEN_SEAT,
+            body={"first_name": "Seat", "last_name": "One", "password": pw2})
+check("... and is accepted once a seat is free", s == 201, (s, j))
+
 print("== AI agent tools")
 lua = r'''
 local Tools = require("lib.agent.tools")
