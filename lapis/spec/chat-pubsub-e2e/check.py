@@ -3,6 +3,8 @@
   check.py cross   alice@api-a, bob@api-b, carol@api-c (REDIS_ENABLED=false):
                    sends and reactions cross pods exactly once; api-c stays local-only
   check.py down    Redis stopped: a send still answers 201 and reaches its own pod
+  check.py ready N GET /ready answers N on api-a and api-b (CHAT_REQUIRE_REDIS=true), 200 on api-c
+  check.py multipod  kanban events, delivery-partner codes and a per-route rate limit span api-a/api-b
 """
 import base64, hashlib, hmac, json, os, socket, sys, threading, time, urllib.request
 
@@ -36,11 +38,11 @@ def token(who):
 class Client:
     """Minimal RFC 6455 client: collects every text frame the server pushes."""
 
-    def __init__(self, who, host):
+    def __init__(self, who, host, path="/api/chat/ws?"):
         self.who, self.host, self.events = who, host, []
         self.sock = socket.create_connection((host, 80), timeout=60)
         key = base64.b64encode(os.urandom(16)).decode()
-        self.sock.sendall((f"GET /api/chat/ws?token={token(who)} HTTP/1.1\r\nHost: {host}\r\n"
+        self.sock.sendall((f"GET {path}token={token(who)} HTTP/1.1\r\nHost: {host}\r\n"
                            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
         head = b""
@@ -92,7 +94,10 @@ def post(who, host, path, body):
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
-        return e.code, {}
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
 
 
 def send(who, host, text):
@@ -153,6 +158,59 @@ def down():
     check(not c["bob"].got("message:new", is_msg(m)), "bob on api-b does not (expected while Redis is down)")
 
 
-{"cross": cross, "down": down}[sys.argv[1]]()
+def ready():
+    want = int(sys.argv[2])
+
+    def status(host):
+        try:
+            with urllib.request.urlopen(f"http://{host}/ready", timeout=10) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    for host, expect in (("api-a", want), ("api-b", want), ("api-c", 200)):
+        end = time.time() + 20
+        got = status(host)
+        while got[0] != expect and time.time() < end:
+            time.sleep(0.5)
+            got = status(host)
+        check(got[0] == expect, f"{host} /ready answers {got[0]} (want {expect}) {got[1].get('reason') or ''}".rstrip())
+
+
+def multipod():
+    project, board = (open(f"{W}/{f}").read().strip() for f in ("project_uuid", "board_uuid"))
+    viewer = Client("bob", "api-b", f"/api/v2/kanban/ws?project={project}&")
+    check(viewer.wait("connected"), "bob watches the kanban board on api-b")
+    status, body = post("alice", "api-a", f"/api/v2/kanban/boards/{board}/tasks", {"title": "cross-pod task"})
+    task = (body.get("data") or {}).get("uuid")
+    check(status == 201 and task, f"alice creates a task on api-a ({status})")
+    check(viewer.wait("task:created", lambda d: d.get("task_uuid") == task),
+          "bob on api-b gets task:created (via Redis)")
+    time.sleep(1)
+    n = len(viewer.got("task:created", lambda d: d.get("task_uuid") == task))
+    check(n == 1, f"exactly once ({n})")
+
+    base = "/api/v2/delivery-partners/verification"
+    status, body = post("alice", "api-a", f"{base}/send-otp", {"phone_number": "+1 555 0100"})
+    check(status == 400, f"a code for another number is refused ({status})")
+    status, body = post("alice", "api-a", f"{base}/send-otp", {"phone_number": "+44 7700 900123"})
+    code = body.get("otp")
+    check(status == 200 and code and len(code) == 6, f"alice asks for a code on api-a ({status})")
+    status, body = post("alice", "api-b", f"{base}/verify-otp", {"phone_number": "+44 7700 900123", "otp": "000000" if code != "000000" else "111111"})
+    check(status == 400, f"a wrong code on api-b is refused ({status})")
+    status, body = post("alice", "api-b", f"{base}/verify-otp", {"phone_number": "+44 7700 900123", "otp": code})
+    check(status == 200 and body.get("verified"), f"the code from api-a verifies on api-b ({status})")
+    status, body = post("carol", "api-c", f"{base}/send-otp", {"phone_number": "+44 7700 900123"})
+    check(status == 503 and "otp" not in body, f"production (api-c) never reveals a code ({status})")
+
+    seen = []
+    for i in range(6):
+        status, _ = post("bob", ("api-a", "api-b")[i % 2], "/auth/2fa/verify", {"code": "000000"})
+        seen.append(status)
+    check(seen[-1] == 429 and 429 not in seen[:5],
+          f"/auth/2fa/verify (5 a minute) limits across pods: {seen}")
+
+
+{"cross": cross, "down": down, "ready": ready, "multipod": multipod}[sys.argv[1]]()
 print(f"  {sys.argv[1]}: {fails} failure(s)")
 sys.exit(1 if fails else 0)

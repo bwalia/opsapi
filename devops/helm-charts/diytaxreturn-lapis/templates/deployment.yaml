@@ -1,3 +1,6 @@
+{{- if and (gt (int .Values.replicaCount) 1) (not (and .Values.redis .Values.redis.enabled)) }}
+{{- fail "replicaCount > 1 needs redis.enabled: true — chat WebSocket events reach other pods through Redis (CHAT_SCALING_RUNBOOK.md)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -159,6 +162,28 @@ spec:
               value: {{ .Values.otpSuppressForEmailRegex | default "^diytaxreturnmail\\+e2e-.*@gmail\\.com$|^diytaxreturnmail@gmail\\.com$|@e2e\\.invalid$|@admin\\.com$" | quote }}
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "all" | quote }}
+            {{- if and .Values.redis .Values.redis.enabled }}
+            # ── Redis (templates/redis.yaml) ───────────────────────────────
+            # Chat WebSocket events cross pods through it, and /ready fails while
+            # this pod's subscriber is disconnected (CHAT_REQUIRE_REDIS), so a pod
+            # that would miss other pods' messages gets no traffic. Explicit env
+            # wins over any REDIS_* in the Vault secret (envFrom).
+            - name: REDIS_ENABLED
+              value: "true"
+            - name: REDIS_HOST
+              value: "{{ .Release.Name }}-redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-redis"
+                  key: password
+            - name: CHAT_REQUIRE_REDIS
+              value: "true"
+            {{- end }}
             {{- if and .Values.setup .Values.setup.adminEmail }}
             - name: ADMIN_EMAIL
               value: {{ .Values.setup.adminEmail | quote }}

@@ -150,12 +150,11 @@ end
 local function generate_temp_password()
     local sets = { "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789" }
     local all = sets[1] .. sets[2] .. sets[3]
-    math.randomseed((ngx and ngx.now and math.floor(ngx.now() * 1e6)) or os.time())
-    local out = {}
-    for _, s in ipairs(sets) do local i = math.random(#s); out[#out + 1] = s:sub(i, i) end
-    for _ = 1, 11 do local i = math.random(#all); out[#out + 1] = all:sub(i, i) end
-    for i = #out, 2, -1 do local j = math.random(i); out[i], out[j] = out[j], out[i] end
-    return table.concat(out)
+    local pw
+    repeat -- from the CSPRNG; redraw until every class is present
+        pw = require("helper.uuid").random_string(14, all)
+    until pw:find("[A-Z]") and pw:find("[a-z]") and pw:find("%d")
+    return pw
 end
 
 

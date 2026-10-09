@@ -19,20 +19,20 @@
       Lua queue and posts that connection's semaphore (both legal cross-request),
       and every connection's own writer coroutine drains its queue and sends.
 
-    Scale: prod is a single worker in a single pod (worker_processes 1,
-    replicaCount 1), so this module-level registry sees every connection — no
-    Redis needed. If workers or replicas ever scale, keep everything else and
-    replace the body of broadcast() with a Redis PUBLISH + a per-connection
-    SUBSCRIBE (the "send only from the owning coroutine" rule still holds).
+    Scale: each pod/worker holds its own registry. broadcast() delivers to this
+    pod's viewers, then hands the frame to the other pods over the chat hub's
+    Redis link (lib/chat-ws.lua relay: one subscription per worker, the pod
+    skips its own frames, Redis down = this pod only). The receiving side only
+    enqueues, so the "send only from the owning coroutine" rule still holds.
 ]]
 
 local ws_server = require("resty.websocket.server")
 local semaphore = require("ngx.semaphore")
 local cjson = require("cjson.safe")
-local jwt = require("resty.jwt")
 local Global = require("helper.global")
 local db = require("lapis.db")
 local KanbanProjectQueries = require("queries.KanbanProjectQueries")
+local ChatWS = require("lib.chat-ws")
 
 local _M = {}
 
@@ -80,15 +80,23 @@ end
 -- @param project_id number
 -- @param event_type string  e.g. "task:moved"
 -- @param data table         small payload (board_uuid, task_uuid, actor_uuid, …)
-function _M.broadcast(project_id, event_type, data)
-    if not project_id then return end
-    local ch = channels[project_id]
+local function fanout(project_id, payload)
+    local ch = channels[tonumber(project_id)]
     if not ch then return end
-    local payload = cjson.encode({ type = event_type, data = data })
-    if not payload then return end
     for _, conn in pairs(ch) do
         enqueue(conn, payload)
     end
+end
+
+-- Frames for this project sent through another pod (enqueue only).
+ChatWS.relay("kanban", fanout)
+
+function _M.broadcast(project_id, event_type, data)
+    if not project_id then return end
+    local payload = cjson.encode({ type = event_type, data = data })
+    if not payload then return end
+    fanout(project_id, payload)
+    ChatWS.relay_publish("kanban", project_id, payload)
 end
 
 -- Verify the JWT from the ?token param. Mirrors middleware/auth.lua's core.

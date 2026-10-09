@@ -59,6 +59,7 @@ local MAX_BACKOFF_S = 30
 local worker_id             -- tags what this worker publishes; its subscriber skips those
 local subscribed = false
 local publish_warned_at = 0
+local relays = {}           -- other hubs riding on this link: relays[name] = deliver(id, frame)
 
 local function register(conn)
     local set = connections[conn.user_uuid]
@@ -99,6 +100,14 @@ local function push_to_user(user_uuid, frame)
     end
 end
 
+-- Per-worker subscription state, in shared memory so /ready (served by any
+-- worker) sees every worker's subscriber (nginx.conf: lua_shared_dict chat_ws).
+local function set_subscribed(up)
+    subscribed = up
+    local dict = ngx.shared.chat_ws
+    if dict and ngx.worker.id() then dict:set("sub:" .. ngx.worker.id(), up) end
+end
+
 local function origin()
     if not worker_id then
         worker_id = string.format("%s:%d:%d", os.getenv("HOSTNAME") or "", ngx.worker.pid(),
@@ -109,12 +118,12 @@ end
 
 -- Hand a frame to the other pods. Never raises: the caller has already
 -- delivered on this pod, so a Redis failure only costs cross-pod delivery.
-local function publish(key, users, frame)
+local function publish(key, users, frame, relay)
     if not RedisClient.enabled() then return end
     local red = RedisClient.connect()
     local ok, err = false, "Redis unreachable"
     if red then
-        ok, err = red:publish(PREFIX .. key, cjson.encode({ o = origin(), u = users, f = frame }))
+        ok, err = red:publish(PREFIX .. key, cjson.encode({ o = origin(), u = users, f = frame, r = relay }))
         if ok then RedisClient.release(red) else red:close() end
     end
     if not ok and ngx.now() - publish_warned_at >= 60 then
@@ -173,10 +182,28 @@ function _M.broadcast_message(channel_uuid, namespace_id, message, channel)
     })
 end
 
+--- Let another WebSocket hub reach sockets held by other pods over this
+-- worker's one Redis link (lib/kanban-ws.lua). `deliver(id, frame)` must only
+-- enqueue, like everything here; it runs for frames another pod sent with
+-- relay_publish(name, id, frame).
+function _M.relay(name, deliver_fn)
+    relays[name] = deliver_fn
+end
+
+function _M.relay_publish(name, id, frame)
+    publish("relay:" .. name .. ":" .. tostring(id), nil, frame, { name, id })
+end
+
 -- Subscriber side: a frame another worker published. Enqueue only.
 local function deliver(payload)
     local m = cjson.decode(payload)
-    if type(m) ~= "table" or m.o == origin() or type(m.f) ~= "string" or type(m.u) ~= "table" then return end
+    if type(m) ~= "table" or m.o == origin() or type(m.f) ~= "string" then return end
+    if type(m.r) == "table" then
+        local relay = relays[m.r[1]]
+        if relay then relay(m.r[2], m.f) end
+        return
+    end
+    if type(m.u) ~= "table" then return end
     for _, user_uuid in ipairs(m.u) do
         push_to_user(user_uuid, m.f)
     end
@@ -193,7 +220,7 @@ local function subscribe()
         red:close()
         return false, "PSUBSCRIBE failed: " .. tostring(err)
     end
-    subscribed = true
+    set_subscribed(true)
     ngx.log(ngx.NOTICE, "[chat-ws] subscribed to Redis; chat delivery spans pods")
     while not ngx.worker.exiting() do
         local res, rerr = red:read_reply()
@@ -203,7 +230,7 @@ local function subscribe()
         end
         if res[1] == "pmessage" then deliver(res[4]) end
     end
-    subscribed = false
+    set_subscribed(false)
     red:close()
     return true, err
 end
@@ -225,12 +252,24 @@ end
 function _M.start()
     if not RedisClient.enabled() then return end
     origin()
+    set_subscribed(false)
     ngx.timer.at(0, run, 0)
     -- Keeps the link provably alive: the subscriber hears this within
     -- HEARTBEAT_S, or read_reply times out at STALE_MS and it reconnects.
     ngx.timer.every(HEARTBEAT_S, function(premature)
         if not premature and subscribed then publish("hb:" .. origin(), {}, "") end
     end)
+end
+
+--- Readiness (GET /ready): whether every worker of this pod holds its Redis
+-- subscription, i.e. receives chat events sent through other pods.
+function _M.subscribed()
+    local dict = ngx.shared.chat_ws
+    if not dict then return subscribed end
+    for id = 0, ngx.worker.count() - 1 do
+        if not dict:get("sub:" .. id) then return false end
+    end
+    return true
 end
 
 -- Verify the JWT from the ?token param. Mirrors middleware/auth.lua's core.

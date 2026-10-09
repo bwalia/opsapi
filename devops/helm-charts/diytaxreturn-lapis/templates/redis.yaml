@@ -1,0 +1,101 @@
+{{- /*
+Redis for chat across pods (lapis/lib/chat-ws.lua, CHAT_SCALING_RUNBOOK.md):
+each pod delivers WebSocket events to its own sockets and PUBLISHes them here
+for the others. Also backs the permission cache and billing counters
+(helper/redis-client.lua), so they are shared by every pod instead of per pod.
+
+Pub/sub and caches only, nothing durable: no persistence, bounded memory. The
+password is generated once and kept across upgrades (lookup), so this Redis is
+not readable by everything else in the cluster. Placed like the app (same node
+rules) so the app pods can reach it.
+*/}}
+{{- if and .Values.redis .Values.redis.enabled }}
+{{- $name := printf "%s-redis" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+type: Opaque
+data:
+  password: {{ if $existing }}{{ index $existing.data "password" }}{{ else }}{{ randAlphaNum 40 | b64enc }}{{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $name }}
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - lubuntu001
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image | default "public.ecr.aws/docker/library/redis:7.4-alpine" | quote }}
+          command: ["sh", "-c", 'exec redis-server --requirepass "$REDISCLI_AUTH" --save "" --appendonly no --maxmemory {{ .Values.redis.maxmemory | default "128mb" }} --maxmemory-policy allkeys-lru']
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}
+                  key: password
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 192Mi
+{{- end }}

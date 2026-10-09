@@ -320,13 +320,7 @@ function Global.splitName(fullName)
 end
 
 function Global.generateRandomPassword()
-    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
-    local password = ""
-    for i = 1, 16 do
-        local rand = math.random(#chars)
-        password = password .. string.sub(chars, rand, rand)
-    end
-    return password
+    return Uuid.random_string(16, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*")
 end
 
 --- Upload file to MinIO/S3 storage directly

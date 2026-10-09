@@ -109,6 +109,8 @@ local push_notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTI
 -- Reviews
 local review_migrations = load_if_enabled(ProjectConfig.FEATURES.REVIEWS, "migrations.reviews") or {}
 
+local delivery_otp_migrations = load_if_enabled(ProjectConfig.FEATURES.DELIVERY, "migrations.delivery-partner-otp") or {}
+
 -- Chat
 local chat_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system") or {}
 local chat_production_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system-production") or
@@ -2560,6 +2562,8 @@ local _migrations = {
     -- Auth hardening: per-account throttles, hashed OTP codes (migrations/auth-hardening.lua)
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
+    -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
+    ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),
