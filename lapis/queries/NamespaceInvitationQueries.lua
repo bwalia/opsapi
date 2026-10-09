@@ -119,6 +119,45 @@ function NamespaceInvitationQueries.create(data)
     return invitation
 end
 
+--- Email a pending invitation its accept link (<origin>/invite/<token>).
+-- Synchronous: call it from a timer or a background job.
+-- @return true | nil, err ("not_pending" when it was accepted/revoked meanwhile)
+function NamespaceInvitationQueries.sendEmail(invitation_uuid, origin)
+    local inv = db.query([[
+        SELECT ni.namespace_id, ni.email, ni.token, ni.message, ni.expires_at, n.name AS namespace_name,
+               COALESCE(NULLIF(nr.display_name, ''), nr.role_name) AS role_name,
+               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS inviter_name
+        FROM namespace_invitations ni
+        JOIN namespaces n ON n.id = ni.namespace_id
+        LEFT JOIN namespace_roles nr ON nr.id = ni.role_id
+        LEFT JOIN users u ON u.id = ni.invited_by
+        WHERE ni.uuid = ? AND ni.status = 'pending' AND ni.expires_at > NOW()
+    ]], invitation_uuid)[1]
+    if not inv then return nil, "not_pending" end
+    if not origin then return nil, "no dashboard URL to link to (set FRONTEND_URL)" end
+    local function val(v) return v ~= db.NULL and v or nil end
+    return require("helper.namespace-mail").send(inv.namespace_id, "namespace.invitation", inv.email, {
+        namespace_name = inv.namespace_name,
+        inviter_name = val(inv.inviter_name),
+        role_name = val(inv.role_name),
+        message = val(inv.message),
+        accept_url = origin .. "/invite/" .. inv.token,
+        expires_in = "7 days",
+    }, { app_name = inv.namespace_name })
+end
+
+--- sendEmail after the current request, without delaying it.
+function NamespaceInvitationQueries.sendEmailLater(invitation_uuid, origin)
+    ngx.timer.at(0, function(premature)
+        if premature then return end
+        local ok, err = pcall(NamespaceInvitationQueries.sendEmail, invitation_uuid, origin)
+        if not ok or (err ~= true and err ~= nil) then
+            ngx.log(ngx.WARN, "[invitations] email not sent: ", tostring(err))
+        end
+        require("helper.plugin-events").releaseConnection()
+    end)
+end
+
 --- Get all invitations for a namespace with pagination
 -- @param namespace_id string|number Namespace ID or UUID
 -- @param params table { page?, perPage?, status?, search? }

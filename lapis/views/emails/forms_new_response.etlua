@@ -1,0 +1,16 @@
+<h2>New response: <%= form_title %></h2>
+
+<table style="width: 100%; border-collapse: collapse; margin: 0 0 24px 0;">
+<% for _, a in ipairs(answers or {}) do %>
+  <tr>
+    <td style="padding: 8px 12px 8px 0; color: #6b7280; vertical-align: top; width: 38%; border-bottom: 1px solid #f3f4f6;"><%= a.label %></td>
+    <td style="padding: 8px 0; color: #111827; vertical-align: top; border-bottom: 1px solid #f3f4f6; white-space: pre-wrap;"><%= a.value %></td>
+  </tr>
+<% end %>
+</table>
+
+<% if response_url then %>
+  <p style="text-align: center; margin: 28px 0;">
+    <a href="<%= response_url %>" class="btn">View the response</a>
+  </p>
+<% end %>

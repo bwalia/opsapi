@@ -111,6 +111,9 @@ local review_migrations = load_if_enabled(ProjectConfig.FEATURES.REVIEWS, "migra
 
 local delivery_otp_migrations = load_if_enabled(ProjectConfig.FEATURES.DELIVERY, "migrations.delivery-partner-otp") or {}
 
+-- Form builder (docs/FORMS.md)
+local forms_migrations = load_if_enabled(ProjectConfig.FEATURES.FORMS, "migrations.forms") or {}
+
 -- Chat
 local chat_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system") or {}
 local chat_production_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system-production") or
@@ -2571,6 +2574,10 @@ local _migrations = {
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
     -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
     ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
+    -- Form builder: tables, then the RBAC module + menu (migrations/forms.lua)
+    ['zzform1_forms_tables'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 1),
+    ['zzform2_forms_module_menu'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 2),
+    ['zzform3_forms_lookup_indexes'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 3),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

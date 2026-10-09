@@ -1117,8 +1117,8 @@ return function(app)
                 return error_response(500, "Failed to create invitation", invitation)
             end
 
-            -- TODO: Send invitation email here
-            -- EmailService.sendInvitation(invitation)
+            NamespaceInvitationQueries.sendEmailLater(invitation.uuid,
+                require("middleware.cors").frontendOrigin(self))
 
             return success_response({
                 message = "Invitation sent successfully",
@@ -1146,8 +1146,8 @@ return function(app)
                 return error_response(500, "Failed to resend invitation", updated)
             end
 
-            -- TODO: Resend invitation email here
-            -- EmailService.sendInvitation(updated)
+            NamespaceInvitationQueries.sendEmailLater(invitation.uuid,
+                require("middleware.cors").frontendOrigin(self))
 
             return success_response({
                 message = "Invitation resent successfully",

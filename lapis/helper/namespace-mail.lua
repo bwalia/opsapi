@@ -42,6 +42,35 @@ NamespaceMail.TEMPLATES = {
             licence_key = "ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2", plan_name = "Pro",
             account_link = "https://billing.example.com/b/app/account", support_email = "support@example.com" },
     },
+    ["namespace.invitation"] = {
+        name = "Workspace invitation",
+        file = "invitation",
+        subject = "You're invited to join {{namespace_name}}",
+        variables = { "namespace_name", "inviter_name", "role_name", "message", "accept_url", "expires_in" },
+        sample = { app_name = "Acme Ltd", namespace_name = "Acme Ltd", inviter_name = "Sam Taylor",
+            role_name = "Member", message = "Welcome aboard!", accept_url = "https://app.example.com/invite/sample",
+            expires_in = "7 days" },
+    },
+    ["forms.new_response"] = {
+        name = "Forms: new response",
+        feature = "forms",
+        file = "forms_new_response",
+        subject = "New response: {{form_title}}",
+        variables = { "form_title", "answers_text", "response_url" },
+        sample = { app_name = "Acme Ltd", form_title = "Contact us",
+            answers = { { label = "Name", value = "Ann Lee" }, { label = "Email", value = "ann@example.com" } },
+            answers_text = "Name: Ann Lee\nEmail: ann@example.com",
+            response_url = "https://app.example.com/dashboard/forms/sample" },
+    },
+    ["forms.auto_reply"] = {
+        name = "Forms: reply to the person who answered",
+        feature = "forms",
+        file = "forms_auto_reply",
+        subject = "{{reply_subject}}",
+        variables = { "form_title", "reply_subject", "reply_body" },
+        sample = { app_name = "Acme Ltd", form_title = "Contact us", reply_subject = "Thanks, Ann",
+            reply_body = "Thanks for getting in touch.\nWe'll reply within one working day." },
+    },
 }
 
 -- ---------------------------------------------------------------------------

@@ -182,18 +182,11 @@ function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
         namespace_id, role_name)
     if not role[1] then return nil, "That role does not exist in this workspace" end
 
+    local UserQueries = require("queries.UserQueries")
     -- Username is required + unique; derive a clean one from the email local part.
-    local base = email:gsub("@.*$", ""):gsub("[^%w]", ""):lower()
-    if #base < 3 then base = "user" .. base end
-    base = base:sub(1, 20)
-    local username, n = base, 0
-    while db.query("SELECT id FROM users WHERE username = ? LIMIT 1", username)[1] do
-        n = n + 1
-        username = base:sub(1, 18) .. tostring(n)
-    end
+    local username = UserQueries.uniqueUsername(email)
 
     local temp_password = generate_temp_password()
-    local UserQueries = require("queries.UserQueries")
     -- Creates the login AND adds them to this workspace with the chosen role.
     local ok, user = pcall(UserQueries.create, {
         username = username, first_name = first, last_name = last, email = email,
