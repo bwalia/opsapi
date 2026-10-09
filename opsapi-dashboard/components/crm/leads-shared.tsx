@@ -38,6 +38,7 @@ import { crmService, type CrmLead, type LeadNotificationSettings } from '@/servi
 import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import PropertyDealsLeadPanel from '@/components/property-deals/LeadPanel';
+import RecordFormResponses from '@/components/forms/RecordFormResponses';
 
 
 // ============================================================
@@ -417,6 +418,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({ isOpen, lead, 
             <p className="text-sm text-secondary-900 whitespace-pre-wrap break-words">{lead.notes}</p>
           </div>
         ) : null}
+
+        {/* The form responses this lead came from (forms module). */}
+        <RecordFormResponses entityType="lead" entityUuid={lead.uuid} />
 
         {/* Captured info */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">

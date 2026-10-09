@@ -44,6 +44,7 @@ ProjectConfig.FEATURES = {
     FIELD_SERVICE = "field_service",   -- Service jobs, job phases, engineer site visits
     SHOP = "shop",                     -- AI hardware shop: configurable catalogue, carts, quotes, Stripe checkout, RAG
     BILLING = "billing",               -- Billing & Entitlements: apps, flat-tier plans, entitlements, licences (docs/BILLING_ENTITLEMENTS.md)
+    FORMS = "forms",                   -- Form builder: public forms, responses, records from them (docs/FORMS.md)
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -75,6 +76,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.FIELD_SERVICE,
         ProjectConfig.FEATURES.SHOP,
         ProjectConfig.FEATURES.BILLING,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -92,6 +94,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -102,6 +105,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.CMS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -125,6 +129,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.BILLING,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -135,6 +140,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -147,6 +153,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.SHOP,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -159,6 +166,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -171,6 +179,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.VAULT,
         ProjectConfig.FEATURES.SERVICES,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -180,6 +189,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.HOSPITAL,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -193,6 +203,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -204,6 +215,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.FORMS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -223,6 +235,13 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.SERVICES,
     },
+
+    -- Forms: FEATURE-ONLY like services, so a deployment whose preset lacks it
+    -- (e.g. PROJECT_CODE=tax_copilot,services) can opt in with ",forms".
+    forms = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.FORMS,
+    },
 }
 
 -- Project codes that ONLY contribute features (and their migrations) and must
@@ -231,6 +250,7 @@ ProjectConfig.PROJECT_FEATURES = {
 -- creation so PROJECT_CODE=tax_copilot,services yields exactly one namespace.
 ProjectConfig.FEATURE_ONLY_CODES = {
     services = true,
+    forms = true,
 }
 
 --- Is this project code feature-only (no dedicated tenant)?
@@ -574,6 +594,12 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "entitlements", name = "Entitlements", description = "Check what a customer may use (server-to-server)", category = "Billing" },
         { machine_name = "licenses", name = "Licences", description = "Licence keys and machine activations for desktop and self-hosted apps", category = "Billing" },
         { machine_name = "customers", name = "Customers", description = "Customer management", category = "Commerce" },
+    },
+
+    -- Form builder (docs/FORMS.md)
+    forms = {
+        { machine_name = "forms", name = "Forms", description = "Build forms, share a public link and collect responses",
+          category = "Content" },
     },
 
     -- Theme system (platform-level; always on)

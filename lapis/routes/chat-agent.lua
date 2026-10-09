@@ -287,7 +287,7 @@ return function(app)
         r.turns = decode(r.turns)
         r.actions = decode(r.actions)
         r.pending = type(r.pending) ~= "userdata" and r.pending and decode(r.pending) or nil
-        if r.pending and not r.pending.method then r.pending = nil end
+        if r.pending and not (r.pending.method or r.pending.tool) then r.pending = nil end
         if r.status == "running" and tonumber(r.age or 0) > STALE_SECONDS then
             r.status = "error"
             r.reply = "The assistant was interrupted before finishing. Please try again."
@@ -382,7 +382,7 @@ return function(app)
                 local method = a.method or (type(a.args) == "table" and tostring(a.args.method or "GET"):upper())
                 if (a.name == "call_api" and method ~= "GET")
                     or (a.name or ""):match("^create_") or (a.name or ""):match("^add_")
-                    or (a.name or ""):match("^invite_") then
+                    or (a.name or ""):match("^invite_") or (a.name or ""):match("^publish_") then
                     return true
                 end
             end
@@ -420,6 +420,11 @@ return function(app)
             has_permission = function(module, action)
                 return NamespaceMiddleware.hasPermission(self, module, action)
             end,
+            -- You can't give a role you don't hold (forms that invite users).
+            can_assign_roles = function(names)
+                return require("helper.rbac-guard").can_assign_role_names(self, names)
+            end,
+            origin = require("middleware.cors").frontendOrigin(self),
         }
     end
 
@@ -445,15 +450,22 @@ return function(app)
         local turns = full_turns(prev)
         turns[#turns + 1] = { role = "user", content = said }
         while #turns > MAX_STORED_TURNS do table.remove(turns, 1) end
-        local reply, actions = "Cancelled — nothing was deleted.", {}
+        local reply, actions = p.tool and "Cancelled — nothing was changed." or "Cancelled — nothing was deleted.", {}
         if approve then
             local ctx = request_ctx(self, ns, user, scope)
             ctx.confirmed = true
-            local res, err = Tools.http_call(ctx, p.method, p.path, p.query, nil)
-            ngx.log(ngx.INFO, "[chat-agent] confirmed ", p.method, " ", tostring(p.path), " user=", user.uuid,
-                " ns=", tostring(ns.id), " ok=", tostring(err == nil), err and (" err=" .. err) or "")
-            actions = { { name = "call_api", label = p.method .. " " .. tostring(p.path), method = p.method,
-                result = res, error = err } }
+            local res, err
+            if p.tool then
+                -- A typed tool that asked first (e.g. publish_form): same RBAC as any call.
+                res, err = Tools.execute(ctx, p.tool, p.args)
+                actions = { { name = p.tool, args = p.args, result = res, error = err } }
+            else
+                res, err = Tools.http_call(ctx, p.method, p.path, p.query, nil)
+                actions = { { name = "call_api", label = p.method .. " " .. tostring(p.path), method = p.method,
+                    result = res, error = err } }
+            end
+            ngx.log(ngx.INFO, "[chat-agent] confirmed ", p.tool or p.method, " ", tostring(p.path or ""), " user=",
+                user.uuid, " ns=", tostring(ns.id), " ok=", tostring(err == nil), err and (" err=" .. err) or "")
             reply = err and ("I couldn't do that: " .. err)
                 or ("Done — confirmed and completed: " .. tostring(p.summary):gsub("%.$", "") .. ".")
         end

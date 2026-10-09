@@ -77,6 +77,11 @@ const InvitationRow = memo(function InvitationRow({
           </div>
           <div className="min-w-0">
             <p className="font-medium text-secondary-900 truncate">{invitation.email}</p>
+            {invitation.source === 'form' && (
+              <p className="text-xs text-secondary-500" title="Asked to join through a form. Holds no seat until they accept.">
+                Requested via a form · no seat held until accepted
+              </p>
+            )}
             {invitation.role && (
               <p className="text-sm text-secondary-500">
                 Role: {invitation.role.display_name || invitation.role.role_name}

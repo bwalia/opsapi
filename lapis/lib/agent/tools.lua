@@ -717,13 +717,9 @@ register({
         if not email:match("^[%w%._%+-]+@[%w%.%-]+%.[%w]+$") then
             return nil, "That doesn't look like a valid email address."
         end
-        local Members = q("NamespaceMemberQueries")
         local Invites = q("NamespaceInvitationQueries")
         -- Same member cap as the real route.
-        local members = Members.count(ctx.namespace_id, "active") or 0
-        local pending = Invites.count(ctx.namespace_id, "pending") or 0
-        local cap = (ctx.namespace and ctx.namespace.max_users) or 10
-        if (members + pending) >= cap then
+        if not Invites.hasFreeSeat(ctx.namespace_id, ctx.namespace and ctx.namespace.max_users) then
             return nil, "This workspace has reached its member limit."
         end
         local inviter = db.select("id FROM users WHERE uuid = ?", ctx.user_uuid)
@@ -956,6 +952,294 @@ function Tools.http_call(ctx, method, path, query, body)
     return { status = res.status, data = out }
 end
 
+-- ========================= forms =========================
+-- Only where the forms feature is deployed. Every tool goes through the same
+-- FormQueries the REST API uses (field validation, locked contact fields,
+-- target permissions), so the agent can't build a form the builder couldn't.
+if require("helper.project-config").isFeatureEnabled("forms") then
+    local Fields = require("lib.forms.fields")
+    local FORM_TYPES = Fields.TYPE_NAMES
+
+    local function forms_auth(ctx)
+        return {
+            has_permission = ctx.has_permission,
+            can_assign_roles = ctx.can_assign_roles or function() return false, "role check unavailable" end,
+        }
+    end
+
+    -- A form by uuid, or the newest whose title contains the text.
+    local function find_form(ctx, ref)
+        local FormQueries = q("FormQueries")
+        if type(ref) ~= "string" or ref == "" then return nil, "Say which form (its title)." end
+        if FormQueries.validUuid(ref) then return FormQueries.get(ctx.namespace_id, ref) end
+        local items = FormQueries.list(ctx.namespace_id, { q = ref, limit = 5 })
+        if not items or #items == 0 then return nil, "No form matches '" .. ref .. "'." end
+        return FormQueries.get(ctx.namespace_id, items[1].uuid)
+    end
+
+    local function summary(form)
+        local fields = {}
+        for _, f in ipairs(form.schema and form.schema.fields or {}) do
+            fields[#fields + 1] = { label = f.label, type = f.type, required = f.required or nil,
+                locked = f.system and true or nil }
+        end
+        local creates = {}
+        for _, t in ipairs(form.targets or {}) do creates[#creates + 1] = t.type end
+        return {
+            uuid = form.uuid, title = form.title, status = form.status, fields = fields,
+            creates_records = creates, responses = form.submission_count,
+            last_response_at = form.last_submission_at, share_url = form.share_url,
+            unpublished_changes = form.has_unpublished_changes or nil,
+            edit_link = "/dashboard/forms/" .. form.uuid,
+        }
+    end
+
+    register({
+        name = "create_form",
+        description = "Create a form as a DRAFT (never published: the user reviews it, then publishes). "
+            .. "Field types: short_text, long_text, email, phone, number, date, time, url, single_select "
+            .. "(dropdown), radio, multi_select (checkboxes), boolean (yes/no), rating, consent, name (first + "
+            .. "last), address, hidden (filled from the link, e.g. utm_source), heading, paragraph. Choice types "
+            .. "need options. create_records adds and locks the name and email fields it needs: don't add those "
+            .. "yourself. Tell the user it's a draft and give them the edit_link.",
+        perms = { { "forms", "create" } },
+        parameters = {
+            type = "object",
+            properties = {
+                title = { type = "string", description = "Form title shown to people filling it in." },
+                description = { type = "string", description = "Intro text under the title (optional)." },
+                fields = {
+                    type = "array",
+                    description = "Questions in order.",
+                    items = {
+                        type = "object",
+                        properties = {
+                            label = { type = "string" },
+                            type = { type = "string", enum = FORM_TYPES },
+                            required = { type = "boolean" },
+                            options = { type = "array", items = { type = "string" },
+                                description = "Choices for single_select, radio, multi_select." },
+                            help = { type = "string", description = "Hint under the question (optional)." },
+                            text = { type = "string", description = "The statement for consent / paragraph." },
+                        },
+                        required = { "label", "type" },
+                    },
+                },
+                create_records = {
+                    type = "array",
+                    items = { type = "string", enum = { "customer", "lead", "user" } },
+                    description = "Create a customer, a lead and/or invite a workspace user from each response "
+                        .. "(only what this workspace has; ask if unsure).",
+                },
+                user_role = { type = "string", description = "Role for invited users (default member)." },
+                template = { type = "string", description = "Start from a starter form: contact, lead_capture, "
+                    .. "customer_signup, event_registration, feedback, job_application, appointment_request." },
+            },
+            required = { "title" },
+        },
+        handler = function(ctx, a)
+            local fields = a.fields
+            if type(fields) == "string" then fields = require("cjson.safe").decode(fields) end
+            if type(fields) == "table" then
+                for _, f in ipairs(fields) do
+                    if type(f) == "table" and type(f.options) == "string" then
+                        local opts = {}
+                        for o in f.options:gmatch("[^,]+") do opts[#opts + 1] = o:match("^%s*(.-)%s*$") end
+                        f.options = opts
+                    end
+                end
+            end
+            local targets
+            if type(a.create_records) == "table" then
+                targets = {}
+                for _, t in ipairs(a.create_records) do
+                    targets[#targets + 1] = t == "user" and { type = "user", role = a.user_role } or { type = t }
+                end
+            end
+            local form, err = q("FormQueries").create(ctx.namespace_id, ctx.user_uuid, {
+                title = a.title, description = a.description, template = a.template,
+                fields = type(fields) == "table" and #fields > 0 and fields or nil, targets = targets,
+            }, forms_auth(ctx), ctx.origin)
+            if not form then return nil, err end
+            local out = summary(form)
+            out.note = "Draft: not live yet. Open edit_link to review and publish."
+            return out
+        end,
+    })
+
+    register({
+        name = "list_forms",
+        description = "List this workspace's forms (newest first) with status and response counts.",
+        perms = { { "forms", "read" } },
+        parameters = {
+            type = "object",
+            properties = {
+                status = { type = "string", enum = { "draft", "published", "closed" } },
+                search = { type = "string", description = "Words in the title (optional)." },
+            },
+        },
+        handler = function(ctx, a)
+            local items, meta = q("FormQueries").list(ctx.namespace_id, { status = a.status, q = a.search, limit = 25 })
+            if not items then return nil, meta end
+            local out = {}
+            for i, f in ipairs(items) do
+                out[i] = { uuid = f.uuid, title = f.title, status = f.status, responses = f.submission_count,
+                    questions = f.question_count, share_url = f.share_url }
+            end
+            return { forms = out }
+        end,
+    })
+
+    register({
+        name = "get_form",
+        description = "Show one form: its questions, what records it creates, status, link and response count.",
+        perms = { { "forms", "read" } },
+        parameters = {
+            type = "object",
+            properties = { form = { type = "string", description = "The form's title (or uuid)." } },
+            required = { "form" },
+        },
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            return summary(form)
+        end,
+    })
+
+    register({
+        name = "update_form",
+        description = "Change a form's DRAFT: title, description, add questions, remove questions, make questions "
+            .. "required, or set which records it creates. Changes go live only when it is published (publish_form). "
+            .. "Questions are named by their label.",
+        perms = { { "forms", "update" } },
+        parameters = {
+            type = "object",
+            properties = {
+                form = { type = "string", description = "The form's title (or uuid)." },
+                title = { type = "string" },
+                description = { type = "string" },
+                add_fields = {
+                    type = "array",
+                    description = "Questions to add at the end (same shape as create_form fields).",
+                    items = {
+                        type = "object",
+                        properties = {
+                            label = { type = "string" },
+                            type = { type = "string", enum = FORM_TYPES },
+                            required = { type = "boolean" },
+                            options = { type = "array", items = { type = "string" } },
+                            help = { type = "string" },
+                            text = { type = "string" },
+                        },
+                        required = { "label", "type" },
+                    },
+                },
+                remove_fields = { type = "array", items = { type = "string" }, description = "Labels to remove." },
+                require_fields = { type = "array", items = { type = "string" },
+                    description = "Labels to make required." },
+                create_records = {
+                    type = "array",
+                    items = { type = "string", enum = { "customer", "lead", "user" } },
+                    description = "Replace which records each response creates ([] for none).",
+                },
+            },
+            required = { "form" },
+        },
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            local function matches(f, names)
+                for _, n in ipairs(type(names) == "table" and names or {}) do
+                    local s = tostring(n):lower()
+                    if (f.label or ""):lower() == s or f.key == n then return true end
+                end
+                return false
+            end
+            local fields, removed = {}, 0
+            for _, f in ipairs(form.schema.fields or {}) do
+                if matches(f, a.remove_fields) and not f.system then
+                    removed = removed + 1
+                else
+                    if matches(f, a.require_fields) then f.required = true end
+                    fields[#fields + 1] = f
+                end
+            end
+            for _, f in ipairs(type(a.add_fields) == "table" and a.add_fields or {}) do
+                if type(f) == "table" and type(f.options) == "string" then
+                    local opts = {}
+                    for o in f.options:gmatch("[^,]+") do opts[#opts + 1] = o:match("^%s*(.-)%s*$") end
+                    f.options = opts
+                end
+                fields[#fields + 1] = f
+            end
+            local body = { title = a.title, description = a.description, fields = fields }
+            if type(a.create_records) == "table" then
+                body.targets = {}
+                for _, t in ipairs(a.create_records) do body.targets[#body.targets + 1] = { type = t } end
+            end
+            local updated, uerr = q("FormQueries").update(ctx.namespace_id, form.uuid, ctx.user_uuid, body,
+                forms_auth(ctx), ctx.origin)
+            if not updated then return nil, uerr end
+            local out = summary(updated)
+            out.removed = removed
+            out.note = "Saved to the draft. Publish it (publish_form) to make the changes live."
+            return out
+        end,
+    })
+
+    register({
+        name = "summarize_form_responses",
+        description = "Summarise a form's recent responses: counts for each choice, averages, and an AI-written "
+            .. "summary of what people said. Contact details are left out.",
+        perms = { { "forms", "read" } },
+        parameters = {
+            type = "object",
+            properties = { form = { type = "string", description = "The form's title (or uuid)." } },
+            required = { "form" },
+        },
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            local row = q("FormQueries").load(ctx.namespace_id, form.uuid)
+            local res = require("lib.forms.ai").summarise(row, ctx.user_uuid)
+            local highlights = {}
+            for _, st in ipairs(res.fields or {}) do
+                if st.counts or st.average then
+                    highlights[#highlights + 1] = { question = st.label, counts = st.counts, average = st.average }
+                end
+            end
+            return { form = form.title, responses = res.responses, highlights = highlights, summary = res.summary,
+                note = res.summary_error }
+        end,
+    })
+
+    register({
+        name = "publish_form",
+        description = "Publish a form so anyone with its link can fill it in (asks the user to confirm first).",
+        perms = { { "forms", "update" } },
+        parameters = {
+            type = "object",
+            properties = { form = { type = "string", description = "The form's title (or uuid)." } },
+            required = { "form" },
+        },
+        confirm = function(ctx, a)
+            local form = find_form(ctx, a.form)
+            if not form then return nil end
+            return "Publish **" .. form.title .. "**? Anyone with its link will be able to fill it in.",
+                { form = form.uuid }
+        end,
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            local published, perr = q("FormQueries").publish(ctx.namespace_id, form.uuid, ctx.user_uuid,
+                forms_auth(ctx))
+            if not published then return nil, perr end
+            return { title = published.title, status = published.status, version = published.published_version,
+                share_url = published.share_url }
+        end,
+    })
+end
+
 register({
     name = "call_api",
     description = "Call the OpsAPI REST API as the current user for this page's module, using the "
@@ -1044,6 +1328,17 @@ function Tools.execute(ctx, name, args)
     end
     if not allowed(ctx, spec.perms) then
         return nil, "You don't have permission to do that (" .. name .. ") in this workspace."
+    end
+    -- Outward-facing actions ask first: the turn ends with the question and
+    -- the route stores `pending`; confirming re-runs this with ctx.confirmed.
+    if spec.confirm and not ctx.confirmed then
+        local okc, question, fixed = pcall(spec.confirm, ctx, args or {})
+        if okc and question then
+            local pargs = args or {}
+            for k, v in pairs(fixed or {}) do pargs[k] = v end -- e.g. the exact form the user saw
+            return { needs_confirmation = true, question = question,
+                pending = { tool = name, args = pargs, summary = (question:gsub("%*", "")) } }
+        end
     end
     local ok, res, err = pcall(spec.handler, ctx, args or {})
     if not ok then

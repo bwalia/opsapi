@@ -66,7 +66,7 @@ local CORS_CONFIG = {
     allowed_origins = buildAllowedOrigins(),
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-User-Email, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug, X-Project-Code, X-Vault-Key, X-Gov-Client-Device-ID, X-Gov-Client-Browser-JS-User-Agent, X-Gov-Client-Screens, X-Gov-Client-Window-Size, X-Gov-Client-Timezone, X-Gov-Client-User-IDs",
+        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Idempotency-Key, X-Render-Token, X-User-Email, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug, X-Project-Code, X-Vault-Key, X-Gov-Client-Device-ID, X-Gov-Client-Browser-JS-User-Agent, X-Gov-Client-Screens, X-Gov-Client-Window-Size, X-Gov-Client-Timezone, X-Gov-Client-User-IDs",
         max_age = "86400",
         credentials = "true"
     }
@@ -114,6 +114,17 @@ function CorsMiddleware.trustedFrontend(url, extra)
     return (allowed and origin) and url or nil
 end
 
+--- The dashboard a link in an email or a share URL should point at: the
+-- request's Origin when it's a trusted frontend, else FRONTEND_URL.
+-- @return origin (no trailing slash) | nil
+function CorsMiddleware.frontendOrigin(self)
+    local h = self and self.req and self.req.headers or {}
+    local trusted = CorsMiddleware.trustedFrontend(h["origin"] or h["Origin"])
+    if trusted then return trusted end
+    local env = os.getenv("FRONTEND_URL")
+    return env and env ~= "" and (env:gsub("/+$", "")) or nil
+end
+
 function CorsMiddleware.enable(app)
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
@@ -144,6 +155,13 @@ function CorsMiddleware.enable(app)
                 self.res.headers["Access-Control-Allow-Origin"] = origin
                 self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
                 self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Idempotency-Key, X-Billing-Session"
+                self.res.headers["Access-Control-Max-Age"] = "600"
+            elseif uri:find("^/api/v2/public/forms/") then
+                -- Public forms are embedded anywhere; no credentials are involved
+                -- (routes/forms-public.lua sets the response's origin).
+                self.res.headers["Access-Control-Allow-Origin"] = origin
+                self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Idempotency-Key, X-Render-Token"
                 self.res.headers["Access-Control-Max-Age"] = "600"
             end
         end

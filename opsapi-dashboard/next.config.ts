@@ -86,6 +86,24 @@ const nextConfig: NextConfig = {
   // Remove powered by header for security
   poweredByHeader: false,
 
+  // Framing: the dashboard can only be framed by itself (clickjacking), while
+  // public forms (/f/*) can be embedded on any site (public/forms-embed.js).
+  async headers() {
+    return [
+      {
+        source: "/((?!f/).*)",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
+      },
+      {
+        source: "/f/:path*",
+        headers: [{ key: "Content-Security-Policy", value: "frame-ancestors *" }],
+      },
+    ];
+  },
+
   // Generate ETags for caching
   generateEtags: true,
 
