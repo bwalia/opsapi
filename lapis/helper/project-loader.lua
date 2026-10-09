@@ -231,7 +231,18 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
         if verbs_err then
             return nil, manifest_path .. ": publishes." .. name .. ": " .. verbs_err
         end
-        publishes[name] = { table = spec.table, verbs = spec.verbs or {} }
+        -- emits: custom events the plugin's code sends for this entity with
+        -- sdk.emit (e.g. property_deals.deal.stage_changed), offered to webhooks.
+        local emits = {}
+        for _, e in ipairs(spec.emits or {}) do
+            if type(e) ~= "string" or not e:match("^[a-z][a-z0-9_]*$") or e == "created" or e == "updated"
+                or e == "deleted" or (spec.verbs or {})[e] then
+                return nil, manifest_path .. ": publishes." .. name .. ".emits: '" .. tostring(e)
+                    .. "' must be a lowercase name that isn't created/updated/deleted or a verb"
+            end
+            emits[#emits + 1] = e
+        end
+        publishes[name] = { table = spec.table, verbs = spec.verbs or {}, emits = emits }
     end
     manifest.publishes = publishes
 

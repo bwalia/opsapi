@@ -218,14 +218,22 @@ end
 -- core code through emitCore() (e.g. a licence key issued or reissued).
 PluginEvents.COMPUTED = { license = { "issued", "reissued" } }
 
-function PluginEvents.entityEvents(entity, verbs)
+function PluginEvents.entityEvents(entity, verbs, emits)
     local out = {}
     for _, a in ipairs(PluginEvents.ACTIONS) do out[#out + 1] = entity .. "." .. a end
     for _, a in ipairs(PluginEvents.COMPUTED[entity] or {}) do out[#out + 1] = entity .. "." .. a end
     local names = {}
     for verb in pairs(verbs or {}) do names[#names + 1] = verb end
+    for _, e in ipairs(emits or {}) do names[#names + 1] = e end
     table.sort(names)
     for _, verb in ipairs(names) do out[#out + 1] = entity .. "." .. verb end
+    return out
+end
+
+-- Emitted event names from a database row ("a,b" -> { "a", "b" }).
+function PluginEvents.decodeEmits(v)
+    local out = {}
+    for name in tostring(v or ""):gmatch("[^,]+") do out[#out + 1] = name end
     return out
 end
 
@@ -358,6 +366,9 @@ function PluginEvents.ensureSchema()
         ADD COLUMN IF NOT EXISTS namespace_id INTEGER REFERENCES namespaces(id) ON DELETE CASCADE
     ]])
     q("ALTER TABLE plugin_event_sources ADD COLUMN IF NOT EXISTS verbs JSONB NOT NULL DEFAULT '{}'::jsonb")
+    -- Custom events a plugin's code emits for this entity (manifest publishes.<x>.emits),
+    -- comma-separated, so workspace webhooks can subscribe to them by name.
+    q("ALTER TABLE plugin_event_sources ADD COLUMN IF NOT EXISTS emits TEXT NOT NULL DEFAULT ''")
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS response_status INTEGER")
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS duration_ms INTEGER")
 
@@ -510,17 +521,17 @@ function PluginEvents.ensureSchema()
     q("DELETE FROM plugin_event_sources WHERE owner = 'core' AND entity NOT IN (" .. table.concat(keep, ", ") .. ")")
 end
 
-function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key, module, verbs)
+function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key, module, verbs, emits)
     local err = PluginEvents.checkVerbs(verbs)
     if err then error(entity .. ": " .. err, 0) end
     db().query([[
-        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key, module, verbs)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key, module, verbs, emits)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
         ON CONFLICT (entity) DO UPDATE SET table_name = EXCLUDED.table_name, owner = EXCLUDED.owner,
             hide = EXCLUDED.hide, ns_sql = EXCLUDED.ns_sql, ns_key = EXCLUDED.ns_key,
-            module = EXCLUDED.module, verbs = EXCLUDED.verbs, updated_at = NOW()
+            module = EXCLUDED.module, verbs = EXCLUDED.verbs, emits = EXCLUDED.emits, updated_at = NOW()
     ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "", module or db().NULL,
-        next(verbs or {}) and cjson.encode(verbs) or "{}")
+        next(verbs or {}) and cjson.encode(verbs) or "{}", table.concat(emits or {}, ","))
 end
 
 --- The "core.audit" subscriptions: every source (core and plugin) while the
@@ -574,7 +585,7 @@ function PluginEvents.syncPlugin(manifest)
     for name, spec in pairs(manifest.publishes) do
         -- By convention (make:resource) a table's RBAC module shares its name.
         PluginEvents.upsertSource(prefix .. name, spec.table, manifest.code, nil, nil, nil,
-            modules[spec.table] and spec.table or nil, spec.verbs)
+            modules[spec.table] and spec.table or nil, spec.verbs, spec.emits)
         entities[#entities + 1] = d.escape_literal(prefix .. name)
     end
     d.query("DELETE FROM plugin_event_sources WHERE owner = " .. d.escape_literal(manifest.code)
