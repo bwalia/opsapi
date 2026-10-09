@@ -16,6 +16,8 @@ trap cleanup EXIT
 mkdir -p "$W/out" "$W/projects"
 git -C "$ROOT" worktree add -q --detach "$W/src" "$REF"; mkdir -p "$W/src/lapis/logs"
 openssl rand -hex 32 > "$W/jwt_secret"; openssl rand -hex 16 > "$W/gh_secret"; openssl rand -hex 16 > "$W/peek_secret"
+# The seeded users' password: random per run, never in the repo.
+printf "Sx%s!" "$(openssl rand -hex 10)" > "$W/user_password"
 docker network create --internal "$NET" >/dev/null
 docker run -d --name sec-pg-$$ --network "$NET" --network-alias sec-pg -e POSTGRES_PASSWORD=sbx pgvector/pgvector:pg15 >/dev/null
 until docker exec sec-pg-$$ pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done; sleep 2
@@ -32,7 +34,7 @@ docker run -d --name sec-api-$$ --network "$NET" --network-alias sec-api -v "$W/
   lapis-lapis >/dev/null
 sleep 7; docker exec -w /app sec-api-$$ lapis migrate >/dev/null 2>&1; docker restart sec-api-$$ >/dev/null; sleep 7
 # Users: alice and bob own a workspace each; carol, dave and gail sign in with a password; eve and frank are staff.
-HASH=$(docker exec sec-api-$$ /usr/local/openresty/luajit/bin/luajit -e 'print(require("bcrypt").digest("Sec-test-Passw0rd!", 10))')
+HASH=$(docker exec -e PW="$(cat "$W/user_password")" sec-api-$$ /usr/local/openresty/luajit/bin/luajit -e 'print(require("bcrypt").digest(os.getenv("PW"), 10))')
 echo '{' > "$W/users.json"; sep=""
 for who in alice bob carol dave eve frank gail; do
   id=$(python3 -c 'import uuid; print(uuid.uuid4())')

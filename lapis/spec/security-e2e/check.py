@@ -6,7 +6,7 @@ import base64, hashlib, hmac, json, os, time, urllib.error, urllib.request, uuid
 B = "http://sec-api"
 SECRET = open("/sec/jwt_secret").read().strip()
 U = json.load(open("/sec/users.json"))  # name -> {uuid, email}
-PASSWORD = "Sec-test-Passw0rd!"
+PASSWORD = open("/sec/user_password").read().strip()  # random per run (run.sh)
 fails = []
 
 def check(name, ok, detail=""):
