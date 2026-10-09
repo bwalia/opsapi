@@ -293,10 +293,14 @@ return function(app)
     }))
 
     local MapFeature = schema("MapFeature", OBJ({
-        layer = ENUM({ "properties", "deals", "leads", "holdings" }), uuid = S(), lat = NUM(), lng = NUM(),
+        layer = ENUM({ "properties", "deals", "leads", "holdings", "sold_prices", "epc", "listings", "auction_lots" }),
+        uuid = S(), lat = NUM(), lng = NUM(),
         title = S(), subtitle = S(), distance_miles = NUM("Radius queries"), tenure = S(), epc_rating = S(), bedrooms = INT(),
         est_market_value = MONEY(), deal_uuid = UUID(), deal_stage = S(), deal_health = ENUM(HEALTH), deal_name = S(),
         lead_kind = S(), situation = S(), deadline_date = DATE(), status = S(), property_uuid = UUID(),
+        record_type = S("Market layers"), price = MONEY(), previous_price = MONEY("Before a price cut"),
+        event_date = DATE("Sold / lodged / listed / auction date"), property_type = S(), cash_only = BOOL(), url = S(),
+        source = S("Connector kind or CSV source"),
     }, { "layer", "uuid", "lat", "lng" }))
     local MapResult = schema("MapResult", OBJ({
         center = OBJ({ lat = NUM(), lng = NUM() }), radius_miles = NUM(), polygon = ARR(ARR(NUM())),
@@ -304,6 +308,9 @@ return function(app)
     }, { "features" }))
     local Card = schema("PropertyCard", OBJ({
         property = ANY("Property"), deal = DealCard, gross_yield_pct = NUM(), discount_pct = NUM("vs estimated value"),
+        comps = OBJ({ count = INT(), median = MONEY(), radius_miles = NUM(), months = INT(), from = DATE(), to = DATE() },
+            nil, "Sold-price comparables within a mile, last 24 months"),
+        discount_vs_comps_pct = NUM("Price (or estimate) vs the comparables' median"),
         top_matches = ARR(OBJ({ uuid = UUID(), buyer_profile_uuid = UUID(), buyer_name = S(), score = NUM(),
                                 breakdown = ANY(), status = S() })),
     }))
@@ -335,13 +342,16 @@ return function(app)
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
-        status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail" })) }),
+        status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail",
+            "scout" })) }),
         response = OBJ({ sla = OBJ({ warned = INT(), overdue = INT(), escalated = INT() }), health = OBJ({ deals = INT() }),
                          compliance_expiry = OBJ({ expired = INT(), warned = INT(), pof_expired = INT() }),
                          digest = OBJ({ sent = INT() }),
                          agents = OBJ({ resumed = INT(), timed_out = INT(), jobshout_polled = INT(), jobshout_decided = INT(),
                                         auto_started = INT() }),
-                         mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }) }), errors = E422 })
+                         mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }),
+                         scout = OBJ({ searches = INT(), alerts = INT(), synced = OBJ({ connectors = INT(),
+                             postcodes = INT(), stored = INT() }) }) }), errors = E422 })
 
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
         paginated = true, response = ARR(Lead), query = {
@@ -475,7 +485,8 @@ return function(app)
         response = MapResult, errors = { ["422"] = "Bad area or layer" }, query = {
             lat = NUM(), lng = NUM(), radius_miles = NUM("1–100, default 25"),
             polygon = S("lat,lng;lat,lng;… (3–200 points) instead of lat/lng/radius"),
-            layers = S("Comma list: properties, deals, leads, holdings (default properties,deals)") } })
+            layers = S("Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots "
+                .. "(default properties,deals)") } })
     sdk.doc(app, "GET /properties/:id/card", { summary = "Map property card", permission = "property_deals_properties.read",
         response = Card, path = { id = UUID() }, errors = E404 })
 
@@ -602,4 +613,100 @@ return function(app)
     sdk.doc(app, "GET /notification-preferences", { summary = "My notification preferences here", response = Prefs })
     sdk.doc(app, "PUT /notification-preferences", { summary = "Change my notification preferences", status = 200,
         body = Prefs, response = Prefs, errors = E422 })
+
+    -- ------------------------------------------------------------------ map data + matching (Phase 6)
+    local KINDS = { "epc", "price_paid", "companies_house", "postcodes", "csv", "propertydata", "searchland", "streetdata",
+        "homedata" }
+    local Connector = schema("Connector", OBJ({
+        uuid = UUID(), kind = ENUM(KINDS), name = S(), label = S(), config = ANY("base_url?, email (EPC), …"),
+        has_secret = BOOL("The key is never returned"), enabled = BOOL(), sync_enabled = BOOL("Daily sync by the deal scout"),
+        stub = BOOL("Paid feed without an adapter yet: use CSV import"), last_run_at = DT(), last_error = S(),
+        records_count = INT(), created_at = DT(), updated_at = DT(),
+    }, { "uuid", "kind", "name", "has_secret" }))
+    local ConnectorWrite = schema("ConnectorWrite", OBJ({ kind = ENUM(KINDS), name = S(), config = ANY(),
+        secret = S("API key; \"\" clears it"), enabled = BOOL(), sync_enabled = BOOL() }, nil, "kind and name required on create"))
+    local MarketRecord = schema("MarketRecord", OBJ({
+        uuid = UUID(), connector_uuid = UUID(), source = S(), record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }),
+        external_id = S(), address = S(), postcode = S(), lat = NUM(), lng = NUM(), property_type = S(), tenure = S(),
+        bedrooms = INT(), price = MONEY(), previous_price = MONEY(), event_date = DATE(), epc_rating = S(), status = S(),
+        cash_only = BOOL(), url = S(), data = ANY(), first_seen_at = DT(), fetched_at = DT(),
+    }, { "uuid", "source", "record_type", "external_id" }))
+    local Breakdown = OBJ({ weight = NUM(), fit = NUM("0–1"), points = NUM(), why = S() })
+    local MatchRow = schema("MatchWithBreakdown", OBJ({
+        uuid = UUID(), property_uuid = UUID(), buyer_profile_uuid = UUID(), score = NUM("0–100; 0 when a deal-breaker hits"),
+        breakdown = OBJ({ budget = Breakdown, area = Breakdown, strategy = Breakdown, yield = Breakdown, condition = Breakdown,
+            deal_breakers = ARR(S()) }),
+        status = ENUM({ "suggested", "sent", "interested", "declined" }), sent_at = DT(), computed_at = DT(),
+        buyer_name = S(), address_line1 = S(), postcode = S(), town = S(),
+    }, { "uuid", "score", "breakdown" }))
+    local ScoutAlert = schema("ScoutAlert", OBJ({
+        uuid = UUID(), saved_search_uuid = UUID(), saved_search_name = S(), kind = ENUM({ "new", "reduced", "stale", "cash_only" }),
+        detail = S(), price = MONEY(), previous_price = MONEY(), seen_at = DT(), created_at = DT(), market_record_uuid = UUID(),
+        record_type = S(), address = S(), postcode = S(), lat = NUM(), lng = NUM(), url = S(), property_type = S(),
+        bedrooms = INT(), cash_only = BOOL(),
+    }, { "uuid", "kind" }))
+    local CompanyCheck = schema("CompanyCheck", OBJ({
+        company_number = S(), name = S(), status = S(), type = S(), created_on = DATE(), sic_codes = ARR(S()),
+        registered_office = ANY(), officers = ARR(OBJ({ name = S(), role = S(), appointed_on = DATE() })),
+        flags = ARR(S("e.g. insolvency history, accounts overdue")), checked_at = DT(),
+    }, { "company_number", "flags" }))
+    local cid = { id = UUID("Connector uuid") }
+
+    sdk.doc(app, "GET /connectors", { summary = "Data connectors", permission = "property_deals_settings.read",
+        response = ARR(Connector) })
+    sdk.doc(app, "POST /connectors", { summary = "Add a data connector", permission = "property_deals_settings.update",
+        body = ConnectorWrite, response = Connector, errors = E422 })
+    sdk.doc(app, "GET /connectors/:id", { summary = "A data connector", permission = "property_deals_settings.read",
+        path = cid, response = Connector, errors = E404 })
+    sdk.doc(app, "PUT /connectors/:id", { summary = "Update a data connector", permission = "property_deals_settings.update",
+        status = 200, path = cid, body = ConnectorWrite, response = Connector, errors = E422 })
+    sdk.doc(app, "DELETE /connectors/:id", { summary = "Remove a data connector", permission = "property_deals_settings.update",
+        path = cid, response = OBJ({ deleted = BOOL() }), errors = E404 })
+    sdk.doc(app, "POST /connectors/:id/run", { summary = "Fetch from a connector now", permission = "property_deals_settings.update",
+        status = 200, path = cid, body = OBJ({ postcode = S() }), response = OBJ({ fetched = INT(), stored = INT() }),
+        errors = { ["404"] = "Not found", ["501"] = "Stub connector (no adapter yet)", ["502"] = "Source failed (also last_error)" } })
+    sdk.doc(app, "GET /market-records", { summary = "Market data (sold prices, EPCs, listings, auction lots)",
+        permission = "property_deals_properties.read", response = ARR(MarketRecord),
+        query = { record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }), postcode = S(), per_page = INT("1–200") } })
+    sdk.doc(app, "POST /market-records/import", { summary = "Import market data from CSV", status = 200,
+        permission = "property_deals_properties.create",
+        description = "Header row; columns used: external_id|id|lot|url, address, postcode, lat, lng, property_type, tenure, "
+            .. "bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded.",
+        body = OBJ({ record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }), csv = S(), source = S() },
+            { "record_type", "csv" }),
+        response = OBJ({ rows = INT(), stored = INT(), skipped = INT() }), errors = { ["413"] = "Over 5 MB", ["422"] = E422["422"] } })
+    sdk.doc(app, "POST /properties/:id/enrich", { summary = "EPC register + sold prices for a property", status = 200,
+        permission = "property_deals_properties.update", path = { id = UUID() },
+        response = OBJ({ epc = OBJ({ rating = S(), certificate_number = S(), expires_on = DATE(), address = S() }),
+            epc_error = S(), sold_prices = INT(), property = ANY("Property"), comps = ANY("Comparables") }),
+        errors = { ["404"] = "Not found", ["422"] = "No postcode" } })
+    sdk.doc(app, "GET /companies/search", { summary = "Companies House search", permission = "property_deals_buyers.read",
+        query = { q = S("Name or number") }, errors = { ["422"] = "No Companies House connector, or q too short" },
+        response = ARR(OBJ({ company_number = S(), title = S(), company_status = S(), date_of_creation = DATE(), address = S() })) })
+    sdk.doc(app, "POST /buyer-profiles/:id/company-check", { summary = "Companies House check for a company buyer", status = 200,
+        permission = "property_deals_buyers.update", path = { id = UUID() }, body = OBJ({ company_number = S() }),
+        response = CompanyCheck, errors = { ["404"] = "Not found", ["422"] = "No number / connector" } })
+    sdk.doc(app, "POST /saved-searches/:id/run", { summary = "Run a saved search now", status = 200,
+        permission = "property_deals_properties.read", path = { id = UUID() },
+        response = OBJ({ new = INT(), reduced = INT(), stale = INT(), cash_only = INT() }), errors = E404 })
+    sdk.doc(app, "GET /scout-alerts", { summary = "Deal scout alerts", permission = "property_deals_properties.read",
+        response = ARR(ScoutAlert), query = { saved_search_uuid = UUID(), unseen = ENUM({ "true" }) } })
+    sdk.doc(app, "POST /scout-alerts/seen", { summary = "Mark alerts seen (all, or the uuids given)", status = 200,
+        permission = "property_deals_properties.read", body = OBJ({ uuids = ARR(UUID()) }), response = OBJ({ updated = INT() }) })
+    sdk.doc(app, "POST /matches/recompute", { summary = "Re-score matches", status = 200, permission = "property_deals_buyers.update",
+        body = OBJ({ property_uuid = UUID(), buyer_profile_uuid = UUID() }, nil, "Neither: the whole workspace"),
+        response = OBJ({ scored = INT() }) })
+    sdk.doc(app, "GET /properties/:id/matches", { summary = "Buyers matching a property, best first",
+        permission = "property_deals_buyers.read", path = { id = UUID() }, response = ARR(MatchRow) })
+    sdk.doc(app, "GET /buyer-profiles/:id/matches", { summary = "Properties matching a buyer, best first",
+        permission = "property_deals_buyers.read", path = { id = UUID() }, response = ARR(MatchRow) })
+    sdk.doc(app, "POST /matches/:id/send", { summary = "Send the deal pack to the buyer (creates an approval)",
+        permission = "property_deals_buyers.update", path = { id = UUID() }, body = OBJ({ subject = S(), body = S() }),
+        response = Approval, errors = { ["404"] = "Not found", ["409"] = "Hits the buyer's deal-breakers" } })
+    sdk.doc(app, "POST /suppliers/nearest", { summary = "Book nearest: suppliers of a kind, nearest first", status = 200,
+        permission = "property_deals_suppliers.read",
+        body = OBJ({ kind = S("e.g. epc_assessor"), task_uuid = UUID(), property_uuid = UUID(), lat = NUM(), lng = NUM(),
+            limit = INT("1–10") }, { "kind" }),
+        response = ARR(OBJ({ supplier_uuid = UUID(), name = S(), distance_miles = NUM(), radius_miles = NUM(),
+            avg_turnaround_hours = NUM(), on_time_pct = NUM(), rating = NUM(), booking_method = S() })), errors = E422 })
 end

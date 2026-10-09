@@ -72,8 +72,8 @@ poly = expect("map polygon", call("GET", P + "/map?polygon=53.9,-1.2;54.0,-1.2;5
 check("map: polygon finds the deal", any(f.get("deal_uuid") == D for f in poly["features"]), poly)
 res = call("GET", P + "/map?lat=999&lng=0", "operator_s", S)
 check("map: bad centre 422", res[0] == 422, res)
-res = call("GET", P + "/map?lat=53.9&lng=-1.1&layers=sold_prices", "operator_s", S)
-check("map: unknown layer 422 (connector layers come later)", res[0] == 422, res)
+res = call("GET", P + "/map?lat=53.9&lng=-1.1&layers=rightmove", "operator_s", S)
+check("map: unknown layer 422", res[0] == 422, res)
 res = call("GET", P + "/map?lat=53.95&lng=-1.09&radius_miles=50", "owner_b", B)
 check("map: other workspace sees no pins", res[0] == 200 and not res[1]["data"]["features"], res)
 prop = sql(f"SELECT property_uuid FROM property_deals_deals WHERE uuid = '{D}'")[0]

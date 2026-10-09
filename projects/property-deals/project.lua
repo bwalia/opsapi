@@ -62,7 +62,10 @@ return {
         agent_run = { table = "property_deals_agent_runs",
                       verbs = { succeeded = { status = "succeeded" }, failed = { status = "failed" } } },
         inbound_message = { table = "property_deals_inbound_messages" },
-        match = { table = "property_deals_matches" },
+        saved_search = { table = "property_deals_saved_searches" },
+        scout_alert = { table = "property_deals_scout_alerts" },
+        match = { table = "property_deals_matches",
+                  verbs = { sent = { status = "sent" }, interested = { status = "interested" } } },
         -- opsapi:publishes (make:resource adds entries above this line)
     },
 
@@ -121,5 +124,12 @@ return {
         ai_max_tokens = { type = "integer", label = "AI: max tokens per reply", default = 2048, min = 64, max = 200000 },
         escalations_always_notify = { type = "boolean", label = "Escalations can't be muted", default = false,
                                       description = "Managers get escalations by push/email even if they turned them off." },
+        -- Buyer matching weights (SPEC §3.7); they need not add up to 100.
+        match_w_budget = { type = "integer", label = "Match weight: budget fit", default = 30, min = 0, max = 100 },
+        match_w_area = { type = "integer", label = "Match weight: area fit", default = 20, min = 0, max = 100 },
+        match_w_strategy = { type = "integer", label = "Match weight: strategy fit", default = 20, min = 0, max = 100 },
+        match_w_yield = { type = "integer", label = "Match weight: yield / discount vs target", default = 20, min = 0, max = 100 },
+        match_w_condition = { type = "integer", label = "Match weight: condition vs refurb appetite", default = 10,
+                              min = 0, max = 100 },
     },
 }

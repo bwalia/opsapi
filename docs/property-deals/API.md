@@ -1,4 +1,4 @@
-# Property Deals API (contract v1.1 — Phase 5)
+# Property Deals API (contract v1.2 — Phase 6)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -218,7 +218,7 @@ POST /api/v2/property-deals/approvals/{id}/decide
 ### 2.6 Map / deal finder
 
 ```http
-GET /api/v2/property-deals/map?lat=53.95&lng=-1.09&radius_miles=25&layers=properties,deals,leads,holdings
+GET /api/v2/property-deals/map?lat=53.95&lng=-1.09&radius_miles=25&layers=properties,deals,leads,holdings,sold_prices,epc,listings,auction_lots
 GET /api/v2/property-deals/map?polygon=53.9,-1.2;54.0,-1.2;54.0,-1.0;53.9,-1.0&layers=deals
 GET /api/v2/property-deals/properties/{id}/card
 ```
@@ -230,10 +230,23 @@ GET /api/v2/property-deals/properties/{id}/card
 ```
 - Radius: 1–100 miles (UI slider 5–50, default 25). At most 2000 features (`truncated`).
 - Colour deal pins by `deal_health` or `deal_stage`.
-- The card gives the property, its active deal, `gross_yield_pct`, `discount_pct` and `top_matches` (3).
+- **Market layers** `sold_prices`, `epc`, `listings`, `auction_lots` come from data connectors and CSV
+  imports (same feature shape plus `price`, `previous_price` (before a cut), `event_date`, `epc_rating`,
+  `cash_only`, `url`, `source`). An unknown layer is a 422.
+- **Card:** the property, its active deal, `gross_yield_pct`, `discount_pct` (vs the estimate),
+  `comps` (sold prices within a mile, 24 months: `count`, `median`), `discount_vs_comps_pct` and
+  `top_matches` (3, each with `breakdown`).
+  - Card buttons: "create deal" (`POST /deals { property_uuid }`), "send to buyer"
+    (`POST /matches/{id}/send`, an approval), "add note" (`PUT /properties/{id} { notes }`).
 - Use Leaflet + OpenStreetMap tiles.
-- **Phase 6** adds layers `sold_prices`, `epc`, `listings`, `auction_lots` (same feature shape), the
-  match scores that fill `top_matches`, and saved searches. Until then an unknown layer is a 422.
+- **Saved searches (deal scout):**
+  - `GET/POST/PUT/DELETE /saved-searches { name, lat, lng, radius_miles | polygon: [[lat,lng],…], filters: { min_price, max_price, min_bedrooms, property_types[], record_types[] }, alerts, stale_after_days }`.
+  - Run one now: `POST /saved-searches/{id}/run`.
+  - The daily job alerts the owner about **new**, **reduced**, **stale** (over `stale_after_days`) and **cash_only** homes. The first run only sets the baseline.
+  - Alerts: `GET /scout-alerts?unseen=true`, `POST /scout-alerts/seen { uuids? }`. Push/in-app category: `deal_scout`.
+- **Data:** `GET /market-records?record_type=&postcode=`.
+  - Import a CSV (auction catalogue, agent feed): `POST /market-records/import { record_type, csv, source? }` (header row; missing lat/lng are geocoded from the postcode).
+  - Look up a property: `POST /properties/{id}/enrich` (EPC register → `epc_rating`, certificate, expiry; nearby sold prices; geocodes a postcode-only property). New properties are looked up automatically when the workspace has these connectors.
 
 ### 2.7 Buyers
 
@@ -241,9 +254,20 @@ GET /api/v2/property-deals/properties/{id}/card
   one CRM contact (`contact_uuid`) or company (`account_uuid`).
 - **Proof of funds:** `pof_status` none · requested · received · verified · expired, plus
   `pof_expires_on`. It expires automatically every day.
-- **Matches:** `GET /matches?buyer_profile_uuid=&sort=score&order=desc`.
-- **Send deal pack:** `POST /approvals { "subject_type": "deal_pack", "action": "send_deal_pack", … }`.
-  It is sent only once approved (Phase 5/6).
+- **Matches:** `GET /buyer-profiles/{id}/matches` (properties, best first) and
+  `GET /properties/{id}/matches` (buyers, best first).
+  - Each row has `score` 0–100 and a `breakdown`: per factor `{ weight, fit, points, why }` for
+    `budget, area, strategy, yield, condition`, plus `deal_breakers` (any → score 0).
+  - Weights are the plugin settings `match_w_*` (default 30/20/20/20/10).
+  - Scores update by themselves when a property or profile changes. Re-score by hand:
+    `POST /matches/recompute { property_uuid? | buyer_profile_uuid? }`.
+  - Mark a buyer's reply: `PUT /matches/{id} { status: interested | declined }`.
+- **Send deal pack:** `POST /matches/{id}/send { subject?, body? }` creates a `send_deal_pack` approval
+  addressed to the buyer's email. Once approved, the email goes and the match becomes `sent`. A
+  match that hits a deal-breaker answers 409.
+- **Company buyers (Ltd/SPV):** `GET /companies/search?q=`,
+  `POST /buyer-profiles/{id}/company-check { company_number }`. Companies House returns the profile,
+  active officers and `flags` (e.g. accounts overdue), saved on the profile as `company_check`.
 
 ### 2.8 Suppliers
 
@@ -251,8 +275,9 @@ GET /api/v2/property-deals/properties/{id}/card
 - **Add a supplier:** `POST /suppliers { "name", "email", "kinds": ["epc_assessor"], "base_lat", "base_lng", "radius_miles" }`
   creates the CRM company, or pass `account_uuid` to use an existing one.
 - **Bookings:** `GET/POST /bookings`, `PUT /bookings/{id} { "status": "confirmed" }`.
-- **"Book nearest"** (nearest suppliers for a task, with the booking agent) is Phase 5/6. Until then
-  create a booking task (`POST /tasks`) or a booking by hand.
+- **"Book nearest":** `POST /suppliers/nearest { kind, task_uuid | property_uuid | lat+lng, limit? }`
+  lists suppliers nearest first, with measured speed. To have the requests drafted and sent, use the
+  booking agent ("Let AI do it" on the booking task).
 - `avg_turnaround_hours` and `on_time_pct` are measured nightly from Phase 7.
 
 ### 2.9 Compliance
@@ -279,7 +304,8 @@ GET /api/v2/property-deals/properties/{id}/card
 | Cost caps | plugin settings `ai_max_cost_run_usd` (stop a run), `ai_max_cost_day_usd` (no new runs today), `ai_max_tokens`; spend: `GET /ai/usage?days=30` |
 | Mailboxes (legal chaser reads replies) | `GET/POST /mail-connectors`, `GET/PUT/DELETE …/{id}`, `POST …/{id}/sync`; kinds `imap { host, port, ssl, username, mailbox }` + password, `gmail { client_id }` + `{ client_secret, refresh_token }`, `m365 { tenant_id, client_id, mailbox }` + client secret. Received mail: `GET /inbound-messages?deal_uuid=`; log one by hand: `POST /inbound-messages` |
 | Email server for approved sends | core `PUT /api/v2/namespace/mail-settings` (else the deployment's SMTP) |
-| Data connectors | **Phase 6** — see §4 |
+| Data connectors | `GET/POST /connectors`, `GET/PUT/DELETE /connectors/{id}`, `POST /connectors/{id}/run { postcode }`. Kinds: `epc` (config `email`, secret API key), `price_paid`, `companies_house` (secret API key), `postcodes`, `csv`; paid feeds `propertydata`, `searchland`, `streetdata`, `homedata` are stubs (run → 501: import their CSV). `sync_enabled` → the daily deal scout fetches for active deals' and saved searches' postcodes. Keys are sealed and never returned |
+| Match weights | plugin settings `match_w_budget`, `match_w_area`, `match_w_strategy`, `match_w_yield`, `match_w_condition` |
 
 An invalid template returns 422 with `details` as a list like
 `["stages[3].tasks[1].due.from: stage_entry, deal_created, …"]`. Show it next to the editor.
@@ -334,8 +360,6 @@ Send `Idempotency-Key` on queued creates (leads, properties, photos, contact log
 
 | Phase | Endpoint (planned) | For |
 |---|---|---|
-| 6 | Map layers `sold_prices`, `epc`, `listings`, `auction_lots`; `GET/POST /saved-searches`; `GET/PUT /connectors`; `POST /matches/recompute` | Map, Buyers, Settings |
-| 6 | `POST /suppliers/nearest { task_uuid | lat,lng, kind }` | "Book nearest" |
 | 7 | `GET /reports/{stage-times|late-days|conversion|supplier-speed|ai-usage}` | Reports |
 
 Exact shapes are fixed when each phase ships, and this table is updated.
@@ -350,6 +374,7 @@ Workspace webhooks (`/api/v2/namespace/webhooks`) can subscribe to:
 - `deal.completed|fell_through|stage_changed|health_changed`.
 - `task.done|awaiting_approval|sla_warning|overdue|escalated`.
 - `approval.requested|approved|rejected|decided|executed`; `agent_run.succeeded|failed`; `inbound_message.created`.
+- `match.sent|interested`; `saved_search.*`, `scout_alert.created`.
 - `compliance_check.passed|failed|expiring|expired`.
 - `booking.confirmed|cancelled`.
 
@@ -369,6 +394,15 @@ engine events). Use it for WhatsApp/Slack.
 | [ios-notification-preferences](api-requests/ios-notification-preferences.md) | Done (Phase 5): `GET/PUT /notification-preferences` + quiet hours; the workspace setting `escalations_always_notify` can make escalations unmutable (§3) |
 
 ## 7. Changes
+
+- **v1.2 (Phase 6):**
+  - Data connectors (EPC register, Land Registry Price Paid, Companies House, postcode lookup; paid-feed
+    stubs) and CSV import.
+  - Map layers `sold_prices`, `epc`, `listings`, `auction_lots`; comparables on the property card.
+  - Automatic EPC lookup for new properties (SPEC §5 #2).
+  - Matching with breakdown, configurable weights and deal-breakers; recompute; deal packs via approval.
+  - Companies House checks; saved searches + deal scout alerts (`jobs/deal_scout.lua`, daily);
+    `POST /suppliers/nearest`.
 
 - **v1.1 (Phase 5):**
   - AI layer: core workspace AI providers (`/api/v2/namespace/ai-providers`, AES-256-GCM sealed keys),

@@ -1,5 +1,5 @@
 -- Run the workflow engine's checks now, for this workspace only (managers):
---   POST /engine/run { "checks": ["sla", "health", "compliance_expiry", "digest", "agents", "mail"] }
+--   POST /engine/run { "checks": ["sla", "health", "compliance_expiry", "digest", "agents", "mail", "scout"] }
 --   (default: sla + health)
 -- The same work the scheduled jobs do (jobs/*.lua); useful after bulk edits and in tests.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -8,7 +8,8 @@ if root and not package.path:find(root .. "/?.lua", 1, true) then package.path =
 local sdk = require("helper.plugin-sdk")
 local U = require("property_deals.util")
 
-local CHECKS = { sla = true, health = true, compliance_expiry = true, digest = true, agents = true, mail = true }
+local CHECKS = { sla = true, health = true, compliance_expiry = true, digest = true, agents = true, mail = true,
+    scout = true }
 
 return function(app)
     app:post("/engine/run", sdk.handler({ permission = "property_deals_settings.manage" }, U.guard(function(self)
@@ -33,6 +34,10 @@ return function(app)
                 out.agents = require("property_deals.ai.tick").run(ns, settings)
             elseif c == "mail" then
                 out.mail = require("property_deals.mail").sync_all(ns)
+            elseif c == "scout" then
+                local Scout = require("property_deals.scout")
+                out.scout = Scout.run(ns, settings)
+                out.scout.synced = Scout.sync(ns)
             end
         end
         return sdk.ok(out)

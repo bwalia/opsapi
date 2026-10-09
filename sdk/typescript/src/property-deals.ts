@@ -72,6 +72,12 @@ export type MailConnector = S['PropertyDealsMailConnector'];
 export type MailConnectorWrite = S['PropertyDealsMailConnectorWrite'];
 export type InboundMessage = S['PropertyDealsInboundMessage'];
 export type NotificationPreferences = S['PropertyDealsNotificationPreferences'];
+export type Connector = S['PropertyDealsConnector'];
+export type ConnectorWrite = S['PropertyDealsConnectorWrite'];
+export type MarketRecord = S['PropertyDealsMarketRecord'];
+export type MatchWithBreakdown = S['PropertyDealsMatchWithBreakdown'];
+export type ScoutAlert = S['PropertyDealsScoutAlert'];
+export type CompanyCheck = S['PropertyDealsCompanyCheck'];
 
 /** Task statuses (pd_status), in workflow order. */
 export const TASK_STATUSES = [
@@ -91,4 +97,5 @@ export const PROPERTY_DEALS_EVENTS = [
   'property_deals.compliance_check.passed', 'property_deals.compliance_check.failed',
   'property_deals.compliance_check.expiring', 'property_deals.compliance_check.expired',
   'property_deals.booking.confirmed', 'property_deals.booking.cancelled',
+  'property_deals.match.sent', 'property_deals.match.interested',
 ] as const;

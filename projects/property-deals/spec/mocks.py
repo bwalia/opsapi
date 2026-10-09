@@ -32,6 +32,8 @@ STATE = {
     "js_launches": [],
 }
 JS_AGENT = "11111111-2222-4333-8444-555555555555"
+POSTCODES = {"YO1 7AA": (53.96, -1.08), "YO1 9AB": (53.962, -1.085), "YO10 5DD": (53.947, -1.05),
+             "LS1 1AA": (53.797, -1.548), "SW1A 1AA": (51.501, -0.142)}
 
 
 def now_iso():
@@ -189,6 +191,8 @@ class Http(BaseHTTPRequestHandler):
                 return self.gmail(p)
             if p.startswith("/m365/v1.0/users/"):
                 return self.m365(p)
+            if p.startswith("/epc/") or p.startswith("/lr/") or p.startswith("/ch/") or p.startswith("/pc/"):
+                return self.data_api("GET", p, {})
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -220,12 +224,67 @@ class Http(BaseHTTPRequestHandler):
                 return self.send(201, {"ok": True})
             if p.startswith("/js/api/v1/"):
                 return self.jobshout("POST", p[len("/js/api/v1"):], b)
+            if p.startswith("/pc/"):
+                return self.data_api("POST", p, b)
             if p in ("/gmail/token", "/m365/token"):
                 raw = b.get("_raw", "")
                 if "secret-ok" not in raw:
                     return self.send(401, {"error": "invalid_client", "error_description": "bad secret"})
                 return self.send(200, {"access_token": "tok-" + p.split("/")[1], "expires_in": 3600})
         self.send(404, {"error": "not found"})
+
+    # Open data: EPC register, Land Registry Price Paid, Companies House, postcodes.io ----
+    def data_api(self, method, p, b):
+        if p.startswith("/pc/postcodes") and method == "POST":
+            res = []
+            for q in b.get("postcodes", []):
+                g = POSTCODES.get(q.upper().replace("  ", " "))
+                res.append({"query": q, "result": {"postcode": q, "latitude": g[0], "longitude": g[1],
+                                                   "admin_district": "York"} if g else None})
+            return self.send(200, {"status": 200, "result": res})
+        if p.startswith("/pc/postcodes?"):
+            return self.send(200, {"status": 200, "result": [{"postcode": "YO1 7AA", "latitude": 53.96, "longitude": -1.08}]})
+        if p.startswith("/epc/api/v1/domestic/search"):
+            auth = self.headers.get("Authorization", "")
+            if auth != "Basic " + base64.b64encode(b"epc@data-buyers.test:epc-key").decode():
+                return self.send(401, {"error": "unauthorised"})
+            if "YO1" not in p:
+                return self.send(200, {"column-names": [], "rows": []})
+            return self.send(200, {"rows": [
+                {"lmk-key": "lmk-1", "address": "7 Mill Lane, York", "postcode": "YO1 7AA", "current-energy-rating": "C",
+                 "lodgement-date": "2022-03-01", "certificate-number": "1234-5678-9012-3456-7890", "total-floor-area": "84",
+                 "property-type": "House"},
+                {"lmk-key": "lmk-old", "address": "7 Mill Lane, York", "postcode": "YO1 7AA", "current-energy-rating": "E",
+                 "lodgement-date": "2010-01-01", "certificate-number": "0000-0000", "property-type": "House"},
+                {"lmk-key": "lmk-2", "address": "9 Mill Lane, York", "postcode": "YO1 7AA", "current-energy-rating": "D",
+                 "lodgement-date": "2019-06-01", "property-type": "House"}]})
+        if p.startswith("/lr/data/ppi/transaction-record.json"):
+            if "YO1" not in p:
+                return self.send(200, {"result": {"items": []}})
+            items = [{"transactionId": "{T-%d}" % i, "pricePaid": price, "transactionDate": date,
+                      "propertyAddress": {"paon": str(n), "street": "MILL LANE", "town": "YORK", "postcode": "YO1 7AA"},
+                      "propertyType": {"prefLabel": [{"_value": "terraced"}]}, "estateType": {"prefLabel": [{"_value": "freehold"}]}}
+                     for i, (price, date, n) in enumerate([(140000, "Fri, 10 May 2024", 3), (160000, "2025-01-15", 5),
+                                                           (150000, "2025-06-30", 11)])]
+            return self.send(200, {"result": {"items": items}})
+        if p.startswith("/ch/"):
+            if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"ch-key:").decode():
+                return self.send(401, {"error": "Invalid Authorization"})
+            if p.startswith("/ch/search/companies"):
+                return self.send(200, {"items": [{"company_number": "01234567", "title": "ACME HOMES LTD", "company_status": "active",
+                                                  "date_of_creation": "2019-02-01", "address_snippet": "1 High St, York"}]})
+            m = re.match(r"^/ch/company/(\w+)(/officers)?", p)
+            if m and m.group(1) != "01234567":
+                return self.send(404, {"errors": [{"error": "company-profile-not-found"}]})
+            if m and m.group(2):
+                return self.send(200, {"items": [{"name": "SMITH, Jo", "officer_role": "director", "appointed_on": "2019-02-01"},
+                                                 {"name": "OLD, Al", "officer_role": "director", "resigned_on": "2020-01-01"}]})
+            if m:
+                return self.send(200, {"company_name": "ACME HOMES LTD", "company_status": "active", "type": "ltd",
+                                       "date_of_creation": "2019-02-01", "sic_codes": ["68100"],
+                                       "accounts": {"overdue": True}, "confirmation_statement": {"overdue": False},
+                                       "registered_office_address": {"locality": "York"}})
+        return self.send(404, {"error": "no route " + p})
 
     # JobShout ---------------------------------------------------------------
     def jobshout(self, method, path, b):

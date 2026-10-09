@@ -75,6 +75,11 @@ erDiagram
 | `property_deals_mail_connectors` | IMAP / Gmail / Microsoft 365 mailbox config + sealed secret, sync cursor | Phase 5 |
 | `property_deals_inbound_messages` | fetched email (data only), matched deal, chase it replied to, agent run it started | Phase 5 |
 
+| `property_deals_connectors` | data sources: EPC, Price Paid, Companies House, postcodes, CSV, paid-feed stubs; sealed key | Phase 6 |
+| `property_deals_market_records` | sold prices, EPC certificates, listings, auction lots (other people's homes: comparables and scouting) | Phase 6; not the workspace's own properties |
+| `property_deals_saved_searches` | pin + radius or polygon + filters the deal scout re-runs | Phase 6 |
+| `property_deals_scout_alerts` | new / reduced / stale / cash-only homes per saved search | one alert per home, kind and price |
+
 Core tables added in Phase 5 (any module can use them):
 
 | Table | What | Notes |

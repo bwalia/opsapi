@@ -390,6 +390,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/buyer-profiles/{id}/company-check": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Companies House check for a company buyer
+         * @description Needs property_deals_buyers.update in the workspace.
+         */
+        post: operations["property_deals_post_buyer_profiles_id_company_check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/buyer-profiles/{id}/matches": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Properties matching a buyer, best first
+         * @description Needs property_deals_buyers.read in the workspace.
+         */
+        get: operations["property_deals_get_buyer_profiles_id_matches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/chases": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -431,6 +471,26 @@ export interface paths {
          * @description Needs property_deals_tasks.update in the workspace.
          */
         put: operations["property_deals_chases_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/companies/search": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Companies House search
+         * @description Needs property_deals_buyers.read in the workspace.
+         */
+        get: operations["property_deals_get_companies_search"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -485,6 +545,78 @@ export interface paths {
          * @description Needs property_deals_compliance.delete in the workspace.
          */
         delete: operations["property_deals_compliance_checks_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/connectors": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data connectors
+         * @description Needs property_deals_settings.read in the workspace.
+         */
+        get: operations["property_deals_get_connectors"];
+        put?: never;
+        /**
+         * Add a data connector
+         * @description Needs property_deals_settings.update in the workspace.
+         */
+        post: operations["property_deals_post_connectors"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/connectors/{id}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A data connector
+         * @description Needs property_deals_settings.read in the workspace.
+         */
+        get: operations["property_deals_get_connectors_id"];
+        /**
+         * Update a data connector
+         * @description Needs property_deals_settings.update in the workspace.
+         */
+        put: operations["property_deals_put_connectors_id"];
+        post?: never;
+        /**
+         * Remove a data connector
+         * @description Needs property_deals_settings.update in the workspace.
+         */
+        delete: operations["property_deals_delete_connectors_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/connectors/{id}/run": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch from a connector now
+         * @description Needs property_deals_settings.update in the workspace.
+         */
+        post: operations["property_deals_post_connectors_id_run"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1138,6 +1270,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/market-records": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market data (sold prices, EPCs, listings, auction lots)
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        get: operations["property_deals_get_market_records"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/market-records/import": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import market data from CSV
+         * @description Header row; columns used: external_id|id|lot|url, address, postcode, lat, lng, property_type, tenure, bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded.
+         *
+         *     Needs property_deals_properties.create in the workspace.
+         */
+        post: operations["property_deals_post_market_records_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/matches": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -1176,6 +1350,46 @@ export interface paths {
          */
         put: operations["property_deals_matches_update"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/matches/{id}/send": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send the deal pack to the buyer (creates an approval)
+         * @description Needs property_deals_buyers.update in the workspace.
+         */
+        post: operations["property_deals_post_matches_id_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/matches/recompute": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-score matches
+         * @description Needs property_deals_buyers.update in the workspace.
+         */
+        post: operations["property_deals_post_matches_recompute"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1294,6 +1508,158 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/properties/{id}/enrich": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * EPC register + sold prices for a property
+         * @description Needs property_deals_properties.update in the workspace.
+         */
+        post: operations["property_deals_post_properties_id_enrich"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/properties/{id}/matches": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buyers matching a property, best first
+         * @description Needs property_deals_buyers.read in the workspace.
+         */
+        get: operations["property_deals_get_properties_id_matches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/saved-searches": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved searches
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        get: operations["property_deals_saved_searches_list"];
+        put?: never;
+        /**
+         * Create a saved search
+         * @description Needs property_deals_properties.create in the workspace.
+         */
+        post: operations["property_deals_saved_searches_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/saved-searches/{id}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a saved search
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        get: operations["property_deals_saved_searches_get"];
+        /**
+         * Update a saved search
+         * @description Needs property_deals_properties.update in the workspace.
+         */
+        put: operations["property_deals_saved_searches_update"];
+        post?: never;
+        /**
+         * Delete a saved search
+         * @description Needs property_deals_properties.delete in the workspace.
+         */
+        delete: operations["property_deals_saved_searches_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/saved-searches/{id}/run": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a saved search now
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        post: operations["property_deals_post_saved_searches_id_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/scout-alerts": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deal scout alerts
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        get: operations["property_deals_get_scout_alerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/scout-alerts/seen": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark alerts seen (all, or the uuids given)
+         * @description Needs property_deals_properties.read in the workspace.
+         */
+        post: operations["property_deals_post_scout_alerts_seen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/setup": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -1367,6 +1733,26 @@ export interface paths {
          * @description Needs property_deals_suppliers.delete in the workspace.
          */
         delete: operations["property_deals_delete_suppliers_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/suppliers/nearest": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book nearest: suppliers of a kind, nearest first
+         * @description Needs property_deals_suppliers.read in the workspace.
+         */
+        post: operations["property_deals_post_suppliers_nearest"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2482,6 +2868,26 @@ export interface components {
              */
             to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
         };
+        PropertyDealsCompanyCheck: {
+            /** Format: date-time */
+            checked_at?: string;
+            company_number: string;
+            /** Format: date */
+            created_on?: string;
+            flags: string[];
+            name?: string;
+            officers?: {
+                /** Format: date */
+                appointed_on?: string;
+                name?: string;
+                role?: string;
+            }[];
+            /** @description Any JSON value */
+            registered_office?: unknown;
+            sic_codes?: string[];
+            status?: string;
+            type?: string;
+        };
         PropertyDealsComplianceCheck: {
             account_uuid?: string;
             /** @description Template compliance key, e.g. aml_cdd_buyer */
@@ -2642,6 +3048,43 @@ export interface components {
              * @description Task uuid
              */
             task_uuid?: string | null;
+        };
+        PropertyDealsConnector: {
+            /** @description base_url?, email (EPC), … */
+            config?: unknown;
+            /** Format: date-time */
+            created_at?: string;
+            enabled?: boolean;
+            /** @description The key is never returned */
+            has_secret: boolean;
+            /** @enum {string} */
+            kind: "epc" | "price_paid" | "companies_house" | "postcodes" | "csv" | "propertydata" | "searchland" | "streetdata" | "homedata";
+            label?: string;
+            last_error?: string;
+            /** Format: date-time */
+            last_run_at?: string;
+            name: string;
+            records_count?: number;
+            /** @description Paid feed without an adapter yet: use CSV import */
+            stub?: boolean;
+            /** @description Daily sync by the deal scout */
+            sync_enabled?: boolean;
+            /** Format: date-time */
+            updated_at?: string;
+            /** Format: uuid */
+            uuid: string;
+        };
+        /** @description kind and name required on create */
+        PropertyDealsConnectorWrite: {
+            /** @description Any JSON value */
+            config?: unknown;
+            enabled?: boolean;
+            /** @enum {string} */
+            kind?: "epc" | "price_paid" | "companies_house" | "postcodes" | "csv" | "propertydata" | "searchland" | "streetdata" | "homedata";
+            name?: string;
+            /** @description API key; "" clears it */
+            secret?: string;
+            sync_enabled?: boolean;
         };
         PropertyDealsDeal: {
             /** Format: date-time */
@@ -3443,6 +3886,7 @@ export interface components {
         };
         PropertyDealsMapFeature: {
             bedrooms?: number;
+            cash_only?: boolean;
             /** Format: date */
             deadline_date?: string;
             /** @enum {string} */
@@ -3455,18 +3899,32 @@ export interface components {
             distance_miles?: number;
             epc_rating?: string;
             est_market_value?: number;
+            /**
+             * Format: date
+             * @description Sold / lodged / listed / auction date
+             */
+            event_date?: string;
             lat: number;
             /** @enum {string} */
-            layer: "properties" | "deals" | "leads" | "holdings";
+            layer: "properties" | "deals" | "leads" | "holdings" | "sold_prices" | "epc" | "listings" | "auction_lots";
             lead_kind?: string;
             lng: number;
+            /** @description Before a price cut */
+            previous_price?: number;
+            price?: number;
+            property_type?: string;
             /** Format: uuid */
             property_uuid?: string;
+            /** @description Market layers */
+            record_type?: string;
             situation?: string;
+            /** @description Connector kind or CSV source */
+            source?: string;
             status?: string;
             subtitle?: string;
             tenure?: string;
             title?: string;
+            url?: string;
             uuid: string;
         };
         PropertyDealsMapResult: {
@@ -3483,6 +3941,37 @@ export interface components {
             radius_miles?: number;
             /** @description More than 2000 */
             truncated?: boolean;
+        };
+        PropertyDealsMarketRecord: {
+            address?: string;
+            bedrooms?: number;
+            cash_only?: boolean;
+            /** Format: uuid */
+            connector_uuid?: string;
+            /** @description Any JSON value */
+            data?: unknown;
+            epc_rating?: string;
+            /** Format: date */
+            event_date?: string;
+            external_id: string;
+            /** Format: date-time */
+            fetched_at?: string;
+            /** Format: date-time */
+            first_seen_at?: string;
+            lat?: number;
+            lng?: number;
+            postcode?: string;
+            previous_price?: number;
+            price?: number;
+            property_type?: string;
+            /** @enum {string} */
+            record_type: "sold_price" | "epc" | "listing" | "auction_lot" | "other";
+            source: string;
+            status?: string;
+            tenure?: string;
+            url?: string;
+            /** Format: uuid */
+            uuid: string;
         };
         /** @description Matches (Property Deals plugin) */
         PropertyDealsMatch: {
@@ -3527,6 +4016,64 @@ export interface components {
              * @enum {string|null}
              */
             status?: "suggested" | "interested" | "declined" | null;
+        };
+        PropertyDealsMatchWithBreakdown: {
+            address_line1?: string;
+            breakdown: {
+                area?: {
+                    /** @description 0–1 */
+                    fit?: number;
+                    points?: number;
+                    weight?: number;
+                    why?: string;
+                };
+                budget?: {
+                    /** @description 0–1 */
+                    fit?: number;
+                    points?: number;
+                    weight?: number;
+                    why?: string;
+                };
+                condition?: {
+                    /** @description 0–1 */
+                    fit?: number;
+                    points?: number;
+                    weight?: number;
+                    why?: string;
+                };
+                deal_breakers?: string[];
+                strategy?: {
+                    /** @description 0–1 */
+                    fit?: number;
+                    points?: number;
+                    weight?: number;
+                    why?: string;
+                };
+                yield?: {
+                    /** @description 0–1 */
+                    fit?: number;
+                    points?: number;
+                    weight?: number;
+                    why?: string;
+                };
+            };
+            buyer_name?: string;
+            /** Format: uuid */
+            buyer_profile_uuid?: string;
+            /** Format: date-time */
+            computed_at?: string;
+            postcode?: string;
+            /** Format: uuid */
+            property_uuid?: string;
+            /** @description 0–100; 0 when a deal-breaker hits */
+            score: number;
+            /** Format: date-time */
+            sent_at?: string;
+            /** @enum {string} */
+            status?: "suggested" | "sent" | "interested" | "declined";
+            town?: string;
+            /** Format: uuid */
+            uuid: string;
         };
         PropertyDealsMe: {
             is_manager?: boolean;
@@ -3676,6 +4223,17 @@ export interface components {
             uuid: string;
         };
         PropertyDealsPropertyCard: {
+            /** @description Sold-price comparables within a mile, last 24 months */
+            comps?: {
+                count?: number;
+                /** Format: date */
+                from?: string;
+                median?: number;
+                months?: number;
+                radius_miles?: number;
+                /** Format: date */
+                to?: string;
+            };
             deal?: {
                 /** @enum {string} */
                 health?: "green" | "amber" | "red";
@@ -3692,6 +4250,8 @@ export interface components {
             };
             /** @description vs estimated value */
             discount_pct?: number;
+            /** @description Price (or estimate) vs the comparables' median */
+            discount_vs_comps_pct?: number;
             gross_yield_pct?: number;
             /** @description Property */
             property?: unknown;
@@ -3865,6 +4425,112 @@ export interface components {
             town?: string | null;
             /** @description UPRN */
             uprn?: string | null;
+        };
+        /** @description Saved searches (Property Deals plugin) */
+        PropertyDealsSavedSearch: {
+            /** @description Alerts */
+            alerts?: boolean | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description { min_price, max_price, min_bedrooms, property_types[], record_types[] } (any JSON object or array) */
+            filters?: unknown;
+            id: number;
+            /** @description Lat */
+            lat?: number | null;
+            /** @description Lng */
+            lng?: number | null;
+            /** @description Name */
+            name: string;
+            namespace_id: number;
+            /**
+             * Format: uuid
+             * @description Owner user uuid
+             */
+            owner_user_uuid?: string | null;
+            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            polygon?: unknown;
+            /** @description Radius (miles), default 25 */
+            radius_miles?: number | null;
+            /** @description Stale after days */
+            stale_after_days?: number | null;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            uuid: string;
+        };
+        PropertyDealsSavedSearchCreate: {
+            /** @description Alerts */
+            alerts?: boolean | null;
+            /** @description { min_price, max_price, min_bedrooms, property_types[], record_types[] } (any JSON object or array) */
+            filters?: unknown;
+            /** @description Lat */
+            lat?: number | null;
+            /** @description Lng */
+            lng?: number | null;
+            /** @description Name */
+            name: string;
+            /**
+             * Format: uuid
+             * @description Owner user uuid
+             */
+            owner_user_uuid?: string | null;
+            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            polygon?: unknown;
+            /** @description Radius (miles), default 25 */
+            radius_miles?: number | null;
+            /** @description Stale after days */
+            stale_after_days?: number | null;
+        };
+        /** @description Only the fields sent are changed; null clears an optional field. */
+        PropertyDealsSavedSearchUpdate: {
+            /** @description Alerts */
+            alerts?: boolean | null;
+            /** @description { min_price, max_price, min_bedrooms, property_types[], record_types[] } (any JSON object or array) */
+            filters?: unknown;
+            /** @description Lat */
+            lat?: number | null;
+            /** @description Lng */
+            lng?: number | null;
+            /** @description Name */
+            name?: string;
+            /**
+             * Format: uuid
+             * @description Owner user uuid
+             */
+            owner_user_uuid?: string | null;
+            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            polygon?: unknown;
+            /** @description Radius (miles), default 25 */
+            radius_miles?: number | null;
+            /** @description Stale after days */
+            stale_after_days?: number | null;
+        };
+        PropertyDealsScoutAlert: {
+            address?: string;
+            bedrooms?: number;
+            cash_only?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+            detail?: string;
+            /** @enum {string} */
+            kind: "new" | "reduced" | "stale" | "cash_only";
+            lat?: number;
+            lng?: number;
+            /** Format: uuid */
+            market_record_uuid?: string;
+            postcode?: string;
+            previous_price?: number;
+            price?: number;
+            property_type?: string;
+            record_type?: string;
+            saved_search_name?: string;
+            /** Format: uuid */
+            saved_search_uuid?: string;
+            /** Format: date-time */
+            seen_at?: string;
+            url?: string;
+            /** Format: uuid */
+            uuid: string;
         };
         PropertyDealsSupplier: {
             /** @description The CRM company */
@@ -5808,6 +6474,124 @@ export interface operations {
             };
         };
     };
+    property_deals_post_buyer_profiles_id_company_check: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    company_number?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsCompanyCheck"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No number / connector */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_buyer_profiles_id_matches: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsMatchWithBreakdown"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
     property_deals_chases_list: {
         parameters: {
             query?: {
@@ -6071,6 +6855,71 @@ export interface operations {
                 };
             };
             /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_companies_search: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Name or number */
+                q?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            address?: string;
+                            company_number?: string;
+                            company_status?: string;
+                            /** Format: date */
+                            date_of_creation?: string;
+                            title?: string;
+                        }[];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No Companies House connector, or q too short */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6398,6 +7247,370 @@ export interface operations {
             };
             /** @description Still referenced by other records */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_connectors: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsConnector"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_connectors: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyDealsConnectorWrite"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsConnector"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_connectors_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Connector uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsConnector"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_put_connectors_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Connector uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyDealsConnectorWrite"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsConnector"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_delete_connectors_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Connector uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted?: boolean;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_connectors_id_run: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Connector uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    postcode?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            fetched?: number;
+                            stored?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Stub connector (no adapter yet) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Source failed (also last_error) */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7856,7 +9069,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail")[];
+                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail" | "scout")[];
                 };
             };
         };
@@ -7891,6 +9104,15 @@ export interface operations {
                                 connectors?: number;
                                 errors?: number;
                                 stored?: number;
+                            };
+                            scout?: {
+                                alerts?: number;
+                                searches?: number;
+                                synced?: {
+                                    connectors?: number;
+                                    postcodes?: number;
+                                    stored?: number;
+                                };
                             };
                             sla?: {
                                 escalated?: number;
@@ -9270,7 +10492,7 @@ export interface operations {
             query?: {
 [key: string]: unknown;
                 lat?: number;
-                /** @description Comma list: properties, deals, leads, holdings (default properties,deals) */
+                /** @description Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots (default properties,deals) */
                 layers?: string;
                 lng?: number;
                 /** @description lat,lng;lat,lng;… (3–200 points) instead of lat/lng/radius */
@@ -9319,6 +10541,133 @@ export interface operations {
                 };
             };
             /** @description Bad area or layer */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_market_records: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description 1–200 */
+                per_page?: number;
+                postcode?: string;
+                record_type?: "sold_price" | "epc" | "listing" | "auction_lot" | "other";
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsMarketRecord"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_market_records_import: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    csv: string;
+                    /** @enum {string} */
+                    record_type: "sold_price" | "epc" | "listing" | "auction_lot" | "other";
+                    source?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            rows?: number;
+                            skipped?: number;
+                            stored?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Over 5 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9520,6 +10869,134 @@ export interface operations {
             };
             /** @description Validation failed (details: field -> message) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_matches_id_send: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body?: string;
+                    subject?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsApproval"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Hits the buyer's deal-breakers */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_matches_recompute: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    buyer_profile_uuid?: string;
+                    /** Format: uuid */
+                    property_uuid?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            scored?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10069,6 +11546,625 @@ export interface operations {
             };
         };
     };
+    property_deals_post_properties_id_enrich: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @description Comparables */
+                            comps?: unknown;
+                            epc?: {
+                                address?: string;
+                                certificate_number?: string;
+                                /** Format: date */
+                                expires_on?: string;
+                                rating?: string;
+                            };
+                            epc_error?: string;
+                            /** @description Property */
+                            property?: unknown;
+                            sold_prices?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No postcode */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_properties_id_matches: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsMatchWithBreakdown"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_saved_searches_list: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                alerts?: boolean;
+                order?: "asc" | "desc";
+                owner_user_uuid?: string;
+                page?: number;
+                per_page?: number;
+                sort?: "name" | "created_at" | "last_run_at";
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of saved searches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsSavedSearch"][];
+                        meta?: components["schemas"]["PluginPageMeta"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Bad filter value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_saved_searches_create: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyDealsSavedSearchCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsSavedSearch"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Conflicts with an existing record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_saved_searches_get: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Saved searches uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsSavedSearch"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_saved_searches_update: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Saved searches uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyDealsSavedSearchUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsSavedSearch"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Conflicts with an existing record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_saved_searches_delete: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Saved searches uuid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Still referenced by other records */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_saved_searches_id_run: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            cash_only?: number;
+                            new?: number;
+                            reduced?: number;
+                            stale?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_scout_alerts: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                saved_search_uuid?: string;
+                unseen?: "true";
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsScoutAlert"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_scout_alerts_seen: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    uuids?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            updated?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
     property_deals_get_setup: {
         parameters: {
             query?: { [key: string]: unknown };
@@ -10452,6 +12548,85 @@ export interface operations {
             };
             /** @description Not found in this workspace */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_suppliers_nearest: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description e.g. epc_assessor */
+                    kind: string;
+                    lat?: number;
+                    /** @description 1–10 */
+                    limit?: number;
+                    lng?: number;
+                    /** Format: uuid */
+                    property_uuid?: string;
+                    /** Format: uuid */
+                    task_uuid?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            avg_turnaround_hours?: number;
+                            booking_method?: string;
+                            distance_miles?: number;
+                            name?: string;
+                            on_time_pct?: number;
+                            radius_miles?: number;
+                            rating?: number;
+                            /** Format: uuid */
+                            supplier_uuid?: string;
+                        }[];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -120,25 +120,31 @@ T.defs = {
         run = function(ctx, args)
             local service = type(args.service) == "string" and args.service:gsub("[^%w_]", "") or ""
             if service == "" then return { error = "service is required" } end
-            local limit = math.max(1, math.min(5, tonumber(args.limit) or 3))
             local p = ctx.property_uuid and U.one("SELECT lat, lng FROM property_deals_properties WHERE uuid = ?",
                 ctx.property_uuid)
-            local lat, lng = p and tonumber(p.lat), p and tonumber(p.lng)
-            local dist = (lat and lng) and string.format(
-                "CASE WHEN s.base_lat IS NULL THEN NULL ELSE earth_distance(ll_to_earth(s.base_lat, s.base_lng), ll_to_earth(%f, %f)) / 1609.344 END",
-                lat, lng) or "NULL"
-            return rows(db.query([[
-                SELECT s.uuid AS supplier_uuid, a.name, ]] .. dist .. [[ AS distance_miles, s.radius_miles,
-                       s.avg_turnaround_hours, s.on_time_pct, s.rating, s.booking_method
-                FROM property_deals_suppliers s JOIN crm_accounts a ON a.uuid = s.account_uuid
-                WHERE s.namespace_id = ? AND s.active AND s.kinds @> ?::jsonb
-                ORDER BY 3 NULLS LAST, s.on_time_pct DESC NULLS LAST LIMIT ?
-            ]], ctx.ns, cjson.encode({ service }), limit),
-                { "supplier_uuid", "name", "distance_miles", "radius_miles", "avg_turnaround_hours", "on_time_pct",
-                  "rating", "booking_method" })
+            return T.nearest(ctx.ns, p and tonumber(p.lat), p and tonumber(p.lng), service, args.limit)
         end,
     },
 }
+
+--- Active suppliers of a kind, nearest to lat/lng first (then the most reliable).
+-- Without a point: most reliable first. Used by the booking agent and POST /suppliers/nearest.
+function T.nearest(ns, lat, lng, service, limit)
+    service = tostring(service or ""):gsub("[^%w_]", "")
+    limit = math.max(1, math.min(10, tonumber(limit) or 3))
+    local dist = (lat and lng) and string.format(
+        "CASE WHEN s.base_lat IS NULL THEN NULL ELSE earth_distance(ll_to_earth(s.base_lat, s.base_lng), ll_to_earth(%f, %f)) / 1609.344 END",
+        lat, lng) or "NULL"
+    return rows(db.query([[
+        SELECT s.uuid AS supplier_uuid, a.name, ]] .. dist .. [[ AS distance_miles, s.radius_miles,
+               s.avg_turnaround_hours, s.on_time_pct, s.rating, s.booking_method
+        FROM property_deals_suppliers s JOIN crm_accounts a ON a.uuid = s.account_uuid
+        WHERE s.namespace_id = ? AND s.active AND s.kinds @> ?::jsonb
+        ORDER BY 3 NULLS LAST, s.on_time_pct DESC NULLS LAST LIMIT ?
+    ]], ns, cjson.encode({ service }), limit),
+        { "supplier_uuid", "name", "distance_miles", "radius_miles", "avg_turnaround_hours", "on_time_pct",
+          "rating", "booking_method" })
+end
 
 --- OpenAI-style tool list for an agent's allowlist.
 function T.schemas(names)

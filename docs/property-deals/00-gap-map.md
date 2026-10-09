@@ -147,6 +147,16 @@ property_id, buyer_profile_id, score, breakdown JSONB, status (suggested/sent/in
 | `property_deals_ai_providers` / `property_deals_agent_configs` | Per-workspace providers, model per job type, fallback order, cost caps, local-only flag, JobShout mapping (or core `namespace_ai_providers` — D11). |
 | `property_deals_digest_log` | One digest per user per local day (idempotent job). |
 
+Added while building (Phases 5–6), each for a reason no existing table covers:
+
+| Table | Why |
+|---|---|
+| `property_deals_ai_routes` | Model chain per job type (the providers themselves went to core `namespace_ai_providers`, D11). |
+| `property_deals_notification_prefs` | Per-user push/email switches + quiet hours for this module (core `notification_preferences` only has shop-order email flags; kanban's are kanban-only). iOS request. |
+| `property_deals_mail_connectors` / `property_deals_inbound_messages` | Mailboxes the legal chaser reads, and what they fetched (stored as data). Core mail is send-only. |
+| `property_deals_scout_alerts` | One alert per home + kind + price for a saved search, so the deal scout's re-runs stay quiet. |
+| core `idempotency_keys` | `Idempotency-Key` replay for offline clients (iOS request); any module can use it. |
+
 Plain scalar settings (timezone, digest time, SLA thresholds 75/100/125, urgency weights, match weights, map tile key) go in **manifest `settings`** (`namespace_plugins.settings`). Timezone is a plugin setting (default `Europe/London`) because `namespaces` has no timezone column.
 
 ---

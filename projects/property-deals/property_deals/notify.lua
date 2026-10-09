@@ -12,10 +12,10 @@ local N = {}
 -- category, plus quiet hours (workspace time zone) that hold back push. In-app
 -- notifications always arrive. No saved row = everything on.
 N.CATEGORIES = { "sla_warning", "overdue", "escalated", "approval_requested", "digest", "compliance_expiring",
-    "agent_update" }
+    "agent_update", "deal_scout" }
 local CATEGORY_OF = { sla_warning = "sla_warning", task_overdue = "overdue", task_escalated = "escalated",
     approval_requested = "approval_requested", daily_digest = "digest", compliance_expiring = "compliance_expiring",
-    agent_update = "agent_update" }
+    agent_update = "agent_update", scout_alert = "deal_scout" }
 
 local function defaults()
     local p = {}

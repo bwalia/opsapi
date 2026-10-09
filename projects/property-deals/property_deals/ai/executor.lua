@@ -8,6 +8,7 @@
 --                      → task waiting_third_party
 --   confirm_booking    email the chosen supplier, mark it confirmed, cancel the
 --                      other requests for the task → task done
+--   send_deal_pack     email a matched buyer the deal pack, mark the match sent
 --   (anything else)    recorded as approved; nothing to run
 local cjson = require("cjson")
 local db = require("lapis.db")
@@ -123,6 +124,16 @@ X.actions.confirm_booking = function(ns, a, p, actor)
     end
     return { result = { booking_uuid = b.uuid, confirmed_with = to, other_requests_cancelled = cancelled },
         task_status = "done" }
+end
+
+--- A deal pack to a matched buyer: email them, mark the match sent.
+X.actions.send_deal_pack = function(ns, a, p, actor)
+    X.send_email(ns, p.to, p.subject or a.title, p.body or "")
+    if U.is_uuid(p.match_uuid) then
+        db.query([[UPDATE property_deals_matches SET status = 'sent', sent_at = NOW(), approval_uuid = ?, updated_at = NOW()
+            WHERE namespace_id = ? AND uuid = ?]], a.uuid, ns, p.match_uuid)
+    end
+    return { result = { sent_to = p.to, match_uuid = p.match_uuid } }
 end
 
 function X.run(ns, a, actor)
