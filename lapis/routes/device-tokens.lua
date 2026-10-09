@@ -32,12 +32,35 @@ return function(app)
         local user = self.current_user
         local data = parse_json_body()
 
+        -- Native iOS apps send a raw APNs token: { token, token_type = "apns",
+        -- apns_environment, bundle_id }. Everyone else sends fcm_token.
+        if (not data.fcm_token or data.fcm_token == "") and type(data.token) == "string" then
+            data.fcm_token = data.token
+        end
+        data.token_type = data.token_type or "fcm"
+        if data.token_type ~= "fcm" and data.token_type ~= "apns" then
+            return { status = 400, json = { error = "token_type must be 'fcm' or 'apns'" } }
+        end
+
         -- Validate required fields
         if not data.fcm_token or data.fcm_token == "" then
             return {
                 status = 400,
                 json = { error = "fcm_token is required" }
             }
+        end
+
+        if data.token_type == "apns" then
+            if not tostring(data.fcm_token):match("^%x+$") or #data.fcm_token < 32 or #data.fcm_token > 200 then
+                return { status = 400, json = { error = "an APNs token is the device token in hex" } }
+            end
+            if data.apns_environment ~= "development" and data.apns_environment ~= "production" then
+                return { status = 400, json = { error = "apns_environment must be 'development' or 'production'" } }
+            end
+            if type(data.bundle_id) ~= "string" or not data.bundle_id:match("^[%w%.%-]+$") or #data.bundle_id > 255 then
+                return { status = 400, json = { error = "bundle_id is required for APNs tokens" } }
+            end
+            data.device_type = data.device_type or "ios"
         end
 
         -- Validate device_type if provided

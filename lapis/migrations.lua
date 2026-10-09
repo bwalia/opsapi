@@ -1410,6 +1410,8 @@ local _migrations = {
         push_notification_migrations, 1),
     ['293_add_device_tokens_indexes'] = conditional_array(ProjectConfig.FEATURES.NOTIFICATIONS,
         push_notification_migrations, 2),
+    ['zzpush3_device_tokens_apns'] = conditional_array(ProjectConfig.FEATURES.NOTIFICATIONS,
+        push_notification_migrations, 3),
 
     -- =========================================================================
     -- TAX COPILOT SYSTEM (Only if TAX_COPILOT feature is enabled)
