@@ -1,0 +1,252 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import toast from 'react-hot-toast';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { Button, Card, ConfirmDialog, Input, Select, Switch } from '@/components/ui';
+import { usePermissions } from '@/contexts/PermissionsContext';
+import { apiError } from '@/components/field-service/shared';
+import { CopyButton, KIND_LABELS } from '@/components/billing/shared';
+import AppSettingsForm from '@/components/billing/AppSettingsForm';
+import { billingService, formatMinor, type AppKind, type AppReport, type BillingApp } from '@/services/billing.service';
+
+function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <Card padding="sm" className="shadow-sm">
+      <p className="text-xs font-medium text-secondary-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-secondary-900 tabular-nums">{value}</p>
+      {hint && <p className="text-xs text-secondary-400">{hint}</p>}
+    </Card>
+  );
+}
+
+export default function AppOverview({
+  app,
+  onChange,
+  onDeleted,
+}: {
+  app: BillingApp;
+  onChange: (a: BillingApp) => void;
+  onDeleted: () => void;
+}) {
+  const { canUpdate, canDelete } = usePermissions();
+  const editable = canUpdate('billing');
+  const [report, setReport] = useState<AppReport | null>(null);
+  const [name, setName] = useState(app.name);
+  const [kind, setKind] = useState<AppKind>(app.kind);
+  const [mode, setMode] = useState(app.mode);
+  const [active, setActive] = useState(app.active);
+  const [saving, setSaving] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    billingService.report(app.uuid).then(setReport).catch(() => setReport(null));
+  }, [app.uuid]);
+
+  const saveBasics = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const updated = await billingService.updateApp(app.uuid, { name: name.trim(), kind, mode, active });
+      if (updated.publishable_key !== app.publishable_key) {
+        toast('Mode changed: the app has a new publishable key', { icon: '🔑' });
+      }
+      onChange(updated);
+      toast.success('Saved');
+    } catch (err) {
+      toast.error(apiError(err, 'Could not save'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rotate = async () => {
+    setBusy(true);
+    try {
+      onChange(await billingService.rotateKey(app.uuid));
+      toast.success('New publishable key issued');
+      setRotateOpen(false);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not rotate the key'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await billingService.deleteApp(app.uuid);
+      toast.success('App deleted');
+      onDeleted();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete the app'));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <Stat label="Active subscriptions" value={report?.active ?? '—'} hint={report ? `${report.trialing} trialing` : undefined} />
+        <Stat
+          label="Monthly recurring revenue"
+          value={report && report.mrr.length > 0 ? report.mrr.map((m) => formatMinor(m.amount, m.currency)).join(' + ') : '—'}
+        />
+        <Stat label="Past due" value={report?.past_due ?? '—'} hint={report ? `${report.churned_30d} cancelled in 30 days` : undefined} />
+        <Stat
+          label="Licences"
+          value={report?.active_licenses ?? '—'}
+          hint={report ? `${report.active_activations} devices · ${report.active_grants} grants` : undefined}
+        />
+      </div>
+
+      <Card className="shadow-sm">
+        <h2 className="text-base font-semibold text-secondary-900">Keys</h2>
+        <p className="mt-1 text-sm text-secondary-500">
+          The publishable key only identifies this app on public endpoints (pricing, licence activation, account links).
+          It is safe in browsers and desktop builds. Your server calls the entitlement API with a{' '}
+          <Link href="/dashboard/namespace/api-keys" className="text-primary-600 hover:underline">
+            workspace API key
+          </Link>{' '}
+          scoped to <span className="font-mono">entitlements</span>; never ship that one to clients.
+        </p>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 [&>div]:min-w-0">
+          <div>
+            <dt className="text-xs font-medium text-secondary-500">Publishable key ({app.mode})</dt>
+            <dd className="mt-1 flex flex-wrap items-center gap-1 min-w-0">
+              <code className="min-w-0 max-w-full truncate rounded bg-secondary-100 px-2 py-1 text-xs">{app.publishable_key}</code>
+              <CopyButton value={app.publishable_key} label="Copy publishable key" />
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => setRotateOpen(true)}
+                  className="inline-flex items-center justify-center p-2 rounded-lg text-secondary-500 hover:text-primary-600 hover:bg-primary-50"
+                  aria-label="Issue a new publishable key"
+                  title="Issue a new publishable key"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-secondary-500">App id (use the id or the slug in API calls)</dt>
+            <dd className="mt-1 flex flex-wrap items-center gap-1 min-w-0">
+              <code className="min-w-0 max-w-full truncate rounded bg-secondary-100 px-2 py-1 text-xs">{app.uuid}</code>
+              <CopyButton value={app.uuid} label="Copy app id" />
+              <code className="rounded bg-secondary-100 px-2 py-1 text-xs">{app.slug}</code>
+            </dd>
+          </div>
+        </dl>
+      </Card>
+
+      <Card className="shadow-sm">
+        <h2 className="text-base font-semibold text-secondary-900">Hosted pages</h2>
+        <p className="mt-1 text-sm text-secondary-500">
+          Link to these from your site or app. Payments need a connected{' '}
+          <Link href="/dashboard/billing/payments" className="text-primary-600 hover:underline">
+            Stripe account
+          </Link>
+          .
+        </p>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 [&>div]:min-w-0">
+          {[
+            { label: 'Pricing (buy a plan)', path: 'pricing' },
+            { label: 'My account (licences, upgrades, billing)', path: 'account' },
+          ].map((page) => {
+            const url = `${window.location.origin}/b/${app.uuid}/${page.path}`;
+            return (
+              <div key={page.path}>
+                <dt className="text-xs font-medium text-secondary-500">{page.label}</dt>
+                <dd className="mt-1 flex flex-wrap items-center gap-1 min-w-0">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 max-w-full truncate rounded bg-secondary-100 px-2 py-1 text-xs text-primary-700 hover:underline"
+                  >
+                    {url}
+                  </a>
+                  <CopyButton value={url} label={`Copy ${page.path} page link`} />
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </Card>
+
+      <form onSubmit={saveBasics}>
+        <Card className="shadow-sm">
+          <h2 className="text-base font-semibold text-secondary-900 mb-4">App</h2>
+          <fieldset disabled={!editable} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} />
+            <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value as AppKind)} helperText="Desktop and self-hosted apps use licence keys.">
+              {Object.entries(KIND_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Mode"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as 'test' | 'live')}
+              helperText="Switching mode issues a new publishable key."
+            >
+              <option value="test">Test</option>
+              <option value="live">Live</option>
+            </Select>
+            <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-secondary-800">Active</p>
+                <p className="text-xs text-secondary-500">An inactive app&apos;s keys stop working.</p>
+              </div>
+              <Switch checked={active} onChange={setActive} aria-label="App active" />
+            </div>
+          </fieldset>
+          {editable && (
+            <div className="mt-5 flex flex-wrap justify-between gap-2">
+              {canDelete('billing') ? (
+                <Button type="button" variant="ghost" className="text-error-600" onClick={() => setDeleteOpen(true)}>
+                  <Trash2 className="w-4 h-4 mr-1.5" /> Delete app
+                </Button>
+              ) : (
+                <span />
+              )}
+              <Button type="submit" isLoading={saving}>
+                Save
+              </Button>
+            </div>
+          )}
+        </Card>
+      </form>
+
+      <AppSettingsForm app={app} editable={editable} onSaved={onChange} />
+
+      <ConfirmDialog
+        isOpen={rotateOpen}
+        onClose={() => setRotateOpen(false)}
+        onConfirm={rotate}
+        title="Issue a new publishable key?"
+        message="The current key stops working at once. Update your pricing page and app builds with the new key."
+        confirmText="Issue new key"
+        variant="warning"
+        isLoading={busy}
+      />
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={remove}
+        title={`Delete ${app.name}?`}
+        message="Its keys stop working at once. Plans, purchases, subscriptions and licences are kept for your records."
+        confirmText="Delete app"
+        variant="danger"
+        isLoading={busy}
+      />
+    </div>
+  );
+}

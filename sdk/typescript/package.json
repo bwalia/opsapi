@@ -1,11 +1,11 @@
 {
   "name": "@opsapi/client",
-  "version": "1.0.0",
-  "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification.",
+  "version": "1.1.0",
+  "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification, billing entitlements and licences.",
   "license": "MIT",
   "homepage": "https://github.com/bwalia/opsapi/tree/main/sdk/typescript#readme",
   "bugs": { "url": "https://github.com/bwalia/opsapi/issues" },
-  "keywords": ["opsapi", "api-client", "openapi", "typescript", "webhooks"],
+  "keywords": ["opsapi", "api-client", "openapi", "typescript", "webhooks", "entitlements", "licensing"],
   "repository": { "type": "git", "url": "https://github.com/bwalia/opsapi.git", "directory": "sdk/typescript" },
   "type": "module",
   "main": "./dist/index.cjs",
@@ -15,6 +15,10 @@
     ".": {
       "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
       "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    },
+    "./billing": {
+      "import": { "types": "./dist/billing.d.ts", "default": "./dist/billing.js" },
+      "require": { "types": "./dist/billing.d.cts", "default": "./dist/billing.cjs" }
     }
   },
   "files": ["dist", "README.md", "CHANGELOG.md", "LICENSE"],

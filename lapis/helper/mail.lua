@@ -474,14 +474,16 @@ end
 -- @return string|nil error message
 local function smtp_send(opts)
     local mail = require("resty.mail")
-    local cfg = get_config()
+    -- opts.smtp: a workspace's own server (helper/namespace-mail.lua).
+    local cfg = opts.smtp or get_config()
 
     local mailer, err = mail.new({
         host     = cfg.host,
         port     = cfg.port,
-        starttls = true,
-        username = cfg.username,
-        password = cfg.password,
+        starttls = cfg.security == nil or cfg.security == "starttls",
+        ssl      = cfg.security == "ssl",
+        username = cfg.username ~= "" and cfg.username or nil,
+        password = cfg.password ~= "" and cfg.password or nil,
         timeout_connect = 10000,
         timeout_send    = 10000,
         timeout_read    = 10000,
@@ -514,7 +516,8 @@ local function smtp_send(opts)
         send_opts.bcc = type(opts.bcc) == "string" and { opts.bcc } or opts.bcc
     end
     if opts.reply_to then
-        send_opts["reply-to"] = opts.reply_to
+        -- lua-resty-mail reads `reply_to` (a "reply-to" key was silently ignored).
+        send_opts.reply_to = opts.reply_to
     end
 
     if opts.html then
@@ -609,7 +612,7 @@ function Mail.send(opts)
     end
 
     -- Check SMTP configuration
-    if not Mail.isConfigured() then
+    if not opts.smtp and not Mail.isConfigured() then
         ngx.log(ngx.WARN, "[Mail] SMTP not configured — email to ", tostring(opts.to), " not sent")
         return false, "SMTP not configured. Set SMTP_USER and SMTP_PASSWORD environment variables."
     end
@@ -714,6 +717,11 @@ end
 -- @return string|nil Error
 function Mail.preview(template, data)
     return render_template(template, data)
+end
+
+--- Custom HTML inside the base layout (previews of workspace templates).
+function Mail.previewHtml(html, data)
+    return wrap_in_base_layout(html, data)
 end
 
 return Mail

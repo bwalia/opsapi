@@ -17,9 +17,9 @@
 ]]
 
 local db = require("lapis.db")
-local cjson = require("cjson")
-
--- Configure cjson
+-- A private cjson: this module wants empty tables as [], and changing the
+-- shared instance would turn every other module's empty objects ({}) into [].
+local cjson = require("cjson").new()
 cjson.encode_empty_table_as_object(false)
 
 local MenuQueries = {}

@@ -181,7 +181,11 @@ return function(app)
 
                 -- Step 8: Create or find customer
                 local customer = nil
-                local existing_customer = db.select("* from customers where email = ? LIMIT 1", customer_data.email)
+                -- This checkout has no workspace: it only ever matches workspace-less
+                -- customers (emails are unique per workspace, so a tenant's customer
+                -- with the same email is a different record).
+                local existing_customer = db.select("* from customers where email = ? AND namespace_id IS NULL LIMIT 1",
+                    customer_data.email)
 
                 if existing_customer and #existing_customer > 0 then
                     customer = existing_customer[1]

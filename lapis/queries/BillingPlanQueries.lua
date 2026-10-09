@@ -110,6 +110,14 @@ function BillingPlanQueries.listByNamespace(namespace_id, opts)
     if not opts.include_inactive then
         table.insert(where, "active = TRUE")
     end
+    -- Billing & Entitlements: one app's plans (id), or only the app-less ones
+    -- (false). The column exists only where the billing feature is deployed.
+    if opts.app_id == false then
+        if require("helper.project-config").isFeatureEnabled("billing") then table.insert(where, "app_id IS NULL") end
+    elseif opts.app_id then
+        table.insert(where, "app_id = ?")
+        table.insert(vals, opts.app_id)
+    end
     if opts.plan_type and VALID_TYPES[opts.plan_type] then
         table.insert(where, "plan_type = ?")
         table.insert(vals, opts.plan_type)
@@ -119,6 +127,126 @@ function BillingPlanQueries.listByNamespace(namespace_id, opts)
     local rows = db.query(sql, unpack(vals))
     for i = 1, #rows do decode_row(rows[i]) end
     return rows
+end
+
+--- Billing & Entitlements: the app-plan fields of a create/update body —
+-- app (uuid/slug, create only), plan_key (unique per app), is_default,
+-- is_public, and features checked against the app's catalogue. `current` =
+-- the plan being updated (nil on create). Plans without an app (the tax
+-- app's) accept none of these and keep their free-form features.
+-- @return fields to write (maybe empty) | nil, err
+function BillingPlanQueries.appFields(namespace_id, body, current)
+    local f = {}
+    -- Without the billing feature (e.g. the tax app) plans work exactly as before.
+    if not require("helper.project-config").isFeatureEnabled("billing") then return f end
+    local Apps = require("queries.BillingAppQueries")
+    local app_id = current and current.app_id
+    if body.app ~= nil then
+        local app = Apps.find(namespace_id, body.app)
+        if not app then return nil, "App not found" end
+        if current and tonumber(app.id) ~= tonumber(current.app_id) then
+            return nil, "a plan can't move to another app"
+        end
+        f.app_id, app_id = app.id, app.id
+    end
+    if not app_id then
+        if body.plan_key ~= nil or body.is_default ~= nil or body.is_public ~= nil then
+            return nil, "plan_key, is_default and is_public are for app plans: send `app`"
+        end
+        return f
+    end
+    if body.plan_key ~= nil or not current then
+        local key = body.plan_key
+        if key == nil then
+            key = tostring(body.name or ""):lower():gsub("[^a-z0-9]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+        end
+        if type(key) ~= "string" or not key:match("^[a-z0-9][a-z0-9_-]*$") or #key > 64 then
+            return nil, "plan_key must be lowercase letters, digits, - and _ (max 64)"
+        end
+        f.plan_key = key
+    end
+    if body.is_default ~= nil then f.is_default = body.is_default == true end
+    if body.is_public ~= nil then f.is_public = body.is_public == true end
+
+    -- Purchase type (docs §3): it also sets the legacy plan_type, so the
+    -- existing validation (billing_interval for subscriptions) applies.
+    -- plan_type is derived from purchase_type for app plans: they must never disagree.
+    local function implied(pt) return pt == "recurring" and "subscription" or "one_time" end
+    if body.plan_type ~= nil then
+        if body.purchase_type ~= nil and body.plan_type ~= implied(body.purchase_type) then
+            return nil, "plan_type contradicts purchase_type (app plans: send purchase_type only)"
+        end
+        if body.purchase_type == nil and current and current.purchase_type and current.purchase_type ~= db.NULL
+            and body.plan_type ~= implied(current.purchase_type) then
+            return nil, "app plans change type through purchase_type, not plan_type"
+        end
+    end
+    local ptype = body.purchase_type
+    if ptype == nil and not current then ptype = (body.plan_type == "one_time") and "one_time" or "recurring" end
+    if ptype ~= nil then
+        if ptype ~= "recurring" and ptype ~= "one_time" and ptype ~= "fixed_term" then
+            return nil, "purchase_type must be recurring, one_time or fixed_term"
+        end
+        f.purchase_type = ptype
+        body.plan_type = ptype == "recurring" and "subscription" or "one_time"
+        f.plan_type = body.plan_type
+        if ptype ~= "recurring" then
+            body.billing_interval = nil
+            f.billing_interval = db.NULL
+        end
+    end
+    local effective = ptype or (current and current.purchase_type)
+    local function days(name)
+        local v = body[name]
+        if v == nil then return nil end
+        if v == cjson.null or v == "" then return db.NULL end
+        local n = tonumber(v)
+        if not n or n ~= math.floor(n) or n < 1 or n > 36500 then
+            return nil, name .. " must be a whole number of days (1-36500)"
+        end
+        return n
+    end
+    local term, terr = days("term_days")
+    if terr then return nil, terr end
+    local updates, uerr = days("updates_days")
+    if uerr then return nil, uerr end
+    if effective == "fixed_term" then
+        if term == db.NULL or (term == nil and not (current and current.term_days)) then
+            return nil, "a fixed_term plan needs term_days"
+        end
+        local covers = body.term_covers or (current and current.term_covers) or "access"
+        if covers ~= "access" and covers ~= "updates" then return nil, "term_covers must be access or updates" end
+        f.term_covers = covers
+    end
+    if term ~= nil then f.term_days = term end
+    if updates ~= nil then
+        if effective ~= "one_time" and updates ~= db.NULL then
+            return nil, "updates_days is for one_time plans (fixed_term plans use term_days)"
+        end
+        f.updates_days = updates
+    end
+    if body.store_products ~= nil then
+        local sp = body.store_products
+        if type(sp) ~= "table" then return nil, "store_products must be an object like {\"app_store\": \"com.acme.pro\"}" end
+        for k, v in pairs(sp) do
+            if (k ~= "app_store" and k ~= "play_store" and k ~= "external") or type(v) ~= "string" or #v > 200 then
+                return nil, "store_products: app_store / play_store / external -> product id"
+            end
+        end
+        f.store_products = require("lib.billing-signing").encode(sp)
+    end
+    if body.features ~= nil then
+        local features, err = Apps.checkFeatureValues(app_id, body.features)
+        if not features then return nil, err end
+        f.features = require("lib.billing-signing").encode(features) -- {} stays an object
+    end
+    return f
+end
+
+--- Before making a plan an app's default: the previous default steps down.
+function BillingPlanQueries.clearDefault(app_id, except_uuid)
+    db.query([[UPDATE billing_plans SET is_default = FALSE, updated_at = NOW()
+        WHERE app_id = ? AND is_default AND uuid <> ?]], app_id, except_uuid or "")
 end
 
 -- Update a plan by uuid. Returns the updated model or nil.
