@@ -12,6 +12,14 @@
 # defaults to the :latest base. Declared before FROM so it can parameterise it.
 # ===========================================================================
 ARG OPSAPI_BASE=bwalia/opsapi-base:latest
+
+# Plugins shipped with the image (repo-root projects/<plugin>, outside this
+# build context). CI passes them as named build contexts, e.g.
+#   docker buildx build --build-context property_deals_plugin=projects/property-deals ...
+# A plain `docker build` gets this empty stage instead: the plugin folder is
+# then empty and the loader skips it (no project.lua).
+FROM scratch AS property_deals_plugin
+
 FROM ${OPSAPI_BASE}
 
 ARG TARGET_NGINX_CONF=nginx.conf
@@ -102,6 +110,9 @@ COPY schema-updates.lua production-schema-upgrade.lua ecommerce-migrations.lua /
 #    /app/projects/<plugin>/ via a bind mount (dev) or an image that is
 #    `FROM bwalia/opsapi` (prod), as consumer products (diy-tax-return-uk)
 #    already do. The `opsapi` CLI (bin/) scaffolds and checks them.
+#    Exception: first-party plugins built into the image, from named build
+#    contexts (see property_deals_plugin above). Dev bind mounts still win.
+COPY --from=property_deals_plugin . /app/projects/property-deals/
 COPY bin /app/bin
 ENV PATH="/app/bin:${PATH}"
 # The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,

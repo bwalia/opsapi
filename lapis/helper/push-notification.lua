@@ -1,7 +1,10 @@
 --[[
     Unified Push Notification Helper
 
-    Routes all push notifications through FCM (Firebase Cloud Messaging).
+    Routes push notifications by token type: FCM (Firebase Cloud Messaging) for
+    `token_type = 'fcm'` rows, APNs directly for `token_type = 'apns'` rows (the
+    native iOS app registers its raw device token, with its environment and
+    bundle id). FCM also handles iOS for apps that use the Firebase SDK.
 
     The Flutter mobile app registers FCM tokens via FirebaseMessaging.getToken()
     for ALL platforms including iOS. FCM tokens are NOT raw APNs device tokens —
@@ -47,13 +50,32 @@ function PushNotification.sendToUsers(user_uuids, notification, data)
         return true, { success = 0, failure = 0, message = "No active devices" }
     end
 
-    local fcm_tokens = {}
+    local fcm_tokens, apns_rows = {}, {}
     for _, token in ipairs(tokens) do
-        table.insert(fcm_tokens, token.fcm_token)
+        if token.token_type == "apns" then
+            table.insert(apns_rows, token)
+        else
+            table.insert(fcm_tokens, token.fcm_token)
+        end
     end
 
     local total_success = 0
     local total_failure = 0
+
+    if #apns_rows > 0 then
+        local ok_apns, APNs = pcall(require, "helper.apns-push")
+        for _, row in ipairs(apns_rows) do
+            local config = ok_apns and APNs.configFor(row.apns_environment, row.bundle_id)
+            -- APNs payload values may be any JSON; sendToDevice puts them next to "aps".
+            local sent = config and APNs.sendToDevice(row.fcm_token, notification, data, config)
+            if sent then
+                total_success = total_success + 1
+            else
+                total_failure = total_failure + 1
+            end
+        end
+        ngx.log(ngx.NOTICE, "[Push] APNs: sent to ", #apns_rows, " devices")
+    end
 
     if #fcm_tokens > 0 then
         local fcm = get_fcm()
@@ -73,7 +95,7 @@ function PushNotification.sendToUsers(user_uuids, notification, data)
     return total_success > 0, {
         success = total_success,
         failure = total_failure,
-        total_devices = #fcm_tokens
+        total_devices = #fcm_tokens + #apns_rows
     }
 end
 

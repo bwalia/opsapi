@@ -17,6 +17,9 @@ function DeviceTokenQueries.register(data, user_uuid)
     -- Sanitize optional fields that might be cjson.null
     local device_name = sanitize_null(data.device_name)
     local device_type = sanitize_null(data.device_type)
+    local token_type = sanitize_null(data.token_type) or "fcm"
+    local apns_environment = token_type == "apns" and sanitize_null(data.apns_environment) or nil
+    local bundle_id = token_type == "apns" and sanitize_null(data.bundle_id) or nil
 
     -- Check if token already exists for this user
     local existing = db.query([[
@@ -32,9 +35,12 @@ function DeviceTokenQueries.register(data, user_uuid)
             SET is_active = TRUE,
                 device_type = COALESCE(?, device_type),
                 device_name = COALESCE(?, device_name),
+                token_type = ?,
+                apns_environment = ?,
+                bundle_id = ?,
                 updated_at = NOW()
             WHERE id = ?
-        ]], device_type, device_name, existing[1].id)
+        ]], device_type, device_name, token_type, apns_environment or db.NULL, bundle_id or db.NULL, existing[1].id)
 
         return DeviceTokenQueries.show(existing[1].uuid)
     end
@@ -55,6 +61,9 @@ function DeviceTokenQueries.register(data, user_uuid)
         fcm_token = data.fcm_token,
         device_type = device_type,
         device_name = device_name,
+        token_type = token_type,
+        apns_environment = apns_environment,
+        bundle_id = bundle_id,
         is_active = db.TRUE
     }
 
@@ -79,7 +88,7 @@ end
 -- Get all active tokens for a user
 function DeviceTokenQueries.getByUser(user_uuid)
     local tokens = db.query([[
-        SELECT id as internal_id, uuid as id, user_uuid, fcm_token,
+        SELECT id as internal_id, uuid as id, user_uuid, fcm_token, token_type, apns_environment, bundle_id,
                device_type, device_name, is_active, created_at, updated_at
         FROM device_tokens
         WHERE user_uuid = ? AND is_active = true
@@ -101,7 +110,7 @@ function DeviceTokenQueries.getActiveTokensForUsers(user_uuids)
     end
 
     local sql = [[
-        SELECT user_uuid, fcm_token, device_type
+        SELECT user_uuid, fcm_token, device_type, token_type, apns_environment, bundle_id
         FROM device_tokens
         WHERE user_uuid IN (]] .. table.concat(placeholders, ", ") .. [[)
           AND is_active = true

@@ -182,6 +182,17 @@ local function create_apns_jwt(config)
 end
 
 -- Get APNs host based on environment
+--- The deployment's APNs config with one device row's environment and bundle
+-- id (TestFlight/App Store = production, Xcode builds = development).
+-- @return config | nil when APNs isn't configured
+function APNsPush.configFor(environment, bundle_id)
+    local config = get_apns_config()
+    if not config then return nil end
+    config.environment = environment or config.environment
+    config.bundle_id = bundle_id or config.bundle_id
+    return config
+end
+
 local function get_apns_host(environment)
     if environment == "production" then
         return APNS_PRODUCTION
@@ -226,7 +237,11 @@ function APNsPush.sendToDevice(device_token, notification, data, config)
 
     if data then
         for k, v in pairs(data) do
-            payload[k] = v
+            if k == "thread_id" then
+                aps["thread-id"] = tostring(v) -- groups notifications (e.g. per deal)
+            else
+                payload[k] = v
+            end
         end
     end
 

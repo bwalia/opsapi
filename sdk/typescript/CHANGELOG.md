@@ -2,6 +2,13 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## 1.2.0
+
+- New subpath `@opsapi/client/property-deals` for the Property Deals plugin (a back office for buying and selling homes; guide: docs/property-deals/API.md). It needs an OpsAPI server with the plugin installed and switched on for the workspace.
+  - `createPropertyDealsClient()` is `createClient()` typed with core + Property Deals paths: Today, deals (board, overview, gates, stage moves, health, timeline), tasks, leads, properties, buyers, suppliers, bookings, compliance, documents, approvals (inbox and decisions), workflow templates, map, digest.
+  - Named types for the main records (`Deal`, `Task`, `Today`, `DealOverview`, `Approval`, `MapResult`, …), plus `TASK_STATUSES` and `PROPERTY_DEALS_EVENTS`.
+- `scripts/generate.mjs --plugin <code>` generates types for one plugin only (`npm run generate:property-deals`).
+
 ## 1.1.0
 
 - New subpath `@opsapi/client/billing` for OpsAPI's Billing & Entitlements module. It needs an OpsAPI server with that module and `BILLING_SIGNING_KEY` set. Tokens and licence files use format v1 (docs/LICENCE_FORMAT.md).

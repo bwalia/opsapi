@@ -70,4 +70,15 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================
+    -- [3] Native APNs tokens (iOS apps without Firebase)
+    -- ========================================
+    -- fcm_token keeps holding the token string for both kinds; token_type says
+    -- which service delivers it. Existing rows stay 'fcm'.
+    [3] = function()
+        db.query("ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS token_type VARCHAR(10) NOT NULL DEFAULT 'fcm'")
+        db.query("ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS apns_environment VARCHAR(20)")
+        db.query("ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS bundle_id VARCHAR(255)")
+    end,
 }

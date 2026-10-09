@@ -286,6 +286,30 @@ When you write SQL yourself, **always filter by `sdk.namespace_id(self)`**. That
 
 Database errors you don't catch become client errors, not 500s: a duplicate value answers `409`, a missing required column or a reference to a row that doesn't exist answers `422`, and a malformed value (text where a UUID or number belongs) answers `400`. The body is `{ error = { code, message, context } }`, never the SQL. Anything else is a logged `500` with a generic message. Catch errors yourself only when you want a different status or message.
 
+**Describe custom routes for Swagger and typed clients.** `sdk.crud` routes get exact OpenAPI schemas automatically; a hand-written route appears with a generic shape until you describe it:
+
+```lua
+return function(app)
+    local Stats = sdk.schema(app, "Stats", {            -- components.schemas.HelpdeskStats
+        type = "object", properties = { status = { type = "string" }, count = { type = "integer" } },
+    })
+    sdk.doc(app, "GET /stats", {
+        summary = "Tickets per status", permission = "helpdesk_tickets.read",
+        response = { type = "array", items = Stats },     -- the envelope's `data`
+        query = { since = { type = "string", format = "date" } },
+    })
+    sdk.doc(app, "POST /tickets/:id/close", {
+        summary = "Close a ticket", permission = "helpdesk_tickets.update", status = 200,
+        path = { id = { type = "string", format = "uuid" } },
+        body = { type = "object", properties = { note = { type = "string" } } },
+        response = { ["$ref"] = "#/components/schemas/HelpdeskTicket" },
+        errors = { ["404"] = "Not found in this workspace" },
+    })
+end
+```
+
+Doc fields: `summary`, `description`, `permission`, `query` (name → schema), `path` (name → schema), `body` (+ `multipart = true` for form uploads), `status` (default 201 for POST, else 200), `response` (the `data` schema), `paginated` (adds `meta` and `page`/`per_page`), `errors` (status → text), `operation_id`. Empty Lua tables encode as JSON arrays, so leave out an empty `properties` (use `additionalProperties = true`). Example: `projects/property-deals/api/openapi.lua`.
+
 ### 5.3 Public (anonymous) routes
 
 Routes under `/api/v2/<code>/public/` skip login. For example, `/api/v2/helpdesk/public/status` or `/api/v2/helpdesk/public/forms/:id`. This only works with the default `api_prefix`: a nested custom prefix doesn't match OpsAPI's public-route rule. With `sdk.handler({}, fn)` the namespace then comes from the `X-Namespace-Id` / `X-Namespace-Slug` header (inactive namespaces are refused). Validate everything, and rate-limit or add CAPTCHAs where abuse matters.
@@ -527,6 +551,17 @@ Run `opsapi migrate`, which registers the subscription and the database trigger.
 
 Tenants can have these events sent to their own URLs without writing code. See [WEBHOOKS.md](WEBHOOKS.md). Each webhook is a subscriber scoped to its workspace, so it shares these guarantees and the retries. Everything a plugin lists in `publishes` is offered to webhooks too.
 
+Custom events your code sends with `sdk.emit` are offered to webhooks once you declare them on the entity's `publishes` entry with `emits`:
+
+```lua
+publishes = {
+    ticket = { table = "helpdesk_tickets", verbs = { closed = { status = "closed" } },
+               emits = { "escalated" } },   -- helpdesk.ticket.escalated, sent by api/escalate.lua
+},
+```
+
+Names in `emits` are lowercase and can't be `created`, `updated`, `deleted` or one of the entity's verbs. Without `emits`, a webhook still gets custom events by subscribing to `<entity>.*`.
+
 ### Audit trail
 
 Every table in `publishes` and every `sdk.emit` is also recorded in the workspace's audit trail: who changed which record, with the fields before and after. Workspace admins see it under **Activity → Audit trail**. You don't need to write anything for this. Name secret columns so they contain `password`, `secret`, `token`, `api_key` or `private_key`, and they're left out of the trail. See [USER_ACTIVITY.md](USER_ACTIVITY.md#audit-trail-record-changes).
@@ -734,6 +769,8 @@ Each one is listed with its message in `GET /api/v2/plugins`.
 | `sdk.crud(app, path, opts)` | Registers the 5 REST routes (§5.1) and the resource's dashboard page (§6, `opts.ui`), and returns the resource. |
 | `sdk.resource(table, opts)` | Tenant-scoped repository (below). `opts`: `fields`, `searchable`, `filterable`, `sortable`, `key` (default `"uuid"`, needs a DB default), `timestamps` (default `true`: bump `updated_at`). |
 | `sdk.handler(opts, fn)` | Wraps a handler with the namespace and permission checks (§5.2). |
+| `sdk.schema(app, name, schema)` | Registers `<PluginCode><name>` in the OpenAPI components; returns a `$ref` (§5.2). |
+| `sdk.doc(app, "METHOD /path", doc)` | Exact OpenAPI operation for a hand-written route (§5.2). |
 | `sdk.validate(input, rules, partial)` | `clean` or `nil, { field = message }`. Rules: `type` (`string` `text` `integer` `number` `boolean` `date` `datetime` `email` `url` `uuid` `json`), `required`, `min`, `max`, `enum` (`label` is used by dashboard pages only). |
 | `sdk.body(self)` | Decoded JSON object, or `nil, message`. |
 | `sdk.page(params)` | `page, per_page, offset` (`per_page` clamped to 1..100). |

@@ -209,6 +209,43 @@ function sdk.emit(namespace_id, name, data)
     return require("helper.plugin-events").emit(namespace_id, name, data)
 end
 
+-- ---------------------------------------------------------------------------
+-- OpenAPI docs for hand-written routes (sdk.crud routes are typed already)
+-- ---------------------------------------------------------------------------
+
+local function pascal(s)
+    return (s:gsub("[^%w]+", " "):gsub("(%w)(%w*)", function(a, b) return a:upper() .. b end):gsub("%s+", ""))
+end
+
+--- Register a named schema for this plugin's docs; returns a $ref to it.
+-- The name is prefixed with the plugin code: sdk.schema(app, "Deal", {...})
+-- in property_deals becomes components.schemas.PropertyDealsDeal.
+function sdk.schema(app, name, schema)
+    assert(app.plugin, "sdk.schema: call it with the app your api file receives")
+    local full = pascal(app.plugin.code) .. name
+    app.plugin.schemas = app.plugin.schemas or {}
+    app.plugin.schemas[full] = schema
+    return { ["$ref"] = "#/components/schemas/" .. full }
+end
+
+--- Describe a hand-written route for /openapi.json and the typed clients:
+--   sdk.doc(app, "GET /deals/:id", {
+--       summary = "Get a deal", description = "...", permission = "deals.read",
+--       query = { stage = { type = "string" } },          -- name -> schema
+--       path = { id = { type = "string", format = "uuid" } },
+--       body = schema, multipart = false,                  -- request body (JSON, or form-data)
+--       status = 200, response = schema, paginated = false, -- the `data` of the envelope (+ meta)
+--       errors = { ["404"] = "Not found", ["409"] = "..." },
+--   })
+-- Routes without a doc still appear, with a generic shape.
+function sdk.doc(app, route, doc)
+    assert(app.plugin, "sdk.doc: call it with the app your api file receives")
+    local method, path = tostring(route):match("^(%u+)%s+(/%S*)$")
+    assert(method, "sdk.doc: route must look like 'GET /path'")
+    app.plugin.docs = app.plugin.docs or {}
+    app.plugin.docs[method .. " " .. app.plugin.api_prefix .. path] = doc
+end
+
 --- page, per_page and SQL offset from ?page=&per_page= (clamped, 1..100).
 function sdk.page(params)
     local Global = require("helper.global")

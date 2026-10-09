@@ -1695,6 +1695,52 @@ local NAMESPACE_HEADER = {
     schema = { type = "string", format = "uuid" },
 }
 
+--- A typed operation for a hand-written plugin route described with sdk.doc.
+local function plugin_doc_op(plugin, route, doc)
+    local method = route.method:lower()
+    local params = { NAMESPACE_HEADER }
+    for name in route.path:gmatch(":([%w_]+)") do
+        local p = (doc.path or {})[name] or {}
+        params[#params + 1] = { ["in"] = "path", name = name, required = true, description = p.description,
+            schema = p.type and p or { type = "string" } }
+    end
+    local qnames = {}
+    for name in pairs(doc.query or {}) do qnames[#qnames + 1] = name end
+    table.sort(qnames)
+    for _, name in ipairs(qnames) do
+        local q = doc.query[name]
+        params[#params + 1] = { ["in"] = "query", name = name, description = q.description, schema = q }
+    end
+    if doc.paginated then
+        params[#params + 1] = { ["in"] = "query", name = "page", schema = { type = "integer", minimum = 1, default = 1 } }
+        params[#params + 1] = { ["in"] = "query", name = "per_page",
+            schema = { type = "integer", minimum = 1, maximum = 100, default = 20 } }
+    end
+    local status = tostring(doc.status or (method == "post" and 201 or 200))
+    local data = doc.response or { type = "object" }
+    local o = {
+        ["x-opsapi-plugin"] = plugin.code,
+        tags = { plugin.name },
+        summary = doc.summary,
+        description = (doc.description or "") .. (doc.permission and ((doc.description and "\n\n" or "")
+            .. "Needs " .. doc.permission .. " in the workspace.") or ""),
+        operationId = plugin.code .. "_" .. (doc.operation_id or (method .. route.path:sub(#plugin.api_prefix + 1)
+            :gsub(":", ""):gsub("[^%w]+", "_"):gsub("_+$", ""))),
+        security = { { BearerAuth = {} } },
+        parameters = params,
+        responses = { [status] = json_response(doc.response_description or "OK", envelope(data, doc.paginated)) },
+    }
+    for code, r in pairs(PLUGIN_ERRORS) do o.responses[code] = r end
+    for code, text in pairs(doc.errors or {}) do
+        o.responses[tostring(code)] = json_response(text, { ["$ref"] = "#/components/schemas/PluginError" })
+    end
+    if doc.body then
+        o.requestBody = { required = doc.body_required ~= false,
+            content = { [doc.multipart and "multipart/form-data" or "application/json"] = { schema = doc.body } } }
+    end
+    return o
+end
+
 --- Typed operations for every sdk.crud resource of a plugin.
 -- @return { [openapi_path] = { [method] = operation } }, { [schema_name] = schema }
 local function plugin_resource_ops(plugin)
@@ -1916,12 +1962,16 @@ function _M.generate()
             end
         end
         if next(typed) then discovered_tags[plugin.name] = true end
+        for name, schema in pairs(plugin.schemas or {}) do spec.components.schemas[name] = schema end
         for _, route in ipairs(plugin.routes) do
             local method = route.method:lower()
             if method ~= "any" then
                 local openapi_path = lapis_to_openapi_path(route.path)
                 spec.paths[openapi_path] = spec.paths[openapi_path] or {}
-                if not spec.paths[openapi_path][method] then
+                local doc = plugin.docs and plugin.docs[route.method .. " " .. route.path]
+                if doc and not spec.paths[openapi_path][method] then
+                    spec.paths[openapi_path][method] = plugin_doc_op(plugin, route, doc)
+                elseif not spec.paths[openapi_path][method] then
                     local operation = build_operation(method, route.path, plugin.name)
                     operation["x-opsapi-plugin"] = plugin.code -- lets tools tell plugin routes from core
                     spec.paths[openapi_path][method] = operation

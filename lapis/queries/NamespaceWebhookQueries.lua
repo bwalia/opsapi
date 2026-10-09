@@ -59,7 +59,7 @@ end
 function NamespaceWebhookQueries.availableEvents(can_read)
     local out = {}
     for _, r in ipairs(db.query([[
-        SELECT entity, owner, module, verbs::text AS verbs FROM plugin_event_sources
+        SELECT entity, owner, module, verbs::text AS verbs, emits FROM plugin_event_sources
         WHERE to_regclass(table_name) IS NOT NULL
         ORDER BY owner <> 'core', entity
     ]])) do
@@ -67,7 +67,8 @@ function NamespaceWebhookQueries.availableEvents(can_read)
             entity = r.entity,
             owner = r.owner,
             allowed = r.module == nil or can_read(r.module),
-            events = array(PluginEvents.entityEvents(r.entity, PluginEvents.decodeVerbs(r.verbs))),
+            events = array(PluginEvents.entityEvents(r.entity, PluginEvents.decodeVerbs(r.verbs),
+                PluginEvents.decodeEmits(r.emits))),
         }
     end
     return array(out)

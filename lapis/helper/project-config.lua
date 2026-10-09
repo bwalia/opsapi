@@ -196,6 +196,17 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.THEMES,
     },
 
+    -- Property deals back office: the property_deals plugin (projects/property-deals)
+    -- builds on CRM (leads, contacts, companies, deals) and kanban (tasks, epics).
+    property = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.KANBAN,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
     -- Minimal core only (just auth system + menu for dashboard)
     core_only = {
         ProjectConfig.FEATURES.CORE,
