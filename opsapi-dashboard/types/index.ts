@@ -598,6 +598,8 @@ export interface NamespaceInvitation {
   role_id?: number;
   invited_by?: number;
   status: 'pending' | 'accepted' | 'declined' | 'expired';
+  /** 'form': someone asked to join through a public form (holds no seat until accepted). */
+  source?: 'admin' | 'form';
   token: string;
   message?: string;
   expires_at: string;

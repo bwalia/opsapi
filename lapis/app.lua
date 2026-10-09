@@ -691,6 +691,14 @@ load_if("crm", "routes.crm-activities")
 -- convert path.
 safe_load_routes("routes.crm-leads")
 safe_load_routes("routes.crm-leads-public")
+-- The link in a workspace invitation email (core: invitations are).
+safe_load_routes("routes.invitations-public")
+
+-- ============================================
+-- FORMS (form builder: public forms, responses, create customers/leads/invitations)
+-- ============================================
+load_if("forms", "routes.forms")
+load_if("forms", "routes.forms-public")
 
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)

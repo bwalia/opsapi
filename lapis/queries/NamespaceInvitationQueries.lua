@@ -103,6 +103,8 @@ function NamespaceInvitationQueries.create(data)
 
     local invitation_data = {
         uuid = Global.generateUUID(),
+        -- Only set for form requests: older databases may not have the column yet.
+        source = data.source == "form" and "form" or nil,
         namespace_id = namespace_id,
         email = data.email:lower(),
         role_id = role_id,
@@ -117,6 +119,81 @@ function NamespaceInvitationQueries.create(data)
 
     local invitation = NamespaceInvitations:create(invitation_data, { returning = "*" })
     return invitation
+end
+
+-- ---------------------------------------------------------------------------
+-- Seats (migrations/invitation-source.lua): active members + admins' pending
+-- invitations. A form request (source 'form') reserves nothing until accepted.
+-- ---------------------------------------------------------------------------
+
+--- Seats taken in a workspace: active members plus pending, unexpired
+-- invitations an admin sent.
+function NamespaceInvitationQueries.seatsUsed(namespace_id)
+    return tonumber(db.query([[
+        SELECT (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = ? AND status = 'active')
+             + (SELECT COUNT(*) FROM namespace_invitations WHERE namespace_id = ? AND status = 'pending'
+                AND expires_at > NOW() AND COALESCE(source, 'admin') <> 'form') AS n
+    ]], namespace_id, namespace_id)[1].n)
+end
+
+--- Is there a seat for someone to send a new admin invitation / form request?
+function NamespaceInvitationQueries.hasFreeSeat(namespace_id, max_users)
+    return NamespaceInvitationQueries.seatsUsed(namespace_id) < (tonumber(max_users) or 10)
+end
+
+--- May this invitation be accepted now? An admin's invitation already holds
+-- its seat; a form request needs a free one.
+function NamespaceInvitationQueries.seatAvailable(invitation)
+    local ns = db.query("SELECT max_users FROM namespaces WHERE id = ?", invitation.namespace_id)[1]
+    local used = NamespaceInvitationQueries.seatsUsed(invitation.namespace_id)
+    if (invitation.source or "admin") ~= "form" then used = used - 1 end
+    return used < (tonumber(ns and ns.max_users) or 10)
+end
+
+--- Pending form requests in a workspace (capped by lib/forms/targets.lua).
+function NamespaceInvitationQueries.pendingFormRequests(namespace_id)
+    return tonumber(db.query([[SELECT COUNT(*) AS n FROM namespace_invitations
+        WHERE namespace_id = ? AND status = 'pending' AND expires_at > NOW() AND source = 'form']],
+        namespace_id)[1].n)
+end
+
+--- Email a pending invitation its accept link (<origin>/invite/<token>).
+-- Synchronous: call it from a timer or a background job.
+-- @return true | nil, err ("not_pending" when it was accepted/revoked meanwhile)
+function NamespaceInvitationQueries.sendEmail(invitation_uuid, origin)
+    local inv = db.query([[
+        SELECT ni.namespace_id, ni.email, ni.token, ni.message, ni.expires_at, n.name AS namespace_name,
+               COALESCE(NULLIF(nr.display_name, ''), nr.role_name) AS role_name,
+               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS inviter_name
+        FROM namespace_invitations ni
+        JOIN namespaces n ON n.id = ni.namespace_id
+        LEFT JOIN namespace_roles nr ON nr.id = ni.role_id
+        LEFT JOIN users u ON u.id = ni.invited_by
+        WHERE ni.uuid = ? AND ni.status = 'pending' AND ni.expires_at > NOW()
+    ]], invitation_uuid)[1]
+    if not inv then return nil, "not_pending" end
+    if not origin then return nil, "no dashboard URL to link to (set FRONTEND_URL)" end
+    local function val(v) return v ~= db.NULL and v or nil end
+    return require("helper.namespace-mail").send(inv.namespace_id, "namespace.invitation", inv.email, {
+        namespace_name = inv.namespace_name,
+        inviter_name = val(inv.inviter_name),
+        role_name = val(inv.role_name),
+        message = val(inv.message),
+        accept_url = origin .. "/invite/" .. inv.token,
+        expires_in = "7 days",
+    }, { app_name = inv.namespace_name })
+end
+
+--- sendEmail after the current request, without delaying it.
+function NamespaceInvitationQueries.sendEmailLater(invitation_uuid, origin)
+    ngx.timer.at(0, function(premature)
+        if premature then return end
+        local ok, err = pcall(NamespaceInvitationQueries.sendEmail, invitation_uuid, origin)
+        if not ok or (err ~= true and err ~= nil) then
+            ngx.log(ngx.WARN, "[invitations] email not sent: ", tostring(err))
+        end
+        require("helper.plugin-events").releaseConnection()
+    end)
 end
 
 --- Get all invitations for a namespace with pagination
@@ -362,6 +439,10 @@ function NamespaceInvitationQueries.accept(token, user_id)
             updated_at = Global.getCurrentTimestamp()
         }, { id = invitation.id })
         return { success = false, error = "You are already a member of this namespace" }
+    end
+
+    if not NamespaceInvitationQueries.seatAvailable(invitation) then
+        return { success = false, error = "This workspace is full. Ask its owner to make room." }
     end
 
     local timestamp = Global.getCurrentTimestamp()

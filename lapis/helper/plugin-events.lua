@@ -177,6 +177,17 @@ if require("helper.project-config").isFeatureEnabled("billing") then
     end
 end
 
+-- Forms, only where deployed. Responses are personal data from the public:
+-- `audit = false` keeps them out of the audit trail (it would copy every
+-- answer into audit_events for a year and outlive a deleted response).
+if require("helper.project-config").isFeatureEnabled("forms") then
+    PluginEvents.CATALOG[#PluginEvents.CATALOG + 1] = {
+        entity = "form.submission", table = "form_submissions", module = "forms", audit = false,
+        hide = "meta,idempotency_key,notifications",
+        verbs = { needs_attention = { status = "needs_attention" } },
+    }
+end
+
 local EVENT_KEY = "^[a-z][a-z0-9_]*[a-z0-9_.]*%.[a-z0-9_*]+$"
 local VERB = "^[a-z][a-z0-9_]*$"
 local COLUMN = "^[a-z_][a-z0-9_]*$"
@@ -542,6 +553,9 @@ end
 local CORE_SUBSCRIPTIONS = {
     { feature = "billing", subscriber = "core.billing",
       events = { "billing.access_link.requested", "billing.licence_key.requested" } },
+    -- Form responses' emails (lib/forms/jobs.lua).
+    { feature = "forms", subscriber = "core.forms",
+      events = { "form.submission.created", "form.submission.updated" } },
 }
 function PluginEvents.syncCore()
     local ProjectConfig = require("helper.project-config")
@@ -567,6 +581,12 @@ function PluginEvents.syncAudit()
             DELETE FROM plugin_event_subscriptions s WHERE s.subscriber = 'core.audit'
               AND NOT EXISTS (SELECT 1 FROM plugin_event_sources src WHERE src.entity || '.*' = s.event)
         ]])
+        for _, src in ipairs(PluginEvents.CATALOG) do
+            if src.audit == false then
+                d.query("DELETE FROM plugin_event_subscriptions WHERE subscriber = 'core.audit' AND event = ?",
+                    src.entity .. ".*")
+            end
+        end
     else
         d.query("DELETE FROM plugin_event_subscriptions WHERE subscriber = 'core.audit'")
     end
@@ -981,6 +1001,16 @@ function PluginEvents.start(projects_root)
             if ngx.worker.id() == 0 then ngx.timer.every(300, jobs.maintain) end
         else
             ngx.log(ngx.ERR, "[plugin-events] billing jobs failed to load: ", tostring(jobs))
+        end
+    end
+    -- Forms: response emails from this outbox, hourly purge on worker 0.
+    if require("helper.project-config").isFeatureEnabled("forms") then
+        local ok_forms, forms_jobs = pcall(require, "lib.forms.jobs")
+        if ok_forms then
+            _handlers["core.forms"] = forms_jobs.handlers
+            if ngx.worker.id() == 0 then ngx.timer.every(3600, forms_jobs.maintain) end
+        else
+            ngx.log(ngx.ERR, "[plugin-events] forms jobs failed to load: ", tostring(forms_jobs))
         end
     end
     -- Always poll: workspace webhooks are deliveries too, plugins or not.

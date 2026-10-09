@@ -1,0 +1,3 @@
+<% for line in ((reply_body or "") .. "\n"):gmatch("(.-)\n") do %>
+  <% if line == "" then %><br><% else %><p style="margin: 0 0 8px 0;"><%= line %></p><% end %>
+<% end %>

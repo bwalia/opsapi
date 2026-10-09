@@ -85,11 +85,19 @@ check("every template names its variables and default file",
     (function() for _, t in pairs(NamespaceMail.TEMPLATES) do if not (t.file and t.subject and #t.variables > 0) then return false end end return true end)())
 local PC = require("helper.project-config")
 local enabled = PC.isFeatureEnabled
+-- Other features add their own templates (forms, invitations): count billing's.
+local function billing_listed()
+    local n = 0
+    for _, t in ipairs(NamespaceMail.listTemplates(1)) do
+        if t.key:match("^billing%.") then n = n + 1 end
+    end
+    return n
+end
 PC.isFeatureEnabled = function(f) return f ~= "billing" end
 check("billing templates are hidden where billing isn't deployed",
-    #NamespaceMail.listTemplates(1) == 0 and NamespaceMail.preview(1, "billing.access_link") == nil)
+    billing_listed() == 0 and NamespaceMail.preview(1, "billing.access_link") == nil)
 PC.isFeatureEnabled = function() return true end
-check("and listed where it is", #NamespaceMail.listTemplates(1) == 2)
+check("and listed where it is", billing_listed() == 2)
 PC.isFeatureEnabled = enabled
 
 print("licence keys")

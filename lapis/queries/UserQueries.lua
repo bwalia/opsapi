@@ -18,6 +18,20 @@ local function strip_secrets(user)
     return user
 end
 
+--- A free username derived from an email's local part (3-25 characters).
+function UserQueries.uniqueUsername(email)
+    local db = require("lapis.db")
+    local base = tostring(email or ""):gsub("@.*$", ""):gsub("[^%w]", ""):lower()
+    if #base < 3 then base = "user" .. base end
+    base = base:sub(1, 20)
+    local username, n = base, 0
+    while db.query("SELECT id FROM users WHERE username = ? LIMIT 1", username)[1] do
+        n = n + 1
+        username = base:sub(1, 18) .. tostring(n)
+    end
+    return username
+end
+
 function UserQueries.create(params)
     local db = require("lapis.db")
     local userData = params
