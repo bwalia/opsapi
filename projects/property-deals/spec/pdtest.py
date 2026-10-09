@@ -77,8 +77,11 @@ def sql(statement):
 
 
 def workspace(owner, name, slug):
-    body = expect(f"{owner} creates workspace {name}",
-                  call("POST", API + "/api/v2/user/namespaces", owner, body={"name": name, "slug": slug}), 201)
+    res = call("POST", API + "/api/v2/user/namespaces", owner, body={"name": name, "slug": slug})
+    if res[0] == 429:  # 5 workspaces a minute per IP: the suites create more, so wait it out once
+        time.sleep(int((res[1] or {}).get("retry_after") or 60) + 1)
+        res = call("POST", API + "/api/v2/user/namespaces", owner, body={"name": name, "slug": slug})
+    body = expect(f"{owner} creates workspace {name}", res, 201)
     ns = (body.get("data") or body).get("namespace", body.get("data") or body)
     return str(ns.get("uuid") or ns.get("id"))
 

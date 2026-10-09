@@ -9,6 +9,9 @@ return {
     run = function(job)
         local stats = require("property_deals.sla").tick(job.namespace_id, job.settings)
         local deals = require("property_deals.health").recompute_workspace(job.namespace_id, job.settings)
+        local Metrics = require("property_deals.metrics")
+        Metrics.sla(job.namespace_id, stats)
+        pcall(Metrics.gauges, job.namespace_id)
         if stats.warned + stats.overdue + stats.escalated > 0 then
             ngx.log(ngx.NOTICE, "[property_deals] sla_tick ns=", job.namespace_id, " warned=", stats.warned,
                 " overdue=", stats.overdue, " escalated=", stats.escalated, " deals=", deals)

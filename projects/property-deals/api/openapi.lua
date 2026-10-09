@@ -343,7 +343,7 @@ return function(app)
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
         status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail",
-            "scout" })) }),
+            "scout", "nightly" })) }),
         response = OBJ({ sla = OBJ({ warned = INT(), overdue = INT(), escalated = INT() }), health = OBJ({ deals = INT() }),
                          compliance_expiry = OBJ({ expired = INT(), warned = INT(), pof_expired = INT() }),
                          digest = OBJ({ sent = INT() }),
@@ -351,7 +351,9 @@ return function(app)
                                         auto_started = INT() }),
                          mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }),
                          scout = OBJ({ searches = INT(), alerts = INT(), synced = OBJ({ connectors = INT(),
-                             postcodes = INT(), stored = INT() }) }) }), errors = E422 })
+                             postcodes = INT(), stored = INT() }) }),
+                         nightly = OBJ({ suppliers = INT(), inbound = INT(), agent_runs = INT(), market = INT() }) }),
+        errors = E422 })
 
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
         paginated = true, response = ARR(Lead), query = {
@@ -709,4 +711,38 @@ return function(app)
             limit = INT("1–10") }, { "kind" }),
         response = ARR(OBJ({ supplier_uuid = UUID(), name = S(), distance_miles = NUM(), radius_miles = NUM(),
             avg_turnaround_hours = NUM(), on_time_pct = NUM(), rating = NUM(), booking_method = S() })), errors = E422 })
+
+    -- ------------------------------------------------------------------ reports + export (Phase 7)
+    local win = { from = DATE("Default: 90 days before `to`"), to = DATE("Exclusive; default tomorrow") }
+    local function report(path, summary, response)
+        sdk.doc(app, "GET /reports/" .. path, { summary = summary, permission = "property_deals_reports.read", query = win,
+            response = response })
+    end
+    report("stage-times", "Time per stage", OBJ({
+        completed_stages = ARR(OBJ({ stage_key = S(), deals = INT(), avg_days = NUM(), median_days = NUM(), max_days = NUM() })),
+        current = ARR(OBJ({ stage_key = S(), deals = INT(), avg_days_so_far = NUM() })) }))
+    report("late-days", "Completed deals vs their target date", OBJ({ completed = INT(), with_target = INT(), on_time = INT(),
+        late = INT(), total_days_late = INT(), avg_days_late = NUM(), on_time_pct = NUM(), penalty_cost = MONEY(),
+        worst = ARR(OBJ({ uuid = UUID(), name = S(), target = DATE(), actual = DATE(), days_late = INT() })) }))
+    report("conversion", "Leads → deals → exchanged → completed", OBJ({
+        totals = OBJ({ leads = INT(), deals = INT(), completed = INT(), lead_to_deal_pct = NUM(), deal_to_completion_pct = NUM() }),
+        by_month = ARR(OBJ({ month = S("YYYY-MM"), leads = INT(), deals = INT(), exchanged = INT(), completed = INT(),
+            fell_through = INT() })),
+        by_source = ARR(OBJ({ source = S(), leads = INT(), deals = INT(), completed = INT() })) }))
+    report("supplier-speed", "Supplier speed and reliability", ARR(OBJ({ supplier_uuid = UUID(), name = S(), kinds = ARR(S()),
+        bookings = INT(), avg_hours_to_confirm = NUM(), avg_hours_to_done = NUM(), measured = INT(), on_time_pct = NUM(),
+        cancelled = INT() })))
+    report("party-speed", "Solicitor / lender / council speed", OBJ({
+        chases = ARR(OBJ({ to_party = S(), chases = INT(), replied = INT(), avg_hours_to_reply = NUM(), median_hours_to_reply = NUM() })),
+        enquiries = ARR(OBJ({ owner_party = S(), raised = INT(), resolved = INT(), still_open = INT(), avg_days_to_resolve = NUM() })) }))
+    report("ai-usage", "AI spend, runs and approval outcomes", OBJ({ total_cost_usd = NUM(),
+        daily = ARR(OBJ({ day = DATE(), agent_key = S(), runs = INT(), failed = INT(), cost_usd = NUM(), tokens = INT() })),
+        approval_outcomes = ARR(OBJ({ agent_key = S(), drafts = INT(), approved = INT(), rejected = INT(), edited = INT(),
+            failed_to_run = INT(), pending = INT() })) }))
+    sdk.doc(app, "GET /export/:entity", { summary = "Export a workspace's data (CSV or JSON)", permission = "property_deals_reports.manage",
+        path = { entity = ENUM({ "deals", "tasks", "properties", "buyer_profiles", "suppliers", "bookings", "enquiries", "chases",
+            "compliance_checks", "documents", "approvals", "agent_runs", "matches", "market_records", "stage_history" }) },
+        query = { format = ENUM({ "csv", "json" }), from = DATE("created on/after"), to = DATE("created before") },
+        description = "At most 50,000 rows (header X-Truncated when cut). CSV cells that start with = + - @ are prefixed with ' "
+            .. "so spreadsheets don't run them.", response = ARR(ANY("A row")), errors = { ["404"] = "Unknown export" } })
 end

@@ -1,4 +1,4 @@
-# Property Deals API (contract v1.2 — Phase 6)
+# Property Deals API (contract v1.3 — Phase 7)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -297,7 +297,8 @@ GET /api/v2/property-deals/properties/{id}/card
 | Module on/off and scalar settings (time zone, digest time, SLA %, escalation, urgency weights, `red_min_working_days`, `due_time`, `expiring_within_days`, `digest_email`) | core `GET /api/v2/namespace/plugins` and `PUT /api/v2/namespace/plugins/property_deals { "settings": {…} }` |
 | Workflow templates | `GET /workflow-templates`, `GET /workflow-templates/{id}` (with the active `definition`), `GET …/{id}/versions`, `GET …/{id}/versions/{n}`, `POST …/{id}/versions { definition, notes }` (publish), `PUT …/{id} { is_active, active_version_uuid }` (roll back), `GET …/{id}/export`, `POST /workflow-templates/import { definition }` |
 | Bank holidays | `GET/POST/PUT/DELETE /holidays` (also a generated page at `/dashboard/plugins/property-deals/holidays`) |
-| Run checks now | `POST /engine/run { "checks": ["sla","health","compliance_expiry","digest","agents","mail"] }` (managers) |
+| Run checks now | `POST /engine/run { "checks": ["sla","health","compliance_expiry","digest","agents","mail","scout","nightly"] }` (managers) |
+| Deals board default | plugin setting `default_template` (default `uk_guaranteed_sale`): the board opens on it when no template has more active deals |
 | **AI providers** (core, any workspace module can use them) | `GET/POST /api/v2/namespace/ai-providers`, `GET/PUT/DELETE …/{id}`, `POST …/{id}/test`, `GET …/{id}/agents` (JobShout). Body: `{ name, provider_type: anthropic\|openai\|gemini\|azure_openai\|mistral\|openai_compatible\|ollama\|jobshout, base_url?, default_model?, secret?, username? (JobShout), options? (Azure: deployment, api_version), is_local?, enabled?, input_cost_per_mtok?, output_cost_per_mtok? }`. **Keys go in, never out**: answers carry `has_secret` + `secret_hint` ("…a1b2"); `secret: ""` clears it. Needs `namespace.update` |
 | Model per job type + fallback order | `GET /ai/routes`, `PUT /ai/routes/{classify\|extract\|draft\|plan\|chat\|summarise} { chain: [{ provider_uuid, model? }], local_only?, max_tokens? }` — tried in order |
 | Agents | `GET /ai/agents` (catalogue + settings), `PUT /ai/agents/{key} { enabled, route: builtin\|jobshout, jobshout_provider_uuid, jobshout_agent_id, fallback_to_builtin, local_only, approval_rule, auto_pickup, auto_pickup_at: "08:00" }` |
@@ -324,10 +325,31 @@ eligible / agent off / no AI provider · 429 today's AI budget is used up. The r
 model, tokens, cost, the tools it called (`steps`, refused ones marked `refused: true`) and the draft.
 Agents and what each may do: [agents.md](agents.md).
 
-### 2.11 Reports — Phase 7
+### 2.11 Reports
 
-Time per stage, late days, conversion, supplier/solicitor/council speed, AI usage and cost. Not in
-v1. Until then use `GET /deals` and `GET /agent-runs` for mocks.
+All `GET`, `?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: the last 90 days; `meta` echoes the window), permission `reports.read`:
+
+| Report | What |
+|---|---|
+| `/reports/stage-times` | `completed_stages[]` { stage_key, deals, avg_days, median_days, max_days } and `current[]` { stage_key, deals, avg_days_so_far } |
+| `/reports/late-days` | completed deals vs their target: on time / late, `avg_days_late`, `on_time_pct`, `penalty_cost` (late penalty, capped), the ten latest `worst[]` |
+| `/reports/conversion` | `totals` (leads, deals, completed, conversion %), `by_month[]` (leads, deals, exchanged, completed, fell_through), `by_source[]` |
+| `/reports/supplier-speed` | per supplier: bookings, hours to confirm, hours to done, on-time %, cancelled |
+| `/reports/party-speed` | chases by party (replied, avg / median hours to reply) and enquiries by owner (raised, resolved, still open, days to resolve) |
+| `/reports/ai-usage` | `daily[]` runs / failures / cost / tokens per agent, `approval_outcomes[]` drafts / approved / rejected / edited / failed / pending per agent |
+
+Supplier directory figures (`avg_turnaround_hours`, `on_time_pct`, `jobs_measured`) are measured
+nightly from the last 12 months of bookings. Turnaround runs from the request to done (or to
+confirmed). A booking is on time when it's done by `slot_end` plus one hour.
+
+**Export** (managers, `reports.manage`): `GET /export/{deals|tasks|properties|buyer_profiles|suppliers|bookings|enquiries|chases|compliance_checks|documents|approvals|agent_runs|matches|market_records|stage_history}?format=csv|json&from=&to=`.
+- It downloads as an attachment, up to 50,000 rows; `X-Truncated` is set when the export is cut.
+- CSV cells starting with `= + - @` get a `'` prefix so spreadsheets don't run them.
+
+**Retention** (plugin settings, applied nightly):
+- `retention_inbound_days` (365): after this, email bodies are removed; sender, subject and the matched deal stay.
+- `retention_agent_run_days` (365): after this, AI run inputs and drafts are removed; the outcome, tokens and cost stay.
+- `retention_market_days` (730): older market data is deleted.
 
 ---
 
@@ -356,13 +378,10 @@ Send `Idempotency-Key` on queued creates (leads, properties, photos, contact log
 
 ---
 
-## 4. Coming next (not in v1 — mock against these shapes)
+## 4. Coming next
 
-| Phase | Endpoint (planned) | For |
-|---|---|---|
-| 7 | `GET /reports/{stage-times|late-days|conversion|supplier-speed|ai-usage}` | Reports |
-
-Exact shapes are fixed when each phase ships, and this table is updated.
+The backend for SPEC phases 1–8 (backend prompt phases 1–7) is complete. New fields or endpoints
+arrive through `api-requests/` like any other change.
 
 ---
 
@@ -394,6 +413,16 @@ engine events). Use it for WhatsApp/Slack.
 | [ios-notification-preferences](api-requests/ios-notification-preferences.md) | Done (Phase 5): `GET/PUT /notification-preferences` + quiet hours; the workspace setting `escalations_always_notify` can make escalations unmutable (§3) |
 
 ## 7. Changes
+
+- **v1.3 (Phase 7):**
+  - The other seven agents: lead triage, property enrichment, offer reasoning (manager-only), buyer
+    matcher, document checker (reads PDFs, cites pages), compliance assistant, investor update.
+    `read_document` and other read-only tools.
+  - Reports (`/reports/*`), export (`/export/{entity}`), retention settings, nightly supplier speed.
+  - Stage history (time per stage).
+  - Prometheus metrics + Grafana dashboard ([observability.md](observability.md)).
+  - Performance targets measured (`spec/perf_test.py`).
+  - The board opens on `default_template`.
 
 - **v1.2 (Phase 6):**
   - Data connectors (EPC register, Land Registry Price Paid, Companies House, postcode lookup; paid-feed

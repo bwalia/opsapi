@@ -5,12 +5,20 @@ draft becomes (`projects/property-deals/property_deals/ai/agents.lua`). None of 
 or sign anything: the draft becomes an **approval**, and the executor
 (`property_deals/ai/executor.lua`) acts only after a named person approves it (SPEC hard rule 6).
 
-| Agent | Job type | Tools (read-only) | Draft becomes | Default rule | Phase |
-|---|---|---|---|---|---|
-| `legal_chaser` — Legal chaser | draft | get_deal_summary, list_open_enquiries, list_recent_chases, list_recent_emails, list_parties | `send_email` chase to the party who owes the most open enquiries, plus proposed enquiry updates (resolve / new); or `update_enquiries` alone | any_operator | 5 |
-| `booking_agent` — Booking agent | plan | get_property, find_suppliers, get_deal_summary | `request_booking`: emails to the 2–3 nearest suitable suppliers asking for slots; bookings recorded `requested`. Confirming one is a second approval (`confirm_booking`) | any_operator | 5 |
-| `digest_writer` — Daily digest writer | summarise | — | No approval: rewrites a person's own rules-based digest as a few sentences (`digest.prose`). The lists stay the source of truth | none | 5 |
-| lead_triage, property_enrichment, offer_reasoning, buyer_matcher, document_checker, compliance_assistant, investor_update | | | | | 7 |
+| Agent | Job type | Tools (read-only) | Draft becomes (an approval) | Default rule |
+|---|---|---|---|---|
+| `lead_triage` — Lead intake & triage | classify | get_lead | `update_lead`: lead kind, situation, deadline, vulnerability flag + note, priority | any_operator |
+| `property_enrichment` — Property enrichment | extract | get_property, get_comps | runs the EPC register + Price Paid lookups first (official data, no AI), then `update_property`: flood / mining risk, known issues | any_operator |
+| `offer_reasoning` — Offer reasoning drafter | plan | get_property, get_comps, get_deal_summary | `record_offer`: offer range + plain-English reasoning; on approval the deal's offer and notes | **manager** (always) |
+| `buyer_matcher` — Buyer matcher | draft | list_matches, get_property, get_comps | re-scores matches (rules), then one `send_deal_pack` per matching buyer (≤ 5) | any_operator |
+| `legal_chaser` — Legal chaser | draft | get_deal_summary, list_open_enquiries, list_recent_chases, list_recent_emails, list_parties | `send_email` chase to the party owing the most open enquiries + proposed enquiry updates; or `update_enquiries` | any_operator |
+| `booking_agent` — Booking agent | plan | get_property, find_suppliers, get_deal_summary | `request_booking` to the 2–3 nearest suppliers; confirming one is a second approval (`confirm_booking`) | any_operator |
+| `document_checker` — Document checker | extract | list_documents, read_document, get_property | `add_red_flags`: each flag (document + page) becomes an open enquiry, blocking when high. Never clears anything | any_operator |
+| `compliance_assistant` — Compliance assistant | extract | list_compliance_checks, list_documents, read_document, list_parties | `compliance_notes`: missing checks added as not_started, notes on checks, ID mismatches. Never passes, waives or closes a check | any_operator |
+| `digest_writer` — Daily digest writer | summarise | — | no approval: rewrites a person's own rules-based digest (`digest.prose`) | none |
+| `investor_update` — Investor update writer | draft | deal_progress, get_deal_summary, list_parties | `send_email` progress note to the deal's buyer | any_operator |
+
+`read_document` reads PDFs with `pdftotext` (with `[page N]` markers, so flags cite pages) and text files.
 
 ## How a run works
 

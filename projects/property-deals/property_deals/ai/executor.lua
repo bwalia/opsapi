@@ -136,6 +136,110 @@ X.actions.send_deal_pack = function(ns, a, p, actor)
     return { result = { sent_to = p.to, match_uuid = p.match_uuid } }
 end
 
+--- Lead triage: write the approved fields to the lead's Property Deals details (+ priority).
+X.actions.update_lead = function(ns, a, p, actor)
+    if not U.is_uuid(p.lead_uuid) then U.fail(422, "No lead in the draft") end
+    local lead = U.one("SELECT uuid FROM crm_leads WHERE namespace_id = ? AND uuid = ?", ns, p.lead_uuid)
+    if not lead then U.fail(404, "Lead not found") end
+    local d = type(p.details) == "table" and p.details or {}
+    local allowed = { lead_kind = 1, situation = 1, situation_note = 1, deadline_date = 1, vulnerability_flag = 1,
+        vulnerability_note = 1 }
+    local row = {}
+    for k, v in pairs(d) do if allowed[k] and v ~= cjson.null then row[k] = v end end
+    local existing = U.one("SELECT id FROM property_deals_lead_details WHERE namespace_id = ? AND lead_uuid = ?", ns, lead.uuid)
+    if next(row) then
+        row.updated_at = db.raw("NOW()")
+        if existing then db.update("property_deals_lead_details", row, { id = existing.id })
+        else
+            row.namespace_id, row.lead_uuid = ns, lead.uuid
+            db.insert("property_deals_lead_details", row)
+        end
+    end
+    if p.priority then
+        db.update("crm_leads", { priority = p.priority, updated_at = db.raw("NOW()") }, { uuid = lead.uuid, namespace_id = ns })
+    end
+    return { result = { lead_uuid = lead.uuid, fields = U.array((function() local k = {} for f in pairs(row) do
+        if f ~= "updated_at" then k[#k + 1] = f end end table.sort(k) return k end)()) } }
+end
+
+--- Property enrichment: approved risk levels and known issues from official data.
+X.actions.update_property = function(ns, a, p, actor)
+    local prop = U.is_uuid(p.property_uuid) and U.one("SELECT * FROM property_deals_properties WHERE namespace_id = ? AND uuid = ?",
+        ns, p.property_uuid)
+    if not prop then U.fail(404, "Property not found") end
+    local c = type(p.changes) == "table" and p.changes or {}
+    local row = { updated_at = db.raw("NOW()") }
+    if c.flood_risk then row.flood_risk = c.flood_risk end
+    if c.mining_risk then row.mining_risk = c.mining_risk end
+    if type(c.known_issues_add) == "table" then
+        local issues, seen = U.json(prop.known_issues) or {}, {}
+        for _, i in ipairs(issues) do seen[i] = true end
+        for _, i in ipairs(c.known_issues_add) do if not seen[i] then issues[#issues + 1] = i; seen[i] = true end end
+        row.known_issues = cjson.encode(U.array(issues))
+    end
+    if c.notes then
+        row.known_issues_note = ((prop.known_issues_note ~= db.NULL and prop.known_issues_note or "") .. "\n" .. c.notes):gsub("^\n", "")
+    end
+    db.update("property_deals_properties", row, { id = prop.id })
+    return { result = { property_uuid = prop.uuid, changed = U.array((function() local k = {} for f in pairs(row) do
+        if f ~= "updated_at" then k[#k + 1] = f end end table.sort(k) return k end)()) }, task_status = "done" }
+end
+
+--- Offer reasoning: record the approved offer on the deal, with the reasoning in its notes.
+X.actions.record_offer = function(ns, a, p, actor)
+    local deal = U.is_uuid(p.deal_uuid) and U.one("SELECT * FROM property_deals_deals WHERE namespace_id = ? AND uuid = ?", ns, p.deal_uuid)
+    if not deal then U.fail(404, "Deal not found") end
+    local rec = tonumber(p.recommended)
+    if not rec or rec <= 0 then U.fail(422, "No recommended offer in the draft") end
+    local note = string.format("Offer reasoning (approved %s): £%d–£%d, recommended £%d.\n%s",
+        require("property_deals.workdays").now():sub(1, 10), math.floor(tonumber(p.offer_low) or rec),
+        math.floor(tonumber(p.offer_high) or rec), math.floor(rec), tostring(p.reasoning or ""))
+    db.update("property_deals_deals", { offer_amount = rec, updated_at = db.raw("NOW()"),
+        notes = db.raw("CONCAT_WS(E'\\n\\n', NULLIF(notes, ''), " .. db.escape_literal(note) .. ")") }, { id = deal.id })
+    return { result = { deal_uuid = deal.uuid, offer_amount = rec }, task_status = "done" }
+end
+
+--- Document checker: each approved red flag becomes an open enquiry (blocking when high).
+X.actions.add_red_flags = function(ns, a, p, actor)
+    if not U.is_uuid(p.deal_uuid) then U.fail(422, "No deal in the draft") end
+    local added = {}
+    for _, f in ipairs(type(p.flags) == "table" and p.flags or {}) do
+        if type(f.title) == "string" and f.title ~= "" then
+            local where = f.filename and (" (" .. f.filename .. (f.page and (", page " .. f.page) or "") .. ")") or ""
+            local e = db.insert("property_deals_enquiries", { namespace_id = ns, deal_uuid = p.deal_uuid,
+                title = (f.title .. where):sub(1, 255), detail = f.detail, owner_party = f.owner_party or "seller_solicitor",
+                blocking = f.severity == "high", source = "agent" }, { returning = "*" })[1]
+            added[#added + 1] = e.uuid
+        end
+    end
+    return { result = { enquiries_added = #added, enquiry_uuids = U.array(added) }, task_status = "done" }
+end
+
+--- Compliance assistant: notes on checks and the missing ones as not_started.
+-- Never passes, waives or closes anything (that needs a named person, DB check + API).
+X.actions.compliance_notes = function(ns, a, p, actor)
+    if not U.is_uuid(p.deal_uuid) then U.fail(422, "No deal in the draft") end
+    local created, noted = 0, 0
+    for _, m in ipairs(type(p.missing) == "table" and p.missing or {}) do
+        local exists = U.one([[SELECT 1 FROM property_deals_compliance_checks WHERE namespace_id = ? AND deal_uuid = ?
+            AND check_type = ? AND party_role IS NOT DISTINCT FROM ?]], ns, p.deal_uuid, m.check_type, m.party_role or db.NULL)
+        if not exists then
+            db.insert("property_deals_compliance_checks", { namespace_id = ns, deal_uuid = p.deal_uuid, subject_type = "deal",
+                check_type = m.check_type, party_role = m.party_role, status = "not_started",
+                notes = "Raised by the compliance assistant: " .. tostring(m.why or "") })
+            created = created + 1
+        end
+    end
+    for _, n in ipairs(type(p.notes) == "table" and p.notes or {}) do
+        local r = db.query([[UPDATE property_deals_compliance_checks
+            SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{assistant_notes}',
+                COALESCE(data -> 'assistant_notes', '[]'::jsonb) || to_jsonb(?::text)), updated_at = NOW()
+            WHERE namespace_id = ? AND uuid = ? AND deal_uuid = ? RETURNING id]], n.note, ns, n.check_uuid, p.deal_uuid)
+        noted = noted + #r
+    end
+    return { result = { checks_created = created, checks_noted = noted, mismatches = p.mismatches } }
+end
+
 function X.run(ns, a, actor)
     local fn = X.actions[a.action]
     local p = U.json(a.payload)

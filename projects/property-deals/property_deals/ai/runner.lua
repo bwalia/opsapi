@@ -31,6 +31,11 @@ local function finish(run, changes)
     changes.updated_at = db.raw("NOW()")
     changes.finished_at = changes.finished_at or db.raw("NOW()")
     db.update("property_deals_agent_runs", changes, { id = run.id })
+    if changes.status then
+        local r = U.one("SELECT cost_usd FROM property_deals_agent_runs WHERE id = ?", run.id)
+        pcall(require("property_deals.metrics").agent_run, run.namespace_id, run.agent_key, changes.status,
+            r and tonumber(r.cost_usd))
+    end
 end
 
 local function fail(ns, run, task, message)
@@ -82,6 +87,9 @@ function R.start(ns, task_uuid, opts)
     if agent.needs_deal and (not task.deal_uuid or task.deal_uuid == db.NULL) then
         return nil, agent.name .. " needs a task on a deal", 422
     end
+    if agent.needs_lead and (not task.lead_uuid or task.lead_uuid == db.NULL) then
+        return nil, agent.name .. " needs a task on a lead", 422
+    end
     if cfg.route ~= "jobshout" and #Config.route(ns, agent.job_type).chain == 0 then
         return nil, "No AI provider is set up (Settings → AI providers)", 422
     end
@@ -116,6 +124,7 @@ local function context(ns, run)
     local ctx = { ns = ns, run = run, task = task, task_uuid = run.task_uuid,
         deal_uuid = run.deal_uuid ~= db.NULL and run.deal_uuid or nil }
     if task and task.property_uuid and task.property_uuid ~= db.NULL then ctx.property_uuid = task.property_uuid end
+    if task and task.lead_uuid and task.lead_uuid ~= db.NULL then ctx.lead_uuid = task.lead_uuid end
     if not ctx.property_uuid and ctx.deal_uuid then
         local d = U.one("SELECT property_uuid FROM property_deals_deals WHERE uuid = ?", ctx.deal_uuid)
         if d and d.property_uuid ~= db.NULL then ctx.property_uuid = d.property_uuid end
@@ -140,14 +149,21 @@ local function deliver(ns, run, task, agent, cfg, out)
             "AI found nothing to send" .. (summary and (": " .. summary) or "."), nil)
         return run_row(ns, run.uuid)
     end
+    -- A manager-only agent (offer reasoning) stays manager-only whatever the task says.
     local rule = cfg.approval_rule ~= nil and cfg.approval_rule ~= db.NULL and cfg.approval_rule
+        or (agent.approval == "manager" and "manager")
         or (task.approval_rule ~= "none" and task.approval_rule) or (agent.approval ~= "none" and agent.approval)
         or "any_operator"
-    local a = require("property_deals.approvals").create(ns, {
-        subject_type = req.subject_type, action = req.action, title = req.title, payload = req.payload, rule = rule,
-        agent_run_uuid = run.uuid, task_uuid = task.task_uuid,
-        deal_uuid = task.deal_uuid ~= db.NULL and task.deal_uuid or nil, requested_by_agent = run.agent_key,
-    })
+    -- One draft, or several (the buyer matcher writes one pack per buyer).
+    local list = req.action and { req } or req
+    local a
+    for _, r in ipairs(list) do
+        a = require("property_deals.approvals").create(ns, {
+            subject_type = r.subject_type, action = r.action, title = r.title, payload = r.payload, rule = rule,
+            agent_run_uuid = run.uuid, task_uuid = task.task_uuid,
+            deal_uuid = task.deal_uuid ~= db.NULL and task.deal_uuid or nil, requested_by_agent = run.agent_key,
+        })
+    end
     finish(run, { status = "succeeded" })
     require("property_deals.tasks").update(ns, task.task_uuid, { pd_status = "awaiting_approval" }, nil)
     return run_row(ns, run.uuid), a
@@ -169,7 +185,7 @@ local function builtin(ns, run, task, agent, cfg)
         intro = intro .. "\nA reviewer rejected your last draft with this note (follow it): " .. run.retry_note
     end
     local messages = {
-        { role = "system", content = G.PREAMBLE .. "\n\n" .. agent.instructions },
+        { role = "system", content = G.PREAMBLE .. "\n\n[agent:" .. run.agent_key .. "]\n" .. agent.instructions },
         { role = "user", content = intro .. "\n\nRecords for this task:\n" .. G.fence("records", agent.context(ctx)) },
     }
     local steps, tokens_in, tokens_out, cost, started = {}, 0, 0, 0, ngx.now()

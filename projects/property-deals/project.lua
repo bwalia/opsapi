@@ -124,6 +124,13 @@ return {
         ai_max_tokens = { type = "integer", label = "AI: max tokens per reply", default = 2048, min = 64, max = 200000 },
         escalations_always_notify = { type = "boolean", label = "Escalations can't be muted", default = false,
                                       description = "Managers get escalations by push/email even if they turned them off." },
+        default_template = { type = "string", label = "Deals board opens on (template key)", default = "uk_guaranteed_sale",
+                             description = "Used when no template has more active deals than another." },
+        retention_inbound_days = { type = "integer", label = "Keep fetched email text for (days)", default = 365, min = 30,
+                                   max = 3650, description = "After this the body is removed; sender, subject and match stay." },
+        retention_agent_run_days = { type = "integer", label = "Keep AI run inputs and drafts for (days)", default = 365,
+                                     min = 30, max = 3650, description = "After this a run keeps its outcome, tokens and cost only." },
+        retention_market_days = { type = "integer", label = "Keep market data for (days)", default = 730, min = 90, max = 3650 },
         -- Buyer matching weights (SPEC §3.7); they need not add up to 100.
         match_w_budget = { type = "integer", label = "Match weight: budget fit", default = 30, min = 0, max = 100 },
         match_w_area = { type = "integer", label = "Match weight: area fit", default = 20, min = 0, max = 100 },

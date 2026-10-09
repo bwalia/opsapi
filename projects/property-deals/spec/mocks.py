@@ -30,6 +30,7 @@ STATE = {
     "js_runs": {},         # run_id -> {status, execution_id, output}
     "js_approvals": {},    # approval_id -> {...}
     "js_launches": [],
+    "s3": {},              # "/bucket/key" -> bytes
 }
 JS_AGENT = "11111111-2222-4333-8444-555555555555"
 POSTCODES = {"YO1 7AA": (53.96, -1.08), "YO1 9AB": (53.962, -1.085), "YO10 5DD": (53.947, -1.05),
@@ -83,6 +84,19 @@ def enquiries_from(messages):
     return list(found.values())
 
 
+def records_of(messages):
+    """The <untrusted_data source="records"> JSON the runner puts in the first user message."""
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str) and 'source="records"' in c:
+            body = c.split('source="records">', 1)[1].rsplit("</untrusted_data>", 1)[0]
+            try:
+                return json.loads(body)
+            except ValueError:
+                return {}
+    return {}
+
+
 def model_reply(body):
     messages, tools = body.get("messages", []), body.get("tools") or []
     system = str(messages[0].get("content") if messages else "")
@@ -98,6 +112,53 @@ def model_reply(body):
         return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
             {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args or {})}}]}}],
             "usage": usage}
+
+    agent = re.search(r"\[agent:(\w+)\]", system)
+    agent = agent.group(1) if agent else None
+    rec = records_of(messages)
+    if agent == "lead_triage":
+        notes = json.dumps(rec.get("lead", {})).lower()
+        return say({"lead_kind": "seller", "situation": "probate" if "probate" in notes else "other",
+                    "situation_note": "Inherited the house from their mother", "deadline_date": "2026-12-01",
+                    "vulnerability_flag": "bereave" in notes, "vulnerability_note": "Recently bereaved", "priority": "high",
+                    "summary": "Probate seller, wants to complete by December"})
+    if agent == "property_enrichment":
+        return say({"summary": "EPC C; comparables around the median",
+                    "updates": {"flood_risk": "low", "mining_risk": None, "known_issues_add": ["short_lease"],
+                                "notes": "Lease has 70 years left"}})
+    if agent == "offer_reasoning":
+        return say({"offer_low": 120000, "offer_high": 135000, "recommended": 128000,
+                    "reasoning": "Comparables sold at a £155k median; the home needs work (about £15k), so we offer below.",
+                    "assumptions": ["Refurb about £15k", "Completion in 4 weeks"]})
+    if agent == "buyer_matcher":
+        return say({"packs": [{"match_uuid": m["match_uuid"], "subject": "A home that fits you",
+                               "body": "Hi %s, this one fits your %s plans." % (m.get("buyer"), (m.get("strategies") or ["buy"])[0])}
+                              for m in rec.get("matches") or [] if isinstance(m, dict)]})
+    if agent == "document_checker":
+        docs = rec.get("documents") or []
+        read = [m for m in tool_msgs if m.get("tool_call_id") == "call_doc"]
+        if docs and "read_document" in tool_names and not read:
+            return call("read_document", "call_doc", {"document_uuid": docs[0]["uuid"]})
+        text = read[0]["content"] if read else ""
+        page = None
+        parts = re.split(r"\[page (\d+)\]", text)
+        for i in range(1, len(parts), 2):
+            if "covenant" in parts[i + 1].lower():
+                page = int(parts[i])
+        flags = [{"document_uuid": docs[0]["uuid"], "page": page, "title": "Restrictive covenant on extensions",
+                  "detail": "The title restricts building beyond the rear wall without consent.", "severity": "high",
+                  "owner_party": "seller_solicitor"}] if page else []
+        return say({"summary": "%d flag(s)" % len(flags), "flags": flags})
+    if agent == "compliance_assistant":
+        checks = rec.get("checks") or []
+        return say({"summary": "Buyer AML missing", "missing": [{"check_type": "aml_cdd_buyer", "party_role": "buyer",
+                                                                  "why": "No buyer ID or proof of address yet"}],
+                    "notes": [{"check_uuid": c["uuid"], "note": "Passport and utility bill names match"} for c in checks[:1]],
+                    "mismatches": ["Seller date of birth differs between passport and driving licence"]})
+    if agent == "investor_update":
+        prog = rec.get("progress") or {}
+        return say({"summary": "weekly", "email": {"to_party": "buyer", "subject": "Your weekly update",
+                    "body": "This week: %d task(s) done, %d to go." % (len(prog.get("done") or []), len(prog.get("open") or []))}})
 
     if "Reply with the single word: ok" in allt:
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage": usage}
@@ -193,6 +254,16 @@ class Http(BaseHTTPRequestHandler):
                 return self.m365(p)
             if p.startswith("/epc/") or p.startswith("/lr/") or p.startswith("/ch/") or p.startswith("/pc/"):
                 return self.data_api("GET", p, {})
+            if p.startswith("/pd-docs/"):
+                key = p.split("?", 1)[0]
+                if key in STATE["s3"]:
+                    data = STATE["s3"][key]
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return None
+                return self.send(404, {"error": "NoSuchKey"})
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -210,7 +281,7 @@ class Http(BaseHTTPRequestHandler):
                     STATE["log"] = []
                 if b.get("reset_all"):
                     STATE.update(log=[], smtp=[], mailbox=[], jobshout_down=False, js_runs={}, js_approvals={},
-                                 js_launches=[])
+                                 js_launches=[], s3={})
                 if b.get("decide_external"):
                     a = STATE["js_approvals"][b["decide_external"]]
                     a.update(status=b.get("status", "approved"), decided_by=str(uuid.uuid4()), decided_at=now_iso(),
@@ -232,6 +303,23 @@ class Http(BaseHTTPRequestHandler):
                     return self.send(401, {"error": "invalid_client", "error_description": "bad secret"})
                 return self.send(200, {"access_token": "tok-" + p.split("/")[1], "expires_in": 3600})
         self.send(404, {"error": "not found"})
+
+    def do_HEAD(self):
+        self.send_response(200 if self.path.split("?")[0] in ("/pd-docs", "/pd-docs/") or self.path.split("?")[0] in STATE["s3"] else 404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_PUT(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        data = self.rfile.read(n) if n else b""
+        key = self.path.split("?", 1)[0]
+        with LOCK:
+            if key.count("/") > 1:
+                STATE["s3"][key] = data
+        self.send_response(200)
+        self.send_header("ETag", '"mock"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     # Open data: EPC register, Land Registry Price Paid, Companies House, postcodes.io ----
     def data_api(self, method, p, b):

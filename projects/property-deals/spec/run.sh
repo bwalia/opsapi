@@ -41,6 +41,7 @@ docker run -d --name pd-api-$ID --network "$NET" -p 127.0.0.1::80 -v "$W/src/lap
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=property -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e OPSAPI_AI_ALLOW_PRIVATE=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e AI_FALLBACK_PROVIDER=none \
+  -e MINIO_ENDPOINT=http://pd-mock:8080 -e MINIO_ACCESS_KEY=minio -e MINIO_SECRET_KEY=minio123 -e MINIO_BUCKET=pd-docs \
   -e REDIS_ENABLED=false lapis-lapis >/dev/null
 sleep 6
 [ "$(docker inspect -f '{{.State.Running}}' pd-api-$ID)" = true ] || { docker logs pd-api-$ID 2>&1 | tail -40; exit 1; }
@@ -67,7 +68,7 @@ MOCK_PORT=$(docker port pd-mock-$ID 8080/tcp | head -1 | sed 's/.*://')
 export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
 export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
 # ONLY=ai_test (etc.) runs one suite while iterating.
-SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test}
+SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test perf_test}
 ( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \

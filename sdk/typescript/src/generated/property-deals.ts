@@ -1042,6 +1042,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/export/{entity}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a workspace's data (CSV or JSON)
+         * @description At most 50,000 rows (header X-Truncated when cut). CSV cells that start with = + - @ are prefixed with ' so spreadsheets don't run them.
+         *
+         *     Needs property_deals_reports.manage in the workspace.
+         */
+        get: operations["property_deals_get_export_entity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/holidays": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -1540,6 +1562,126 @@ export interface paths {
          * @description Needs property_deals_buyers.read in the workspace.
          */
         get: operations["property_deals_get_properties_id_matches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/ai-usage": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AI spend, runs and approval outcomes
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_ai_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/conversion": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Leads → deals → exchanged → completed
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_conversion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/late-days": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Completed deals vs their target date
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_late_days"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/party-speed": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Solicitor / lender / council speed
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_party_speed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/stage-times": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Time per stage
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_stage_times"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/reports/supplier-speed": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Supplier speed and reliability
+         * @description Needs property_deals_reports.read in the workspace.
+         */
+        get: operations["property_deals_get_reports_supplier_speed"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9069,7 +9211,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail" | "scout")[];
+                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail" | "scout" | "nightly")[];
                 };
             };
         };
@@ -9104,6 +9246,12 @@ export interface operations {
                                 connectors?: number;
                                 errors?: number;
                                 stored?: number;
+                            };
+                            nightly?: {
+                                agent_runs?: number;
+                                inbound?: number;
+                                market?: number;
+                                suppliers?: number;
                             };
                             scout?: {
                                 alerts?: number;
@@ -9480,6 +9628,69 @@ export interface operations {
             };
             /** @description Still referenced by other records */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_export_entity: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                format?: "csv" | "json";
+                /** @description created on/after */
+                from?: string;
+                /** @description created before */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                entity: "deals" | "tasks" | "properties" | "buyer_profiles" | "suppliers" | "bookings" | "enquiries" | "chases" | "compliance_checks" | "documents" | "approvals" | "agent_runs" | "matches" | "market_records" | "stage_history";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown[];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Unknown export */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11647,6 +11858,413 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["PropertyDealsMatchWithBreakdown"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_ai_usage: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            approval_outcomes?: {
+                                agent_key?: string;
+                                approved?: number;
+                                drafts?: number;
+                                edited?: number;
+                                failed_to_run?: number;
+                                pending?: number;
+                                rejected?: number;
+                            }[];
+                            daily?: {
+                                agent_key?: string;
+                                cost_usd?: number;
+                                /** Format: date */
+                                day?: string;
+                                failed?: number;
+                                runs?: number;
+                                tokens?: number;
+                            }[];
+                            total_cost_usd?: number;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_conversion: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            by_month?: {
+                                completed?: number;
+                                deals?: number;
+                                exchanged?: number;
+                                fell_through?: number;
+                                leads?: number;
+                                /** @description YYYY-MM */
+                                month?: string;
+                            }[];
+                            by_source?: {
+                                completed?: number;
+                                deals?: number;
+                                leads?: number;
+                                source?: string;
+                            }[];
+                            totals?: {
+                                completed?: number;
+                                deal_to_completion_pct?: number;
+                                deals?: number;
+                                lead_to_deal_pct?: number;
+                                leads?: number;
+                            };
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_late_days: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            avg_days_late?: number;
+                            completed?: number;
+                            late?: number;
+                            on_time?: number;
+                            on_time_pct?: number;
+                            penalty_cost?: number;
+                            total_days_late?: number;
+                            with_target?: number;
+                            worst?: {
+                                /** Format: date */
+                                actual?: string;
+                                days_late?: number;
+                                name?: string;
+                                /** Format: date */
+                                target?: string;
+                                /** Format: uuid */
+                                uuid?: string;
+                            }[];
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_party_speed: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            chases?: {
+                                avg_hours_to_reply?: number;
+                                chases?: number;
+                                median_hours_to_reply?: number;
+                                replied?: number;
+                                to_party?: string;
+                            }[];
+                            enquiries?: {
+                                avg_days_to_resolve?: number;
+                                owner_party?: string;
+                                raised?: number;
+                                resolved?: number;
+                                still_open?: number;
+                            }[];
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_stage_times: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            completed_stages?: {
+                                avg_days?: number;
+                                deals?: number;
+                                max_days?: number;
+                                median_days?: number;
+                                stage_key?: string;
+                            }[];
+                            current?: {
+                                avg_days_so_far?: number;
+                                deals?: number;
+                                stage_key?: string;
+                            }[];
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_reports_supplier_speed: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default: 90 days before `to` */
+                from?: string;
+                /** @description Exclusive; default tomorrow */
+                to?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            avg_hours_to_confirm?: number;
+                            avg_hours_to_done?: number;
+                            bookings?: number;
+                            cancelled?: number;
+                            kinds?: string[];
+                            measured?: number;
+                            name?: string;
+                            on_time_pct?: number;
+                            /** Format: uuid */
+                            supplier_uuid?: string;
+                        }[];
                         /** @example true */
                         success: boolean;
                     };

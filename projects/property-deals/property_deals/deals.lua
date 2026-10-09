@@ -232,8 +232,15 @@ function Deals.update(ns, uuid, data, actor_uuid)
         if data.target_completion_date ~= nil then crm.expected_close_date = data.target_completion_date end
         if data.status == "completed" then
             crm.status, crm.won_at, crm.actual_close_date = "won", db.raw("NOW()"), db.raw("CURRENT_DATE")
+            -- The reports' late days count from here when nobody gave the date.
+            if data.actual_completion_at == nil and (deal.actual_completion_at == nil or deal.actual_completion_at == db.NULL) then
+                data.actual_completion_at = db.raw("NOW()")
+            end
         elseif data.status == "fell_through" then
             crm.status, crm.lost_at = "lost", db.raw("NOW()")
+        end
+        if data.status == "completed" or data.status == "fell_through" then
+            db.query("UPDATE property_deals_stage_history SET left_at = NOW() WHERE deal_uuid = ? AND left_at IS NULL", uuid)
         end
         if next(crm) then
             crm.updated_at = db.raw("NOW()")
