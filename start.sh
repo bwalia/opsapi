@@ -70,6 +70,7 @@ show_help() {
     echo "  academy        - LMS: courses + lessons + rich (WYSIWYG) content"
     echo "  field_service  - Service jobs + job phases + engineer site visits"
     echo "                   (includes CRM + Timesheets + Invoicing)"
+    echo "  property       - Property deals back office (CRM + Kanban + property_deals plugin)"
     echo "  core_only      - Just authentication tables"
     echo "  services       - Domain Management + GitHub-workflow integration"
     echo "                   (feature-only: adds the feature to a tenant, seeds no"
@@ -365,7 +366,7 @@ validate_project_code() {
     # GitHub-workflow integration) and its migrations WITHOUT seeding its own
     # tenant, so it is meant to be combined with a tenant code, e.g.
     # `tax_copilot,services`. It is a valid code on its own here too.
-    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business academy field_service core_only services"
+    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business academy field_service property core_only services"
 
     # Split on commas and validate each individual code.
     # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
@@ -870,7 +871,7 @@ if [[ -n "$PROJECT_CODE" ]]; then
         echo -e "${BLUE}[i] Project code from argument: ${CYAN}${PROJECT_CODE}${NC}"
     else
         echo -e "${RED}[!] Invalid project code: '$PROJECT_CODE'${NC}"
-        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, field_service, core_only, services${NC}"
+        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, field_service, property, core_only, services${NC}"
         echo -e "${YELLOW}[!] Combine with commas: ecommerce,collaboration  or  tax_copilot,services${NC}"
         exit 1
     fi
