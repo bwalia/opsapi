@@ -5,8 +5,8 @@
  */
 
 import {
-  AlignLeft, AtSign, CalendarDays, CircleDot, Clock, EyeOff, Hash, Heading, Link2, ListChecks,
-  ListFilter, MapPin, Phone, Pilcrow, ShieldCheck, Star, ToggleLeft, Type, UserRound,
+  AlignLeft, AtSign, CalendarDays, CircleDot, Clock, EyeOff, FileUp, Hash, Heading, Link2, ListChecks,
+  ListFilter, MapPin, Phone, Pilcrow, ShieldCheck, SplitSquareVertical, Star, ToggleLeft, Type, UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import type { FieldType, FormField, MapsTo } from '@/services/forms.service';
@@ -52,6 +52,8 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     defaults: () => ({ label: 'Address' }) },
   { type: 'url', label: 'Website', icon: Link2, group: 'Contact', input: true, hasPlaceholder: true,
     defaults: () => ({ label: 'Website' }) },
+  { type: 'file_upload', label: 'File upload', icon: FileUp, group: 'Other', input: true,
+    defaults: () => ({ label: 'Upload a file', max_files: 1, max_size_mb: 10, accept: 'any' }) },
   { type: 'consent', label: 'Consent', icon: ShieldCheck, group: 'Other', input: true, maps: ['marketing_consent'],
     defaults: () => ({ label: 'Consent', text: 'I agree to the privacy policy.', required: true }) },
   { type: 'hidden', label: 'Hidden (from link)', icon: EyeOff, group: 'Other', input: true,
@@ -60,6 +62,8 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     defaults: () => ({ label: 'Section title' }) },
   { type: 'paragraph', label: 'Text block', icon: Pilcrow, group: 'Layout', input: false,
     defaults: () => ({ label: '', text: 'Some text for the people filling in the form.' }) },
+  { type: 'page_break', label: 'Page break (new step)', icon: SplitSquareVertical, group: 'Layout', input: false,
+    defaults: () => ({ label: 'Next step' }) },
 ];
 
 function opts(...labels: string[]) {

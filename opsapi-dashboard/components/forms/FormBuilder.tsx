@@ -23,7 +23,8 @@ import { Card, Select, Switch } from '@/components/ui';
 import type { FormField, FormTarget, TargetOption, TargetType } from '@/services/forms.service';
 import { FIELD_TYPES, FIELD_TYPE_BY_NAME, MAPS_TO_LABEL, keyFromLabel, newField } from './field-types';
 import FieldInspector from './FieldInspector';
-import FormRenderer, { type Answers } from './FormRenderer';
+import FormRunner from './FormRunner';
+import type { Answers } from './FormRenderer';
 
 interface Props {
   fields: FormField[];
@@ -43,6 +44,8 @@ export default function FormBuilder(props: Props) {
   const [selected, setSelected] = useState<string | null>(fields[0]?.key ?? null);
   const [preview, setPreview] = useState<null | 'desktop' | 'mobile'>(null);
   const [previewValues, setPreviewValues] = useState<Answers>({});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
+  const [previewDone, setPreviewDone] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -149,12 +152,18 @@ export default function FormBuilder(props: Props) {
         </div>
         <div className={cn('mx-auto rounded-2xl border border-secondary-200 bg-surface p-6 shadow-sm',
           preview === 'mobile' ? 'max-w-[390px]' : 'max-w-2xl')}>
-          <FormRenderer fields={fields} values={previewValues} idPrefix="preview"
-            onChange={(k, v) => setPreviewValues((p) => ({ ...p, [k]: v }))} />
-          <button type="button" disabled className="mt-8 h-11 rounded-lg bg-primary-500 px-6 font-semibold text-white opacity-80">
-            Submit
-          </button>
-          <p className="mt-2 text-xs text-secondary-500">Preview only: nothing is sent.</p>
+          {previewDone ? (
+            <div className="py-6 text-center">
+              <p className="text-secondary-800">That&apos;s the end of the form: in the live form, Submit sends it.</p>
+              <button type="button" onClick={() => { setPreviewDone(false); setPreviewValues({}); }}
+                className="mt-3 text-sm font-medium text-primary-600 hover:underline">Start again</button>
+            </div>
+          ) : (
+            <FormRunner fields={fields} values={previewValues} idPrefix="preview" errors={previewErrors}
+              setErrors={setPreviewErrors} onSubmit={() => setPreviewDone(true)}
+              onChange={(k, v) => setPreviewValues((p) => ({ ...p, [k]: v }))} />
+          )}
+          <p className="mt-3 text-xs text-secondary-500">Preview only: nothing is sent. Logic and steps work as on the live form.</p>
         </div>
       </div>
     );
@@ -222,6 +231,7 @@ export default function FormBuilder(props: Props) {
         {current ? (
           <fieldset disabled={readOnly}>
             <FieldInspector field={current} lockedBecause={lockReason}
+              earlier={fields.slice(0, Math.max(0, fields.findIndex((f) => f.key === current.key)))}
               onChange={(patch) => current.key && update(current.key, patch)} />
           </fieldset>
         ) : (
@@ -239,10 +249,12 @@ function SortableField({ id, field, index, total, selected, readOnly, onSelect, 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: readOnly });
   const def = FIELD_TYPE_BY_NAME[field.type];
   const Icon = def?.icon;
+  const isBreak = field.type === 'page_break';
   const iconBtn = 'inline-flex h-8 w-8 items-center justify-center rounded-md text-secondary-500 hover:bg-secondary-100 hover:text-secondary-800 disabled:opacity-30';
   return (
     <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('group flex items-center gap-2 rounded-xl border bg-surface px-2 py-2.5 shadow-sm transition-colors',
+      className={cn('group flex items-center gap-2 rounded-xl border px-2 py-2.5 shadow-sm transition-colors',
+        isBreak ? 'border-dashed bg-secondary-50' : 'bg-surface',
         selected ? 'border-primary-500 ring-2 ring-primary-500/15' : 'border-secondary-200 hover:border-secondary-300',
         isDragging && 'z-10 opacity-80 shadow-lg')}>
       <button type="button" {...attributes} {...listeners} aria-label={`Drag to reorder: ${field.label || def?.label}`}
@@ -262,6 +274,8 @@ function SortableField({ id, field, index, total, selected, readOnly, onSelect, 
             {field.system && <span className="inline-flex items-center gap-0.5"><Lock className="h-3 w-3" /> locked</span>}
             {field.maps_to && <span>→ {MAPS_TO_LABEL[field.maps_to]}</span>}
             {field.width === 'half' && <span>· half width</span>}
+            {field.logic?.rules?.length ? <span>· shown only if…</span> : null}
+            {isBreak && <span>· a new step starts here</span>}
           </span>
         </span>
       </button>

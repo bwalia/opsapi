@@ -25,6 +25,7 @@ import type {
   CustomerState,
 } from '@/types';
 import toast from 'react-hot-toast';
+import RecordFormResponses from '@/components/forms/RecordFormResponses';
 
 const inputClass =
   'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface';
@@ -361,6 +362,9 @@ export default function CustomerDetailPage() {
           </div>
         </div>
       </Card>
+
+      <RecordFormResponses entityType="customer" entityUuid={uuid}
+        className="rounded-xl border border-secondary-200 bg-surface p-6 shadow-sm" />
 
       {/* Address */}
       <Card className="shadow-sm">

@@ -6,10 +6,11 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Lock } from 'lucide-react';
+import { GitBranch, Lock, Plus, Trash2 } from 'lucide-react';
 import { Input, Select, Switch, Textarea } from '@/components/ui';
-import type { FieldOption, FormField, MapsTo } from '@/services/forms.service';
+import type { FieldLogic, FieldOption, FormField, LogicOp, LogicRule, MapsTo } from '@/services/forms.service';
 import { FIELD_TYPE_BY_NAME, MAPS_TO_LABEL } from './field-types';
+import { opsFor } from './logic';
 
 function optionValue(label: string, taken: Set<string>, i: number) {
   let base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 100) || `option_${i + 1}`;
@@ -48,9 +49,11 @@ interface Props {
   field: FormField;
   lockedBecause?: string;
   onChange: (patch: Partial<FormField>) => void;
+  /** Questions above this one (what its logic may refer to). */
+  earlier: FormField[];
 }
 
-export default function FieldInspector({ field, lockedBecause, onChange }: Props) {
+export default function FieldInspector({ field, lockedBecause, onChange, earlier }: Props) {
   const def = FIELD_TYPE_BY_NAME[field.type];
   const locked = !!field.system;
   const v = field.validation || {};
@@ -147,6 +150,24 @@ export default function FieldInspector({ field, lockedBecause, onChange }: Props
           <option value="10">1 to 10</option>
         </Select>
       )}
+      {field.type === 'file_upload' && (
+        <>
+          <Select label="Kind of files" value={field.accept || 'any'}
+            onChange={(e) => onChange({ accept: e.target.value as FormField['accept'] })}>
+            <option value="any">Images or documents</option>
+            <option value="images">Images only (JPG, PNG, GIF, WebP, HEIC)</option>
+            <option value="documents">Documents only (PDF, Word, Excel, PowerPoint, text, CSV)</option>
+          </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="Files" value={String(field.max_files || 1)} onChange={(e) => onChange({ max_files: Number(e.target.value) })}>
+              {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>Up to {n}</option>)}
+            </Select>
+            <Select label="Size each" value={String(field.max_size_mb || 10)} onChange={(e) => onChange({ max_size_mb: Number(e.target.value) })}>
+              {[1, 2, 5, 10].map((n) => <option key={n} value={n}>{n} MB</option>)}
+            </Select>
+          </div>
+        </>
+      )}
       {field.type === 'hidden' && (
         <Input label="Read from the link parameter" value={field.param || ''} maxLength={64}
           helperText={`e.g. ?${field.param || 'utm_campaign'}=autumn — the value is saved with the response.`}
@@ -171,6 +192,9 @@ export default function FieldInspector({ field, lockedBecause, onChange }: Props
           {def.maps.map((m) => <option key={m} value={m}>{MAPS_TO_LABEL[m]}</option>)}
         </Select>
       )}
+      {!locked && field.type !== 'hidden' && (
+        <LogicEditor logic={field.logic} earlier={earlier} onChange={(logic) => onChange({ logic })} />
+      )}
       {field.key && def?.input && (
         <p className="text-xs text-secondary-500">
           Answer key <code className="rounded bg-secondary-100 px-1 py-0.5">{field.key}</code> — use{' '}
@@ -190,4 +214,139 @@ function ToggleRow({ label, checked, onChange, disabled }: {
       <Switch checked={checked} onChange={onChange} disabled={disabled} aria-label={label} />
     </div>
   );
+}
+
+/** "Show this question only if …" over the questions above it. */
+function LogicEditor({ logic, earlier, onChange }: {
+  logic?: FieldLogic; earlier: FormField[]; onChange: (l: FieldLogic | undefined) => void;
+}) {
+  const sources = earlier.filter((f) => f.key && FIELD_TYPE_BY_NAME[f.type]?.input && f.type !== 'file_upload');
+  const rules = logic?.rules || [];
+  const on = rules.length > 0;
+  const set = (next: LogicRule[]) => onChange(next.length ? { match: logic?.match || 'all', rules: next } : undefined);
+  const firstRule = (): LogicRule | null => {
+    const src = sources[sources.length - 1];
+    if (!src?.key) return null;
+    const op = opsFor(src.type)[0].op;
+    return { field: src.key, op, value: defaultValue(src, op) };
+  };
+
+  return (
+    <div className="space-y-3 border-t border-secondary-100 pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-secondary-700">
+          <GitBranch className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Show only if…
+        </span>
+        <Switch checked={on} aria-label="Show this question only if" disabled={!on && sources.length === 0}
+          onChange={(b) => { const r = firstRule(); set(b && r ? [r] : []); }} />
+      </div>
+      {!on && sources.length === 0 && <p className="text-xs text-secondary-500">Add a question above this one first.</p>}
+      {on && (
+        <>
+          {rules.length > 1 && (
+            <Select aria-label="Match" value={logic?.match || 'all'}
+              onChange={(e) => onChange({ match: e.target.value === 'any' ? 'any' : 'all', rules })}>
+              <option value="all">All of these are true</option>
+              <option value="any">Any of these is true</option>
+            </Select>
+          )}
+          {rules.map((r, i) => {
+            const src = sources.find((f) => f.key === r.field);
+            const update = (patch: Partial<LogicRule>) => set(rules.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+            return (
+              <div key={i} className="space-y-2 rounded-lg bg-secondary-50 p-2.5">
+                <div className="flex gap-2">
+                  <Select aria-label="Question" value={r.field} className="min-w-0"
+                    onChange={(e) => {
+                      const next = sources.find((f) => f.key === e.target.value);
+                      if (!next) return;
+                      const op = opsFor(next.type)[0].op;
+                      update({ field: e.target.value, op, value: defaultValue(next, op) });
+                    }}>
+                    {!src && <option value={r.field}>(question removed or moved below)</option>}
+                    {sources.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </Select>
+                  <button type="button" aria-label="Remove condition" onClick={() => set(rules.filter((_, j) => j !== i))}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-secondary-500 hover:bg-secondary-100">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                {src && (
+                  <div className="flex gap-2">
+                    <Select aria-label="Condition" value={r.op} className="min-w-0"
+                      onChange={(e) => { const op = e.target.value as LogicOp; update({ op, value: defaultValue(src, op) }); }}>
+                      {opsFor(src.type).map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
+                    </Select>
+                    <RuleValue source={src} rule={r} onChange={(value) => update({ value })} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {rules.length < 10 && (
+            <button type="button" onClick={() => { const r = firstRule(); if (r) set([...rules, r]); }}
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:underline">
+              <Plus className="h-4 w-4" /> Add condition
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function defaultValue(src: FormField, op: LogicOp): LogicRule['value'] {
+  if (op === 'filled' || op === 'empty') return undefined;
+  if (op === 'in' || op === 'not_in') return src.options?.[0] ? [src.options[0].value] : [];
+  if (src.options?.length) return src.options[0].value;
+  if (src.type === 'boolean' || src.type === 'consent') return true;
+  if (src.type === 'number' || src.type === 'rating') return 1;
+  return '';
+}
+
+function RuleValue({ source: src, rule, onChange }: {
+  source: FormField; rule: LogicRule; onChange: (v: LogicRule['value']) => void;
+}) {
+  if (rule.op === 'filled' || rule.op === 'empty') return null;
+  if (rule.op === 'in' || rule.op === 'not_in') {
+    const chosen = Array.isArray(rule.value) ? rule.value : [];
+    return (
+      <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+        {(src.options || []).map((o) => {
+          const on = chosen.includes(o.value);
+          return (
+            <button key={o.value} type="button" aria-pressed={on}
+              onClick={() => onChange(on ? chosen.filter((v) => v !== o.value) : [...chosen, o.value])}
+              className={`rounded-full border px-2.5 py-1 text-xs ${on ? 'border-primary-500 bg-primary-500/10 text-primary-700' : 'border-secondary-300 text-secondary-600'}`}>
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+  if (src.options?.length) {
+    return (
+      <Select aria-label="Value" value={String(rule.value ?? '')} className="min-w-0" onChange={(e) => onChange(e.target.value)}>
+        {src.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </Select>
+    );
+  }
+  if (src.type === 'boolean' || src.type === 'consent') {
+    return (
+      <Select aria-label="Value" value={rule.value === false ? 'false' : 'true'} className="min-w-0"
+        onChange={(e) => onChange(e.target.value === 'true')}>
+        <option value="true">{src.type === 'consent' ? 'ticked' : 'Yes'}</option>
+        <option value="false">{src.type === 'consent' ? 'not ticked' : 'No'}</option>
+      </Select>
+    );
+  }
+  if (src.type === 'number' || src.type === 'rating') {
+    return <Input aria-label="Value" inputMode="decimal" value={String(rule.value ?? '')}
+      onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} />;
+  }
+  if (src.type === 'date') {
+    return <Input aria-label="Value" type="date" value={String(rule.value ?? '')} onChange={(e) => onChange(e.target.value)} />;
+  }
+  return <Input aria-label="Value" value={String(rule.value ?? '')} maxLength={200} onChange={(e) => onChange(e.target.value)} />;
 }

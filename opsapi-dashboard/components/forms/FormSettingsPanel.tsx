@@ -6,9 +6,11 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { AlertTriangle, MailCheck } from 'lucide-react';
-import { Button, Card, Input, Switch, Textarea } from '@/components/ui';
+import { chatService, type ChatChannel } from '@/services/chat.service';
+import SpamProtectionModal from './SpamProtectionModal';
+import { Button, Card, Input, Select, Switch, Textarea } from '@/components/ui';
 import { apiError } from '@/components/field-service/shared';
-import type { Form, FormSettings } from '@/services/forms.service';
+import { formsService, type Form, type FormSettings } from '@/services/forms.service';
 
 /** Where this workspace's emails go out from, with the way to set up its own server. */
 function EmailVia({ via }: { via?: Form['email_via'] }) {
@@ -59,6 +61,16 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
   const [closeAt, setCloseAt] = useState(toLocalInput(form.settings?.close_at));
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [channels, setChannels] = useState<ChatChannel[] | null>(null);
+  const [spamOpen, setSpamOpen] = useState(false);
+  const [spamReady, setSpamReady] = useState<boolean | null>(null);
+
+  // Chat channels (if chat is on here) and whether Turnstile keys exist.
+  useEffect(() => {
+    chatService.listChannels().then(setChannels).catch(() => setChannels(null));
+    formsService.workspaceSettings()
+      .then((w) => setSpamReady(!!w.turnstile.site_key && w.turnstile.has_secret)).catch(() => setSpamReady(null));
+  }, []);
 
   useEffect(() => {
     setS(form.settings || {});
@@ -71,6 +83,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
     if (s.redirect_url && !/^https:\/\//.test(s.redirect_url)) errs.redirect_url = 'Use an https:// address.';
     const list = emails.split(/[,\s]+/).map((e) => e.trim()).filter(Boolean);
     if (list.some((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))) errs.notify_emails = 'One of these is not an email address.';
+    if (s.theme?.logo_url && !/^https:\/\//.test(s.theme.logo_url)) errs.logo_url = 'Use an https:// address.';
     if (s.auto_reply?.enabled && (!s.auto_reply.subject?.trim() || !s.auto_reply.body?.trim())) {
       errs.auto_reply = 'An auto-reply needs a subject and a message.';
     }
@@ -89,6 +102,10 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
         close_at: closeAt ? new Date(closeAt).toISOString() : null,
         notify_emails: list.length ? list : null,
         auto_reply: s.auto_reply?.enabled || s.auto_reply?.subject || s.auto_reply?.body ? s.auto_reply : null,
+        theme: s.theme && Object.values(s.theme).some(Boolean) ? s.theme : null,
+        captcha: !!s.captcha,
+        notify_in_app: s.notify_in_app !== false,
+        chat_channel_uuid: clear(s.chat_channel_uuid),
       } as unknown as FormSettings);
       toast.success('Settings saved');
     } catch (e) {
@@ -148,6 +165,63 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
         )}
       </Section>
 
+      <Section title="Alerts" description="Besides email: tell the team in the app and in chat.">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-secondary-800">In-app notification</p>
+            <p className="text-xs text-secondary-500">To you and the notify addresses that are members of this workspace.</p>
+          </div>
+          <Switch checked={s.notify_in_app !== false} aria-label="In-app notification"
+            onChange={(b) => setS({ ...s, notify_in_app: b })} />
+        </div>
+        {channels !== null && (
+          <Select label="Post each new response to a chat channel" value={s.chat_channel_uuid || ''}
+            onChange={(e) => setS({ ...s, chat_channel_uuid: e.target.value || undefined })}>
+            <option value="">Don&apos;t post</option>
+            {channels.filter((c) => (c.type || c.channel_type) !== 'direct').map((c) => (
+              <option key={c.uuid} value={c.uuid}>#{c.name}</option>
+            ))}
+          </Select>
+        )}
+      </Section>
+
+      <Section title="Branding" description="How the public page looks.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ColorInput label="Main colour (buttons, highlights)" value={s.theme?.primary_color}
+            onChange={(v) => setS({ ...s, theme: { ...s.theme, primary_color: v } })} />
+          <ColorInput label="Page background" value={s.theme?.background} fallback="#f8fafc"
+            onChange={(v) => setS({ ...s, theme: { ...s.theme, background: v } })} />
+        </div>
+        <Input label="Logo (image address)" placeholder="https://example.com/logo.png" value={s.theme?.logo_url || ''}
+          error={errors.logo_url} helperText="Empty = your workspace's logo."
+          onChange={(e) => setS({ ...s, theme: { ...s.theme, logo_url: e.target.value || undefined } })} />
+        <Input label="Submit button text" placeholder="Submit" maxLength={40} value={s.theme?.submit_label || ''}
+          onChange={(e) => setS({ ...s, theme: { ...s.theme, submit_label: e.target.value || undefined } })} />
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-secondary-800">Hide &ldquo;Powered by OpsAPI&rdquo;</span>
+          <Switch checked={!!s.theme?.hide_branding} aria-label="Hide Powered by"
+            onChange={(b) => setS({ ...s, theme: { ...s.theme, hide_branding: b || undefined } })} />
+        </div>
+      </Section>
+
+      <Section title="Spam protection" description="Bots are already filtered (a hidden trap field, a minimum time, rate limits).">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-secondary-800">&ldquo;I&apos;m not a robot&rdquo; check (Cloudflare Turnstile)</p>
+            <p className="text-xs text-secondary-500">
+              {spamReady === false ? 'Add your workspace’s Turnstile keys first. ' : 'For forms that attract spam. '}
+              <button type="button" className="font-medium text-primary-600 hover:underline" onClick={() => setSpamOpen(true)}>
+                {spamReady ? 'Workspace keys' : 'Set up Turnstile'}
+              </button>
+            </p>
+          </div>
+          <Switch checked={!!s.captcha} aria-label="Turnstile check" disabled={spamReady === false && !s.captcha}
+            onChange={(b) => setS({ ...s, captcha: b })} />
+        </div>
+      </Section>
+      <SpamProtectionModal open={spamOpen} onClose={() => setSpamOpen(false)}
+        onSaved={(w) => setSpamReady(!!w.turnstile.site_key && w.turnstile.has_secret)} />
+
       <Section title="Keep responses" description="Responses older than this are deleted automatically. Leave empty to keep them.">
         <Input label="Days" inputMode="numeric" value={s.retention_days ?? ''} placeholder="e.g. 365"
           onChange={(e) => setS({ ...s, retention_days: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} />
@@ -159,5 +233,23 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
         </div>
       )}
     </fieldset>
+  );
+}
+
+function ColorInput({ label, value, onChange, fallback = '#ff004e' }: {
+  label: string; value?: string; onChange: (v?: string) => void; fallback?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-secondary-700">{label}</label>
+      <div className="flex items-center gap-2">
+        <input type="color" aria-label={label} value={value || fallback} onChange={(e) => onChange(e.target.value)}
+          className="h-10 w-12 cursor-pointer rounded-lg border border-secondary-300 bg-surface p-1" />
+        <input aria-label={`${label} (hex)`} value={value || ''} placeholder="Default" maxLength={7}
+          onChange={(e) => onChange(/^#[0-9a-fA-F]{6}$/.test(e.target.value) ? e.target.value : e.target.value || undefined)}
+          className="h-10 w-28 rounded-lg border border-secondary-300 bg-surface px-3 font-mono text-sm" />
+        {value && <button type="button" onClick={() => onChange(undefined)} className="text-xs text-secondary-500 hover:underline">Reset</button>}
+      </div>
+    </div>
   );
 }

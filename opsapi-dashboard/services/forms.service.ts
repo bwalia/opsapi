@@ -10,7 +10,21 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
 export type FieldType =
   | 'short_text' | 'long_text' | 'email' | 'phone' | 'url' | 'number' | 'date' | 'time'
   | 'single_select' | 'radio' | 'multi_select' | 'boolean' | 'rating' | 'consent'
-  | 'name' | 'address' | 'hidden' | 'heading' | 'paragraph';
+  | 'name' | 'address' | 'file_upload' | 'hidden' | 'heading' | 'paragraph' | 'page_break';
+
+export type LogicOp = 'eq' | 'neq' | 'in' | 'not_in' | 'gt' | 'lt' | 'filled' | 'empty' | 'contains';
+
+export interface LogicRule {
+  /** Answer key of a question above this one. */
+  field: string;
+  op: LogicOp;
+  value?: string | number | boolean | string[];
+}
+
+export interface FieldLogic {
+  match: 'all' | 'any';
+  rules: LogicRule[];
+}
 
 export type MapsTo = 'phone' | 'company' | 'job_title' | 'address' | 'notes' | 'marketing_consent';
 
@@ -34,10 +48,16 @@ export interface FormField {
   };
   scale?: 5 | 10;
   text?: string;
+  /** File questions: how many files, the size limit, and which kinds. */
+  max_files?: number;
+  max_size_mb?: number;
+  accept?: 'images' | 'documents' | 'any';
   param?: string;
   maps_to?: MapsTo;
   /** Set by the server: a contact field a target needs. Locked in the builder. */
   system?: 'contact.name' | 'contact.email';
+  /** Show this field only when these rules hold (questions above it). */
+  logic?: FieldLogic;
 }
 
 export type TargetType = 'customer' | 'lead' | 'user';
@@ -56,6 +76,13 @@ export interface FormSettings {
   notify_emails?: string[];
   auto_reply?: { enabled: boolean; subject?: string; body?: string };
   retention_days?: number;
+  theme?: { primary_color?: string; background?: string; logo_url?: string; submit_label?: string; hide_branding?: boolean };
+  /** The workspace's Turnstile check on this form. */
+  captcha?: boolean;
+  /** In-app notification to the creator and notify addresses that are members (default on). */
+  notify_in_app?: boolean;
+  /** Post each response to this chat channel of the workspace. */
+  chat_channel_uuid?: string;
 }
 
 export type FormStatus = 'draft' | 'published' | 'closed' | 'archived';
@@ -154,6 +181,44 @@ export interface FormInput {
   expected_updated_at?: string;
 }
 
+export interface Analytics {
+  days: number;
+  totals: { views: number; starts: number; responses: number; conversion?: number; completion?: number; avg_seconds?: number };
+  series: { day: string; views: number; starts: number; responses: number }[];
+  funnel: { step: number; reached: number }[];
+  sources: { source: string; responses: number }[];
+}
+
+export interface ResponseSummary {
+  responses: number;
+  fields: { key: string; label: string; type: FieldType; answered: number; counts?: Record<string, number>;
+    average?: number; min?: number; max?: number }[];
+  summary?: string;
+  summary_error?: string;
+}
+
+export interface GeneratedForm {
+  title: string;
+  description?: string;
+  schema: { fields: FormField[] };
+  targets: FormTarget[];
+  dropped: number;
+}
+
+export interface RecordResponse {
+  uuid: string;
+  status: SubmissionStatus;
+  created_at: string;
+  outcome: SubmissionLink['outcome'];
+  form_uuid: string;
+  form_title: string;
+  answers: { label: string; value: string }[];
+}
+
+export interface WorkspaceFormsSettings {
+  turnstile: { site_key?: string; has_secret: boolean };
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 const BASE = '/api/v2/forms';
 
@@ -213,6 +278,28 @@ export const formsService = {
   },
   async removeSubmission(uuid: string, sid: string): Promise<void> {
     await apiClient.delete(`${BASE}/${uuid}/submissions/${sid}`);
+  },
+  async fileLink(uuid: string, sid: string, fileId: string): Promise<string> {
+    return unwrap<{ url: string }>(await apiClient.get(`${BASE}/${uuid}/submissions/${sid}/files/${fileId}`)).url;
+  },
+  async analytics(uuid: string, days = 30): Promise<Analytics> {
+    return unwrap<Analytics>(await apiClient.get(`${BASE}/${uuid}/analytics?days=${days}`));
+  },
+  async summary(uuid: string): Promise<ResponseSummary> {
+    return unwrap<ResponseSummary>(await apiClient.post(`${BASE}/${uuid}/summary`, {}, JSON_BODY));
+  },
+  async generate(prompt: string): Promise<GeneratedForm> {
+    return unwrap<GeneratedForm>(await apiClient.post(`${BASE}/generate`, { prompt }, JSON_BODY));
+  },
+  async forRecord(entityType: 'customer' | 'lead' | 'user' | 'invitation', entityUuid: string): Promise<RecordResponse[]> {
+    return unwrap<RecordResponse[]>(await apiClient.get(
+      `${BASE}/responses?entity_type=${entityType}&entity_uuid=${encodeURIComponent(entityUuid)}`));
+  },
+  async workspaceSettings(): Promise<WorkspaceFormsSettings> {
+    return unwrap<WorkspaceFormsSettings>(await apiClient.get(`${BASE}/workspace-settings`));
+  },
+  async saveWorkspaceSettings(input: { turnstile: { site_key?: string; secret?: string } }): Promise<WorkspaceFormsSettings> {
+    return unwrap<WorkspaceFormsSettings>(await apiClient.put(`${BASE}/workspace-settings`, input, JSON_BODY));
   },
   async exportCsv(uuid: string, params: { status?: string; from?: string; to?: string; q?: string } = {}) {
     const res = await apiClient.get(`${BASE}/${uuid}/export${buildQueryString(params)}`, { responseType: 'blob' });

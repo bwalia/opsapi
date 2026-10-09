@@ -22,11 +22,12 @@ import FormBuilder from '@/components/forms/FormBuilder';
 import FormSettingsPanel from '@/components/forms/FormSettingsPanel';
 import FormSharePanel from '@/components/forms/FormSharePanel';
 import FormResponses from '@/components/forms/FormResponses';
+import FormInsights from '@/components/forms/FormInsights';
 import {
   formsService, shareUrl, type Form, type FormField, type FormSettings, type FormTarget, type TargetOption,
 } from '@/services/forms.service';
 
-type Tab = 'build' | 'settings' | 'share' | 'responses';
+type Tab = 'build' | 'settings' | 'share' | 'responses' | 'insights';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 
 const TABS: { key: Tab; label: string }[] = [
@@ -34,6 +35,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'settings', label: 'Settings' },
   { key: 'share', label: 'Share' },
   { key: 'responses', label: 'Responses' },
+  { key: 'insights', label: 'Insights' },
 ];
 
 function FormEditor() {
@@ -250,6 +252,7 @@ function FormEditor() {
         {tab === 'settings' && <FormSettingsPanel form={form} onSave={saveSettings} readOnly={readOnly} />}
         {tab === 'share' && <FormSharePanel form={form} />}
         {tab === 'responses' && <FormResponses formUuid={form.uuid} initialResponse={search?.get('response') || undefined} />}
+        {tab === 'insights' && <FormInsights formUuid={form.uuid} />}
       </div>
     </div>
   );
