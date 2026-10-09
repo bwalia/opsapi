@@ -20,39 +20,6 @@ function AwsProvider:new(config)
     return instance
 end
 
--- Simplified AWS Signature V4 (HMAC-SHA256 based)
-local function hmac_sha256(key, data)
-    local ok, hmac = pcall(require, "resty.hmac")
-    if ok then
-        local h = hmac:new(key, hmac.ALGOS.SHA256)
-        h:update(data)
-        return h:final()
-    end
-    -- Fallback: use openssl via shell
-    local handle = io.popen("echo -n '" .. data .. "' | openssl dgst -sha256 -hmac '" .. key .. "' -binary 2>/dev/null | xxd -p -c 256")
-    local result = handle and handle:read("*a") or ""
-    if handle then handle:close() end
-    return result:gsub("%s+", "")
-end
-
-local function sha256_hex(data)
-    local ok, resty_sha256 = pcall(require, "resty.sha256")
-    if ok then
-        local sha = resty_sha256:new()
-        sha:update(data or "")
-        local digest = sha:final()
-        local hex = {}
-        for i = 1, #digest do
-            hex[i] = string.format("%02x", string.byte(digest, i))
-        end
-        return table.concat(hex)
-    end
-    local handle = io.popen("echo -n '" .. (data or "") .. "' | sha256sum 2>/dev/null")
-    local result = handle and handle:read("*a") or ""
-    if handle then handle:close() end
-    return result:match("^(%x+)") or ""
-end
-
 local function aws_request(self, action, params)
     local ok, http = pcall(require, "resty.http")
     if not ok then return nil, "resty.http not available" end

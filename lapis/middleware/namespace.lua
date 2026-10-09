@@ -135,6 +135,11 @@ function NamespaceMiddleware.requireNamespace(handler)
             return handler(self)
         end
 
+        -- A workspace's data is only for its members: no login, no namespace.
+        if not self.current_user then
+            return { json = { error = "Authentication required" }, status = 401 }
+        end
+
         -- Extract namespace identifier
         local namespace_identifier = extractNamespaceIdentifier(self)
 
@@ -172,7 +177,7 @@ function NamespaceMiddleware.requireNamespace(handler)
             }
         end
 
-        -- Check user has access to this namespace (if authenticated)
+        -- Check user has access to this namespace (always authenticated here)
         if self.current_user then
             -- Check if user is a platform admin (administrative role)
             local is_platform_admin = isPlatformAdmin(self.current_user)
@@ -239,13 +244,6 @@ function NamespaceMiddleware.requireNamespace(handler)
                 self.namespace_permissions = {}
                 self.is_namespace_owner = false  -- Not actual owner, but has admin access
             end
-        else
-            -- No authenticated user - just set namespace
-            self.namespace = namespace
-            self.namespace_membership = nil
-            self.namespace_permissions = {}
-            self.is_namespace_owner = false
-            self.is_platform_admin = false
         end
 
         ngx.log(ngx.INFO, "Namespace context set: ", namespace.slug, " for user: ",

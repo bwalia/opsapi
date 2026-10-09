@@ -19,18 +19,13 @@ local RateLimit = {}
 
 local DICT_NAME = "rate_limit_store"
 
---- Get client IP, respecting X-Forwarded-For / X-Real-IP behind reverse proxy
+--- The client's IP, as our own proxies saw it (helper/client-ip.lua: the
+-- right-most X-Forwarded-For hop that isn't a trusted proxy, trusted =
+-- internal ranges + OPSAPI_TRUSTED_PROXIES). The left-most entry is whatever
+-- the client wrote, so it is never used.
 -- @return string Client IP address
 function RateLimit.getClientIP()
-    -- X-Forwarded-For: client, proxy1, proxy2
-    local xff = ngx.var.http_x_forwarded_for
-    if xff then
-        local ip = xff:match("^([^,]+)")
-        if ip then return ip:match("^%s*(.-)%s*$") end
-    end
-    local real_ip = ngx.var.http_x_real_ip
-    if real_ip then return real_ip end
-    return ngx.var.remote_addr
+    return require("helper.client-ip").get()
 end
 
 --- Check rate limit for a given key

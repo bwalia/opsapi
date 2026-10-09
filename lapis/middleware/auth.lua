@@ -39,7 +39,7 @@ function AuthMiddleware.authenticate(self)
         return nil, { error = "JWT secret not configured", status = 500 }
     end
 
-    local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
+    local jwt_obj = require("helper.jwt-verify")(JWT_SECRET_KEY, token)
     if not jwt_obj or not jwt_obj.verified then
         ngx.log(ngx.WARN, "JWT verification failed: ", (jwt_obj and jwt_obj.reason or "unknown"))
         return nil, { error = "Invalid or expired token", status = 401 }
@@ -56,17 +56,9 @@ end
 function AuthMiddleware.requireAuth(handler)
     return function(self)
         ngx.log(ngx.INFO, "=== AUTH MIDDLEWARE CALLED for: " .. (self.req.parsed_url.path or "unknown"))
-        
-        -- Check for public browse header
-        local public_browse = self.req.headers["x-public-browse"]
-        if public_browse and public_browse:lower() == "true" then
-            ngx.log(ngx.INFO, "Public browse access granted")
-            -- Allow public access without authentication
-            self.current_user = nil
-            self.is_public_browse = true
-            return handler(self)
-        end
 
+        -- No anonymous mode here: public data is served by routes that don't
+        -- use requireAuth (e.g. the storefront GETs in products.lua / stores.lua).
         local user, err = AuthMiddleware.authenticate(self)
         if err then
             ngx.log(ngx.INFO, "Authentication failed: " .. (err.error or "unknown error"))
@@ -84,15 +76,6 @@ end
 function AuthMiddleware.requireAuthBefore(self)
     ngx.log(ngx.INFO, "=== AUTH MIDDLEWARE (before) CALLED for: " .. (self.req.parsed_url.path or "unknown"))
 
-    -- Check for public browse header
-    local public_browse = self.req.headers["x-public-browse"]
-    if public_browse and public_browse:lower() == "true" then
-        ngx.log(ngx.INFO, "Public browse access granted")
-        self.current_user = nil
-        self.is_public_browse = true
-        return
-    end
-
     local user, err = AuthMiddleware.authenticate(self)
     if err then
         ngx.log(ngx.INFO, "Authentication failed: " .. (err.error or "unknown error"))
@@ -107,7 +90,7 @@ end
 
 function AuthMiddleware.requireRole(role, handler)
     return function(self)
-        -- Note: role-based endpoints require authentication regardless of public browse setting
+        -- Role-based endpoints always require authentication.
         -- This is a security measure for endpoints that check user roles
 
         local user, err = AuthMiddleware.authenticate(self)

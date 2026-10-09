@@ -19,6 +19,21 @@ local Mail = require("helper.mail")
 -- guardAuth() records any failed response of a route; successes are recorded
 -- explicitly where the user is known.
 local UserActivity = require("lib.user-activity")
+local Throttle = require("helper.auth-throttle")
+
+-- 429 with Retry-After, for per-account limits (helper/auth-throttle.lua).
+local function locked_response(message, retry_after)
+    ngx.header["Retry-After"] = tostring(math.max(retry_after or 60, 1))
+    return { status = 429, json = { error = message, code = "AUTH_LOCKED", retry_after = retry_after } }
+end
+
+-- The lockout key of a sign-in identifier: the account (email or username
+-- alike), or the identifier itself when no account matches.
+local function login_lock_key(identifier)
+    local row = db.query("SELECT uuid FROM users WHERE lower(email) = lower(?) OR lower(username) = lower(?) LIMIT 1",
+        identifier, identifier)[1]
+    return Throttle.key("login", row and row.uuid or identifier)
+end
 local function login_identifier(self)
     return self.params.username or self.params.identifier
 end
@@ -254,11 +269,21 @@ return function(app)
             })
         end
 
+        -- Per-account lockout, whatever the IP: too many wrong passwords and
+        -- even the right one is refused until the window ends.
+        local lock_key = login_lock_key(identifier)
+        local locked, retry_after = Throttle.blocked(lock_key, Throttle.LOGIN)
+        if locked then
+            return locked_response("Too many failed sign-in attempts. Try again later.", retry_after)
+        end
+
         local user = UserQueries.verify(identifier, password)
 
         if not user then
+            Throttle.hit(lock_key, Throttle.LOGIN.window)
             return Errors.response(self, "AUTH_INVALID_CREDENTIALS")
         end
+        Throttle.clear(lock_key)
 
         -- Get user with roles
         local userWithRoles = UserQueries.show(user.uuid)
@@ -289,6 +314,9 @@ return function(app)
             first_name = userWithRoles.first_name,
         }, brand)
 
+        if otp_err == "rate_limited" then
+            return locked_response("Too many verification codes requested. Try again later.", Throttle.OTP_SEND.window)
+        end
         if not otp_ok then
             ngx.log(ngx.ERR, "[2FA] OTP send failed for ", userWithRoles.email, ": ", tostring(otp_err))
             -- Still require 2FA, just warn that email may not arrive
@@ -407,6 +435,9 @@ return function(app)
         }
 
         local ok, err = OTP.sendToEmail(user, brand)
+        if err == "rate_limited" then
+            return locked_response("Too many verification codes requested. Try again later.", Throttle.OTP_SEND.window)
+        end
         if not ok then
             ngx.log(ngx.ERR, "[2FA] Resend OTP failed for ", user.email, ": ", tostring(err))
         end

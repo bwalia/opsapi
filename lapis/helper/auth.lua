@@ -3,37 +3,43 @@ local Global = require("helper.global")
 
 local _M = {}
 
--- Public routes that do not require authentication
+-- Routes that need no login, and the methods allowed without one: `true` =
+-- GET/HEAD only (public reads); a table lists other methods explicitly. A
+-- write is public only if it is listed here (a public GET route stays closed
+-- to anonymous POST/PUT/DELETE).
+local GET = true
 local PUBLIC_ROUTES = {
-    ["^/$"] = true,
-    ["^/health$"] = true,
-    ["^/swagger$"] = true,
-    ["^/api%-docs$"] = true,
-    ["^/openapi%.json$"] = true,
-    ["^/swagger/swagger%.json$"] = true,
-    ["^/metrics$"] = true,
-    ["^/api/v2/login$"] = true,
-    ["^/api/v2/register$"] = true,
-    ["^/api/v2/storeproducts$"] = true,
-    ["^/api/v2/stores/[^/]+/products$"] = true,
-    ["^/api/v2/products/[^/]+/variants$"] = true,
-    ["^/api/v2/stores$"] = true,
-    ["^/api/v2/products$"] = true,
-    ["^/api/v2/categories$"] = true,
-    -- Academy Stripe webhook (Stripe sends no JWT; verified by signature).
-    ["^/api/v2/public/academy/stripe/webhook$"] = true,
-    -- ["^/auth/forgot_password$"] = true,
-    -- ["^/auth/reset_password$"] = true
+    ["^/$"] = GET,
+    ["^/health$"] = GET,
+    ["^/swagger$"] = GET,
+    ["^/api%-docs$"] = GET,
+    ["^/openapi%.json$"] = GET,
+    ["^/swagger/swagger%.json$"] = GET,
+    ["^/metrics$"] = GET,
+    ["^/api/v2/register$"] = { POST = true },
+    -- Storefront browsing (products.lua / stores.lua / categories.lua / variants.lua).
+    ["^/api/v2/stores/[^/]+/products$"] = GET,
+    ["^/api/v2/products/[^/]+/variants$"] = GET,
+    ["^/api/v2/stores$"] = GET,
+    ["^/api/v2/products$"] = GET,
+    ["^/api/v2/categories$"] = GET,
+    -- Webhooks: no login, their signature is their authentication.
+    ["^/api/v2/public/academy/stripe/webhook$"] = { POST = true },
+    ["^/api/v2/webhooks/stripe$"] = { POST = true },
+    ["^/api/v2/webhooks/github$"] = { POST = true },
 }
 
-function _M.is_public_route(uri)
-    for pattern, _ in pairs(PUBLIC_ROUTES) do
-        if ngx.re.match(uri, pattern) then
-            ngx.log(ngx.NOTICE, "Public route matched: ", uri, " with pattern: ", pattern)
-            return true
+--- Is this request allowed without a login?
+-- @param uri string
+-- @param method string|nil (defaults to the request's)
+function _M.is_public_route(uri, method)
+    method = method or (ngx and ngx.var.request_method) or "GET"
+    for pattern, methods in pairs(PUBLIC_ROUTES) do
+        if uri:match(pattern) then -- Lua patterns, as written above (%-, %.)
+            if methods == GET then return method == "GET" or method == "HEAD" end
+            return methods[method] == true
         end
     end
-    ngx.log(ngx.NOTICE, "Not a public route: ", uri)
     return false
 end
 
@@ -137,7 +143,7 @@ function _M.authenticate()
         ngx.exit(500)
     end
 
-    local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
+    local jwt_obj = require("helper.jwt-verify")(JWT_SECRET_KEY, token)
 
     if not jwt_obj.verified then
         ngx.log(ngx.WARN, "JWT verification failed: ", jwt_obj.reason)

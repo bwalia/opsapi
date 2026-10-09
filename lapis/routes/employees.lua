@@ -66,6 +66,8 @@ return function(app)
     -- (owner/admin), so it's gated there rather than on employees.
     local team_member = Http.guard("users", "create", function(self)
         local body = Http.body(self)
+        local may, why = require("helper.rbac-guard").can_assign_role_names(self, body.role_name)
+        if not may then return Http.fail(403, why) end
         local result, err = EmployeeQueries.createTeamMember(self.namespace.id, Http.actor(self), body)
         if not result then return Http.from_error(err) end
 
