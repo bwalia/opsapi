@@ -2,7 +2,7 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
-## Unreleased
+## 1.3.0
 
 - `@opsapi/client/property-deals`: the AI layer (Phase 5) — "Let AI do it" (`POST /tasks/{id}/agent-run`), agent runs, `/ai/agents`, `/ai/routes`, `/ai/usage`, approval retry and booking confirmation, mail connectors and inbound messages, notification preferences, the task contact log; `ApprovalDecision` gains `payload_version` / `payload_sha256`. New named types `Agent`, `AgentConfig`, `AiRoute`, `MailConnector`, `MailConnectorWrite`, `InboundMessage`, `NotificationPreferences`; more events in `PROPERTY_DEALS_EVENTS`.
 - `@opsapi/client/property-deals`: map data and matching (Phase 6) — data connectors, market records + CSV import, property enrichment, map layers `sold_prices` / `epc` / `listings` / `auction_lots`, comparables on the property card, matches with breakdown + recompute + deal packs, Companies House search/check, saved searches and deal scout alerts, `POST /suppliers/nearest`. Named types `Connector`, `ConnectorWrite`, `MarketRecord`, `MatchWithBreakdown`, `ScoutAlert`, `CompanyCheck`.
