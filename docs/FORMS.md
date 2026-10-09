@@ -212,10 +212,17 @@ can't have a CNAME, so use the provider's ALIAS/ANAME record or a subdomain.
 
 **For the platform operator:** custom domains are off until `FORMS_DOMAIN_TARGET` is set (§12).
 The edge must then:
-1. route those hosts to the dashboard, keeping the original `Host` or sending `X-Forwarded-Host`;
+1. route those hosts to the dashboard, passing the customer's host as `X-Original-Host` (or
+   keeping it as `Host` / `X-Forwarded-Host`);
 2. get a certificate for each one. Ask `GET /api/v2/public/form-domains/check?domain=<host>` before
    issuing it: **200** means it is a connected domain. This is the hook for Caddy's
    `on_demand_tls ask` or lua-resty-auto-ssl's `allow_domain`.
+
+**On wslproxy** (bwalia/wslproxy#1317, "on-demand hosts"), both steps are one setting. On the
+dashboard's server, set **On-demand hosts: ask URL** to
+`https://<api host>/api/v2/public/form-domains/check`, and set `FORMS_DOMAIN_TARGET` to the name
+customers should CNAME to (the edge's POP name). A connected domain then gets its certificate on
+its first visit and reaches the dashboard with `X-Original-Host`.
 
 A deployment on its own address (e.g. a single-workspace dashboard at `my.example.com`) needs
 none of this: its links already use that address.

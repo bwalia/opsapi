@@ -6,6 +6,11 @@ import { NextResponse, type NextRequest } from 'next/server';
  * the API (GET /api/v2/public/form-domains/check, the same question the edge
  * asks before issuing a certificate), cached per host for a minute. If the
  * API can't be reached, the host is treated as the dashboard.
+ *
+ * Behind an edge that serves the custom host "as" the dashboard (wslproxy
+ * on-demand hosts), Host is the dashboard's own name and the client's host
+ * arrives as X-Original-Host; X-Forwarded-Host may be rewritten by a second
+ * proxy layer, so X-Original-Host is read first.
  */
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
@@ -33,7 +38,8 @@ async function isCustomDomain(host: string): Promise<boolean> {
 }
 
 export async function proxy(req: NextRequest) {
-  const host = (req.headers.get('x-forwarded-host') || req.headers.get('host') || '').split(',')[0].trim()
+  const host = (req.headers.get('x-original-host') || req.headers.get('x-forwarded-host') || req.headers.get('host') || '')
+    .split(',')[0].trim()
     .replace(/:\d+$/, '').toLowerCase();
   if (!maybeCustom(host) || req.nextUrl.pathname.startsWith('/f/')) return NextResponse.next();
   if (!(await isCustomDomain(host))) return NextResponse.next();
