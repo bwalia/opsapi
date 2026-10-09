@@ -32,6 +32,11 @@ function signIn(win: Window) {
 }
 
 describe('Forms', () => {
+  before(function () {
+    // Needs a seeded owner session (see the header); skip where there is none.
+    if (!Cypress.env('FORMS_TOKEN')) this.skip();
+  });
+
   it('builds, publishes, fills in and shows a response with its customer', () => {
     cy.visit('/dashboard/forms', { onBeforeLoad: signIn });
     cy.contains('h1', 'Forms').should('be.visible');
