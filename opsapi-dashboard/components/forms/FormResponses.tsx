@@ -11,7 +11,7 @@ import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  AlertTriangle, Download, Inbox, Loader2, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2,
+  AlertTriangle, Download, Inbox, Loader2, Paperclip, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2,
 } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, Input, Modal, Select } from '@/components/ui';
 import { apiError } from '@/components/field-service/shared';
@@ -44,6 +44,8 @@ export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale'> 
       return v === true ? 'Agreed' : 'Not agreed';
     case 'rating':
       return `${v}/${field.scale || 5}`;
+    case 'file_upload':
+      return (Array.isArray(v) ? v : []).map((f) => (f as { name?: string })?.name || 'file').join(', ');
     default:
       return typeof v === 'object' ? JSON.stringify(v) : String(v);
   }
@@ -304,7 +306,9 @@ function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdat
                 <div key={f.key} className="grid gap-1 py-3 sm:grid-cols-3 sm:gap-4">
                   <dt className="text-sm text-secondary-500">{f.label}</dt>
                   <dd className="whitespace-pre-wrap break-words text-sm text-secondary-900 sm:col-span-2">
-                    {showAnswer(f, s.answers[f.key || '']) || <span className="text-secondary-400">—</span>}
+                    {f.type === 'file_upload' && Array.isArray(s.answers[f.key || '']) ? (
+                      <Files formUuid={formUuid} sid={s.uuid} files={s.answers[f.key || ''] as { id: string; name: string; size: number }[]} />
+                    ) : (showAnswer(f, s.answers[f.key || '']) || <span className="text-secondary-400">—</span>)}
                   </dd>
                 </div>
               ))}
@@ -358,5 +362,35 @@ function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdat
           }
         }} />
     </>
+  );
+}
+
+/** A response's files: each opens through a short-lived signed link. */
+function Files({ formUuid, sid, files }: { formUuid: string; sid: string; files: { id: string; name: string; size: number }[] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const open = async (id: string) => {
+    setBusy(id);
+    try {
+      window.open(await formsService.fileLink(formUuid, sid, id), '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      toast.error(apiError(e, 'Could not open the file'));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <ul className="space-y-1.5">
+      {files.map((f) => (
+        <li key={f.id} className="flex items-center gap-2">
+          <Paperclip className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />
+          <span className="min-w-0 truncate">{f.name}</span>
+          <span className="shrink-0 text-xs text-secondary-500">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+          <button type="button" onClick={() => open(f.id)} disabled={busy === f.id}
+            className="shrink-0 text-sm font-medium text-primary-600 hover:underline disabled:opacity-50">
+            {busy === f.id ? 'Opening…' : 'Open'}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

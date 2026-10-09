@@ -7,16 +7,24 @@
  * the checks here are only for convenience).
  */
 
-import React from 'react';
-import { Star } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { FileUp, Loader2, Paperclip, Star, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FormField } from '@/services/forms.service';
+import type { UploadedFile } from '@/services/forms-public.service';
+
+/** Stores one file for a file question (the public page passes it; the preview doesn't). */
+export type UploadFn = (fieldKey: string, file: File) => Promise<UploadedFile>;
+
+// The form's brand colour (FormRunner sets --form-accent), else the app's.
+const ACCENT = 'var(--form-accent,var(--color-primary-500))';
+const SELECTED = 'border-[var(--form-accent,var(--color-primary-500))] bg-[color-mix(in_srgb,var(--form-accent,var(--color-primary-500))_6%,transparent)]';
 
 export type Answers = Record<string, unknown>;
 
 const control =
   'w-full rounded-lg border bg-surface px-3.5 py-2.5 text-[15px] text-secondary-900 placeholder:text-secondary-400 ' +
-  'transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/25 focus:border-primary-500 ' +
+  'transition-colors focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--form-accent,var(--color-primary-500))_25%,transparent)] focus:border-[var(--form-accent,var(--color-primary-500))] ' +
   'disabled:cursor-not-allowed disabled:bg-secondary-50';
 
 function border(error?: string) {
@@ -28,10 +36,11 @@ function str(v: unknown): string {
 }
 
 /** Client-side required check (the server re-checks everything). */
-export function missingRequired(fields: FormField[], values: Answers): Record<string, string> {
+export function missingRequired(fields: FormField[], values: Answers, shown?: Set<string>): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const f of fields) {
-    if (!f.required || !f.key || f.type === 'heading' || f.type === 'paragraph' || f.type === 'hidden') continue;
+    if (!f.required || !f.key || ['heading', 'paragraph', 'hidden', 'page_break'].includes(f.type)) continue;
+    if (shown && !shown.has(f.key)) continue;
     const v = values[f.key];
     let empty = v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
     if (f.type === 'name') empty = !str((v as { first?: string })?.first).trim();
@@ -50,18 +59,23 @@ interface Props {
   disabled?: boolean;
   /** Prefix for element ids (two renderers on one page must not clash). */
   idPrefix?: string;
+  /** Keys shown by conditional logic (components/forms/logic.ts); all when absent. */
+  shown?: Set<string>;
+  upload?: UploadFn;
 }
 
-export default function FormRenderer({ fields, values, errors = {}, onChange, disabled, idPrefix = 'f' }: Props) {
+export default function FormRenderer({ fields, values, errors = {}, onChange, disabled, idPrefix = 'f', shown, upload }: Props) {
   return (
     <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
       {fields.map((f, i) => {
-        if (f.type === 'hidden') return null;
+        if (f.type === 'hidden' || f.type === 'page_break') return null;
+        if (shown && !shown.has(f.key || `idx-${i}`)) return null;
         const full = f.width !== 'half' || f.type === 'heading' || f.type === 'paragraph';
         return (
           <div key={f.key || i} className={cn(full && 'sm:col-span-2')}>
             <Field field={f} value={f.key ? values[f.key] : undefined} error={f.key ? errors[f.key] : undefined}
-              onChange={(v) => f.key && onChange(f.key, v)} disabled={disabled} id={`${idPrefix}-${f.key || i}`} />
+              onChange={(v) => f.key && onChange(f.key, v)} disabled={disabled} id={`${idPrefix}-${f.key || i}`}
+              upload={upload} />
           </div>
         );
       })}
@@ -93,8 +107,9 @@ function describedBy(id: string, field: FormField, error?: string) {
   return error ? `${id}-error` : field.help ? `${id}-help` : undefined;
 }
 
-function Field({ field: f, value, error, onChange, disabled, id }: {
+function Field({ field: f, value, error, onChange, disabled, id, upload }: {
   field: FormField; value: unknown; error?: string; onChange: (v: unknown) => void; disabled?: boolean; id: string;
+  upload?: UploadFn;
 }) {
   const aria = { 'aria-invalid': error ? true : undefined, 'aria-describedby': describedBy(id, f, error) };
   const max = f.validation?.max_length;
@@ -141,11 +156,11 @@ function Field({ field: f, value, error, onChange, disabled, id }: {
             {options.map((o) => (
               <label key={o.value} className={cn(
                 'flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3.5 py-2.5 text-[15px] transition-colors',
-                current === o.value ? 'border-primary-500 bg-primary-500/5' : 'border-secondary-300 hover:border-secondary-400',
+                current === o.value ? SELECTED : 'border-secondary-300 hover:border-secondary-400',
                 f.type === 'boolean' && 'flex-1 justify-center')}>
                 <input type="radio" name={id} value={o.value} checked={current === o.value} disabled={disabled}
                   onChange={() => onChange(f.type === 'boolean' ? o.value === 'true' : o.value)}
-                  className="h-4 w-4 accent-primary-500" />
+                  className="h-4 w-4" style={{ accentColor: ACCENT }} />
                 <span className="text-secondary-800">{o.label}</span>
               </label>
             ))}
@@ -166,8 +181,8 @@ function Field({ field: f, value, error, onChange, disabled, id }: {
               return (
                 <label key={o.value} className={cn(
                   'flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3.5 py-2.5 text-[15px] transition-colors',
-                  on ? 'border-primary-500 bg-primary-500/5' : 'border-secondary-300 hover:border-secondary-400')}>
-                  <input type="checkbox" checked={on} disabled={disabled} className="h-4 w-4 accent-primary-500"
+                  on ? SELECTED : 'border-secondary-300 hover:border-secondary-400')}>
+                  <input type="checkbox" checked={on} disabled={disabled} className="h-4 w-4" style={{ accentColor: ACCENT }}
                     onChange={() => onChange(on ? selected.filter((v) => v !== o.value) : [...selected, o.value])} />
                   <span className="text-secondary-800">{o.label}</span>
                 </label>
@@ -193,7 +208,7 @@ function Field({ field: f, value, error, onChange, disabled, id }: {
                   'focus:outline-none focus:ring-2 focus:ring-primary-500/30',
                   k <= n ? 'text-warning-500' : 'text-secondary-300 hover:text-secondary-400')}>
                 {scale === 10
-                  ? <span className={cn('text-sm font-semibold', k <= n ? 'text-primary-600' : 'text-secondary-500')}>{k}</span>
+                  ? <span className={cn('text-sm font-semibold', k <= n ? 'text-[var(--form-accent,var(--color-primary-600))]' : 'text-secondary-500')}>{k}</span>
                   : <Star className="h-7 w-7" fill={k <= n ? 'currentColor' : 'none'} />}
               </button>
             ))}
@@ -203,13 +218,16 @@ function Field({ field: f, value, error, onChange, disabled, id }: {
       );
     }
 
+    case 'file_upload':
+      return <FileField field={f} value={value} error={error} onChange={onChange} disabled={disabled} id={id} upload={upload} />;
+
     case 'consent':
       return (
         <div>
           <label className={cn('flex cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-3',
             error ? 'border-error-500' : 'border-secondary-200')}>
             <input id={id} type="checkbox" checked={value === true} disabled={disabled}
-              onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-primary-500" {...aria} />
+              onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0" style={{ accentColor: ACCENT }} {...aria} />
             <span className="text-sm text-secondary-700">
               <span className="font-medium text-secondary-900">{f.label}</span>
               {f.required && <span className="ml-0.5 text-error-500" aria-hidden="true">*</span>}
@@ -282,4 +300,92 @@ function Field({ field: f, value, error, onChange, disabled, id }: {
       );
     }
   }
+}
+
+const ACCEPT: Record<string, string> = {
+  images: 'image/jpeg,image/png,image/gif,image/webp,.heic,.heif',
+  documents: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv',
+};
+
+function size(bytes: number) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** A file question: each file uploads when picked; the answer is the stored files. */
+function FileField({ field: f, value, error, onChange, disabled, id, upload }: {
+  field: FormField; value: unknown; error?: string; onChange: (v: unknown) => void; disabled?: boolean; id: string;
+  upload?: UploadFn;
+}) {
+  const files = Array.isArray(value) ? (value as UploadedFile[]) : [];
+  const [busy, setBusy] = useState(0);
+  const [problem, setProblem] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const max = f.max_files || 1;
+  const limit = (f.max_size_mb || 10) * 1024 * 1024;
+  const accept = f.accept === 'images' ? ACCEPT.images : f.accept === 'documents' ? ACCEPT.documents
+    : `${ACCEPT.images},${ACCEPT.documents}`;
+
+  const pick = async (list: FileList | null) => {
+    if (!list || !upload || !f.key) return;
+    setProblem('');
+    const chosen = Array.from(list).slice(0, Math.max(0, max - files.length));
+    let next = files;
+    for (const file of chosen) {
+      if (file.size > limit) {
+        setProblem(`${file.name} is larger than ${f.max_size_mb || 10} MB.`);
+        continue;
+      }
+      setBusy((b) => b + 1);
+      try {
+        const stored = await upload(f.key, file);
+        next = [...next, stored];
+        onChange(next);
+      } catch (e) {
+        setProblem((e as Error).message || `${file.name} couldn't be uploaded.`);
+      } finally {
+        setBusy((b) => b - 1);
+      }
+    }
+    if (input.current) input.current.value = '';
+  };
+
+  const shownError = error || problem;
+  return (
+    <div>
+      <Label htmlFor={id} field={f} />
+      {files.length > 0 && (
+        <ul className="mb-2 space-y-1.5">
+          {files.map((file) => (
+            <li key={file.id} className="flex items-center gap-2 rounded-lg border border-secondary-200 px-3 py-2 text-sm">
+              <Paperclip className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-secondary-800">{file.name}</span>
+              <span className="shrink-0 text-xs text-secondary-500">{size(file.size)}</span>
+              <button type="button" disabled={disabled} aria-label={`Remove ${file.name}`}
+                onClick={() => onChange(files.filter((x) => x.id !== file.id))}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-secondary-500 hover:bg-secondary-100">
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {files.length < max && (
+        <label htmlFor={id} className={cn('flex min-h-[88px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-4 py-4 text-center text-sm transition-colors',
+          shownError ? 'border-error-500' : 'border-secondary-300 hover:border-secondary-400',
+          (!upload || disabled) && 'cursor-not-allowed opacity-60')}>
+          {busy > 0 ? <Loader2 className="h-5 w-5 animate-spin text-secondary-400" /> : <FileUp className="h-5 w-5 text-secondary-400" aria-hidden="true" />}
+          <span className="font-medium text-secondary-700">{busy > 0 ? 'Uploading…' : max > 1 ? 'Choose files' : 'Choose a file'}</span>
+          <span className="text-xs text-secondary-500">
+            {f.accept === 'images' ? 'Images' : f.accept === 'documents' ? 'Documents' : 'Images or documents'}
+            {` up to ${f.max_size_mb || 10} MB`}{max > 1 ? ` · up to ${max} files` : ''}
+            {!upload && ' · uploads work on the live form'}
+          </span>
+          <input ref={input} id={id} type="file" className="sr-only" accept={accept} multiple={max - files.length > 1}
+            disabled={!upload || disabled || busy > 0} onChange={(e) => pick(e.target.files)}
+            aria-invalid={shownError ? true : undefined} aria-describedby={describedBy(id, f, shownError)} />
+        </label>
+      )}
+      <Help id={id} field={f} error={shownError} />
+    </div>
+  );
 }

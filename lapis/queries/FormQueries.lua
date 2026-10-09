@@ -74,7 +74,7 @@ end
 
 --- Merge `raw` into `current` settings, validating each key.
 -- @return settings | nil, err
-function FormQueries.cleanSettings(raw, current)
+function FormQueries.cleanSettings(raw, current, namespace_id)
     local s = {}
     for k, v in pairs(current or {}) do s[k] = v end
     if raw == nil or raw == cjson.null then return s end
@@ -128,6 +128,56 @@ function FormQueries.cleanSettings(raw, current)
             end
             return setmetatable(out, cjson.array_mt)
         end,
+        -- The workspace's Turnstile check on this form (keys: Forms -> Workspace settings).
+        captcha = function(v)
+            if v ~= true and v ~= "true" then return false end
+            if namespace_id and not require("lib.forms.workspace").turnstile(namespace_id) then
+                return nil, "needs your workspace's Turnstile keys first (Forms → Spam protection)"
+            end
+            return true
+        end,
+        notify_in_app = function(v) return v == true or v == "true" end,
+        -- Post each new response to one of this workspace's chat channels.
+        chat_channel_uuid = function(v)
+            if type(v) ~= "string" or not v:match(UUID) then return nil, "must be a chat channel" end
+            if not require("helper.project-config").isFeatureEnabled("chat") then return nil, "chat isn't available" end
+            local ch = db.query("SELECT 1 FROM chat_channels WHERE uuid = ? AND namespace_id = ?", v,
+                namespace_id or 0)[1]
+            if not ch then return nil, "is not a channel of this workspace" end
+            return v
+        end,
+        -- Branding of the public page.
+        theme = function(v)
+            if type(v) ~= "table" then return nil, "must be an object" end
+            local t = {}
+            for _, k in ipairs({ "primary_color", "background" }) do
+                if v[k] ~= nil and v[k] ~= cjson.null and v[k] ~= "" then
+                    if type(v[k]) ~= "string" or not v[k]:match("^#%x%x%x%x%x%x$") then
+                        return nil, k .. " must be a colour like #1f6feb"
+                    end
+                    t[k] = v[k]:lower()
+                end
+            end
+            if v.logo_url ~= nil and v.logo_url ~= cjson.null and v.logo_url ~= "" then
+                local u = setting_text(v.logo_url, 1000)
+                if not u or not u:match("^https://[%w%-%.]+[^%s\"'<>]*$") then
+                    return nil, "logo_url must be an https:// address"
+                end
+                t.logo_url = u
+            end
+            if v.submit_label ~= nil and v.submit_label ~= cjson.null and v.submit_label ~= "" then
+                local l, err = setting_text(v.submit_label, 40)
+                if not l then return nil, "submit_label " .. (err or "is invalid") end
+                t.submit_label = l
+            end
+            if v.hide_branding == true then
+                if namespace_id and not require("lib.forms.limits").of(namespace_id).hide_branding then
+                    return nil, "hiding \"Powered by\" isn't included in this workspace's plan"
+                end
+                t.hide_branding = true
+            end
+            return t
+        end,
         auto_reply = function(v)
             if type(v) ~= "table" then return nil, "must be { enabled, subject, body }" end
             local subject, serr = setting_text(v.subject, 200)
@@ -170,6 +220,8 @@ end
 function FormQueries.present(row, full)
     local schema = decode(row.draft_schema, { fields = {} })
     local origin = nonnull(row.public_origin)
+    local domain = require("lib.forms.domains").active_for(row.namespace_id)
+    if domain then origin = "https://" .. domain end
     local out = {
         uuid = row.uuid,
         public_id = row.public_id,
@@ -184,6 +236,7 @@ function FormQueries.present(row, full)
         has_unpublished_changes = row.has_unpublished_changes == true,
         share_url = origin and (origin .. "/f/" .. row.public_id) or nil,
         share_path = "/f/" .. row.public_id,
+        share_domain = domain,
         targets = setmetatable(decode(row.targets, {}), cjson.array_mt),
         created_by_uuid = nonnull(row.created_by_uuid),
         created_at = row.created_at,
@@ -221,6 +274,7 @@ function FormQueries.get(namespace_id, uuid)
     local smtp_ok, smtp = pcall(require("helper.namespace-mail").smtp, namespace_id)
     out.email_via = (smtp_ok and smtp) and "workspace"
         or (require("helper.mail").isConfigured() and "platform" or "none")
+    out.can_hide_branding = require("lib.forms.limits").of(namespace_id).hide_branding == true
     return out
 end
 
@@ -273,8 +327,12 @@ function FormQueries.create(namespace_id, actor_uuid, body, auth, origin)
     body = body or {}
     local count = tonumber(db.query("SELECT COUNT(*) AS n FROM forms WHERE namespace_id = ? AND deleted_at IS NULL",
         namespace_id)[1].n)
-    if count >= FormQueries.MAX_PER_NAMESPACE then
-        return nil, "this workspace has reached " .. FormQueries.MAX_PER_NAMESPACE .. " forms; delete some first"
+    local plan_max = require("lib.forms.limits").of(namespace_id).forms
+    local max = math.min(FormQueries.MAX_PER_NAMESPACE, plan_max or FormQueries.MAX_PER_NAMESPACE)
+    if count >= max then
+        return nil, plan_max and plan_max <= count
+            and ("your plan includes " .. plan_max .. " forms; delete one or upgrade to add more")
+            or ("this workspace has reached " .. max .. " forms; delete some first"), 403
     end
 
     local template
@@ -303,7 +361,7 @@ function FormQueries.create(namespace_id, actor_uuid, body, auth, origin)
         or (template and { fields = template.fields }) or { fields = {} }
     local schema, serr = Fields.normalize(raw_schema, roles)
     if not schema then return nil, serr end
-    local settings, err = FormQueries.cleanSettings(body.settings, {})
+    local settings, err = FormQueries.cleanSettings(body.settings, {}, namespace_id)
     if not settings then return nil, err end
 
     for _ = 1, 3 do -- a public_id collision (62^12 space) is astronomically rare; retry anyway
@@ -362,7 +420,7 @@ function FormQueries.update(namespace_id, uuid, actor_uuid, body, auth, origin)
         args[#args + 1] = jsonb(schema)
     end
     if body.settings ~= nil then
-        local settings, err = FormQueries.cleanSettings(body.settings, decode(row.settings, {}))
+        local settings, err = FormQueries.cleanSettings(body.settings, decode(row.settings, {}), namespace_id)
         if not settings then return nil, err end
         set[#set + 1] = "settings = ?"
         args[#args + 1] = jsonb(settings)
@@ -389,6 +447,8 @@ function FormQueries.update(namespace_id, uuid, actor_uuid, body, auth, origin)
     if not res[1] then
         return nil, "This form was changed by someone else. Reload it to see the latest version.", 409
     end
+    -- Settings apply to the live form at once (they aren't versioned).
+    if body.settings ~= nil then require("lib.forms.public-cache").bust(row.public_id) end
     return FormQueries.get(namespace_id, uuid)
 end
 
@@ -483,7 +543,7 @@ end
 
 -- What a visitor's browser gets: the published fields without internals.
 local PUBLIC_FIELD_KEYS = { "key", "type", "label", "help", "placeholder", "required", "options", "validation",
-    "scale", "text", "param", "width" }
+    "scale", "text", "param", "width", "logic", "max_files", "max_size_mb", "accept" }
 
 function FormQueries.publicSchema(schema)
     local fields = {}

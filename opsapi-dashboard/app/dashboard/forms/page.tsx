@@ -14,14 +14,17 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  ClipboardList, Copy, ExternalLink, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Search, Sparkles, Trash2, Unlock,
+  ClipboardList, Copy, ExternalLink, FilePlus2, Globe, Link2, Loader2, Lock, MoreHorizontal, Pencil, Search, ShieldCheck, Sparkles,
+  Trash2, Unlock,
 } from 'lucide-react';
-import { Badge, Button, ConfirmDialog, Input, Modal, Select } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Input, Modal, Select, Textarea } from '@/components/ui';
+import SpamProtectionModal from '@/components/forms/SpamProtectionModal';
+import CustomDomainModal from '@/components/forms/CustomDomainModal';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError } from '@/components/field-service/shared';
-import { formsService, parseTs, shareUrl, type FormSummary, type FormTemplate } from '@/services/forms.service';
+import { formsService, parseTs, shareUrl, type FormSummary, type FormTemplate, type GeneratedForm } from '@/services/forms.service';
 
 const STATUS: Record<string, { label: string; variant: 'success' | 'warning' | 'secondary' }> = {
   draft: { label: 'Draft', variant: 'secondary' },
@@ -41,6 +44,35 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
   const [title, setTitle] = useState('');
   const [template, setTemplate] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'start' | 'ai'>('start');
+  const [prompt, setPrompt] = useState('');
+  const [draft, setDraft] = useState<GeneratedForm | null>(null);
+  const [drafting, setDrafting] = useState(false);
+
+  const generate = async () => {
+    setDrafting(true);
+    setDraft(null);
+    try {
+      setDraft(await formsService.generate(prompt.trim()));
+    } catch (e) {
+      toast.error(apiError(e, 'The AI could not draft a form'));
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const createFromDraft = async () => {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      const form = await formsService.create({ title: title.trim() || draft.title, description: draft.description,
+        fields: draft.schema.fields, targets: draft.targets });
+      router.push(`/dashboard/forms/${form.uuid}`);
+    } catch (e) {
+      toast.error(apiError(e, 'Could not create the form'));
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (open && templates.length === 0) formsService.templates().then(setTemplates).catch(() => undefined);
@@ -73,9 +105,47 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
       footer={
         <div className="flex w-full justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={create} isLoading={busy}>Create and edit</Button>
+          {mode === 'start'
+            ? <Button onClick={create} isLoading={busy}>Create and edit</Button>
+            : <Button onClick={createFromDraft} isLoading={busy} disabled={!draft}>Create this form</Button>}
         </div>
       }>
+      <div className="mb-5 inline-flex rounded-lg border border-secondary-300 p-0.5" role="tablist">
+        {(['start', 'ai'] as const).map((m) => (
+          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm ${mode === m ? 'bg-secondary-900 text-white' : 'text-secondary-600 hover:bg-secondary-100'}`}>
+            {m === 'ai' && <Sparkles className="h-4 w-4" />}{m === 'start' ? 'Blank or template' : 'Describe it, AI drafts it'}
+          </button>
+        ))}
+      </div>
+      {mode === 'ai' ? (
+        <div className="space-y-4">
+          <Textarea label="What should the form ask, and what should happen with each response?" rows={4} maxLength={2000}
+            value={prompt} onChange={(e) => setPrompt(e.target.value)}
+            placeholder="A job application form: name, email, phone, a link to their CV, years of experience, and when they can start. Make each applicant a lead." />
+          <Button variant="outline" leftIcon={<Sparkles className="h-4 w-4" />} onClick={generate} isLoading={drafting}
+            disabled={prompt.trim().length < 5}>
+            {draft ? 'Draft again' : 'Draft the form'}
+          </Button>
+          {draft && (
+            <div className="rounded-xl border border-secondary-200 p-4">
+              <Input label="Title" value={title || draft.title} onChange={(e) => setTitle(e.target.value)} />
+              {draft.description && <p className="mt-2 text-sm text-secondary-600">{draft.description}</p>}
+              <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-secondary-800">
+                {draft.schema.fields.map((f, i) => (
+                  <li key={f.key || i}>{f.label || f.type}{f.required ? ' *' : ''}
+                    <span className="text-secondary-500"> · {f.type.replace('_', ' ')}{f.system ? ' · locked' : ''}</span></li>
+                ))}
+              </ol>
+              {draft.targets.length > 0 && (
+                <p className="mt-3 text-sm text-secondary-700">Creates: {draft.targets.map((t) => (t.type === 'user' ? 'invitation' : t.type)).join(', ')}</p>
+              )}
+              {draft.dropped > 0 && <p className="mt-2 text-xs text-warning-600">{draft.dropped} suggested question(s) were left out because they weren&apos;t valid.</p>}
+              <p className="mt-2 text-xs text-secondary-500">It is created as a draft: you can change anything before publishing.</p>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="space-y-5">
         <Input label="Title" placeholder="e.g. Get a quote" value={title} maxLength={200}
           onChange={(e) => setTitle(e.target.value)} autoFocus />
@@ -93,12 +163,15 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
           experience, and make each applicant a lead.”
         </p>
       </div>
+      )}
     </Modal>
   );
 }
 
 function FormsPageContent() {
-  const { canCreate, canUpdate, canDelete } = usePermissions();
+  const { canCreate, canUpdate, canDelete, canManage } = usePermissions();
+  const [spamOpen, setSpamOpen] = useState(false);
+  const [domainOpen, setDomainOpen] = useState(false);
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -157,9 +230,19 @@ function FormsPageContent() {
     <div className="space-y-6">
       <PageHeader title="Forms" icon={<ClipboardList className="h-5 w-5" />}
         description="Build a form, share its link, and turn every response into a customer, lead or teammate."
-        actions={canCreate('forms') ? (
-          <Button leftIcon={<FilePlus2 className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New form</Button>
-        ) : undefined} />
+        actions={(
+          <>
+            {canManage('forms') && (
+              <>
+                <Button variant="ghost" leftIcon={<Globe className="h-4 w-4" />} onClick={() => setDomainOpen(true)}>Custom domain</Button>
+                <Button variant="ghost" leftIcon={<ShieldCheck className="h-4 w-4" />} onClick={() => setSpamOpen(true)}>Spam protection</Button>
+              </>
+            )}
+            {canCreate('forms') && (
+              <Button leftIcon={<FilePlus2 className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New form</Button>
+            )}
+          </>
+        )} />
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="flex-1">
@@ -263,6 +346,8 @@ function FormsPageContent() {
       )}
 
       <NewFormModal open={newOpen} onClose={() => setNewOpen(false)} />
+      <SpamProtectionModal open={spamOpen} onClose={() => setSpamOpen(false)} />
+      <CustomDomainModal open={domainOpen} onClose={() => setDomainOpen(false)} onChanged={() => load()} />
       <ConfirmDialog isOpen={!!toDelete} onClose={() => setToDelete(null)} variant="danger" title="Delete form"
         confirmText="Delete" isLoading={deleting}
         message={`Delete "${toDelete?.title}"? Its link stops working at once; its responses are removed after 30 days.`}

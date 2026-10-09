@@ -1107,6 +1107,113 @@ if require("helper.project-config").isFeatureEnabled("forms") then
     })
 
     register({
+        name = "update_form",
+        description = "Change a form's DRAFT: title, description, add questions, remove questions, make questions "
+            .. "required, or set which records it creates. Changes go live only when it is published (publish_form). "
+            .. "Questions are named by their label.",
+        perms = { { "forms", "update" } },
+        parameters = {
+            type = "object",
+            properties = {
+                form = { type = "string", description = "The form's title (or uuid)." },
+                title = { type = "string" },
+                description = { type = "string" },
+                add_fields = {
+                    type = "array",
+                    description = "Questions to add at the end (same shape as create_form fields).",
+                    items = {
+                        type = "object",
+                        properties = {
+                            label = { type = "string" },
+                            type = { type = "string", enum = FORM_TYPES },
+                            required = { type = "boolean" },
+                            options = { type = "array", items = { type = "string" } },
+                            help = { type = "string" },
+                            text = { type = "string" },
+                        },
+                        required = { "label", "type" },
+                    },
+                },
+                remove_fields = { type = "array", items = { type = "string" }, description = "Labels to remove." },
+                require_fields = { type = "array", items = { type = "string" },
+                    description = "Labels to make required." },
+                create_records = {
+                    type = "array",
+                    items = { type = "string", enum = { "customer", "lead", "user" } },
+                    description = "Replace which records each response creates ([] for none).",
+                },
+            },
+            required = { "form" },
+        },
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            local function matches(f, names)
+                for _, n in ipairs(type(names) == "table" and names or {}) do
+                    local s = tostring(n):lower()
+                    if (f.label or ""):lower() == s or f.key == n then return true end
+                end
+                return false
+            end
+            local fields, removed = {}, 0
+            for _, f in ipairs(form.schema.fields or {}) do
+                if matches(f, a.remove_fields) and not f.system then
+                    removed = removed + 1
+                else
+                    if matches(f, a.require_fields) then f.required = true end
+                    fields[#fields + 1] = f
+                end
+            end
+            for _, f in ipairs(type(a.add_fields) == "table" and a.add_fields or {}) do
+                if type(f) == "table" and type(f.options) == "string" then
+                    local opts = {}
+                    for o in f.options:gmatch("[^,]+") do opts[#opts + 1] = o:match("^%s*(.-)%s*$") end
+                    f.options = opts
+                end
+                fields[#fields + 1] = f
+            end
+            local body = { title = a.title, description = a.description, fields = fields }
+            if type(a.create_records) == "table" then
+                body.targets = {}
+                for _, t in ipairs(a.create_records) do body.targets[#body.targets + 1] = { type = t } end
+            end
+            local updated, uerr = q("FormQueries").update(ctx.namespace_id, form.uuid, ctx.user_uuid, body,
+                forms_auth(ctx), ctx.origin)
+            if not updated then return nil, uerr end
+            local out = summary(updated)
+            out.removed = removed
+            out.note = "Saved to the draft. Publish it (publish_form) to make the changes live."
+            return out
+        end,
+    })
+
+    register({
+        name = "summarize_form_responses",
+        description = "Summarise a form's recent responses: counts for each choice, averages, and an AI-written "
+            .. "summary of what people said. Contact details are left out.",
+        perms = { { "forms", "read" } },
+        parameters = {
+            type = "object",
+            properties = { form = { type = "string", description = "The form's title (or uuid)." } },
+            required = { "form" },
+        },
+        handler = function(ctx, a)
+            local form, err = find_form(ctx, a.form)
+            if not form then return nil, err or "Form not found." end
+            local row = q("FormQueries").load(ctx.namespace_id, form.uuid)
+            local res = require("lib.forms.ai").summarise(row, ctx.user_uuid)
+            local highlights = {}
+            for _, st in ipairs(res.fields or {}) do
+                if st.counts or st.average then
+                    highlights[#highlights + 1] = { question = st.label, counts = st.counts, average = st.average }
+                end
+            end
+            return { form = form.title, responses = res.responses, highlights = highlights, summary = res.summary,
+                note = res.summary_error }
+        end,
+    })
+
+    register({
         name = "publish_form",
         description = "Publish a form so anyone with its link can fill it in (asks the user to confirm first).",
         perms = { { "forms", "update" } },

@@ -92,6 +92,22 @@ local function slug(label, max)
 end
 
 local KEY = "^[a-z][a-z0-9_]*$"
+local UUID_PATTERN = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+
+-- Files a form accepts: by extension, with the type the server stores (never
+-- the browser's). No SVG/HTML: they could run script where they're served.
+Fields.FILE_TYPES = {
+    jpg = { "image/jpeg", "images" }, jpeg = { "image/jpeg", "images" }, png = { "image/png", "images" },
+    gif = { "image/gif", "images" }, webp = { "image/webp", "images" }, heic = { "image/heic", "images" },
+    heif = { "image/heif", "images" },
+    pdf = { "application/pdf", "documents" }, txt = { "text/plain", "documents" }, csv = { "text/csv", "documents" },
+    doc = { "application/msword", "documents" },
+    docx = { "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "documents" },
+    xls = { "application/vnd.ms-excel", "documents" },
+    xlsx = { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "documents" },
+    ppt = { "application/vnd.ms-powerpoint", "documents" },
+    pptx = { "application/vnd.openxmlformats-officedocument.presentationml.presentation", "documents" },
+}
 local EMAIL = "^[%w%._%%%+%-]+@[%w%.%-]+%.%a%a+$" -- the customers table's own check
 local ISO_DATE = "^(%d%d%d%d)%-(%d%d)%-(%d%d)$"
 
@@ -405,7 +421,42 @@ Fields.TYPES = {
         end,
         validate = function(value) return text(value, 500) end,
     },
+    -- Files go up first (POST .../uploads, lib/forms/uploads.lua); the answer is
+    -- their upload ids, which the submit swaps for { id, name, size, type }.
+    file_upload = {
+        define = function(f, raw)
+            local n = raw.max_files == nil and 1 or int(raw.max_files, 1, 10)
+            local mb = raw.max_size_mb == nil and 10 or int(raw.max_size_mb, 1, 10)
+            local accept = raw.accept == nil and "any" or raw.accept
+            if not n then return "max_files must be 1-10" end
+            if not mb then return "max_size_mb must be 1-10" end
+            if accept ~= "images" and accept ~= "documents" and accept ~= "any" then
+                return "accept must be images, documents or any"
+            end
+            f.max_files, f.max_size_mb, f.accept = n, mb, accept
+        end,
+        validate = function(value, f)
+            if type(value) ~= "table" or (value.id ~= nil) then value = { value } end
+            if #value > f.max_files then return nil, "attach at most " .. f.max_files .. " file(s)" end
+            local out = {}
+            for _, v in ipairs(value) do
+                local id = type(v) == "table" and v.id or v
+                if type(id) ~= "string" or not id:match(UUID_PATTERN) then return nil, "has a file that isn't valid" end
+                out[#out + 1] = id
+            end
+            return setmetatable(out, cjson.array_mt)
+        end,
+        show = function(value)
+            local names = {}
+            for _, v in ipairs(type(value) == "table" and value or {}) do
+                names[#names + 1] = type(v) == "table" and (v.name or v.id) or tostring(v)
+            end
+            return table.concat(names, ", ")
+        end,
+    },
     heading = { input = false },
+    -- Starts a new step of a multi-step form; its label (optional) titles the step.
+    page_break = { input = false },
     paragraph = {
         input = false,
         define = function(f, raw)
@@ -454,7 +505,9 @@ local function normalize_field(raw, i, taken)
     local where = "field " .. i
     local label, lerr = text(raw.label, 300)
     if not label then return nil, where .. ": label " .. lerr end
-    if label == "" and raw.type ~= "paragraph" then return nil, where .. ": label is required" end
+    if label == "" and raw.type ~= "paragraph" and raw.type ~= "page_break" then
+        return nil, where .. ": label is required"
+    end
     where = "field '" .. (label ~= "" and label or tostring(i)) .. "'"
 
     local key = raw.key
@@ -486,7 +539,140 @@ local function normalize_field(raw, i, taken)
         f.maps_to = raw.maps_to
     end
     if raw.system ~= nil and Fields.SYSTEM[raw.system] then f.system = raw.system end
+    f._logic = raw.logic -- checked once every field's final position is known (clean_logic)
     return f
+end
+
+-- ---------------------------------------------------------------------------
+-- Conditional logic: "show this question only if ..."
+-- ---------------------------------------------------------------------------
+-- field.logic = { match = "all" | "any", rules = { { field, op, value }, ... } }
+-- A rule may only refer to an answer field ABOVE it, so a form reads top to
+-- bottom and can't loop. A hidden question is never required and its answer
+-- is dropped (Fields.validate), on the server as in the browser
+-- (components/forms/logic.ts mirrors this).
+
+local OPS = { eq = true, neq = true, ["in"] = true, not_in = true, gt = true, lt = true, filled = true,
+    empty = true, contains = true }
+local CHOICE = { single_select = true, radio = true, multi_select = true }
+local NUMERIC = { number = true, rating = true }
+Fields.MAX_RULES = 10
+
+local function rule_value(src, op, value, where)
+    if op == "filled" or op == "empty" then return nil end
+    if op == "in" or op == "not_in" then
+        if not CHOICE[src.type] then return nil, where .. ": 'is one of' needs a choice question" end
+        if type(value) ~= "table" or #value == 0 or #value > 50 then return nil, where .. ": choose 1-50 options" end
+        local out = {}
+        for _, v in ipairs(value) do
+            if not option_of(src, v) then return nil, where .. ": '" .. tostring(v) .. "' isn't one of its options" end
+            out[#out + 1] = v
+        end
+        return setmetatable(out, cjson.array_mt)
+    end
+    if op == "gt" or op == "lt" then
+        if NUMERIC[src.type] then
+            local n = tonumber(value)
+            if not n then return nil, where .. ": compare with a number" end
+            return n
+        end
+        if src.type == "date" then
+            if not valid_date(value) then return nil, where .. ": compare with a date (YYYY-MM-DD)" end
+            return value
+        end
+        return nil, where .. ": 'greater/less than' needs a number, rating or date question"
+    end
+    if CHOICE[src.type] then
+        if not option_of(src, value) then
+            return nil, where .. ": '" .. tostring(value) .. "' isn't one of its options"
+        end
+        return value
+    end
+    if src.type == "boolean" or src.type == "consent" then
+        local b = bool(value)
+        if b == nil then return nil, where .. ": compare with yes or no" end
+        return b
+    end
+    if NUMERIC[src.type] then
+        local n = tonumber(value)
+        if not n then return nil, where .. ": compare with a number" end
+        return n
+    end
+    local t = text(value, 200)
+    if not t or t == "" then return nil, where .. ": give a value to compare with" end
+    return t
+end
+
+local function clean_logic(raw, earlier, where)
+    if raw == nil or raw == NULL then return nil end
+    if type(raw) ~= "table" then return nil, where .. ": logic must be { match, rules }" end
+    local rules = raw.rules
+    if rules == nil or rules == NULL or (type(rules) == "table" and #rules == 0) then return nil end
+    if type(rules) ~= "table" then return nil, where .. ": logic rules must be a list" end
+    if #rules > Fields.MAX_RULES then return nil, where .. ": at most " .. Fields.MAX_RULES .. " rules" end
+    local out = {}
+    for i, r in ipairs(rules) do
+        local at = where .. " rule " .. i
+        local src = type(r) == "table" and earlier[r.field]
+        if not src then return nil, at .. " must refer to a question above this one" end
+        if not OPS[r.op] then return nil, at .. ": unknown condition '" .. tostring(r.op) .. "'" end
+        local value, err = rule_value(src, r.op, r.value, at)
+        if err then return nil, err end
+        out[#out + 1] = { field = r.field, op = r.op, value = value }
+    end
+    return { match = raw.match == "any" and "any" or "all", rules = setmetatable(out, cjson.array_mt) }
+end
+
+local function rule_ok(r, answers)
+    local v = answers[r.field]
+    if r.op == "filled" then return v ~= nil end
+    if r.op == "empty" then return v == nil end
+    if v == nil then return r.op == "neq" or r.op == "not_in" end
+    if r.op == "contains" then
+        if type(v) == "table" then
+            for _, x in ipairs(v) do if x == r.value then return true end end
+            return false
+        end
+        return tostring(v):lower():find(tostring(r.value):lower(), 1, true) ~= nil
+    end
+    if r.op == "in" or r.op == "not_in" then
+        local hit = false
+        for _, x in ipairs(type(v) == "table" and v or { v }) do
+            for _, y in ipairs(r.value or {}) do
+                if x == y then hit = true end
+            end
+        end
+        return (r.op == "in") == hit
+    end
+    if r.op == "gt" or r.op == "lt" then
+        local a, b = v, r.value
+        if type(b) == "number" then a = tonumber(v) end
+        if a == nil or type(a) ~= type(b) then return false end
+        if r.op == "gt" then return a > b end
+        return a < b
+    end
+    local same = false -- eq / neq; a multi-select "equals" a value it contains
+    if type(v) == "table" then
+        for _, x in ipairs(v) do if x == r.value then same = true end end
+    elseif type(r.value) == "number" then
+        same = tonumber(v) == r.value
+    else
+        same = v == r.value
+    end
+    return (r.op == "eq") == same
+end
+
+--- Is the field shown, given the (clean) answers above it?
+function Fields.visible(field, answers)
+    local logic = field.logic
+    if type(logic) ~= "table" or type(logic.rules) ~= "table" or #logic.rules == 0 then return true end
+    local any = logic.match == "any"
+    for _, r in ipairs(logic.rules) do
+        local ok = rule_ok(r, answers)
+        if any and ok then return true end
+        if not any and not ok then return false end
+    end
+    return not any
 end
 
 --- Clean and validate a schema, adding (and locking) the contact fields the
@@ -573,6 +759,21 @@ function Fields.normalize(schema, required_roles)
     end
     if #fields > Fields.MAX_FIELDS then return nil, "a form can have at most " .. Fields.MAX_FIELDS .. " fields" end
 
+    -- Logic, now that every field's final position is known. Locked contact
+    -- fields are always shown.
+    local earlier = {}
+    for _, f in ipairs(fields) do
+        local raw_logic = f._logic
+        f._logic = nil
+        if raw_logic ~= nil and not f.system then
+            local logic, err = clean_logic(raw_logic, earlier, "field '" .. (f.label ~= "" and f.label or f.key) .. "'")
+            if err then return nil, err end
+            f.logic = logic
+        end
+        local def = Fields.TYPES[f.type]
+        if def and def.input ~= false then earlier[f.key] = f end
+    end
+
     local out = { fields = setmetatable(fields, cjson.array_mt) }
     if #cjson.encode(out) > Fields.MAX_SCHEMA_BYTES then return nil, "the form is too large" end
     return out
@@ -590,7 +791,8 @@ function Fields.validate(schema, data)
     local clean, errors = {}, nil
     for _, f in ipairs(schema.fields or {}) do
         local def = Fields.TYPES[f.type]
-        if def and def.input ~= false then
+        -- A question hidden by its logic takes no answer and isn't required.
+        if def and def.input ~= false and Fields.visible(f, clean) then
             local value = data[f.key]
             local missing = empty(value) or (f.type == "consent" and bool(value) == false)
             if not missing then

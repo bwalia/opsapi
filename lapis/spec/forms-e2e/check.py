@@ -8,6 +8,9 @@ import base64, concurrent.futures as cf, email, email.policy, glob, hashlib, hma
 import urllib.error, urllib.request
 
 A, B, C = os.environ["API_A"], os.environ["API_B"], os.environ["API_C"]
+API_CONTAINER_B = os.environ.get("API_CONTAINER_B")
+STUB_DIR = os.environ.get("STUB_DIR", "")
+STUBS = os.environ.get("STUBS_CONTAINER", "")
 PG = os.environ["PG_CONTAINER"]
 API_CONTAINER = os.environ["API_CONTAINER"]
 SECRET = open(os.environ["JWT_SECRET_FILE"]).read().strip()
@@ -80,9 +83,10 @@ def user(name):
     return u
 
 
-def submit(public_id, answers, token, ip, key=None, hp=None, base=A):
+def submit(public_id, answers, token, ip, key=None, hp=None, base=A, extra=None):
     body = {"answers": answers, "render_token": token, "context": {"page_url": "https://site.test/contact",
                                                                     "utm": {"campaign": "autumn"}}}
+    body.update(extra or {})
     if hp is not None:
         body["_hp"] = hp
     return call("POST", "/api/v2/public/forms/%s/submissions" % public_id, body=body, base=base,
@@ -101,6 +105,28 @@ def ip():
     ip_counter[0] += 1
     n = ip_counter[0]
     return "203.0.%d.%d" % (n // 250, n % 250 + 1)
+
+
+def upload(public_id, field, name, data, token, base=A):
+    boundary = uuid.uuid4().hex
+    body = ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n" % (boundary, name)).encode() + data \
+        + ("\r\n--%s--\r\n" % boundary).encode()
+    h = {"Content-Type": "multipart/form-data; boundary=" + boundary, "X-Forwarded-For": ip()}
+    if token:
+        h["X-Render-Token"] = token
+    req = urllib.request.Request("%s/api/v2/public/forms/%s/uploads?field=%s" % (base, public_id, field), data=body,
+                                 method="POST", headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def lapis_exec(container, lua):
+    return subprocess.run(["docker", "exec", "-w", "/app", container, "lapis", "exec", lua], capture_output=True,
+                          text=True).stdout
 
 
 def mails():
@@ -443,6 +469,281 @@ s, j = call("POST", "/api/v2/public/invitations/%s/accept" % TOKEN_SEAT,
             body={"first_name": "Seat", "last_name": "One", "password": pw2})
 check("... and is accepted once a seat is free", s == 201, (s, j))
 
+
+print("== phase 2: conditional logic and steps")
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Logic test", "fields": [
+    {"type": "boolean", "label": "Do you have a company?", "required": True},
+    {"type": "short_text", "label": "Company name", "required": True,
+     "logic": {"match": "all", "rules": [{"field": "do_you_have_a_company", "op": "eq", "value": True}]}},
+    {"type": "page_break", "label": "About the company"},
+    {"type": "radio", "label": "Size", "options": ["Small", "Large"],
+     "logic": {"rules": [{"field": "company_name", "op": "filled"}]}},
+]})
+LF = (j.get("data") or {})
+check("a form with logic and a page break saves", s == 201 and [f["type"] for f in LF["schema"]["fields"]]
+      == ["boolean", "short_text", "page_break", "radio"] and LF["schema"]["fields"][1]["logic"]["rules"][0]["op"] == "eq",
+      (s, j))
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Bad logic", "fields": [
+    {"type": "short_text", "label": "First", "logic": {"rules": [{"field": "second", "op": "filled"}]}},
+    {"type": "short_text", "label": "Second"}]})
+check("logic that refers to a question below is refused (422)", s == 422 and "above" in j.get("error", ""), (s, j))
+call("POST", "/api/v2/forms/%s/publish" % LF["uuid"], owner_a, NS_A)
+ltok, _, lj = token_for(LF["public_id"])
+check("the public form carries the logic", any(f.get("logic") for f in (lj.get("data") or {}).get("fields", [])))
+time.sleep(2.2)
+s, j = submit(LF["public_id"], {"do_you_have_a_company": False, "company_name": "Sneaky Ltd", "size": "large"}, ltok, ip())
+row = one("SELECT data::text FROM form_submissions WHERE form_id = (SELECT id FROM forms WHERE uuid = '%s') "
+          "ORDER BY id DESC LIMIT 1" % LF["uuid"])
+check("answers to hidden questions are dropped by the server", s == 201 and "Sneaky" not in row and "large" not in row,
+      (s, row))
+s, j = submit(LF["public_id"], {"do_you_have_a_company": True}, ltok, ip())
+check("a shown required question must be answered (400)", s == 400 and "company_name" in j.get("errors", {}), (s, j))
+s, j = submit(LF["public_id"], {"do_you_have_a_company": True, "company_name": "Acme", "size": "large"}, ltok, ip())
+check("shown questions are kept", s == 201, (s, j))
+
+print("== phase 2: file uploads")
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Uploads", "fields": [
+    {"type": "short_text", "label": "Note"},
+    {"type": "file_upload", "label": "Photo", "accept": "images", "max_size_mb": 1, "max_files": 2}]})
+UF = j["data"]
+call("POST", "/api/v2/forms/%s/publish" % UF["uuid"], owner_a, NS_A)
+utok, _, _ = token_for(UF["public_id"])
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 2048
+s, j = upload(UF["public_id"], "photo", "holiday snap.png", PNG, utok)
+check("an image uploads (201)", s == 201 and j["data"]["name"] == "holiday snap.png" and j["data"]["type"] == "image/png",
+      (s, j))
+FILE_ID = (j.get("data") or {}).get("id")
+s, j = upload(UF["public_id"], "photo", "x.svg", b"<svg onload=alert(1)>", utok)
+check("SVG is refused (415)", s == 415, (s, j))
+s, j = upload(UF["public_id"], "photo", "doc.pdf", b"%PDF-1.4", utok)
+check("a PDF is refused where only images are allowed (415)", s == 415, (s, j))
+s, j = upload(UF["public_id"], "photo", "big.png", PNG + b"\0" * (1024 * 1024), utok)
+check("a file over the field's limit is refused (413)", s == 413, (s, j))
+s, j = upload(UF["public_id"], "photo", "a.png", PNG, None)
+check("an upload without the page's token is refused (403)", s == 403, (s, j))
+s, j = upload(UF["public_id"], "note", "a.png", PNG, utok)
+check("an upload to a question that doesn't take files is refused (400)", s == 400, (s, j))
+time.sleep(2.2)
+s, j = submit(UF["public_id"], {"note": "hi", "photo": [FILE_ID]}, utok, ip())
+data = json.loads(one("SELECT data::text FROM form_submissions WHERE form_id = (SELECT id FROM forms WHERE uuid = '%s') "
+                      "ORDER BY id DESC LIMIT 1" % UF["uuid"]))
+check("the response stores the file's name and size, not a storage URL",
+      s == 201 and data["photo"][0]["name"] == "holiday snap.png" and "http" not in json.dumps(data), (s, data))
+s, j = submit(UF["public_id"], {"note": "again", "photo": [FILE_ID]}, utok, ip())
+check("a file can't be attached to a second response (400)", s == 400 and "photo" in j.get("errors", {}), (s, j))
+usid = one("SELECT uuid FROM form_submissions WHERE form_id = (SELECT id FROM forms WHERE uuid = '%s') "
+           "ORDER BY id LIMIT 1" % UF["uuid"])
+s, j = call("GET", "/api/v2/forms/%s/submissions/%s/files/%s" % (UF["uuid"], usid, FILE_ID), owner_a, NS_A)
+check("staff get a short-lived signed link", s == 200 and "X-Amz-Signature" in j["data"]["url"], (s, j))
+s, _ = call("GET", "/api/v2/forms/%s/submissions/%s/files/%s" % (UF["uuid"], usid, FILE_ID), owner_b, NS_B)
+check("another workspace can't get the link (404)", s == 404, s)
+s, j = upload(UF["public_id"], "photo", "orphan.png", PNG, utok)
+sql("UPDATE form_uploads SET created_at = NOW() - interval '2 days' WHERE uuid = '%s'" % j["data"]["id"])
+lapis_exec(API_CONTAINER, 'print("purged " .. require("lib.forms.uploads").purge(100))')
+check("a file never attached is purged after a day", count("form_uploads", "uuid = '%s'" % j["data"]["id"]) == 0)
+check("an attached file is kept", count("form_uploads", "uuid = '%s' AND submission_id IS NOT NULL" % FILE_ID) == 1)
+
+print("== phase 2: branding, analytics, captcha")
+s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {
+    "primary_color": "#123ABC", "logo_url": "https://cdn.test/logo.png", "submit_label": "Send it"}}})
+check("branding saves", s == 200 and j["data"]["settings"]["theme"]["primary_color"] == "#123abc", (s, j))
+_, _, pj = token_for(UF["public_id"])
+check("the public form gets the branding at once", (pj.get("data") or {}).get("theme", {}).get("submit_label") == "Send it", pj)
+s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {"primary_color": "red"}}})
+check("a bad colour is refused (422)", s == 422, (s, j))
+s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {"logo_url": "javascript:x"}}})
+check("a non-https logo is refused (422)", s == 422, (s, j))
+s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {"hide_branding": True}}})
+check("no plan may hide \"Powered by OpsAPI\" (422, says why)", s == 422 and "plan" in json.dumps(j), (s, j))
+s, j = call("GET", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A)
+check("the builder is told the toggle isn't available", s == 200 and j["data"].get("can_hide_branding") is False, j)
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Old plan branding", "fields": [
+    {"type": "short_text", "label": "Note"}]})
+OLD = j["data"]
+sql("""UPDATE forms SET settings = jsonb_build_object('theme', jsonb_build_object('hide_branding', true,
+       'submit_label', 'Go')) WHERE uuid = '%s'""" % OLD["uuid"])
+call("POST", "/api/v2/forms/%s/publish" % OLD["uuid"], owner_a, NS_A)
+_, _, pj = token_for(OLD["public_id"])
+theme = (pj.get("data") or {}).get("theme") or {}
+check("a hide-branding saved under an earlier plan isn't honoured", theme.get("submit_label") == "Go"
+      and "hide_branding" not in theme, pj)
+
+for _ in range(3):
+    token_for(LF["public_id"])
+for t, st in (("start", None), ("start", None), ("step", 2)):
+    call("POST", "/api/v2/public/forms/%s/events" % LF["public_id"], body={"type": t, "step": st})
+lapis_exec(API_CONTAINER, 'require("lib.forms.stats").flush() print("flushed")')
+s, j = call("GET", "/api/v2/forms/%s/analytics?days=7" % LF["uuid"], owner_a, NS_A)
+an = j.get("data") or {}
+check("analytics: views, starts, responses, conversion and the step funnel",
+      s == 200 and an["totals"]["views"] >= 4 and an["totals"]["starts"] == 2 and an["totals"]["responses"] == 2
+      and an["totals"]["conversion"] is not None and len(an["series"]) == 7
+      and any(f["step"] == 2 and f["reached"] == 1 for f in an["funnel"]), (s, an.get("totals"), an.get("funnel")))
+s, _ = call("GET", "/api/v2/forms/%s/analytics" % LF["uuid"], owner_b, NS_B)
+check("another workspace can't read the analytics (404)", s == 404, s)
+
+s, _ = call("PUT", "/api/v2/forms/workspace-settings", member_a, NS_A, {"turnstile": {"site_key": "k", "secret": "s"}})
+check("only someone with forms.manage sets the CAPTCHA keys (403)", s == 403, s)
+s, j = call("PUT", "/api/v2/forms/workspace-settings", owner_a, NS_A,
+            {"turnstile": {"site_key": "site-key-1", "secret": "test-secret"}})
+check("the owner saves the keys; the secret is never returned",
+      s == 200 and j["data"]["turnstile"] == {"site_key": "site-key-1", "has_secret": True}
+      and "test-secret" not in json.dumps(j), (s, j))
+check("the secret is stored encrypted", "test-secret" not in (one("SELECT turnstile_secret_encrypted FROM "
+      "form_workspace_settings WHERE namespace_id = %s" % ID_A) or "test-secret"))
+s, j = call("PUT", "/api/v2/forms/" + LF["uuid"], owner_a, NS_A, {"settings": {"captcha": True}})
+check("a form turns the check on", s == 200 and j["data"]["settings"]["captcha"] is True, (s, j))
+ctok, _, cj = token_for(LF["public_id"])
+check("the public form gets the site key only", (cj.get("data") or {}).get("captcha") ==
+      {"provider": "turnstile", "site_key": "site-key-1"}, cj)
+time.sleep(2.2)
+ANS2 = {"do_you_have_a_company": False}
+s1, j1 = submit(LF["public_id"], ANS2, ctok, ip())
+s2, _ = submit(LF["public_id"], ANS2, ctok, ip(), extra={"captcha_token": "forged"})
+s3, _ = submit(LF["public_id"], ANS2, ctok, ip(), extra={"captcha_token": "ok-token"})
+check("no / a forged CAPTCHA token is refused; a good one goes through",
+      (s1, j1.get("code"), s2, s3) == (400, "captcha", 400, 201), (s1, j1, s2, s3))
+call("PUT", "/api/v2/forms/" + LF["uuid"], owner_a, NS_A, {"settings": {"captcha": False}})
+
+print("== phase 2: records' form responses, in-app and chat alerts")
+cust = one("SELECT uuid FROM customers WHERE lower(email) = 'race@x.test'")
+s, j = call("GET", "/api/v2/forms/responses?entity_type=customer&entity_uuid=" + cust, owner_a, NS_A)
+check("a customer's page can list the responses linked to them", s == 200 and len(j["data"]) == 20
+      and j["data"][0]["form_title"] == "Quote request" and j["data"][0]["answers"], (s, len(j.get("data") or [])))
+s, j = call("GET", "/api/v2/forms/responses?entity_type=customer&entity_uuid=" + cust, owner_b, NS_B)
+check("... and another workspace sees none of them", s == 200 and j["data"] == [], (s, j))
+owner_id = one("SELECT id FROM users WHERE uuid = '%s'" % owner_a["uuid"])
+check("the form's creator got in-app notifications", count("notifications", "user_id = %s AND type = 'form_response'"
+      % owner_id) > 0)
+CH = str(uuid.uuid4())
+sql("INSERT INTO chat_channels (uuid, name, type, created_by, namespace_id, created_at, updated_at) "
+    "VALUES ('%s', 'leads', 'public', '%s', %s, now(), now())" % (CH, owner_a["uuid"], ID_A))
+CHB = str(uuid.uuid4())
+sql("INSERT INTO chat_channels (uuid, name, type, created_by, namespace_id, created_at, updated_at) "
+    "VALUES ('%s', 'b', 'public', '%s', (SELECT id FROM namespaces WHERE slug = 'forms-b'), now(), now())"
+    % (CHB, owner_b["uuid"]))
+s, _ = call("PUT", "/api/v2/forms/" + FID, owner_a, NS_A, {"settings": {"chat_channel_uuid": CHB}})
+check("another workspace's chat channel is refused (422)", s == 422, s)
+s, _ = call("PUT", "/api/v2/forms/" + FID, owner_a, NS_A, {"settings": {"chat_channel_uuid": CH}})
+submit(PUB, dict(ANS, email="chat@x.test"), tok, ip())
+for _ in range(30):
+    if count("chat_messages", "channel_uuid = '%s' AND content LIKE '%%chat@x.test%%'" % CH):
+        break
+    time.sleep(1)
+check("a new response is posted to the chosen chat channel",
+      s == 200 and count("chat_messages", "channel_uuid = '%s' AND content LIKE 'New response to%%'" % CH) == 1, s)
+
+print("== phase 2: AI")
+s, j = call("POST", "/api/v2/forms/generate", owner_a, NS_A, {"prompt": "Event sign-up; make each person a lead"})
+d = j.get("data") or {}
+check("generate: a draft with the model's valid questions, contact fields locked, the lead target",
+      s == 200 and d["title"] == "Event sign-up" and [f["label"] for f in d["schema"]["fields"]]
+      == ["Name", "Email", "Ticket", "Dietary needs"] and d["dropped"] == 1 and d["targets"] == [{"type": "lead"}],
+      (s, j))
+check("generate saves nothing", count("forms", "title = 'Event sign-up'") == 0)
+s, j = call("POST", "/api/v2/forms/%s/summary" % FID, owner_a, NS_A)
+d = j.get("data") or {}
+budget = next((f for f in d.get("fields", []) if f["key"] == "budget"), {})
+check("summary: exact counts plus the AI's text", s == 200 and d["responses"] > 10 and budget.get("counts")
+      and "VIP" in (d.get("summary") or ""), (s, j))
+prompts = sorted(glob.glob(os.path.join(STUB_DIR, "llm-*.json")))
+last = open(prompts[-1]).read() if prompts else ""
+check("no respondent's email was sent to the AI", prompts and "@x.test" not in last, last[:300])
+check("AI calls are metered as feature 'forms'", count("ai_usage", "feature = 'forms'") >= 2)
+
+print("== phase 2: plan limits")
+lapis_exec(API_CONTAINER, 'require("lib.forms.limits").PLANS.free = { forms = 1 } print("set")')
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Over the limit"})
+lapis_exec(API_CONTAINER, 'require("lib.forms.limits").PLANS.free = {} print("reset")')
+check("a plan's form limit is enforced (403, says why)", s == 403 and "plan includes 1 forms" in j.get("error", ""), (s, j))
+
+print("== phase 2: custom domains")
+def zone(records):
+    # Written from inside the stubs container: a host-side write over a macOS bind mount can be read stale.
+    subprocess.run(["docker", "exec", "-i", STUBS, "sh", "-c", "cat > /w/dns.json"], input=json.dumps(records),
+                   text=True, check=True)
+
+
+EDGE = {"edge.forms.test": {"A": ["10.9.9.9"]}}
+zone(EDGE)
+s, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("domain settings: available, with the platform's target", s == 200 and j["data"]["available"]
+      and j["data"]["target"] == "edge.forms.test" and not j["data"].get("domain"), j)
+s, j = call("PUT", "/api/v2/forms/domain", member_a, NS_A, {"domain": "forms.acme.test"})
+check("only forms.manage can connect a domain (403)", s == 403, (s, j))
+bad = [call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": d})[0]
+       for d in ["not a domain", "203.0.113.9", "edge.forms.test", "-bad.acme.test", "a..b.test", "bücher.test"]]
+check("bad, IP, the platform's own and non-ASCII domains are refused (400)", bad == [400] * 6, bad)
+s, j = call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": "https://Forms.Acme.TEST/path"})
+d = j.get("data") or {}
+recs = {r["type"]: r for r in d.get("records", [])}
+TXT_A = recs.get("TXT", {}).get("value", "")
+check("a domain is cleaned up and waits for DNS, with both records to add", s == 200
+      and d.get("domain") == "forms.acme.test" and d.get("status") == "pending"
+      and recs.get("CNAME", {}).get("value") == "edge.forms.test"
+      and recs.get("TXT", {}).get("name") == "_opsapi-challenge.forms.acme.test" and TXT_A.startswith("opsapi-verify="), j)
+check("it says what's missing", "doesn't point at edge.forms.test" in (d.get("last_error") or "")
+      and "TXT record" in (d.get("last_error") or ""), d)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_a, NS_A)
+check("pointing at the edge isn't enough: the TXT proof is required", s == 200 and j["data"]["status"] == "pending"
+      and "TXT" in (j["data"].get("last_error") or "") and "point" not in (j["data"].get("last_error") or ""), j)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"},
+                   "_opsapi-challenge.forms.acme.test": {"TXT": [TXT_A]}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_a, NS_A)
+check("with both records it's connected", s == 200 and j["data"]["status"] == "active"
+      and not j["data"].get("last_error") and j["data"].get("verified_at"), j)
+s, j = call("GET", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A)
+check("form links use the domain", j["data"]["share_url"] == "https://forms.acme.test/f/" + UF["public_id"]
+      and j["data"]["share_domain"] == "forms.acme.test", j["data"].get("share_url"))
+s1, _ = call("GET", "/api/v2/public/form-domains/check?domain=forms.acme.test")
+s2, _ = call("GET", "/api/v2/public/form-domains/check?domain=other.acme.test")
+check("the edge's check: 200 for a connected domain, 404 for others", (s1, s2) == (200, 404), (s1, s2))
+
+s, j = call("POST", "/api/v2/forms", owner_b, NS_B, {"title": "B's form", "fields": [
+    {"type": "short_text", "label": "Note"}]})
+FB = j["data"]
+call("POST", "/api/v2/forms/%s/publish" % FB["uuid"], owner_b, NS_B)
+ACME = {"Origin": "https://forms.acme.test", "X-Forwarded-For": "198.51.100.251"}
+s_foreign, _ = call("GET", "/api/v2/public/forms/" + FB["public_id"], headers=ACME)
+s_own, own = call("GET", "/api/v2/public/forms/" + UF["public_id"], headers=ACME)
+s_plain, _ = call("GET", "/api/v2/public/forms/" + FB["public_id"])
+check("a custom domain serves only its own workspace's forms", (s_foreign, s_own, s_plain) == (404, 200, 200),
+      (s_foreign, s_own, s_plain))
+btok, _, _ = token_for(FB["public_id"])
+time.sleep(2.1)
+s, _ = call("POST", "/api/v2/public/forms/%s/submissions" % FB["public_id"], body={"answers": {"note": "x"},
+            "render_token": btok}, headers=dict(ACME, **{"Idempotency-Key": str(uuid.uuid4())}))
+check("... and takes responses only for them (404)", s == 404, s)
+
+# Whoever proves control of the domain now wins.
+s, j = call("PUT", "/api/v2/forms/domain", owner_b, NS_B, {"domain": "forms.acme.test"})
+TXT_B = {r["type"]: r for r in j["data"]["records"]}["TXT"]["value"]
+check("another workspace can't take a domain without its own proof", j["data"]["status"] == "pending", j)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"},
+                   "_opsapi-challenge.forms.acme.test": {"TXT": [TXT_B]}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_b, NS_B)
+_, ja = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("with it, the domain moves, and the first workspace is told why", j["data"]["status"] == "active"
+      and ja["data"]["status"] == "pending" and "Another workspace" in (ja["data"].get("last_error") or ""), (j, ja))
+check("a domain is active in one workspace at most",
+      count("form_domains", "domain = 'forms.acme.test' AND status = 'active'") == 1)
+s, j = call("DELETE", "/api/v2/forms/domain", owner_b, NS_B)
+check("removing it", s == 200 and not j["data"].get("domain")
+      and count("form_domains", "namespace_id = (SELECT id FROM namespaces WHERE uuid = '%s')" % NS_B) == 0, j)
+
+# The hourly job connects a domain once its records appear.
+call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": "join.acme.test"})
+_, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+TXT_J = {r["type"]: r for r in j["data"]["records"]}["TXT"]["value"]
+zone(dict(EDGE, **{"join.acme.test": {"A": ["10.9.9.9"]}, "_opsapi-challenge.join.acme.test": {"TXT": [TXT_J]}}))
+sql("UPDATE form_domains SET checked_at = NOW() - INTERVAL '2 hours' WHERE domain = 'join.acme.test'")
+out = lapis_exec(API_CONTAINER, 'print("CHECKED " .. require("lib.forms.domains").maintain())')
+_, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("the hourly check connects it (an A record to the edge's address works too)",
+      j["data"]["status"] == "active", (out[-300:], j))
+call("DELETE", "/api/v2/forms/domain", owner_a, NS_A)
+
 print("== AI agent tools")
 lua = r'''
 local Tools = require("lib.agent.tools")
@@ -461,10 +762,16 @@ local p2, perr = Tools.execute(ctx, "publish_form", { form = "Agent job form" })
 print("PUBLISH " .. J.encode({ res = p2, err = perr }))
 local bad, berr = Tools.execute(ctx, "create_form", { title = "Bad", fields = { { label = "X", type = "colour" } } })
 print("BAD " .. J.encode({ err = berr }))
+local up, uerr = Tools.execute(ctx, "update_form", { form = "Agent job form", add_fields = { { label = "Notice period",
+  type = "short_text" } }, remove_fields = { "Role" }, require_fields = { "Years of experience" } })
+print("UPDATE " .. J.encode({ res = up, err = uerr }))
+local sm, serr = Tools.execute(ctx, "summarize_form_responses", { form = "Quote request" })
+print("SUMMARY " .. J.encode({ res = sm, err = serr }))
 ''' % (ID_A, owner_a["uuid"])
 out = subprocess.run(["docker", "exec", "-w", "/app", API_CONTAINER, "lapis", "exec", lua], capture_output=True,
                      text=True).stdout
-got = {m.group(1): json.loads(m.group(2)) for m in re.finditer(r"^(CREATE|CONFIRM|PUBLISH|BAD) (\{.*\})$", out, re.M)}
+got = {m.group(1): json.loads(m.group(2)) for m in re.finditer(r"^(CREATE|CONFIRM|PUBLISH|BAD|UPDATE|SUMMARY) (\{.*\})$",
+                                                                    out, re.M)}
 created = (got.get("CREATE") or {}).get("res") or {}
 check("agent create_form: a draft with locked name/email first, then the questions",
       created.get("status") == "draft" and [f["type"] for f in created.get("fields", [])]
@@ -475,6 +782,13 @@ check("agent publish_form after confirming publishes", ((got.get("PUBLISH") or {
       == "published", got.get("PUBLISH"))
 check("agent gets a usable error for an unknown field type", "unknown type 'colour'"
       in ((got.get("BAD") or {}).get("err") or ""), got.get("BAD"))
+upd = (got.get("UPDATE") or {}).get("res") or {}
+check("agent update_form: adds, removes, requires, in the draft",
+      [f["label"] for f in upd.get("fields", [])] == ["Name", "Email", "Years of experience", "Notice period"]
+      and upd["fields"][2].get("required") and upd.get("unpublished_changes"), got.get("UPDATE"))
+smy = (got.get("SUMMARY") or {}).get("res") or {}
+check("agent summarize_form_responses: counts and the summary", smy.get("responses", 0) > 10
+      and "VIP" in (smy.get("summary") or "") and smy.get("highlights"), got.get("SUMMARY"))
 
 print("== feature gate")
 s, _ = call("GET", "/api/v2/forms", owner_a, NS_A, base=C)

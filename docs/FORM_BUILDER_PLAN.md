@@ -1,6 +1,6 @@
 # Form Builder: Design Plan
 
-Status: **Phase 1 built** (feat/forms; user guide: [FORMS.md](FORMS.md)) · Feature flag: `forms` · Date: 2026-10-09
+Status: **Phase 1 built** (PR #704) · **Phase 2 built** (feat/forms-phase2, stacked on #704) · user guide: [FORMS.md](FORMS.md) · Feature flag: `forms` · Date: 2026-10-09
 
 > **Changed while building Phase 1** (each is explained where it applies):
 > - **Create a user** sends an invitation; the account is created when the person accepts and sets a
@@ -16,6 +16,36 @@ Status: **Phase 1 built** (feat/forms; user guide: [FORMS.md](FORMS.md)) · Feat
 >   - Mechanics: the core column `namespace_invitations.source` (`admin` | `form`) and
 >     `NamespaceInvitationQueries.seatsUsed` / `seatAvailable`.
 >   - Pending form requests are capped at `max(50, 5 × max_users)`.
+
+> **Changed while building Phase 2:**
+> - **Logic operators:** `not_in`, `empty` and `contains` were added to the planned set. Rules may
+>   only refer to questions above, at most 10 per question. Locked contact fields can't have logic.
+> - **Drop-off is per step, not per field.** Per-field drop-off would need an event per answer;
+>   a step funnel costs one event per step and answers the same question for multi-step forms.
+> - **Prefill is `?<answer_key>=value`**, not `?prefill=`. Hidden fields keep their own `param`.
+> - **Custom domain** (`lib/forms/domains.lua`, `form_domains`, migration `zzform6`). It does not
+>   go through the domains module: that module is a DevOps tool gated on `services`, which syncs
+>   wslproxy configs to a repo. Instead:
+>   - a workspace claims one domain and proves control with a TXT record;
+>   - the domain must also point at `FORMS_DOMAIN_TARGET`. Pointing at the shared edge alone
+>     proves nothing;
+>   - the edge asks `GET /api/v2/public/form-domains/check` before issuing a certificate (the
+>     on-demand TLS pattern);
+>   - the domain serves only that workspace's forms (Origin check plus `opsapi-dashboard/proxy.ts`).
+>
+>   wslproxy has no on-demand "ask" hook yet (its `allow_domain` only knows configured servers).
+>   Until it does, each domain is added there as a server routed to the dashboard.
+> - **Plan limits (D7), decided 2026-10-09:** everything is free for now. No plan has limits, and
+>   every form shows "Powered by OpsAPI": no plan may hide it. The checks stay in place for pricing
+>   later (`lib/forms/limits.lua`).
+> - **Framing:** the dashboard now sends `X-Frame-Options: SAMEORIGIN` and `frame-ancestors 'self'`
+>   on every page except `/f/*`, which sends `frame-ancestors *` so it can be embedded
+>   (`next.config.ts`). Before this, nothing stopped other sites from framing the dashboard.
+> - **Turnstile fails closed.** If Cloudflare can't be reached, the response is refused. The
+>   secret is stored with `Global.encryptSecret`.
+> - **New tables:** `form_uploads` (no FK to the submission, so a file can be uploaded before its
+>   response exists; claimed in the submit transaction), `form_daily_stats` and
+>   `form_workspace_settings` (migrations `zzform4`, `zzform5`).
 
 ## 1. What we're building
 
@@ -577,7 +607,7 @@ so `normalize()`, the permission checks and the limits apply to the agent too.
 - the agent tools and knowledge file;
 - docs (`docs/FORMS.md`) and tests (§16).
 
-**Phase 2: grow it, and make clients choose it.** Each item has the reason it sells.
+**Phase 2: grow it, and make clients choose it** (built). Each item has the reason it sells.
 
 | Feature | Why clients care |
 |---|---|
