@@ -26,11 +26,11 @@ and free of the usual scale traps.
   O(log n) at any depth. Never reintroduce `OFFSET`-based paging.
 - **Partial active-member indexes** (`WHERE left_at IS NULL`) back membership
   checks and WS fan-out; **BRIN** on `created_at` for time ranges; unique
-  constraints stop dup reactions/members. *(Correction: this used to say GIN
-  serves full-text search. Search (`ChatMessageQueries.search`) is
-  `content ILIKE '%term%'` within one channel; nothing queries the two GIN
-  indexes, `search_vector` and `to_tsvector(content)`. They only add write cost.
-  See §2a "Search".)*
+  constraints stop dup reactions/members. **Search** (`ChatMessageQueries.search`)
+  runs on the `search_vector` GIN index (`websearch_to_tsquery`, stemmed words).
+  *(Correction: search used to be `content ILIKE '%term%'`, which scanned the
+  whole channel whenever few messages matched. Neither GIN index was used. The
+  duplicate `to_tsvector(content)` index is dropped. See §2a "Search".)*
 - **Reactions are batch-loaded.** `getByChannel` calls
   `getReactionsForMessages(uuids)` — one `message_uuid IN (…)` query for the
   whole page (was an N+1: one query per message on every poll). Keep it batched.
@@ -84,27 +84,47 @@ trigger fires.
     already deletes its channels, messages and reactions (FK cascade). Archival
     moves rows out of the hot table; it does not delete them.
   - **Archive age: 12 months**, measured from `created_at`.
-  - **A deleted message is purged after 30 days.** Today "delete" only sets
-    `is_deleted`; the content stays forever. The purge blanks `content`,
-    `attachments` and `metadata`, deletes their objects, and keeps the row as a
-    tombstone so threads and reply counts stay intact. This is the privacy half
-    of retention, it is cheap, and it doesn't depend on the trigger.
+  - **A deleted message is purged after 30 days. Built: `lib/chat-retention.lua`.**
+    "Delete" only sets `is_deleted`, so before this the content stayed forever.
+    The purge doesn't depend on the trigger. What it does:
+    - sets `content` to `'[deleted]'` (the `has_content` check needs some text);
+    - clears `attachments`, `mentions` and `metadata`;
+    - deletes the edit history. It has to: the edit trigger copies the old text
+      into it during the purge itself;
+    - deletes the uploaded files.
+
+    The row stays as a tombstone, so threads, reply counts and reactions keep
+    working. It runs daily on worker 0 behind an advisory lock: 1,000 messages a
+    batch, files deleted after each batch commits, and a rerun picks up where it
+    stopped.
 - **Attachments: object storage only, never Postgres blobs.** Already the case:
   the dashboard uploads to MinIO (`/api/v2/documents/upload`, prefix
   `chat-attachments/`), and messages store `file_url` references.
   - Archiving a message leaves its objects alone.
-  - The deleted-message purge deletes them.
+  - The deleted-message purge deletes them, **but only an object in the
+    author's own `chat-attachments/<author uuid>/` folder**. Attachment URLs are
+    written by the client, so a URL pointing elsewhere (another user's file,
+    `..`, encoded characters, another prefix) is skipped. Tested against MinIO:
+    the author's file and thumbnail went; the other user's file, the `..` URL
+    and a non-chat file stayed.
   - Deleting a workspace should delete its `chat-attachments/` objects. Today
     nothing does, so they are orphaned (a gap to close with the purge).
 - **Search covers the hot table only (the last 12 months).**
   - Archived messages aren't searchable in the app; they're reachable by admin
     SQL or an export.
-  - Today's search is a per-channel `ILIKE` (no index; cost grows with the
-    channel's size).
-  - Before archival, switch it to `search_vector @@ websearch_to_tsquery(...)`
-    (a generated column, always up to date), and drop the duplicate
-    `chat_messages_content_search_idx`. That is a query change: `EXPLAIN
-    (ANALYZE, BUFFERS)` before and after, in its own PR.
+  - **Done:** search runs on `search_vector @@ websearch_to_tsquery(...)` (a
+    generated column, always current), and the unused
+    `chat_messages_content_search_idx` is dropped (`zzchat2`; about 60 MB per
+    million messages).
+  - It now matches words, not substrings: "meetings" finds "meeting"; "mess"
+    no longer finds "message".
+  - Measured on 1M messages, in a 20k-message channel:
+
+    | Search | `ILIKE` before | Full-text after |
+    |---|---|---|
+    | Rare term (1 hit) | 84.2 ms | 4.2 ms |
+    | No match | 69.7 ms | 0.17 ms |
+    | Common term (10k hits) | 0.7 ms | 0.6 ms |
 
 #### How, when the trigger fires
 

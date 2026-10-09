@@ -113,6 +113,7 @@ local review_migrations = load_if_enabled(ProjectConfig.FEATURES.REVIEWS, "migra
 local chat_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system") or {}
 local chat_production_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system-production") or
     {}
+local chat_lifecycle_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-lifecycle") or {}
 
 -- Kanban
 local kanban_project_migrations = load_if_enabled(ProjectConfig.FEATURES.KANBAN, "migrations.kanban-project-system") or
@@ -1227,6 +1228,8 @@ local _migrations = {
     ['205_add_user_presence_functions'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 14),
     ['206_add_chat_data_quality_constraints'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations,
         15),
+    ['zzchat2_drop_unused_content_search_index'] = conditional_array(ProjectConfig.FEATURES.CHAT,
+        chat_lifecycle_migrations, 1),
     ['207_create_user_channels_view'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 16),
     ['208_add_channel_mention_support'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 17),
     ['209_add_chat_metrics_table'] = conditional_array(ProjectConfig.FEATURES.CHAT, chat_production_migrations, 18),
