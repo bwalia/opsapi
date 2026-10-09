@@ -64,4 +64,12 @@ function U.guard(fn)
     end
 end
 
+--- U.guard for a create route that also honours an Idempotency-Key header
+-- (a client retrying after a lost response gets the first answer back).
+function U.guard_create(fn)
+    return U.guard(function(self)
+        return require("helper.plugin-sdk").idempotent(self, function() return fn(self) end)
+    end)
+end
+
 return U

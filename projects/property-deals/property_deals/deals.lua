@@ -194,6 +194,9 @@ function Deals.create(ns, input, user_uuid, settings)
         if lead then
             db.update("property_deals_lead_details", { property_uuid = deal.property_uuid or db.NULL },
                 { namespace_id = ns, lead_uuid = lead.uuid })
+            -- Contacts logged on the lead before it was a deal now show on the deal.
+            db.query("UPDATE property_deals_chases SET deal_uuid = ?, updated_at = NOW() WHERE namespace_id = ? AND lead_uuid = ? AND deal_uuid IS NULL",
+                deal.uuid, ns, lead.uuid)
         end
         -- Workflow engine: the first stage's tasks.
         require("property_deals.engine").enter_stage(ns, deal.uuid, first.key, user_uuid, settings)

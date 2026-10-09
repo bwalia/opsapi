@@ -65,7 +65,7 @@ return function(app)
         return sdk.ok(task)
     end))
 
-    app:post("/tasks", sdk.handler({ permission = "property_deals_tasks.create" }, U.guard(function(self)
+    app:post("/tasks", sdk.handler({ permission = "property_deals_tasks.create" }, U.guard_create(function(self)
         local data, bad = input(self, CREATE)
         if not data then return bad end
         local ns, user = sdk.namespace_id(self), sdk.user(self).uuid

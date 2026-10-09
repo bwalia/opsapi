@@ -92,7 +92,7 @@ return function(app)
         return sdk.ok(sdk.array(rows), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) })
     end))
 
-    app:post("/compliance-checks", sdk.handler({ permission = "property_deals_compliance.create" }, U.guard(function(self)
+    app:post("/compliance-checks", sdk.handler({ permission = "property_deals_compliance.create" }, U.guard_create(function(self)
         local body, err = sdk.body(self)
         if not body then return sdk.error(400, err) end
         local data, errors = sdk.validate(body, FIELDS)

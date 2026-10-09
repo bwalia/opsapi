@@ -1,8 +1,9 @@
 -- Daily digest (SPEC §3.3): per person, rules-based. Sent once per local day at
 -- the workspace's digest_time (default 07:30, workspace time zone) by
 -- jobs/daily_digest.lua: in-app + push, and email when mail is configured.
--- GET /digest shows the live version. (The AI "digest writer" agent can turn
--- it into prose later; these lists stay the source of truth.)
+-- GET /digest shows the live version. When the workspace has a model, the
+-- "digest writer" agent turns it into a few sentences (d.prose); these lists
+-- stay the source of truth and the plain summary is the fallback.
 local cjson = require("cjson")
 local db = require("lapis.db")
 local U = require("property_deals.util")
@@ -121,7 +122,7 @@ end
 local function esc(s) return (tostring(s or ""):gsub("[<>&\"]", { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;", ['"'] = "&quot;" })) end
 
 local function html(d)
-    local out = { "<h2>Your day — " .. esc(d.date) .. "</h2><p>" .. esc(D.summary(d)) .. "</p>" }
+    local out = { "<h2>Your day — " .. esc(d.date) .. "</h2><p>" .. esc(d.prose or D.summary(d)) .. "</p>" }
     local function list(title, rows, fmt)
         if #rows == 0 then return end
         out[#out + 1] = "<h3>" .. title .. "</h3><ul>"
@@ -171,11 +172,18 @@ function D.run(ns, settings, force)
             VALUES (?, ?, ?, ?::jsonb, ?) ON CONFLICT (namespace_id, user_uuid, local_date) DO NOTHING RETURNING id
         ]], ns, user, today, cjson.encode(d), D.is_empty(d))[1]
         if logged and not D.is_empty(d) then
+            -- The digest writer agent may turn the lists into prose; the lists stay as they are.
+            local ok, prose = pcall(require("property_deals.ai.runner").write_digest, ns, user, d)
+            if not ok then ngx.log(ngx.WARN, "[property_deals] digest writer: ", tostring(prose)); prose = nil end
+            if prose then
+                d.prose = prose
+                db.query("UPDATE property_deals_digest_log SET payload = ?::jsonb WHERE id = ?", cjson.encode(d), logged.id)
+            end
             Notify.send(ns, { user }, { kind = "daily_digest", event = "property_deals.digest.daily", route = "digest",
-                uuid = today, title = "Your day", body = D.summary(d) })
+                uuid = today, title = "Your day", body = prose or D.summary(d) })
             local u = U.one("SELECT email FROM users WHERE uuid = ?", user)
-            if settings == nil or settings.digest_email ~= false then
-                Notify.email(u and u.email, "Your property deals today — " .. today, html(d), D.summary(d))
+            if (settings == nil or settings.digest_email ~= false) and Notify.allowed(ns, user, "daily_digest", "email") then
+                Notify.email(u and u.email, "Your property deals today — " .. today, html(d), prose or D.summary(d))
             end
             sent = sent + 1
         end

@@ -8,6 +8,95 @@ local U = require("property_deals.util")
 
 local N = {}
 
+-- Per-user preferences (ios-notification-preferences): push / email per
+-- category, plus quiet hours (workspace time zone) that hold back push. In-app
+-- notifications always arrive. No saved row = everything on.
+N.CATEGORIES = { "sla_warning", "overdue", "escalated", "approval_requested", "digest", "compliance_expiring",
+    "agent_update" }
+local CATEGORY_OF = { sla_warning = "sla_warning", task_overdue = "overdue", task_escalated = "escalated",
+    approval_requested = "approval_requested", daily_digest = "digest", compliance_expiring = "compliance_expiring",
+    agent_update = "agent_update" }
+
+local function defaults()
+    local p = {}
+    for _, c in ipairs(N.CATEGORIES) do p[c] = { push = true, email = true } end
+    return p
+end
+
+--- A user's preferences in this workspace, defaults filled in.
+function N.prefs(ns, user_uuid)
+    local p = defaults()
+    local row = U.one("SELECT prefs FROM property_deals_notification_prefs WHERE namespace_id = ? AND user_uuid = ?", ns, user_uuid)
+    local saved = row and U.json(row.prefs) or {}
+    for _, c in ipairs(N.CATEGORIES) do
+        if type(saved[c]) == "table" then
+            if saved[c].push ~= nil then p[c].push = saved[c].push == true end
+            if saved[c].email ~= nil then p[c].email = saved[c].email == true end
+        end
+    end
+    if type(saved.quiet_hours) == "table" then p.quiet_hours = saved.quiet_hours end
+    return p
+end
+
+local HHMM = "^[012]%d:[0-5]%d$"
+
+--- Merge `input` into the saved preferences (only fields sent change).
+function N.save_prefs(ns, user_uuid, input)
+    local current = N.prefs(ns, user_uuid)
+    local errors = {}
+    for k, v in pairs(input) do
+        if current[k] and k ~= "quiet_hours" then
+            if type(v) ~= "table" then errors[k] = "{ push?, email? }"
+            else
+                for _, ch in ipairs({ "push", "email" }) do
+                    if v[ch] ~= nil then
+                        if type(v[ch]) ~= "boolean" then errors[k] = ch .. " must be true or false"
+                        else current[k][ch] = v[ch] end
+                    end
+                end
+            end
+        elseif k == "quiet_hours" then
+            if v == require("cjson").null or v == false then current.quiet_hours = nil
+            elseif type(v) ~= "table" or type(v.from) ~= "string" or type(v.to) ~= "string"
+                or not v.from:match(HHMM) or not v.to:match(HHMM) then
+                errors.quiet_hours = "{ from: \"HH:MM\", to: \"HH:MM\" } or null"
+            else current.quiet_hours = { from = v.from, to = v.to } end
+        else
+            errors[k] = "unknown preference"
+        end
+    end
+    if next(errors) then return nil, errors end
+    db.query([[
+        INSERT INTO property_deals_notification_prefs (namespace_id, user_uuid, prefs) VALUES (?, ?, ?::jsonb)
+        ON CONFLICT (namespace_id, user_uuid) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = NOW()
+    ]], ns, user_uuid, require("cjson").encode(current))
+    return N.prefs(ns, user_uuid)
+end
+
+local function quiet_now(ns, q)
+    if type(q) ~= "table" or not q.from or not q.to then return false end
+    local s = require("helper.plugin-sdk").settings("property_deals", ns) or {}
+    local tz = s.timezone or "Europe/London"
+    local ok, r = pcall(U.one, "SELECT to_char(NOW() AT TIME ZONE ?, 'HH24:MI') AS t", tz)
+    local now = ok and r and r.t or "12:00"
+    if q.from < q.to then return now >= q.from and now < q.to end
+    return now >= q.from or now < q.to -- over midnight, e.g. 21:00-07:00
+end
+
+--- May this user get `channel` (push|email) for notification kind `kind` now?
+function N.allowed(ns, user_uuid, kind, channel)
+    local cat = CATEGORY_OF[kind]
+    if not cat then return true end
+    local p = N.prefs(ns, user_uuid)
+    if p[cat] and p[cat][channel] == false then
+        -- A workspace may make escalations to managers impossible to mute.
+        local s = require("helper.plugin-sdk").settings("property_deals", ns) or {}
+        if not (cat == "escalated" and s.escalations_always_notify == true) then return false end
+    end
+    if channel == "push" and cat ~= "digest" and quiet_now(ns, p.quiet_hours) then return false end
+    return true
+end
+
 local function has_table(name)
     return U.one("SELECT to_regclass(?) IS NOT NULL AS ok", name).ok
 end
@@ -40,12 +129,17 @@ function N.send(ns, user_uuids, n)
             end
         end
     end
-    if has_table("device_tokens") then
+    local push_users = {}
+    for _, u in ipairs(users) do
+        local ok, yes = pcall(N.allowed, ns, u, n.kind, "push")
+        if not ok or yes then push_users[#push_users + 1] = u end
+    end
+    if has_table("device_tokens") and #push_users > 0 then
         local push = {}
         for k, v in pairs(data) do push[k] = tostring(v) end
         push.thread_id = n.deal_uuid and tostring(n.deal_uuid) or nil
         local ok, err = pcall(function()
-            require("helper.push-notification").sendToUsers(users, { title = n.title, body = n.body }, push)
+            require("helper.push-notification").sendToUsers(push_users, { title = n.title, body = n.body }, push)
         end)
         if not ok then ngx.log(ngx.WARN, "[property_deals] push: ", tostring(err)) end
     end

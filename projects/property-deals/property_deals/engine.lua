@@ -211,7 +211,8 @@ function E.create_task(ctx, stage_key, tdef, actor, done)
         approval_rule = tdef.approval == "none" and "none" or tdef.approval,
         owner_user_uuid = owner_for(ctx, tdef.owner),
         owner_agent_key = tdef.owner == "agent" and tdef.agent and tdef.agent.agent_key or nil,
-        metadata = { depends_on_keys = U.array(keys), waiting_on = U.array(waiting), template_task = tdef.key },
+        metadata = { depends_on_keys = U.array(keys), waiting_on = U.array(waiting), template_task = tdef.key,
+                     agent_auto = tdef.agent and tdef.agent.auto == true or nil },
     }
     local why
     if #waiting == 0 then

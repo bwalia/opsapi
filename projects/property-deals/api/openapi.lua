@@ -212,7 +212,9 @@ return function(app)
                               payload_version = INT(), payload_sha256 = S(), edited = BOOL() })),
         decided_at = DT(), executed_at = DT(), execution_result = ANY(), jobshout_approval_id = S(), expires_at = DT(),
         agent_key = S(), provider = S(), model = S(), cost_usd = NUM(), tokens_in = INT(), tokens_out = INT(),
-        run_sources = ANY("Sources the agent used"), from_jobshout = BOOL(), can_decide = BOOL("Inbox only"),
+        run_sources = ANY("Sources the agent used"), run_steps = ANY("Inbox: the agent's tool calls (refused ones too)"),
+        run_output = ANY("Inbox: the agent's structured output"), execution_attempts = INT(),
+        jobshout_provider_uuid = UUID(), from_jobshout = BOOL(), can_decide = BOOL("Inbox only"),
         waiting_for = S("After a first two_person approval"), created_at = DT(), updated_at = DT(),
     }, { "uuid", "title", "status", "rule" }))
     local ApprovalCreate = schema("ApprovalCreate", OBJ({
@@ -223,6 +225,8 @@ return function(app)
     local Decide = schema("ApprovalDecision", OBJ({
         decision = ENUM({ "approve", "reject" }), note = S("Required to reject"),
         payload = ANY("Edited version (approve only); stored as a new payload version"),
+        payload_version = INT("The version you looked at: 409 if the draft changed since (recommended)"),
+        payload_sha256 = S("Or its hash"),
     }, { "decision" }))
 
     local DealCard = OBJ({ uuid = UUID(), name = S(), stage_key = S(), health = ENUM(HEALTH), health_reasons = ARR(S()),
@@ -331,10 +335,13 @@ return function(app)
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
-        status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest" })) }),
+        status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail" })) }),
         response = OBJ({ sla = OBJ({ warned = INT(), overdue = INT(), escalated = INT() }), health = OBJ({ deals = INT() }),
                          compliance_expiry = OBJ({ expired = INT(), warned = INT(), pof_expired = INT() }),
-                         digest = OBJ({ sent = INT() }) }), errors = E422 })
+                         digest = OBJ({ sent = INT() }),
+                         agents = OBJ({ resumed = INT(), timed_out = INT(), jobshout_polled = INT(), jobshout_decided = INT(),
+                                        auto_started = INT() }),
+                         mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }) }), errors = E422 })
 
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
         paginated = true, response = ARR(Lead), query = {
@@ -477,4 +484,122 @@ return function(app)
         paginated = true, response = ARR(OBJ({ local_date = DATE(), payload = Digest, empty = BOOL(), created_at = DT() })) })
     sdk.doc(app, "POST /digest/send", { summary = "Send today's digests now", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ sent = INT() }) })
+
+    -- ------------------------------------------------------------------ AI layer (Phase 5)
+    local AgentRun = schema("AgentRun", OBJ({
+        uuid = UUID(), task_uuid = S(), deal_uuid = UUID(), agent_key = S(),
+        provider = ENUM({ "builtin", "jobshout" }), provider_uuid = UUID("The workspace AI provider / JobShout link used"),
+        model = S(), prompt_version = S(), status = ENUM({ "queued", "running", "succeeded", "failed", "cancelled" }),
+        trigger = ENUM({ "manual", "auto", "email", "retry" }), attempt = INT(), retry_note = S("Reviewer's note it redrafted with"),
+        steps = ARR(OBJ({ round = INT(), tool = S(), args = ANY(), refused = BOOL(), reason = S(), reply = BOOL(),
+                          parsed = BOOL(), note = S(), error = S() })),
+        output = ANY("Structured output"), output_draft = S("The draft text"), error = S(),
+        tokens_in = INT(), tokens_out = INT(), cost_usd = NUM(), latency_ms = INT(), fallback_used = BOOL(),
+        jobshout_task_id = S(), jobshout_run_id = S(), jobshout_execution_id = S(), triggered_by_user_uuid = S(),
+        started_at = DT(), finished_at = DT(), created_at = DT(), updated_at = DT(),
+    }, { "uuid", "agent_key", "provider", "status" }))
+    local AgentConfig = schema("AgentConfig", OBJ({
+        agent_key = S(), enabled = BOOL(), route = ENUM({ "builtin", "jobshout" }), jobshout_provider_uuid = UUID(),
+        jobshout_agent_id = S(), jobshout_project_id = S(), fallback_to_builtin = BOOL("Use the built-in model when JobShout is down"),
+        local_only = BOOL("Only providers flagged is_local"), approval_rule = ENUM({ "any_operator", "manager", "two_person" }),
+        auto_pickup = BOOL(), auto_pickup_at = S("HH:MM, workspace time"), last_auto_run_on = DATE(),
+        default = BOOL("Not saved yet: these are the defaults"),
+    }, { "agent_key", "enabled", "route" }))
+    local Agent = schema("Agent", OBJ({
+        key = S(), name = S(), job_type = ENUM({ "classify", "extract", "draft", "plan", "chat", "summarise" }),
+        version = S("Prompt version"), tools = ARR(S(), "Tool allowlist"),
+        default_approval = S(), needs_deal = BOOL(), config = AgentConfig,
+    }, { "key", "name", "job_type", "tools", "config" }))
+    local Route = schema("AiRoute", OBJ({
+        uuid = UUID(), job_type = S(), chain = ARR(OBJ({ provider_uuid = UUID(), model = S() }, { "provider_uuid" }),
+            "Fallback order: tried in turn"), local_only = BOOL(), max_tokens = INT(), created_at = DT(), updated_at = DT(),
+    }, { "job_type", "chain" }))
+    local MailConnector = schema("MailConnector", OBJ({
+        uuid = UUID(), name = S(), kind = ENUM({ "imap", "gmail", "m365" }),
+        config = ANY("imap { host, port, ssl, username, mailbox } | gmail { client_id } | m365 { tenant_id, client_id, mailbox }"),
+        has_secret = BOOL("The secret itself is never returned"), secret_hint = S(), enabled = BOOL(), cursor = ANY(),
+        last_synced_at = DT(), last_error = S(), created_at = DT(), updated_at = DT(),
+    }, { "uuid", "name", "kind", "has_secret" }))
+    local MailConnectorWrite = schema("MailConnectorWrite", OBJ({
+        name = S(), kind = ENUM({ "imap", "gmail", "m365" }), config = ANY(),
+        secret = ANY("IMAP password | Gmail { client_secret, refresh_token } | M365 client secret; \"\" clears it"),
+        enabled = BOOL(),
+    }, nil, "name, kind and config are required on create"))
+    local Inbound = schema("InboundMessage", OBJ({
+        uuid = UUID(), connector_uuid = UUID(), from_address = S(), from_name = S(), subject = S(), received_at = DT(),
+        body_text = S("Untrusted: shown as data, never acted on"), deal_uuid = UUID(),
+        matched_by = ENUM({ "reference", "sender" }), chase_uuid = UUID("The chase this replied to"),
+        agent_run_uuid = UUID("Legal chaser run it started"), processed_at = DT(),
+    }, { "uuid", "from_address" }))
+    local Channel = OBJ({ push = BOOL(), email = BOOL() })
+    local Prefs = schema("NotificationPreferences", OBJ({
+        sla_warning = Channel, overdue = Channel, escalated = Channel, approval_requested = Channel, digest = Channel,
+        compliance_expiring = Channel, agent_update = Channel,
+        quiet_hours = OBJ({ from = S("HH:MM"), to = S("HH:MM") }, { "from", "to" }, "Workspace time; holds back push, not the digest"),
+    }))
+    local Chase = OBJ({ uuid = UUID(), deal_uuid = UUID(), lead_uuid = S(), task_uuid = S(), to_party = S(), to_name = S(),
+        to_address = S(), channel = S(), subject = S(), body = S(), outcome = S(), status = S(), sent_at = DT(),
+        sent_by_user_uuid = S(), created_at = DT() })
+
+    sdk.doc(app, "GET /ai/agents", { summary = "Agent catalogue + this workspace's settings", permission = "property_deals_ai.read",
+        response = ARR(Agent) })
+    sdk.doc(app, "PUT /ai/agents/:key", { summary = "Configure an agent", permission = "property_deals_settings.update",
+        status = 200, path = { key = S("Agent key, e.g. legal_chaser") }, response = AgentConfig, errors = E422,
+        body = OBJ({ enabled = BOOL(), route = ENUM({ "builtin", "jobshout" }), jobshout_provider_uuid = UUID(),
+            jobshout_agent_id = S(), jobshout_project_id = S(), fallback_to_builtin = BOOL(), local_only = BOOL(),
+            approval_rule = ENUM({ "any_operator", "manager", "two_person" }), auto_pickup = BOOL(), auto_pickup_at = S("HH:MM") }) })
+    sdk.doc(app, "GET /ai/routes", { summary = "Model chain per job type", permission = "property_deals_ai.read",
+        response = ARR(Route) })
+    sdk.doc(app, "PUT /ai/routes/:job_type", { summary = "Set a job type's model chain (fallback order)",
+        permission = "property_deals_settings.update", status = 200, response = Route, errors = E422,
+        path = { job_type = ENUM({ "classify", "extract", "draft", "plan", "chat", "summarise" }) },
+        body = OBJ({ chain = ARR(OBJ({ provider_uuid = UUID(), model = S("Default: the provider's default_model") }, { "provider_uuid" })),
+            local_only = BOOL(), max_tokens = INT() }, { "chain" }) })
+    sdk.doc(app, "GET /ai/usage", { summary = "AI spend and runs", permission = "property_deals_ai.read",
+        query = { days = INT("Window, 1–366 (default 30)") },
+        response = OBJ({ days = INT(), spent_today_usd = NUM(), spent_window_usd = NUM(), cap_day_usd = NUM(), cap_run_usd = NUM(),
+            by_agent = ARR(OBJ({ agent_key = S(), runs = INT(), failed = INT(), tokens_in = INT(), tokens_out = INT(),
+                cost_usd = NUM(), avg_latency_ms = INT() })) }) })
+    sdk.doc(app, "POST /tasks/:id/agent-run", { summary = "Let AI do it", permission = "property_deals_ai.create", status = 202,
+        path = tid, body = OBJ({ note = S("Extra instruction for this run") }), response = AgentRun,
+        description = "Starts the task's agent; poll GET /agent-runs/{id}. The draft lands in Approvals.",
+        errors = { ["404"] = "Not found", ["409"] = "An agent is already on it, or the task is closed",
+                   ["422"] = "Not agent-eligible, agent off/unavailable, or no AI provider", ["429"] = "Daily AI budget used up" } })
+    sdk.doc(app, "POST /agent-runs/:id/cancel", { summary = "Cancel a queued/running run", permission = "property_deals_ai.update",
+        status = 200, path = { id = UUID() }, response = AgentRun, errors = { ["409"] = "Not queued or running" } })
+    sdk.doc(app, "POST /approvals/:id/retry", { summary = "Run a failed approved action again",
+        permission = "property_deals_approvals.manage", status = 200, path = { id = UUID() }, response = Approval,
+        errors = { ["404"] = "Not found", ["409"] = "Not failed", ["422"] = "Failed again (details.approval)" } })
+    sdk.doc(app, "POST /bookings/:id/confirm", { summary = "Ask to confirm a supplier's slot (creates an approval)",
+        permission = "property_deals_suppliers.update", path = { id = UUID("Booking uuid") }, response = Approval,
+        body = OBJ({ slot_start = DT(), slot_end = DT(), cost = NUM(), subject = S(), body = S() }),
+        errors = { ["404"] = "Not found", ["409"] = "Not requested/tentative", ["422"] = E422["422"] } })
+    sdk.doc(app, "POST /tasks/:id/contact-log", { summary = "Log a call / message made from a task (deal or lead)",
+        permission = "property_deals_tasks.create", path = tid, response = Chase, errors = E422,
+        body = OBJ({ channel = ENUM({ "phone", "sms", "whatsapp", "email", "letter", "portal" }), to_party = ENUM(PARTIES),
+            to_name = S(), to_address = S(), outcome = S("e.g. no_answer, spoke, left_message"), note = S(), subject = S(),
+            sent_at = DT() }, { "channel" }) })
+    local mc = { id = UUID("Mail connector uuid") }
+    sdk.doc(app, "GET /mail-connectors", { summary = "Mailboxes the legal chaser reads", permission = "property_deals_settings.read",
+        response = ARR(MailConnector) })
+    sdk.doc(app, "POST /mail-connectors", { summary = "Add a mailbox (IMAP, Gmail, Microsoft 365)",
+        permission = "property_deals_settings.update", body = MailConnectorWrite, response = MailConnector, errors = E422 })
+    sdk.doc(app, "GET /mail-connectors/:id", { summary = "A mailbox", permission = "property_deals_settings.read",
+        path = mc, response = MailConnector, errors = E404 })
+    sdk.doc(app, "PUT /mail-connectors/:id", { summary = "Update a mailbox", permission = "property_deals_settings.update",
+        status = 200, path = mc, body = MailConnectorWrite, response = MailConnector, errors = E422 })
+    sdk.doc(app, "DELETE /mail-connectors/:id", { summary = "Remove a mailbox", permission = "property_deals_settings.update",
+        path = mc, response = OBJ({ deleted = BOOL() }), errors = E404 })
+    sdk.doc(app, "POST /mail-connectors/:id/sync", { summary = "Fetch new mail now", permission = "property_deals_settings.update",
+        status = 200, path = mc, response = OBJ({ fetched = INT(), stored = INT(), matched = INT() }),
+        errors = { ["404"] = "Not found", ["502"] = "Mailbox sign-in or fetch failed (also in last_error)" } })
+    sdk.doc(app, "GET /inbound-messages", { summary = "Emails received about deals", permission = "property_deals_tasks.read",
+        response = ARR(Inbound), query = { deal_uuid = UUID(), unmatched = ENUM({ "true" }), per_page = INT("1–100") } })
+    sdk.doc(app, "POST /inbound-messages", { summary = "Log a received email by hand", permission = "property_deals_tasks.create",
+        response = Inbound, errors = { ["409"] = "Already logged", ["422"] = E422["422"] },
+        body = OBJ({ from_address = S(), from_name = S(), subject = S(), body_text = S(), received_at = DT(),
+            deal_uuid = UUID("Attach to this deal (else matched by reference / sender)") }, { "from_address", "body_text" }) })
+    sdk.doc(app, "GET /notification-preferences", { summary = "My notification preferences here", response = Prefs })
+    sdk.doc(app, "PUT /notification-preferences", { summary = "Change my notification preferences", status = 200,
+        body = Prefs, response = Prefs, errors = E422 })
 end

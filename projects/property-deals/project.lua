@@ -57,8 +57,11 @@ return {
                              emits = { "expiring", "expired" } },
         approval = { table = "property_deals_approvals",
                      verbs = { requested = { status = "pending" }, approved = { status = "approved" },
-                               rejected = { status = "rejected" } },
+                               rejected = { status = "rejected" }, executed = { status = "executed" } },
                      emits = { "decided" } },
+        agent_run = { table = "property_deals_agent_runs",
+                      verbs = { succeeded = { status = "succeeded" }, failed = { status = "failed" } } },
+        inbound_message = { table = "property_deals_inbound_messages" },
         match = { table = "property_deals_matches" },
         -- opsapi:publishes (make:resource adds entries above this line)
     },
@@ -110,5 +113,13 @@ return {
         urgency_w_money = { type = "integer", label = "Urgency weight: money at risk", default = 10, min = 0, max = 100 },
         urgency_money_scale = { type = "integer", label = "Money at risk that counts as full urgency (£)", default = 5000,
                                 min = 1 },
+        -- AI (SPEC §3.5). Providers + keys: Workspace → AI providers (core); routes and agents: /ai/*.
+        ai_max_cost_run_usd = { type = "number", label = "AI: stop a run above (USD)", default = 0.5, min = 0,
+                                description = "An agent run is stopped once it costs more than this." },
+        ai_max_cost_day_usd = { type = "number", label = "AI: daily budget (USD)", default = 10, min = 0,
+                                description = "No new agent runs today once agents have spent this." },
+        ai_max_tokens = { type = "integer", label = "AI: max tokens per reply", default = 2048, min = 64, max = 200000 },
+        escalations_always_notify = { type = "boolean", label = "Escalations can't be muted", default = false,
+                                      description = "Managers get escalations by push/email even if they turned them off." },
     },
 }
