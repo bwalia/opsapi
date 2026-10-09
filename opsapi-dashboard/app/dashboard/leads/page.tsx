@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Pagination, Card, Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import TourHost from '@/components/property-deals/Tour';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
   crmService,
@@ -469,8 +470,11 @@ function LeadsPageContent() {
 
 export default function LeadsPage() {
   return (
-    <ProtectedPage module="crm" title="Leads">
-      <LeadsPageContent />
-    </ProtectedPage>
+    <>
+      <ProtectedPage module="crm" title="Leads">
+        <LeadsPageContent />
+      </ProtectedPage>
+      <TourHost />
+    </>
   );
 }
