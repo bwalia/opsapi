@@ -250,7 +250,7 @@ GET /api/v2/property-deals/properties/{id}/card
 
 ### 2.7 Buyers
 
-- **Profiles:** `GET/POST /buyer-profiles`, `PUT /buyer-profiles/{id}`. A profile sits on exactly
+- **Profiles:** `GET/POST /buyer-profiles`, `PUT /buyer-profiles/{id}`; the list with names: `GET /buyer-profiles/directory?q=`. A profile sits on exactly
   one CRM contact (`contact_uuid`) or company (`account_uuid`).
 - **Proof of funds:** `pof_status` none · requested · received · verified · expired, plus
   `pof_expires_on`. It expires automatically every day.
@@ -411,6 +411,7 @@ engine events). Use it for WhatsApp/Slack.
 | [ios-contact-log-without-deal](api-requests/ios-contact-log-without-deal.md) | Done (Phase 5): option 1 + 2 — chases take `lead_uuid` (deal optional), `GET /chases?lead_uuid=`, `POST /tasks/{id}/contact-log`; moved onto the deal when the lead converts (§3) |
 | [ios-idempotent-creates](api-requests/ios-idempotent-creates.md) | Done (Phase 5): `Idempotency-Key` on every create, core leads and kanban comments included (§1) |
 | [ios-notification-preferences](api-requests/ios-notification-preferences.md) | Done (Phase 5): `GET/PUT /notification-preferences` + quiet hours; the workspace setting `escalations_always_notify` can make escalations unmutable (§3) |
+| [web-buyer-directory](api-requests/web-buyer-directory.md) | Done: `GET /buyer-profiles/directory?q=&pof_status=` — profiles with the buyer's `name` and `email` |
 
 ## 7. Changes
 

@@ -745,4 +745,11 @@ return function(app)
         query = { format = ENUM({ "csv", "json" }), from = DATE("created on/after"), to = DATE("created before") },
         description = "At most 50,000 rows (header X-Truncated when cut). CSV cells that start with = + - @ are prefixed with ' "
             .. "so spreadsheets don't run them.", response = ARR(ANY("A row")), errors = { ["404"] = "Unknown export" } })
+
+    sdk.doc(app, "GET /buyer-profiles/directory", { summary = "Buyers with names (Buyers page)", permission = "property_deals_buyers.read",
+        query = { q = S("Name or email"), pof_status = S() },
+        response = ARR(OBJ({ uuid = UUID(), name = S(), email = S(), contact_uuid = S(), account_uuid = S(), entity_type = S(),
+            pof_status = S(), pof_expires_on = DATE(), funding_route = S(), price_min = MONEY(), price_max = MONEY(),
+            strategies = ANY(), areas = ANY(), deal_breakers = ANY(), min_yield_pct = NUM(), min_discount_pct = NUM(),
+            refurb_appetite = S(), company_number = S(), company_check = ANY(), active = BOOL(), updated_at = DT() }, { "uuid" })) })
 end

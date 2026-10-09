@@ -16,8 +16,14 @@ cleanup() { [ -n "${KEEP:-}" ] && { echo "KEEP: sandbox left running (pd-api-$ID
 trap cleanup EXIT
 
 mkdir -p "$W/src"
-(cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals) | grep -v '^lapis/logs/' \
-  | rsync -a --files-from=- "$ROOT/" "$W/src/"
+# rsync where available, else tar (e.g. inside a colima VM).
+if command -v rsync >/dev/null; then
+  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals) | grep -v '^lapis/logs/' \
+    | rsync -a --files-from=- "$ROOT/" "$W/src/"
+else
+  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals | grep -v '^lapis/logs/' \
+    | tar -cf - -T -) | tar -xf - -C "$W/src"
+fi
 mkdir -p "$W/src/lapis/logs" "$W/src/projects"
 JWT_SECRET=$(openssl rand -hex 32)
 

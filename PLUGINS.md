@@ -142,7 +142,9 @@ return {
     },
 
     -- Dashboard sidebar entries: each opens the generated page of an sdk.crud
-    -- resource, or a custom page (§6).
+    -- resource, a custom page (§6), or `route`: a native page the dashboard
+    -- itself ships for this plugin, under /dashboard/<plugin-with-hyphens>/
+    -- (e.g. { label = "Today", route = "/dashboard/helpdesk/today", module = ... }).
     menu = {
         { label = "Support overview", page = "overview", module = "helpdesk_tickets", icon = "LayoutDashboard" },
         { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },

@@ -76,6 +76,19 @@ return {
     -- Simple lists use the generated plugin pages; the main screens (Today,
     -- deals, map, approvals...) are native dashboard pages (gap map D7).
     menu = {
+        -- Native pages in opsapi-dashboard/app/dashboard/property-deals (gap map D7).
+        { label = "Deals today", route = "/dashboard/property-deals/today", module = "property_deals_tasks", icon = "Target" },
+        { label = "Deals", route = "/dashboard/property-deals/deals", module = "property_deals_deals", icon = "Kanban" },
+        { label = "Approvals", route = "/dashboard/property-deals/approvals", module = "property_deals_approvals",
+          icon = "CheckSquare" },
+        { label = "Deal finder", route = "/dashboard/property-deals/map", module = "property_deals_properties", icon = "MapPin" },
+        { label = "Buyers", route = "/dashboard/property-deals/buyers", module = "property_deals_buyers", icon = "Handshake" },
+        { label = "Suppliers", route = "/dashboard/property-deals/suppliers", module = "property_deals_suppliers", icon = "Wrench" },
+        { label = "Compliance", route = "/dashboard/property-deals/compliance", module = "property_deals_compliance",
+          icon = "Shield" },
+        { label = "Deal reports", route = "/dashboard/property-deals/reports", module = "property_deals_reports", icon = "BarChart" },
+        { label = "Deals settings", route = "/dashboard/property-deals/settings", module = "property_deals_settings",
+          icon = "Settings" },
         { label = "Bank holidays", resource = "holidays", module = "property_deals_settings", icon = "CalendarDays" },
         -- opsapi:menu (make:resource adds entries above this line)
     },
