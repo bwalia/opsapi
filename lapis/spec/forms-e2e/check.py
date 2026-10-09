@@ -10,6 +10,7 @@ import urllib.error, urllib.request
 A, B, C = os.environ["API_A"], os.environ["API_B"], os.environ["API_C"]
 API_CONTAINER_B = os.environ.get("API_CONTAINER_B")
 STUB_DIR = os.environ.get("STUB_DIR", "")
+STUBS = os.environ.get("STUBS_CONTAINER", "")
 PG = os.environ["PG_CONTAINER"]
 API_CONTAINER = os.environ["API_CONTAINER"]
 SECRET = open(os.environ["JWT_SECRET_FILE"]).read().strip()
@@ -552,6 +553,20 @@ s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"
 check("a bad colour is refused (422)", s == 422, (s, j))
 s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {"logo_url": "javascript:x"}}})
 check("a non-https logo is refused (422)", s == 422, (s, j))
+s, j = call("PUT", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A, {"settings": {"theme": {"hide_branding": True}}})
+check("no plan may hide \"Powered by OpsAPI\" (422, says why)", s == 422 and "plan" in json.dumps(j), (s, j))
+s, j = call("GET", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A)
+check("the builder is told the toggle isn't available", s == 200 and j["data"].get("can_hide_branding") is False, j)
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Old plan branding", "fields": [
+    {"type": "short_text", "label": "Note"}]})
+OLD = j["data"]
+sql("""UPDATE forms SET settings = jsonb_build_object('theme', jsonb_build_object('hide_branding', true,
+       'submit_label', 'Go')) WHERE uuid = '%s'""" % OLD["uuid"])
+call("POST", "/api/v2/forms/%s/publish" % OLD["uuid"], owner_a, NS_A)
+_, _, pj = token_for(OLD["public_id"])
+theme = (pj.get("data") or {}).get("theme") or {}
+check("a hide-branding saved under an earlier plan isn't honoured", theme.get("submit_label") == "Go"
+      and "hide_branding" not in theme, pj)
 
 for _ in range(3):
     token_for(LF["public_id"])
@@ -641,6 +656,93 @@ lapis_exec(API_CONTAINER, 'require("lib.forms.limits").PLANS.free = { forms = 1 
 s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"title": "Over the limit"})
 lapis_exec(API_CONTAINER, 'require("lib.forms.limits").PLANS.free = {} print("reset")')
 check("a plan's form limit is enforced (403, says why)", s == 403 and "plan includes 1 forms" in j.get("error", ""), (s, j))
+
+print("== phase 2: custom domains")
+def zone(records):
+    # Written from inside the stubs container: a host-side write over a macOS bind mount can be read stale.
+    subprocess.run(["docker", "exec", "-i", STUBS, "sh", "-c", "cat > /w/dns.json"], input=json.dumps(records),
+                   text=True, check=True)
+
+
+EDGE = {"edge.forms.test": {"A": ["10.9.9.9"]}}
+zone(EDGE)
+s, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("domain settings: available, with the platform's target", s == 200 and j["data"]["available"]
+      and j["data"]["target"] == "edge.forms.test" and not j["data"].get("domain"), j)
+s, j = call("PUT", "/api/v2/forms/domain", member_a, NS_A, {"domain": "forms.acme.test"})
+check("only forms.manage can connect a domain (403)", s == 403, (s, j))
+bad = [call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": d})[0]
+       for d in ["not a domain", "203.0.113.9", "edge.forms.test", "-bad.acme.test", "a..b.test", "bücher.test"]]
+check("bad, IP, the platform's own and non-ASCII domains are refused (400)", bad == [400] * 6, bad)
+s, j = call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": "https://Forms.Acme.TEST/path"})
+d = j.get("data") or {}
+recs = {r["type"]: r for r in d.get("records", [])}
+TXT_A = recs.get("TXT", {}).get("value", "")
+check("a domain is cleaned up and waits for DNS, with both records to add", s == 200
+      and d.get("domain") == "forms.acme.test" and d.get("status") == "pending"
+      and recs.get("CNAME", {}).get("value") == "edge.forms.test"
+      and recs.get("TXT", {}).get("name") == "_opsapi-challenge.forms.acme.test" and TXT_A.startswith("opsapi-verify="), j)
+check("it says what's missing", "doesn't point at edge.forms.test" in (d.get("last_error") or "")
+      and "TXT record" in (d.get("last_error") or ""), d)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_a, NS_A)
+check("pointing at the edge isn't enough: the TXT proof is required", s == 200 and j["data"]["status"] == "pending"
+      and "TXT" in (j["data"].get("last_error") or "") and "point" not in (j["data"].get("last_error") or ""), j)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"},
+                   "_opsapi-challenge.forms.acme.test": {"TXT": [TXT_A]}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_a, NS_A)
+check("with both records it's connected", s == 200 and j["data"]["status"] == "active"
+      and not j["data"].get("last_error") and j["data"].get("verified_at"), j)
+s, j = call("GET", "/api/v2/forms/" + UF["uuid"], owner_a, NS_A)
+check("form links use the domain", j["data"]["share_url"] == "https://forms.acme.test/f/" + UF["public_id"]
+      and j["data"]["share_domain"] == "forms.acme.test", j["data"].get("share_url"))
+s1, _ = call("GET", "/api/v2/public/form-domains/check?domain=forms.acme.test")
+s2, _ = call("GET", "/api/v2/public/form-domains/check?domain=other.acme.test")
+check("the edge's check: 200 for a connected domain, 404 for others", (s1, s2) == (200, 404), (s1, s2))
+
+s, j = call("POST", "/api/v2/forms", owner_b, NS_B, {"title": "B's form", "fields": [
+    {"type": "short_text", "label": "Note"}]})
+FB = j["data"]
+call("POST", "/api/v2/forms/%s/publish" % FB["uuid"], owner_b, NS_B)
+ACME = {"Origin": "https://forms.acme.test", "X-Forwarded-For": "198.51.100.251"}
+s_foreign, _ = call("GET", "/api/v2/public/forms/" + FB["public_id"], headers=ACME)
+s_own, own = call("GET", "/api/v2/public/forms/" + UF["public_id"], headers=ACME)
+s_plain, _ = call("GET", "/api/v2/public/forms/" + FB["public_id"])
+check("a custom domain serves only its own workspace's forms", (s_foreign, s_own, s_plain) == (404, 200, 200),
+      (s_foreign, s_own, s_plain))
+btok, _, _ = token_for(FB["public_id"])
+time.sleep(2.1)
+s, _ = call("POST", "/api/v2/public/forms/%s/submissions" % FB["public_id"], body={"answers": {"note": "x"},
+            "render_token": btok}, headers=dict(ACME, **{"Idempotency-Key": str(uuid.uuid4())}))
+check("... and takes responses only for them (404)", s == 404, s)
+
+# Whoever proves control of the domain now wins.
+s, j = call("PUT", "/api/v2/forms/domain", owner_b, NS_B, {"domain": "forms.acme.test"})
+TXT_B = {r["type"]: r for r in j["data"]["records"]}["TXT"]["value"]
+check("another workspace can't take a domain without its own proof", j["data"]["status"] == "pending", j)
+zone(dict(EDGE, **{"forms.acme.test": {"CNAME": "edge.forms.test"},
+                   "_opsapi-challenge.forms.acme.test": {"TXT": [TXT_B]}}))
+s, j = call("POST", "/api/v2/forms/domain/check", owner_b, NS_B)
+_, ja = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("with it, the domain moves, and the first workspace is told why", j["data"]["status"] == "active"
+      and ja["data"]["status"] == "pending" and "Another workspace" in (ja["data"].get("last_error") or ""), (j, ja))
+check("a domain is active in one workspace at most",
+      count("form_domains", "domain = 'forms.acme.test' AND status = 'active'") == 1)
+s, j = call("DELETE", "/api/v2/forms/domain", owner_b, NS_B)
+check("removing it", s == 200 and not j["data"].get("domain")
+      and count("form_domains", "namespace_id = (SELECT id FROM namespaces WHERE uuid = '%s')" % NS_B) == 0, j)
+
+# The hourly job connects a domain once its records appear.
+call("PUT", "/api/v2/forms/domain", owner_a, NS_A, {"domain": "join.acme.test"})
+_, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+TXT_J = {r["type"]: r for r in j["data"]["records"]}["TXT"]["value"]
+zone(dict(EDGE, **{"join.acme.test": {"A": ["10.9.9.9"]}, "_opsapi-challenge.join.acme.test": {"TXT": [TXT_J]}}))
+sql("UPDATE form_domains SET checked_at = NOW() - INTERVAL '2 hours' WHERE domain = 'join.acme.test'")
+out = lapis_exec(API_CONTAINER, 'print("CHECKED " .. require("lib.forms.domains").maintain())')
+_, j = call("GET", "/api/v2/forms/domain", owner_a, NS_A)
+check("the hourly check connects it (an A record to the edge's address works too)",
+      j["data"]["status"] == "active", (out[-300:], j))
+call("DELETE", "/api/v2/forms/domain", owner_a, NS_A)
 
 print("== AI agent tools")
 lua = r'''

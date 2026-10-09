@@ -131,18 +131,23 @@ check("a rule can't point below its question", Fields.normalize({ fields = {
     { type = "short_text", label = "Two" } } }, {}) == nil)
 check("a rule's value must be one of the options", Fields.normalize({ fields = {
     { type = "radio", label = "R", options = { "X" } },
-    { type = "short_text", label = "T", logic = { rules = { { field = "r", op = "eq", value = "nope" } } } } } }, {}) == nil)
+    { type = "short_text", label = "T",
+      logic = { rules = { { field = "r", op = "eq", value = "nope" } } } } } }, {}) == nil)
 check("locked contact fields can't be hidden", assert(Fields.normalize({ fields = {
     { type = "boolean", label = "Q" },
-    { type = "email", label = "Email", system = "contact.email", logic = { rules = { { field = "q", op = "eq", value = true } } } },
+    { type = "email", label = "Email", system = "contact.email",
+      logic = { rules = { { field = "q", op = "eq", value = true } } } },
 } }, { ["contact.email"] = true })).fields[2].logic == nil)
 
 print("file questions")
-local ff = assert(Fields.normalize({ fields = { { type = "file_upload", label = "CV", max_files = 2, accept = "documents" } } }, {}))
-check("file question settings", ff.fields[1].max_files == 2 and ff.fields[1].max_size_mb == 10 and ff.fields[1].accept == "documents")
+local ff = assert(Fields.normalize({ fields = {
+    { type = "file_upload", label = "CV", max_files = 2, accept = "documents" } } }, {}))
+check("file question settings", ff.fields[1].max_files == 2 and ff.fields[1].max_size_mb == 10
+    and ff.fields[1].accept == "documents")
 local U1 = "9e98ab27-846a-43c3-9473-64668b0c7859"
 check("the answer is upload ids", Fields.validate(ff, { cv = { U1 } }).cv[1] == U1)
-check("stored details are accepted again (retry)", Fields.validate(ff, { cv = { { id = U1, name = "cv.pdf" } } }).cv[1] == U1)
+check("stored details are accepted again (retry)",
+    Fields.validate(ff, { cv = { { id = U1, name = "cv.pdf" } } }).cv[1] == U1)
 check("too many files refused", select(2, Fields.validate(ff, { cv = { U1, U1, U1 } })).cv ~= nil)
 check("no SVG or HTML among allowed files", Fields.FILE_TYPES.svg == nil and Fields.FILE_TYPES.html == nil
     and Fields.FILE_TYPES.png[2] == "images" and Fields.FILE_TYPES.pdf[2] == "documents")
@@ -196,6 +201,23 @@ check("lists are keyset-paged (no OFFSET)", not read("lapis/queries/FormSubmissi
     and not read("lapis/queries/FormQueries.lua"):find(OFFSET))
 check("the agent can't publish without asking", has(read("lapis/lib/agent/tools.lua"), 'name = "publish_form"')
     and read("lapis/lib/agent/tools.lua"):match('name = "publish_form".-confirm = function') ~= nil)
+
+print("custom domains")
+if not pcall(require, "resty.lrucache") then
+    package.loaded["resty.lrucache"] = { new = function() return {} end }
+end
+local n = require("lib.forms.domains").normalize
+check("a domain is cleaned up (scheme, path, port, case, trailing dot)",
+    n("HTTPS://Forms.Acme.com:443/f/x?y=1") == "forms.acme.com" and n(" forms.acme.com. ") == "forms.acme.com")
+check("IPs, single labels, bad labels, numeric TLDs and non-ASCII are refused",
+    not n("203.0.113.9") and not n("localhost") and not n("-a.acme.com") and not n("a..b.com")
+    and not n("a.b.c-") and not n(("a"):rep(64) .. ".com") and not n("x.123") and not n("bücher.de") and not n(nil))
+check("an international name in its xn-- form is fine", n("xn--bcher-kva.de") == "xn--bcher-kva.de")
+local pub = read("lapis/routes/forms-public.lua")
+check("the public form routes refuse another workspace's custom domain (view, upload/event, submit)",
+    select(2, pub:gsub("foreign_domain%(self", "")) >= 3)
+check("the TXT proof is required, not just DNS pointing at the edge",
+    has(read("lapis/lib/forms/domains.lua"), "if found.owned and found.routed then"))
 
 print("")
 print(failures == 0 and "All checks passed." or (failures .. " check(s) failed."))

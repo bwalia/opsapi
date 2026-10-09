@@ -9,7 +9,7 @@
 #
 # Fresh database, no real credentials. Needs the lapis-lapis,
 # pgvector/pgvector:pg15, redis:7-alpine, python:3.12-alpine and quay.io/minio/minio
-# images, and python3. stubs.py stands in for the AI model and Cloudflare Turnstile.
+# images, and python3. stubs.py stands in for the AI model, Cloudflare Turnstile and DNS.
 set -euo pipefail
 REF=${1:-}
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd); HERE="$ROOT/lapis/spec/forms-e2e"
@@ -30,6 +30,7 @@ docker run -d --name $P-stubs --network "$NET" --network-alias stubs -v "$W:/w" 
   python:3.12-alpine python -I /stubs.py >/dev/null
 docker run -d --name $P-minio --network "$NET" --network-alias minio -e MINIO_ROOT_USER=formsminio \
   -e MINIO_ROOT_PASSWORD="$(cat "$W/jwt_secret" | cut -c1-24)" quay.io/minio/minio server /data >/dev/null
+STUBS_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $P-stubs)
 until docker exec $P-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done; sleep 2
 docker exec -i $P-pg psql -U postgres -q <<'SQL'
 CREATE ROLE pguser LOGIN PASSWORD 'pgpassword' NOSUPERUSER;
@@ -44,6 +45,7 @@ api() { # name project_code
     -e OPENSSL_SECRET_KEY="$(cat "$W/enc_key")" -e OPENSSL_SECRET_IV="$(cat "$W/enc_iv")" \
     -e AI_PROVIDER=openai -e AI_BASE_URL=http://stubs:8080/v1 -e AI_API_KEY=stub -e AI_MODEL=stub \
     -e AI_FALLBACK_PROVIDER=none -e TURNSTILE_VERIFY_URL=http://stubs:8080/turnstile \
+    -e FORMS_DOMAIN_TARGET=edge.forms.test -e DOMAIN_VERIFY_RESOLVERS="$STUBS_IP" \
     -e MINIO_ENDPOINT=http://minio:9000 -e MINIO_ENDPOINT_WEB_EXTERNAL=http://minio:9000 -e MINIO_BUCKET=forms-e2e \
     -e MINIO_ACCESS_KEY=formsminio -e MINIO_SECRET_KEY="$(cat "$W/jwt_secret" | cut -c1-24)" -e MINIO_REGION=us-east-1 \
     lapis-lapis >/dev/null
@@ -58,7 +60,7 @@ for p in a b c; do until curl -fs "http://127.0.0.1:$(port $p)/health" >/dev/nul
 rc=0
 API_A="http://127.0.0.1:$(port a)" API_B="http://127.0.0.1:$(port b)" API_C="http://127.0.0.1:$(port c)" \
   PG_CONTAINER=$P-pg API_CONTAINER=$P-a API_CONTAINER_B=$P-b JWT_SECRET_FILE="$W/jwt_secret" MAIL_DIR="$W/mail" \
-  STUB_DIR="$W/stub" \
+  STUB_DIR="$W/stub" STUBS_CONTAINER=$P-stubs \
   python3 -I "$HERE/check.py" || rc=1
 echo "== errors and form warnings logged by the pods during the run"
 for p in a b; do docker exec $P-$p sh -c 'grep -E "\[error\]|\[warn\].*\[(forms|invitations)\]" /var/log/nginx/error.log | sed -E "s/^[0-9/]+ [0-9:]+ \[error\] [0-9]+#[0-9]+: (\*[0-9]+ )?//; s/, client: .*//" | cut -c1-220 | sort | uniq -c | head -10' || true; done
