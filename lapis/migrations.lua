@@ -370,6 +370,7 @@ local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "mig
 local namespace_module_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-module") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
 local auth_hardening_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.auth-hardening") or {}
+local ai_provider_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.ai-providers") or {}
 local billing_ent_migrations = load_if_enabled(ProjectConfig.FEATURES.BILLING, "migrations.billing-entitlements") or {}
 local namespace_mail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-mail") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
@@ -2562,6 +2563,9 @@ local _migrations = {
     -- Auth hardening: per-account throttles, hashed OTP codes (migrations/auth-hardening.lua)
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
+    -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
+    ['zzai1_namespace_ai_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 1),
+    ['zzai2_idempotency_keys'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 2),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

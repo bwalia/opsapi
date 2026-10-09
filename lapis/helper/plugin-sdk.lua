@@ -100,6 +100,15 @@ function sdk.handler(opts, fn)
     return NamespaceMiddleware.requireNamespace(fn)
 end
 
+--- Honour an `Idempotency-Key` header on a create: a retry with the same key
+-- (same workspace, user and request) gets the first response back and nothing
+-- is created twice (helper/idempotency.lua). sdk.crud creates already do this.
+--   return sdk.idempotent(self, function() ... return sdk.created(row) end)
+function sdk.idempotent(self, fn)
+    local user = self.current_user
+    return require("helper.idempotency").run(self, self.namespace and self.namespace.id, user and user.uuid, fn)
+end
+
 function sdk.namespace_id(self)
     return self.namespace and self.namespace.id
 end
@@ -370,6 +379,9 @@ local function guarded(fk_status, fn)
         return nil, fk_status, fk_status == 409 and "Record is still referenced by other records"
             or "A referenced record does not exist"
     end
+    if msg:find("violates check constraint", 1, true) then
+        return nil, 422, "Values not allowed together (" .. (msg:match('check constraint "([^"]+)"') or "check") .. ")"
+    end
     error(res, 0)
 end
 
@@ -616,11 +628,13 @@ function sdk.crud(app, path, opts)
 
     if on("create") then
         app:post(path, guard("create", function(self)
-            local data, bad = input(self)
-            if not data then return bad end
-            local row, status, msg = R.create(self.namespace.id, data)
-            if not row then return sdk.error(status, msg) end
-            return sdk.created(row)
+            return sdk.idempotent(self, function()
+                local data, bad = input(self)
+                if not data then return bad end
+                local row, status, msg = R.create(self.namespace.id, data)
+                if not row then return sdk.error(status, msg) end
+                return sdk.created(row)
+            end)
         end))
     end
 

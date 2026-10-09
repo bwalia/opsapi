@@ -868,6 +868,9 @@ return function(app)
             return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
+        -- Idempotency-Key: an offline client's retry replays the first answer.
+        local project = db.query("SELECT namespace_id FROM kanban_projects WHERE id = ?", board.project_id)[1]
+        return require("helper.idempotency").run(self, project and project.namespace_id, user.uuid, function()
         local data = parse_json_body()
 
         -- type check rejects a repeated form key (arrives as a table → SQL 500).
@@ -901,6 +904,7 @@ return function(app)
         notify_safe("notifyTaskCommented", task, comment, user.uuid, get_namespace_id(), mentioned)
 
         return api_response(201, comment)
+        end)
     end)
 
     -- PUT /api/v2/kanban/comments/:uuid - Update comment
