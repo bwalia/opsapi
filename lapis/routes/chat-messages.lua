@@ -420,7 +420,7 @@ return function(app)
         end
 
         local search_term = self.params.q or self.params.query
-        if not search_term or search_term == "" then
+        if type(search_term) ~= "string" or search_term == "" then
             return { status = 400, json = { error = "Search query is required" } }
         end
 
