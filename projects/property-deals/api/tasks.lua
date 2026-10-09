@@ -97,7 +97,8 @@ return function(app)
             return sdk.error(422, "Validation failed", { snooze_reason = "is required when snoozing" })
         end
         local task = U.tx(function() return Tasks.update(ns, current.task_uuid, data, sdk.user(self).uuid) end)
-        return sdk.ok(task)
+        if task.deal_uuid then require("property_deals.health").recompute_deal(ns, task.deal_uuid, sdk.settings(self)) end
+        return sdk.ok(Tasks.get(ns, current.task_uuid))
     end)))
 
     app:get("/tasks/:id/dependencies", sdk.handler({ permission = "property_deals_tasks.read" }, function(self)

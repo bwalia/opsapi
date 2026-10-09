@@ -195,6 +195,8 @@ function Deals.create(ns, input, user_uuid, settings)
             db.update("property_deals_lead_details", { property_uuid = deal.property_uuid or db.NULL },
                 { namespace_id = ns, lead_uuid = lead.uuid })
         end
+        -- Workflow engine: the first stage's tasks.
+        require("property_deals.engine").enter_stage(ns, deal.uuid, first.key, user_uuid, settings)
         return Deals.get(ns, deal.uuid)
     end)
 end
@@ -217,7 +219,7 @@ Deals.UPDATABLE = {
     name = { type = "string" },
 }
 
-function Deals.update(ns, uuid, data)
+function Deals.update(ns, uuid, data, actor_uuid)
     local deal = Deals.get(ns, uuid)
     if not deal then return nil end
     return U.tx(function()
@@ -234,10 +236,12 @@ function Deals.update(ns, uuid, data)
             crm.updated_at = db.raw("NOW()")
             db.update("crm_deals", crm, { uuid = deal.crm_deal_uuid, namespace_id = ns })
         end
+        local retime = data.target_exchange_date ~= nil or data.target_completion_date ~= nil
         if next(data) then
             data.updated_at = db.raw("NOW()")
             db.update("property_deals_deals", data, { uuid = uuid, namespace_id = ns })
         end
+        if retime then require("property_deals.engine").retarget(ns, uuid, actor_uuid) end
         return Deals.get(ns, uuid)
     end)
 end

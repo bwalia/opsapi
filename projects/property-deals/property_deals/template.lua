@@ -80,6 +80,10 @@ function T.validate(def)
         end
         if type(s.name) ~= "string" or s.name == "" then bad(p .. ".name", "is required") end
         if s.tasks ~= nil and not is_list(s.tasks) then bad(p .. ".tasks", "must be a list") end
+        if s.expected_working_days ~= nil and (type(s.expected_working_days) ~= "number" or s.expected_working_days < 0) then
+            bad(p .. ".expected_working_days", "must be a number of working days (0 or more)")
+        end
+        if s.parallel ~= nil and type(s.parallel) ~= "boolean" then bad(p .. ".parallel", "must be true or false") end
         for j, t in ipairs(is_list(s.tasks) and s.tasks or {}) do
             local tp = p .. ".tasks[" .. j .. "]"
             if type(t.key) ~= "string" or not t.key:match(KEY) then

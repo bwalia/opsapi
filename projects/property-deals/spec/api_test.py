@@ -1,84 +1,18 @@
 """Property Deals API checks (Phase 2): setup, CRUD, tenant isolation and RBAC.
 
 Run by run.sh against a sandbox OpsAPI (PD_API, PD_JWT_SECRET). Standard library only.
-Two workspaces: "Demo Buyers Ltd" (A) and "Other Co" (B). Users: owner A, owner B, and three
+Two workspaces: "Acme Property Ltd" (A) and "Other Co" (B). Users: owner A, owner B, and three
 A members with the pd_read_only, pd_agent and pd_operator roles.
 """
-import base64
-import hashlib
-import hmac
 import json
 import os
 import sys
-import time
-import urllib.error
-import urllib.request
 
-API = os.environ["PD_API"]
-SECRET = os.environ["PD_JWT_SECRET"]
-P = API + "/api/v2/property-deals"
-
-USERS = {
-    "owner_a": ("a1111111-0000-4000-8000-000000000001", "owner.a@pd.invalid"),
-    "owner_b": ("b2222222-0000-4000-8000-000000000002", "owner.b@pd.invalid"),
-    "reader": ("c3333333-0000-4000-8000-000000000003", "reader.a@pd.invalid"),
-    "agent": ("d4444444-0000-4000-8000-000000000004", "agent.a@pd.invalid"),
-    "operator": ("e5555555-0000-4000-8000-000000000005", "operator.a@pd.invalid"),
-}
-
-failures = 0
-
-
-def jwt(user):
-    uuid, email = USERS[user]
-    b = lambda d: base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).rstrip(b"=")
-    h = b({"typ": "JWT", "alg": "HS256"})
-    p = b({"userinfo": {"uuid": uuid, "email": email}, "iat": int(time.time()), "exp": int(time.time()) + 3600,
-           "iss": "opsapi"})
-    sig = base64.urlsafe_b64encode(hmac.new(SECRET.encode(), h + b"." + p, hashlib.sha256).digest()).rstrip(b"=")
-    return (h + b"." + p + b"." + sig).decode()
-
-
-def call(method, url, user, ns=None, body=None):
-    headers = {"Authorization": "Bearer " + jwt(user), "Content-Type": "application/json"}
-    if ns:
-        headers["X-Namespace-Id"] = ns
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, json.loads(r.read() or b"null")
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        try:
-            return e.code, json.loads(raw)
-        except ValueError:
-            return e.code, raw.decode(errors="replace")
-
-
-def check(name, cond, detail=None):
-    global failures
-    if cond:
-        print("ok    " + name)
-    else:
-        failures += 1
-        print("FAIL  " + name + ("  -> " + json.dumps(detail)[:600] if detail is not None else ""))
-
-
-def expect(name, res, status):
-    check(f"{name} ({status})", res[0] == status, res)
-    return res[1]
-
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pdtest import API, P, USERS, call, check, expect, workspace, finish  # noqa: E402
 
 # --- Workspaces --------------------------------------------------------------
-def workspace(owner, name, slug):
-    body = expect(f"{owner} creates workspace {name}",
-                  call("POST", API + "/api/v2/user/namespaces", owner, body={"name": name, "slug": slug}), 201)
-    ns = (body.get("data") or body).get("namespace", body.get("data") or body)
-    return str(ns.get("uuid") or ns.get("id"))
-
-
-A = workspace("owner_a", "Demo Buyers Ltd", "demo-buyers")
+A = workspace("owner_a", "Acme Property Ltd", "acme-property")
 B = workspace("owner_b", "Other Co", "other-co")
 
 res = call("GET", P + "/deals", "owner_a", A)
@@ -177,7 +111,8 @@ check("completed_by recorded", done["completed_by_user_uuid"] == USERS["owner_a"
 res = call("PUT", P + f"/tasks/{task['task_uuid']}", "owner_a", A, {"snoozed_until": "2026-10-11T09:00:00Z"})
 check("snooze needs a reason (422)", res[0] == 422, res)
 mine = expect("my open tasks", call("GET", P + f"/tasks?owner_user_uuid={USERS['owner_a'][0]}&open=true", "owner_a", A), 200)
-check("my tasks lists the owned open task", mine["meta"]["total"] == 1, mine)
+check("my tasks lists the owned open task (plus the engine's stage tasks)",
+      any(t["task_uuid"] == task["task_uuid"] for t in mine["data"]) and mine["meta"]["total"] >= 2, mine["meta"])
 
 # --- Enquiries, chases, suppliers, bookings, compliance ----------------------------
 enq = expect("raise enquiry", call("POST", P + "/enquiries", "owner_a", A,
@@ -254,6 +189,4 @@ check("agent can't sign off compliance (403)", res[0] == 403, res)
 expect("agent can update a task", call("PUT", P + f"/tasks/{task['task_uuid']}", "agent", A, {"pd_status": "agent_running"}), 200)
 expect("agent can read approvals", call("GET", P + "/approvals", "agent", A), 200)
 
-print()
-print("FAILED: %d" % failures if failures else "ALL PASSED")
-sys.exit(1 if failures else 0)
+sys.exit(finish())

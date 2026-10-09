@@ -4,6 +4,9 @@
 -- A starting point, not legal advice: each workspace's own solicitor or
 -- compliance lead must review and edit it (docs/property-deals/compliance-disclaimer.md).
 -- Format: docs/property-deals/template-format.md
+-- expected_working_days / parallel feed the completion-slip forecast: parallel
+-- stages run alongside the critical path (searches -> enquiries -> exchange ->
+-- completion) and don't add to it.
 
 local function task(t)
     t.owner = t.owner or "operator"
@@ -20,7 +23,7 @@ return {
     deal_types = { "buy", "buy_and_assign", "sourcing" },
     stages = {
         {
-            key = "new_lead", name = "New seller lead",
+            key = "new_lead", name = "New seller lead", expected_working_days = 1,
             tasks = {
                 task { key = "call_back", title = "Call the seller back", sla_minutes = 60,
                        due = { from = "stage_entry", minutes = 60 }, blocking = true, priority = "high" },
@@ -31,7 +34,7 @@ return {
             },
         },
         {
-            key = "qualified", name = "Qualified",
+            key = "qualified", name = "Qualified", expected_working_days = 2,
             tasks = {
                 task { key = "pull_title", title = "Pull title register and plan", due = { from = "stage_entry", hours = 24 },
                        agent = { eligible = true, agent_key = "property_enrichment" } },
@@ -50,7 +53,7 @@ return {
             },
         },
         {
-            key = "offer_sent", name = "Offer sent",
+            key = "offer_sent", name = "Offer sent", expected_working_days = 2,
             tasks = {
                 task { key = "send_offer", title = "Send written offer with reasoning", blocking = true,
                        due = { from = "deal_created", hours = 48 }, approval = "manager", compliance = true,
@@ -58,7 +61,7 @@ return {
             },
         },
         {
-            key = "accepted", name = "Accepted",
+            key = "accepted", name = "Accepted", expected_working_days = 1,
             tasks = {
                 task { key = "memo_of_sale", title = "Issue memorandum of sale", blocking = true,
                        due = { from = "stage_entry", hours = 8 } },
@@ -69,7 +72,7 @@ return {
             },
         },
         {
-            key = "seller_papers", name = "Seller papers",
+            key = "seller_papers", name = "Seller papers", expected_working_days = 3, parallel = true,
             tasks = {
                 task { key = "chase_seller_forms", title = "Chase seller forms (TA6, TA10, TA7 if leasehold)",
                        due = { from = "stage_entry", working_days = 2 }, blocking = true,
@@ -77,7 +80,7 @@ return {
             },
         },
         {
-            key = "searches", name = "Searches",
+            key = "searches", name = "Searches", expected_working_days = 10,
             tasks = {
                 task { key = "order_searches", title = "Order searches", due = { from = "stage_entry", working_days = 1 },
                        blocking = true,
@@ -85,7 +88,7 @@ return {
             },
         },
         {
-            key = "epc", name = "EPC",
+            key = "epc", name = "EPC", expected_working_days = 2, parallel = true,
             tasks = {
                 task { key = "epc_register_check", title = "Check the public register for a valid EPC",
                        sla_minutes = 30, due = { from = "stage_entry", minutes = 30 }, blocking = true,
@@ -98,7 +101,7 @@ return {
             },
         },
         {
-            key = "survey", name = "Survey / valuation",
+            key = "survey", name = "Survey / valuation", expected_working_days = 5, parallel = true,
             tasks = {
                 task { key = "book_survey", title = "Book survey or lender valuation", sla_minutes = 60,
                        due = { from = "stage_entry", minutes = 60 }, blocking = true,
@@ -106,7 +109,7 @@ return {
             },
         },
         {
-            key = "lease_pack", name = "Lease pack",
+            key = "lease_pack", name = "Lease pack", expected_working_days = 10, parallel = true,
             when = { tenure = { "leasehold", "share_of_freehold" } },
             tasks = {
                 task { key = "request_lease_pack", title = "Request management pack from managing agent / freeholder",
@@ -114,7 +117,7 @@ return {
             },
         },
         {
-            key = "enquiries", name = "Enquiries",
+            key = "enquiries", name = "Enquiries", expected_working_days = 5,
             tasks = {
                 task { key = "chase_enquiries", title = "Chase each open enquiry", repeat_every = { working_days = 1 },
                        due = { from = "stage_entry", working_days = 1 }, blocking = true,
@@ -123,7 +126,7 @@ return {
             },
         },
         {
-            key = "funds_buyer", name = "Funds & buyer",
+            key = "funds_buyer", name = "Funds & buyer", expected_working_days = 3, parallel = true,
             tasks = {
                 task { key = "buyer_funds", title = "Buyer proof of funds / mortgage or bridging offer",
                        due = { from = "target_exchange", working_days = -5 }, blocking = true, compliance = true },
@@ -133,7 +136,7 @@ return {
             },
         },
         {
-            key = "exchange", name = "Exchange",
+            key = "exchange", name = "Exchange", expected_working_days = 1,
             entry_gate = {
                 tasks_done = { "order_searches", "buyer_funds", "buyer_aml" },
                 compliance_passed = { "aml_cdd_seller", "aml_cdd_buyer", "aml_source_of_funds_buyer",
@@ -148,7 +151,7 @@ return {
             },
         },
         {
-            key = "completion", name = "Completion",
+            key = "completion", name = "Completion", expected_working_days = 1,
             entry_gate = {
                 tasks_done = { "exchange_contracts" },
                 compliance_passed = { "completion_statement_agreed" },
@@ -162,7 +165,7 @@ return {
             },
         },
         {
-            key = "after_completion", name = "After completion",
+            key = "after_completion", name = "After completion", expected_working_days = 0,
             optional = true,
             tasks = {
                 task { key = "refurb_plan", title = "Refurb plan", due = { from = "stage_entry", working_days = 5 } },

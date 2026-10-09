@@ -10,7 +10,7 @@ return {
     deal_types = { "sell" },
     stages = {
         {
-            key = "instruct_agent", name = "Instruct agent",
+            key = "instruct_agent", name = "Instruct agent", expected_working_days = 5,
             tasks = {
                 { key = "choose_agent", title = "Choose and instruct an estate agent", owner = "operator",
                   due = { from = "stage_entry", working_days = 3 }, blocking = true, approval = "none" },
@@ -22,14 +22,14 @@ return {
             },
         },
         {
-            key = "marketing", name = "On the market",
+            key = "marketing", name = "On the market", expected_working_days = 30,
             tasks = {
                 { key = "weekly_update", title = "Weekly viewing and feedback update", owner = "operator",
                   repeat_every = { working_days = 5 }, due = { from = "stage_entry", working_days = 5 }, approval = "none" },
             },
         },
         {
-            key = "sale_agreed", name = "Sale agreed",
+            key = "sale_agreed", name = "Sale agreed", expected_working_days = 2,
             tasks = {
                 { key = "instruct_solicitor", title = "Instruct seller's solicitor", owner = "operator",
                   due = { from = "stage_entry", working_days = 1 }, blocking = true, approval = "none" },
@@ -38,7 +38,7 @@ return {
             },
         },
         {
-            key = "conveyancing", name = "Conveyancing",
+            key = "conveyancing", name = "Conveyancing", expected_working_days = 40,
             tasks = {
                 { key = "chase_progress", title = "Chase solicitors for progress", owner = "operator",
                   repeat_every = { working_days = 2 }, due = { from = "stage_entry", working_days = 2 },
@@ -46,7 +46,7 @@ return {
             },
         },
         {
-            key = "exchange", name = "Exchange",
+            key = "exchange", name = "Exchange", expected_working_days = 1,
             entry_gate = { tasks_done = { "seller_aml" }, compliance_passed = { "aml_cdd_seller" },
                            fields = { "agreed_price", "target_completion_date" } },
             tasks = {
@@ -55,7 +55,7 @@ return {
             },
         },
         {
-            key = "completion", name = "Completion",
+            key = "completion", name = "Completion", expected_working_days = 10,
             entry_gate = { tasks_done = { "exchange_contracts" } },
             tasks = {
                 { key = "completion_funds", title = "Sale proceeds received", owner = "manager", blocking = true,

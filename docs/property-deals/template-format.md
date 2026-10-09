@@ -36,7 +36,10 @@ Seeds: `projects/property-deals/property_deals/seed/uk_guaranteed_sale.lua` and
 {
   "key": "exchange",                   // unique within the template
   "name": "Exchange",
-  "optional": false,                   // optional stages can be skipped by a manager
+  "optional": false,                   // not on the normal path: never chosen by "advance", only moved to on purpose
+  "parallel": false,                   // runs alongside the stage before it: its tasks start when that stage is
+                                       // entered, the deal's stage doesn't change, and it isn't on the critical path
+  "expected_working_days": 10,         // typical duration, for the completion-slip forecast (urgency.md)
   "when": { "tenure": ["leasehold"] }, // only for deals whose property matches (else skipped)
   "entry_gate": {                      // checked before a deal may ENTER this stage
     "tasks_done": ["order_searches", "buyer_aml"],         // task keys (any stage) that must be done
@@ -49,7 +52,12 @@ Seeds: `projects/property-deals/property_deals/seed/uk_guaranteed_sale.lua` and
 }
 ```
 
-If the gate isn't met, the stage move is refused with a list of exactly what is missing (Phase 3).
+Moving a deal (`POST /deals/:id/stage { "to": "exchange" }`) checks the target stage's gate. If it
+isn't met the answer is `409` with `details.missing`, one entry per problem:
+`{ "type": "compliance", "key": "aml_cdd_buyer", "message": "AML customer due diligence — buyer is not passed (in progress)" }`.
+`GET /deals/:id/gate?to=exchange` previews the same list. Gate items whose task or stage doesn't
+apply to the deal (a `when` that fails) are not required. Compliance items count when their latest
+check is `passed` and not expired, or `waived`.
 
 ### Task
 
@@ -67,7 +75,7 @@ If the gate isn't met, the stage move is refused with a list of exactly what is 
   "depends_on": ["epc_register_check"],// can't start until these tasks are done
   "approval": "any_operator",          // none | any_operator | manager | two_person — for anything it sends/books/pays
   "agent": { "eligible": true, "agent_key": "booking_agent", "auto": false },
-  "skip_if": { "epc_valid": true },    // engine condition (Phase 3): close itself with evidence
+  "skip_if": { "epc_valid": true },    // when this holds the task closes itself, with the facts as evidence
   "when": { "tenure": ["leasehold", "share_of_freehold"] },
   "repeat_every": { "working_days": 1 }// recreated until the stage is left (e.g. daily chase)
 }
@@ -84,6 +92,24 @@ If the gate isn't met, the stage move is refused with a list of exactly what is 
 | `target_completion` | the deal's target completion date; negative counts back |
 
 Working days skip weekends and the workspace's holidays (`/holidays`, seeded with UK bank holidays).
+A task with `depends_on` (or `due.from = task_done`) has no clock until its prerequisites are done;
+then `stage_entry`/`task_done` offsets count from that moment. If `sla_minutes` is missing, the SLA
+window is from the clock start to the due time.
+
+### Conditions (`when`, `skip_if`)
+
+| Key | Holds when |
+|---|---|
+| `tenure: ["leasehold", …]` | the deal's property has one of these tenures |
+| `deal_type: ["buy", …]` | the deal is one of these types |
+| `party_is_company: true/false` | a party on the deal is (or isn't) a company |
+| `epc_valid: true/false` | the property has an EPC certificate number and an expiry date that hasn't passed |
+
+Unknown keys never hold. When a task closes with evidence `{ "epc_valid": true,
+"certificate_number", "expires_on", "rating" }` (for example the EPC register check), the property
+is updated and any `skip_if: { epc_valid: true }` task closes itself.
+`repeat_every: { "working_days": n }` creates the next copy each time one is done, while the deal is
+still in that stage.
 
 ### Compliance item
 

@@ -35,23 +35,26 @@ return {
         -- opsapi:modules (make:resource adds entries above this line)
     },
 
-    -- Change events (property_deals.<entity>.created/updated/deleted) plus
-    -- business verbs. Engine events (stage_changed, health_changed,
-    -- task.overdue, task.escalated, compliance.expiring) are emitted by code.
+    -- Change events (property_deals.<entity>.created/updated/deleted), business
+    -- verbs (status changes), and `emits`: events the engine sends from code
+    -- (deal.stage_changed, task.overdue, ...). All are offered to workspace webhooks.
     publishes = {
         deal = { table = "property_deals_deals",
-                 verbs = { completed = { status = "completed" }, fell_through = { status = "fell_through" } } },
+                 verbs = { completed = { status = "completed" }, fell_through = { status = "fell_through" } },
+                 emits = { "stage_changed", "health_changed" } },
         property = { table = "property_deals_properties" },
         buyer_profile = { table = "property_deals_buyer_profiles" },
         task = { table = "property_deals_task_details",
-                 verbs = { done = { pd_status = "done" }, awaiting_approval = { pd_status = "awaiting_approval" } } },
+                 verbs = { done = { pd_status = "done" }, awaiting_approval = { pd_status = "awaiting_approval" } },
+                 emits = { "sla_warning", "overdue", "escalated" } },
         enquiry = { table = "property_deals_enquiries" },
         chase = { table = "property_deals_chases" },
         supplier = { table = "property_deals_suppliers" },
         booking = { table = "property_deals_bookings",
                     verbs = { confirmed = { status = "confirmed" }, cancelled = { status = "cancelled" } } },
         compliance_check = { table = "property_deals_compliance_checks",
-                             verbs = { passed = { status = "passed" }, failed = { status = "failed" } } },
+                             verbs = { passed = { status = "passed" }, failed = { status = "failed" } },
+                             emits = { "expiring", "expired" } },
         approval = { table = "property_deals_approvals",
                      verbs = { requested = { status = "pending" }, approved = { status = "approved" },
                                rejected = { status = "rejected" } } },
@@ -87,5 +90,24 @@ return {
         red_min_working_days = { type = "integer", label = "Red when fewer working days remain than", default = 10,
                                  min = 0, max = 60,
                                  description = "...and the deal still has open blockers." },
+        escalation_action = { type = "string", label = "At the reassign threshold", default = "reassign_manager",
+                              enum = { "reassign_manager", "escalation_queue" },
+                              description = "Give the task to a manager, or leave it unowned in the escalation queue." },
+        due_time = { type = "string", label = "Deadlines on a date fall due at (local)", default = "17:00",
+                     description = "HH:MM; used for dates counted from target exchange / completion." },
+        expiring_within_days = { type = "integer", label = "Warn about expiring compliance (days ahead)", default = 14,
+                                 min = 1, max = 120 },
+        digest_email = { type = "boolean", label = "Email the daily digest", default = true },
+        -- Urgency weights (docs/property-deals/urgency.md); they need not add up to 100.
+        urgency_w_time = { type = "integer", label = "Urgency weight: time used", default = 35, min = 0, max = 100 },
+        urgency_w_completion = { type = "integer", label = "Urgency weight: closeness to completion", default = 20,
+                                 min = 0, max = 100 },
+        urgency_w_blocking = { type = "integer", label = "Urgency weight: blocking task", default = 15, min = 0, max = 100 },
+        urgency_w_blockers = { type = "integer", label = "Urgency weight: open enquiries", default = 10, min = 0, max = 100 },
+        urgency_w_silence = { type = "integer", label = "Urgency weight: third-party silence", default = 10,
+                              min = 0, max = 100 },
+        urgency_w_money = { type = "integer", label = "Urgency weight: money at risk", default = 10, min = 0, max = 100 },
+        urgency_money_scale = { type = "integer", label = "Money at risk that counts as full urgency (£)", default = 5000,
+                                min = 1 },
     },
 }

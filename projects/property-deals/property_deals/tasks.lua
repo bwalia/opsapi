@@ -65,7 +65,8 @@ function Tasks.create(ns, t, actor_uuid)
         reporter_user_uuid = actor_uuid,
     })
     if t.owner_user_uuid then
-        require("queries.KanbanTaskQueries").assignUser(task.id, t.owner_user_uuid, actor_uuid, ns)
+        -- assigned_by is required by kanban; system actions (jobs) record the assignee.
+        require("queries.KanbanTaskQueries").assignUser(task.id, t.owner_user_uuid, actor_uuid or t.owner_user_uuid, ns)
     end
     local details = db.insert("property_deals_task_details", {
         namespace_id = ns,
@@ -80,7 +81,7 @@ function Tasks.create(ns, t, actor_uuid)
         owner_agent_key = t.owner_agent_key,
         due_at = t.due_at,
         sla_minutes = t.sla_minutes,
-        sla_started_at = t.sla_minutes and db.raw("NOW()") or nil,
+        sla_started_at = t.sla_started_at or (t.sla_minutes and db.raw("NOW()")) or nil,
         blocking = t.blocking == true,
         compliance = t.compliance == true,
         agent_eligible = t.agent_eligible == true,
@@ -167,13 +168,19 @@ function Tasks.update(ns, task_uuid, changes, actor_uuid)
     end
     if changes.owner_user_uuid and changes.owner_user_uuid ~= db.NULL and changes.owner_user_uuid ~= current.owner_user_uuid then
         local t = U.one("SELECT id FROM kanban_tasks WHERE uuid = ?", task_uuid)
-        require("queries.KanbanTaskQueries").assignUser(t.id, changes.owner_user_uuid, actor_uuid, ns)
+        require("queries.KanbanTaskQueries").assignUser(t.id, changes.owner_user_uuid,
+            actor_uuid or changes.owner_user_uuid, ns)
     end
     if next(changes) then
         changes.updated_at = db.raw("NOW()")
         db.update("property_deals_task_details", changes, { namespace_id = ns, task_uuid = task_uuid })
     end
-    return Tasks.get(ns, task_uuid)
+    local updated = Tasks.get(ns, task_uuid)
+    if status == "done" and current.pd_status ~= "done" then
+        -- Start dependants, close tasks whose condition now holds, repeat (workflow engine).
+        require("property_deals.engine").on_task_done(ns, updated, actor_uuid)
+    end
+    return updated
 end
 
 return Tasks

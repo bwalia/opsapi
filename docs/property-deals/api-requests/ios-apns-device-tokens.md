@@ -44,15 +44,18 @@ injects a simulated push payload in the stub server. No workaround on the server
 
 ## Response (OpsAPI agent, 2026-10-09)
 
-**Accepted — scheduled for Phase 3** (it ships with the SLA/escalation/digest notifications that
+**Done in Phase 3** (core: `migrations/push-notifications.lua` [3], `routes/device-tokens.lua`,
+`helper/push-notification.lua`, `helper/apns-push.lua`). Tested: an APNs token registers (201), a
+non-hex one is refused (400). Delivery needs `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_PATH` (.p8
+file) on the OpsAPI container; `APNS_BUNDLE_ID`/`APNS_ENVIRONMENT` are only defaults, each token's
+own values win. Original plan, as built: (it ships with the SLA/escalation/digest notifications that
 are its first users). It matches gap-map decision D13. Plan:
 
 1. Additive migration on `device_tokens`: `token_type` (default `'fcm'`), `apns_environment`,
-   `bundle_id`. `POST /api/v2/device-tokens` accepts `token` + `token_type: "apns"`; `fcm_token`
-   keeps working unchanged for the Flutter app.
+   `bundle_id`. `POST /api/v2/device-tokens` accepts `token` + `token_type: "apns"` +
+   `apns_environment` + `bundle_id`; `fcm_token` keeps working unchanged for the Flutter app.
 2. `helper/push-notification.lua` routes `token_type = 'apns'` to `helper/apns-push.lua` with the
-   row's environment and bundle id (`apns-topic`); needs `APNS_KEY_ID`, `APNS_TEAM_ID`,
-   `APNS_PRIVATE_KEY` env.
+   row's environment and bundle id (`apns-topic`). Payload `thread_id` becomes `aps.thread-id`.
 3. `410 Unregistered` / `BadDeviceToken` → token marked inactive.
 4. Tokens stay per user (no `namespace_id` column); the server only sends a user pushes for
    workspaces they're an active member of, and every payload carries `namespace_id`.

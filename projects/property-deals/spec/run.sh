@@ -2,7 +2,8 @@
 # Property Deals end-to-end check in a throwaway Docker sandbox: a fresh
 # PROJECT_CODE=property install with its own Postgres, the plugin mounted,
 # migrations run twice (and re-run from scratch to prove they are idempotent),
-# then api_test.py drives the API as two workspaces and several roles.
+# then api_test.py drives the API as two workspaces and several roles, and
+# scenario_test.py runs the SPEC §5 scenario (rules part) with time travel in SQL.
 #
 #   projects/property-deals/spec/run.sh       # from the repo root; needs the lapis-lapis image
 #
@@ -50,14 +51,16 @@ docker exec pd-api-$ID sh -c 'kill -HUP $(cat /app/logs/nginx.pid)'; sleep 3
 
 for u in 'a1111111-0000-4000-8000-000000000001 owner.a@pd.invalid' 'b2222222-0000-4000-8000-000000000002 owner.b@pd.invalid' \
          'c3333333-0000-4000-8000-000000000003 reader.a@pd.invalid' 'd4444444-0000-4000-8000-000000000004 agent.a@pd.invalid' \
-         'e5555555-0000-4000-8000-000000000005 operator.a@pd.invalid'; do
+         'e5555555-0000-4000-8000-000000000005 operator.a@pd.invalid' 'f6666666-0000-4000-8000-000000000006 owner.s@pd.invalid' \
+         'a7777777-0000-4000-8000-000000000007 manager.s@pd.invalid' 'b8888888-0000-4000-8000-000000000008 operator.s@pd.invalid'; do
   set -- $u
   docker exec pd-pg-$ID psql -U postgres -d e2e -qc "INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at)
     VALUES ('$1', 'PD', 'Test', '$2', '${2%%@*}', 'x', true, now(), now())"
 done
 
 PORT=$(docker port pd-api-$ID 80/tcp | head -1 | sed 's/.*://')
-PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" python3 -I "$HERE/api_test.py" || {
+export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
+{ python3 -I "$HERE/api_test.py" && python3 -I "$HERE/scenario_test.py"; } || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
     | grep -A2 "\[property_deals\]" | grep -v -E "^\s+/|^--" | sed 's/.*\[property_deals\] //' | cut -c1-400 | sort -u | tail -10
