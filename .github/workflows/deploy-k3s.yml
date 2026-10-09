@@ -284,6 +284,9 @@ jobs:
         with:
           context: ./lapis
           file: ./lapis/Dockerfile
+          # First-party plugins baked into the image (lapis/Dockerfile, gap map D8).
+          build-contexts: |
+            property_deals_plugin=./projects/property-deals
           push: true
           # Both tags point at the same image. :latest is what every
           # environment pulls; the versioned tag is what the smoke test
