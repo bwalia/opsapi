@@ -260,6 +260,8 @@ function FormJobs.maintain(premature)
     elseif n > 0 then
         ngx.log(ngx.NOTICE, "[forms] purged ", n, " response(s)")
     end
+    local dok, derr = pcall(require("lib.forms.domains").maintain)
+    if not dok then ngx.log(ngx.ERR, "[forms] custom domain checks failed: ", tostring(derr)) end
     require("helper.plugin-events").releaseConnection()
 end
 

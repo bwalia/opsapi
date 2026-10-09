@@ -14,11 +14,12 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  ClipboardList, Copy, ExternalLink, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Search, ShieldCheck, Sparkles,
+  ClipboardList, Copy, ExternalLink, FilePlus2, Globe, Link2, Loader2, Lock, MoreHorizontal, Pencil, Search, ShieldCheck, Sparkles,
   Trash2, Unlock,
 } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, Input, Modal, Select, Textarea } from '@/components/ui';
 import SpamProtectionModal from '@/components/forms/SpamProtectionModal';
+import CustomDomainModal from '@/components/forms/CustomDomainModal';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -170,6 +171,7 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
 function FormsPageContent() {
   const { canCreate, canUpdate, canDelete, canManage } = usePermissions();
   const [spamOpen, setSpamOpen] = useState(false);
+  const [domainOpen, setDomainOpen] = useState(false);
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -231,7 +233,10 @@ function FormsPageContent() {
         actions={(
           <>
             {canManage('forms') && (
-              <Button variant="ghost" leftIcon={<ShieldCheck className="h-4 w-4" />} onClick={() => setSpamOpen(true)}>Spam protection</Button>
+              <>
+                <Button variant="ghost" leftIcon={<Globe className="h-4 w-4" />} onClick={() => setDomainOpen(true)}>Custom domain</Button>
+                <Button variant="ghost" leftIcon={<ShieldCheck className="h-4 w-4" />} onClick={() => setSpamOpen(true)}>Spam protection</Button>
+              </>
             )}
             {canCreate('forms') && (
               <Button leftIcon={<FilePlus2 className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New form</Button>
@@ -342,6 +347,7 @@ function FormsPageContent() {
 
       <NewFormModal open={newOpen} onClose={() => setNewOpen(false)} />
       <SpamProtectionModal open={spamOpen} onClose={() => setSpamOpen(false)} />
+      <CustomDomainModal open={domainOpen} onClose={() => setDomainOpen(false)} onChanged={() => load()} />
       <ConfirmDialog isOpen={!!toDelete} onClose={() => setToDelete(null)} variant="danger" title="Delete form"
         confirmText="Delete" isLoading={deleting}
         message={`Delete "${toDelete?.title}"? Its link stops working at once; its responses are removed after 30 days.`}

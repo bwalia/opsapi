@@ -134,6 +134,27 @@ return function(app)
         return result(require("lib.forms.workspace").save(self.namespace.id, actor(self), b))
     end))
 
+    -- The workspace's custom domain for form links (lib/forms/domains.lua).
+    app:get("/api/v2/forms/domain", guard("read", function(self)
+        return ok(require("lib.forms.domains").get(self.namespace.id))
+    end))
+    app:put("/api/v2/forms/domain", guard("manage", function(self)
+        local b, err = body()
+        if not b then return fail(400, err) end
+        -- The dashboard's own host can't become a forms-only domain.
+        local reserved = { self.req.headers["origin"], require("middleware.cors").frontendOrigin(self) }
+        return result(require("lib.forms.domains").claim(self.namespace.id, actor(self), b.domain, reserved))
+    end))
+    app:post("/api/v2/forms/domain/check", guard("manage", function(self)
+        local allowed = require("middleware.rate-limit").check("forms_domain_check:" .. self.namespace.id, 10, 60)
+        if not allowed then return fail(429, "Checked a lot just now; wait a minute.") end
+        return result(require("lib.forms.domains").check(self.namespace.id))
+    end))
+    app:delete("/api/v2/forms/domain", guard("manage", function(self)
+        require("lib.forms.domains").remove(self.namespace.id)
+        return ok(require("lib.forms.domains").get(self.namespace.id))
+    end))
+
     app:get("/api/v2/forms/:uuid", guard("read", function(self)
         local form = FormQueries.get(self.namespace.id, self.params.uuid)
         if not form then return NOT_FOUND end

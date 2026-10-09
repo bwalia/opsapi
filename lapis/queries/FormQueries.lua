@@ -220,6 +220,8 @@ end
 function FormQueries.present(row, full)
     local schema = decode(row.draft_schema, { fields = {} })
     local origin = nonnull(row.public_origin)
+    local domain = require("lib.forms.domains").active_for(row.namespace_id)
+    if domain then origin = "https://" .. domain end
     local out = {
         uuid = row.uuid,
         public_id = row.public_id,
@@ -234,6 +236,7 @@ function FormQueries.present(row, full)
         has_unpublished_changes = row.has_unpublished_changes == true,
         share_url = origin and (origin .. "/f/" .. row.public_id) or nil,
         share_path = "/f/" .. row.public_id,
+        share_domain = domain,
         targets = setmetatable(decode(row.targets, {}), cjson.array_mt),
         created_by_uuid = nonnull(row.created_by_uuid),
         created_at = row.created_at,
@@ -271,6 +274,7 @@ function FormQueries.get(namespace_id, uuid)
     local smtp_ok, smtp = pcall(require("helper.namespace-mail").smtp, namespace_id)
     out.email_via = (smtp_ok and smtp) and "workspace"
         or (require("helper.mail").isConfigured() and "platform" or "none")
+    out.can_hide_branding = require("lib.forms.limits").of(namespace_id).hide_branding == true
     return out
 end
 

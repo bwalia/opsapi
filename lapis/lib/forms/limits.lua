@@ -3,8 +3,10 @@
     professional | enterprise). nil = unlimited. Only platform admins / billing
     change a workspace's plan, so owners can't lift their own limits.
 
-    ponytail: every plan is unlimited until pricing is decided; filling in
-    PLANS is the whole change (forms, responses_per_month, hide_branding).
+    For now (decided 2026-10-09) everything is free and every form shows
+    "Powered by OpsAPI": no plan has limits, and none may hide the branding.
+    Pricing later = filling in PLANS (forms, responses_per_month,
+    hide_branding = true for the plans that may hide it).
 ]]
 
 local db = require("lapis.db")
@@ -18,7 +20,7 @@ Limits.PLANS = {
     enterprise = {},
 }
 
-local DEFAULTS = { hide_branding = true }
+local DEFAULTS = { hide_branding = false }
 
 --- The limits of a workspace. @return { forms?, responses_per_month?, hide_branding }
 function Limits.of(namespace_id)

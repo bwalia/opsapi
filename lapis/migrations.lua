@@ -2583,6 +2583,7 @@ local _migrations = {
     ['zzform3_forms_lookup_indexes'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 3),
     ['zzform4_forms_uploads_stats'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 4),
     ['zzform5_forms_workspace_settings'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 5),
+    ['zzform6_forms_custom_domains'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 6),
     ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),

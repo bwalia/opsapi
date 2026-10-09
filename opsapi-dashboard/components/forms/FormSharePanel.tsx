@@ -51,7 +51,7 @@ export default function FormSharePanel({ form }: { form: Form }) {
             </h2>
             <p className="mt-0.5 text-sm text-secondary-500">
               {live
-                ? 'Anyone with this link can fill it in.'
+                ? `Anyone with this link can fill it in.${form.share_domain ? '' : ' Want it on your own domain? Forms → Custom domain.'}`
                 : form.status === 'closed'
                   ? 'Visitors see your closed message. Reopen it to take responses again.'
                   : 'Publish the form first; until then the link shows "not available".'}

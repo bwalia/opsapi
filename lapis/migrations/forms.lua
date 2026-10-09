@@ -272,4 +272,26 @@ return {
         db.query([[CREATE INDEX IF NOT EXISTS form_submissions_ns_time_idx
             ON form_submissions (namespace_id, created_at) WHERE status <> 'spam']])
     end,
+
+    -- [6] A workspace's custom domain for its form links (lib/forms/domains.lua).
+    -- One per workspace; a domain is active in at most one workspace at a time.
+    [6] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS form_domains (
+                id BIGSERIAL PRIMARY KEY,
+                namespace_id BIGINT NOT NULL UNIQUE REFERENCES namespaces(id) ON DELETE CASCADE,
+                domain VARCHAR(253) NOT NULL,
+                token VARCHAR(64) NOT NULL,
+                status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
+                last_error TEXT,
+                checked_at TIMESTAMPTZ,
+                verified_at TIMESTAMPTZ,
+                created_by_uuid TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS form_domains_active_idx
+            ON form_domains (domain) WHERE status = 'active']])
+    end,
 }

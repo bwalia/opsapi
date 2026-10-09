@@ -67,7 +67,7 @@ export default function SpamProtectionModal({ open, onClose, onSaved }: {
           {ready ? 'Turnstile is set up. Turn it on per form in its Settings tab.' : 'Not set up yet.'}
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary-600">
-          <li>In the Cloudflare dashboard, open <strong>Turnstile → Add widget</strong> and add the domain your forms are on.</li>
+          <li>In the Cloudflare dashboard, open <strong>Turnstile → Add widget</strong> and add the domains your forms are on (this dashboard&apos;s, and your custom domain if you use one).</li>
           <li>Copy the <strong>site key</strong> and the <strong>secret key</strong> here.</li>
         </ol>
         <Input label="Site key" value={siteKey} onChange={(e) => setSiteKey(e.target.value)} placeholder="0x4AAAAAAA…" />

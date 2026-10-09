@@ -23,6 +23,7 @@ local FormQueries = require("queries.FormQueries")
 local Submit = require("lib.forms.submit")
 local PublicCache = require("lib.forms.public-cache")
 local Stats = require("lib.forms.stats")
+local Domains = require("lib.forms.domains")
 
 local MAX_BODY = 64 * 1024
 -- ponytail: fixed limits; per-plan limits when a plan needs more than ~10/s per form.
@@ -73,6 +74,28 @@ end
 
 local NOT_AVAILABLE = { success = false, error = "This form isn't available.", code = "form_not_found" }
 
+-- Asked from another workspace's custom domain? (A custom domain serves only
+-- its own workspace's forms; the page there calls this API with that Origin.)
+local function foreign_domain(self, namespace_id)
+    local origin = self.req.headers["origin"]
+    local host = type(origin) == "string" and origin:lower():match("^https?://([^/:]+)")
+    local owner = host and Domains.namespace_of(host) or nil
+    return owner ~= nil and owner ~= tonumber(namespace_id)
+end
+
+-- The form's theme, keeping "Powered by" unless the workspace's plan may hide it
+-- now (a setting saved under an earlier plan doesn't outlive it).
+local function branded(theme, namespace_id)
+    if type(theme) ~= "table" or not theme.hide_branding
+        or require("lib.forms.limits").of(namespace_id).hide_branding then
+        return theme
+    end
+    local t = {}
+    for k, v in pairs(theme) do t[k] = v end
+    t.hide_branding = nil
+    return t
+end
+
 -- What the public GET returns for a form (cached per worker: lib/forms/public-cache.lua).
 local function view(public_id)
     local row = FormQueries.publicForm(public_id)
@@ -94,7 +117,7 @@ local function view(public_id)
                 version = tonumber(row.v_version),
                 fields = FormQueries.publicSchema(schema),
                 workspace = { name = row.namespace_name, logo_url = nonnull(row.namespace_logo) },
-                theme = settings.theme,
+                theme = branded(settings.theme, row.namespace_id),
                 captcha = settings.captcha and {
                     provider = "turnstile",
                     site_key = (require("lib.forms.workspace").turnstile(row.namespace_id)),
@@ -116,6 +139,9 @@ return function(app)
             PublicCache.set(id, v)
         end
         if v.status ~= 200 then return respond(v.status, v.body, { ["Cache-Control"] = "no-store" }) end
+        if foreign_domain(self, v.namespace_id) then
+            return respond(404, NOT_AVAILABLE, { ["Cache-Control"] = "no-store" })
+        end
         Stats.hit(v.form_id, "view")
         -- The token is per request (it dates the page view), so the body is copied.
         local data = {}
@@ -125,21 +151,21 @@ return function(app)
     end)
 
     -- The live form for an upload/event (cached like the GET), or nil.
-    local function live(id)
+    local function live(self, id)
         if type(id) ~= "string" or not id:match("^%w+$") or #id > 16 then return nil end
         local v = PublicCache.get(id)
         if not v then
             v = view(id)
             PublicCache.set(id, v)
         end
-        return v.status == 200 and v or nil
+        return v.status == 200 and not foreign_domain(self, v.namespace_id) and v or nil
     end
 
     app:post("/api/v2/public/forms/:public_id/events", function(self)
         allow_any_origin(self)
         local allowed = RateLimit.check("forms_event:" .. RateLimit.getClientIP(), 60, 60)
         if not allowed then return { status = 204, layout = false, "" } end
-        local v = live(self.params.public_id)
+        local v = live(self, self.params.public_id)
         ngx.req.read_body()
         local ok, b = pcall(J.decode, ngx.req.get_body_data() or "")
         if v and ok and type(b) == "table" and (b.type == "start" or b.type == "step") then
@@ -155,7 +181,7 @@ return function(app)
             local allowed, _, retry = RateLimit.check(l[1], l[2], l[3])
             if not allowed then return too_many(retry) end
         end
-        local v = live(self.params.public_id)
+        local v = live(self, self.params.public_id)
         if not v then return respond(404, NOT_AVAILABLE) end
         -- The page's render token: uploads come from someone who opened the form.
         if not Submit.check_token(v.form_id, self.req.headers["x-render-token"], nil, 0) then
@@ -166,6 +192,16 @@ return function(app)
             { id = v.form_id, namespace_id = v.namespace_id }, v.schema, self.params.field, file, Submit.ip_hash(ip))
         if not res then return respond(status or 400, { success = false, error = err }) end
         return respond(201, { success = true, data = res })
+    end)
+
+    -- For the edge (and the dashboard's proxy.ts): is this host an active custom
+    -- form domain? 200 = yes (a certificate may be issued for it), 404 = no.
+    app:get("/api/v2/public/form-domains/check", function(self)
+        local domain = Domains.normalize(self.params.domain)
+        if domain and Domains.namespace_of(domain) then
+            return respond(200, { success = true, domain = domain }, { ["Cache-Control"] = "no-store" })
+        end
+        return respond(404, { success = false }, { ["Cache-Control"] = "no-store" })
     end)
 
     app:post("/api/v2/public/forms/:public_id/submissions", function(self)
@@ -193,7 +229,7 @@ return function(app)
         local row = FormQueries.publicForm(id)
         local settings = row and FormQueries.decode(row.settings, {}) or {}
         local status, code = unavailable(row, settings)
-        if status == 404 then return respond(404, NOT_AVAILABLE) end
+        if status == 404 or foreign_domain(self, row.namespace_id) then return respond(404, NOT_AVAILABLE) end
         if status then return respond(status, closed_body(row, settings, code)) end
 
         local res = Submit.handle({

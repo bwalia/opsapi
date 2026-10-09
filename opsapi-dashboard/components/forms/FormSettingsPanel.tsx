@@ -197,11 +197,13 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
           onChange={(e) => setS({ ...s, theme: { ...s.theme, logo_url: e.target.value || undefined } })} />
         <Input label="Submit button text" placeholder="Submit" maxLength={40} value={s.theme?.submit_label || ''}
           onChange={(e) => setS({ ...s, theme: { ...s.theme, submit_label: e.target.value || undefined } })} />
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-secondary-800">Hide &ldquo;Powered by OpsAPI&rdquo;</span>
-          <Switch checked={!!s.theme?.hide_branding} aria-label="Hide Powered by"
-            onChange={(b) => setS({ ...s, theme: { ...s.theme, hide_branding: b || undefined } })} />
-        </div>
+        {form.can_hide_branding && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-secondary-800">Hide &ldquo;Powered by OpsAPI&rdquo;</span>
+            <Switch checked={!!s.theme?.hide_branding} aria-label="Hide Powered by"
+              onChange={(b) => setS({ ...s, theme: { ...s.theme, hide_branding: b || undefined } })} />
+          </div>
+        )}
       </Section>
 
       <Section title="Spam protection" description="Bots are already filtered (a hidden trap field, a minimum time, rate limits).">

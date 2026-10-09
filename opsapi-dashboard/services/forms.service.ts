@@ -101,6 +101,8 @@ export interface FormSummary {
   has_unpublished_changes: boolean;
   share_url?: string;
   share_path: string;
+  /** The workspace's connected custom domain, if any: links use it. */
+  share_domain?: string;
   targets: FormTarget[];
   created_at: string;
   updated_at: string;
@@ -113,6 +115,8 @@ export interface Form extends FormSummary {
   published_keys: string[];
   /** Where emails go out from: the workspace's own SMTP, the platform's, or nowhere. */
   email_via?: 'workspace' | 'platform' | 'none';
+  /** Whether this workspace's plan may hide "Powered by OpsAPI" (no plan may, for now). */
+  can_hide_branding?: boolean;
 }
 
 export interface TargetOption {
@@ -219,6 +223,19 @@ export interface WorkspaceFormsSettings {
   turnstile: { site_key?: string; has_secret: boolean };
 }
 
+/** The workspace's custom domain for form links. */
+export interface FormDomain {
+  /** Custom domains are set up on this platform. */
+  available: boolean;
+  target?: string;
+  domain?: string;
+  status?: 'pending' | 'active';
+  last_error?: string;
+  checked_at?: string;
+  verified_at?: string;
+  records?: { type: 'CNAME' | 'A' | 'TXT'; name: string; value: string }[];
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 const BASE = '/api/v2/forms';
 
@@ -301,6 +318,18 @@ export const formsService = {
   async saveWorkspaceSettings(input: { turnstile: { site_key?: string; secret?: string } }): Promise<WorkspaceFormsSettings> {
     return unwrap<WorkspaceFormsSettings>(await apiClient.put(`${BASE}/workspace-settings`, input, JSON_BODY));
   },
+  async domain(): Promise<FormDomain> {
+    return unwrap<FormDomain>(await apiClient.get(`${BASE}/domain`));
+  },
+  async saveDomain(domain: string): Promise<FormDomain> {
+    return unwrap<FormDomain>(await apiClient.put(`${BASE}/domain`, { domain }, JSON_BODY));
+  },
+  async checkDomain(): Promise<FormDomain> {
+    return unwrap<FormDomain>(await apiClient.post(`${BASE}/domain/check`, {}, JSON_BODY));
+  },
+  async removeDomain(): Promise<FormDomain> {
+    return unwrap<FormDomain>(await apiClient.delete(`${BASE}/domain`));
+  },
   async exportCsv(uuid: string, params: { status?: string; from?: string; to?: string; q?: string } = {}) {
     const res = await apiClient.get(`${BASE}/${uuid}/export${buildQueryString(params)}`, { responseType: 'blob' });
     const cd = String(res.headers['content-disposition'] || '');
@@ -309,8 +338,9 @@ export const formsService = {
   },
 };
 
-/** The public link for a form (the API knows the dashboard origin, else this one). */
-export function shareUrl(form: Pick<FormSummary, 'share_url' | 'share_path'>): string {
+/** The public link for a form: on the workspace's custom domain, else on this dashboard. */
+export function shareUrl(form: Pick<FormSummary, 'share_url' | 'share_path' | 'share_domain'>): string {
+  if (form.share_domain) return `https://${form.share_domain}${form.share_path}`;
   if (typeof window !== 'undefined') return window.location.origin + form.share_path;
   return form.share_url || form.share_path;
 }
