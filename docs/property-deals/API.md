@@ -1,4 +1,4 @@
-# Property Deals API (contract v1.5)
+# Property Deals API (contract v1.6)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -122,6 +122,21 @@ Customer request: personal follow-ups and "call them now" alerts.
   your own phone). Per-person switches and addresses (`ntfy_topic`, `telegram_chat_id`) are in
   `/notification-preferences` (category `hot_lead`). `GET /hot-leads` lists leads whose call task is
   still open.
+
+### 2.1d Personal follow-ups — `POST /leads/{id}/follow-up`
+`{ channel?: email|whatsapp|sms, signal_uuid?, note? }` → 202 `{ task_uuid, run_uuid }`. The
+`lead_followup` agent drafts ONE short message opening with the lead's newest news (or the one given), with
+an angle per lead kind (seller, buyer, landlord, agent, solicitor, broker). The draft is an approval
+(`action = send_lead_followup`, `subject_type = chase`): edit and approve it in the inbox. On approval:
+- **email** → workspace SMTP, with an opt-out line; **sms** → the workspace's Android SMS Gateway (else an
+  `sms:` link); **whatsapp** → a `https://wa.me/...` click-to-chat link in `execution_result.manual_link`
+  (no paid API; the task stays `in_progress` until it's sent);
+- refused (409/422) if the lead opted out, or is a private person with no `consent_basis` (B2B leads with a
+  company name may be contacted); the address is re-read from the lead at send time;
+- logs a chase on the lead (`outcome = followup`), marks the news `used_at`, sets `last_followup_at`.
+New news from the Companies House watch starts a draft by itself (`followup_auto_on_news`, default on,
+needs an AI provider, leads with an owner, one open follow-up per lead). An opt-out reply cancels waiting
+drafts and blocks new ones; vulnerable leads need a manager's approval.
 
 ### 2.2 Leads (extend the existing page)
 
@@ -454,6 +469,9 @@ engine events). Use it for WhatsApp/Slack.
 | [web-buyer-directory](api-requests/web-buyer-directory.md) | Done: `GET /buyer-profiles/directory?q=&pof_status=` — profiles with the buyer's `name` and `email` |
 
 ## 7. Changes
+
+- **v1.6:** personal follow-ups (`POST /leads/{id}/follow-up`, agent `lead_followup`, action
+  `send_lead_followup`, setting `followup_auto_on_news`, lead `opted_out_at` / `last_followup_at`).
 
 - **v1.5:**
   - Lead news (`/leads/{id}/signals`, Companies House watch + captured posts, `jobs/lead_signals.lua`

@@ -163,5 +163,8 @@ return {
                                      .. "below become new leads. Empty = off. Needs a Companies House connector." },
         ch_new_company_sic = { type = "string", label = "SIC codes for new property companies",
                                default = "68100,68209,68320,41100" },
+        followup_auto_on_news = { type = "boolean", label = "Draft a personal follow-up when a lead has news",
+                                  default = true, description = "The AI drafts it; a person approves before it is sent. "
+                                      .. "Needs an AI provider; only leads with an owner." },
     },
 }

@@ -479,8 +479,106 @@ JSON only: {"summary": "...", "email": {"to_party": "buyer", "subject": "...", "
     end,
 }
 
+-- ---------------------------------------------------------------------------
+-- 11. Lead follow-up (personal, from the lead's newest news)
+-- ---------------------------------------------------------------------------
+local ANGLE = {
+    seller = "they may want a quick, certain sale: offer a no-pressure chat about options and timing",
+    buyer_investor = "they buy property: offer off-market deals that fit what they're doing",
+    landlord = "they own rentals: offer to buy tenanted or problem properties, or source more",
+    agent = "they are an estate agent: offer to buy stock that's hard to sell, and fast referrals both ways",
+    agent_referral = "they refer sellers: thank them and keep the door open for referrals",
+    solicitor = "they are a solicitor: offer quick, reliable buyers for clients who need a fast sale",
+    broker = "they are a broker: offer referrals both ways for investors who need finance",
+}
+
+A.lead_followup = {
+    name = "Lead follow-up (personal)",
+    job_type = "draft",
+    version = "lead_followup@1",
+    needs_lead = true,
+    approval = "any_operator",
+    tools = {},
+    instructions = [[
+Write ONE short, personal follow-up to this lead that makes them want to reply. Open with their newest news
+item (a company they just formed, a director role, a filing or charge, or something they posted) in a
+natural, specific way — congratulate or ask about it; never invent details that are not in the records, and
+never mention how we found it (no "we monitor", no "Companies House alert"). Then one line on why we're
+relevant (use the "angle" in the records), then ONE easy question. Warm, plain British English, no hype,
+no emojis, no markdown. Email: subject under 8 words, body under 90 words, sign off with the sender's first
+name. WhatsApp / SMS: under 300 characters, no subject. If there's no news, keep it short and ask one
+question about what they're working on. Reply with JSON only:
+{"signal_uuid": "uuid of the news item you used, or null", "subject": "... (email only)", "body": "...",
+ "why": "one line: what makes it personal"}]],
+    context = function(ctx)
+        local ns, lead_uuid = ctx.ns, ctx.lead_uuid
+        local meta = ctx.task and U.json(ctx.task.metadata) or {}
+        local l = U.one([[
+            SELECT l.first_name, l.company_name, l.owner_user_uuid, d.lead_kind, d.situation
+            FROM crm_leads l LEFT JOIN property_deals_lead_details d ON d.lead_uuid = l.uuid
+            WHERE l.namespace_id = ? AND l.uuid = ?
+        ]], ns, lead_uuid) or {}
+        local function v(x) if x == db.NULL then return nil end return x end
+        local sender = l.owner_user_uuid and v(l.owner_user_uuid)
+            and U.one("SELECT first_name FROM users WHERE uuid = ?", l.owner_user_uuid)
+        local news = db.query([[
+            SELECT uuid, kind, title, LEFT(summary, 600) AS summary, occurred_at, used_at FROM property_deals_lead_signals
+            WHERE namespace_id = ? AND lead_uuid = ? ORDER BY (uuid::text = ?) DESC, (used_at IS NULL) DESC,
+                occurred_at DESC LIMIT 5
+        ]], ns, lead_uuid, tostring(meta.signal_uuid or ""))
+        local replies = db.query([[
+            SELECT channel, LEFT(body_text, 400) AS text, received_at, reply_temperature FROM property_deals_inbound_messages
+            WHERE namespace_id = ? AND lead_uuid = ? ORDER BY received_at DESC LIMIT 3
+        ]], ns, lead_uuid)
+        return {
+            channel = meta.channel or "email",
+            use_news = meta.signal_uuid,
+            team_note = meta.note,
+            lead = { first_name = v(l.first_name), company = v(l.company_name), kind = v(l.lead_kind),
+                     situation = v(l.situation) },
+            angle = ANGLE[v(l.lead_kind) or ""] or "be useful: ask what they're working on in property",
+            sender = { first_name = sender and v(sender.first_name) or "The team" },
+            news = U.array(news), recent_replies = U.array(replies),
+        }
+    end,
+    draft = function(ctx, out)
+        local ns, lead_uuid = ctx.ns, ctx.lead_uuid
+        local meta = ctx.task and U.json(ctx.task.metadata) or {}
+        local l = U.one([[
+            SELECT l.uuid, l.first_name, l.last_name, l.company_name, NULLIF(l.email, '') AS email,
+                   NULLIF(l.phone, '') AS phone, d.opted_out_at
+            FROM crm_leads l LEFT JOIN property_deals_lead_details d ON d.lead_uuid = l.uuid
+            WHERE l.namespace_id = ? AND l.uuid = ?
+        ]], ns, lead_uuid)
+        local function null(v) return v == nil or v == db.NULL end
+        if not l or not null(l.opted_out_at) then return nil end
+        local body = G.text(out.body, 2000)
+        if not body then return nil end
+        local channel = ({ email = "email", whatsapp = "whatsapp", sms = "sms" })[meta.channel] or "email"
+        if channel ~= "email" and #body > 600 then body = body:sub(1, 600) end
+        -- Recipient from the lead record, never from model output.
+        local to = channel == "email" and l.email or l.phone
+        if null(to) then to = nil end
+        local signal
+        if U.is_uuid(out.signal_uuid) then
+            signal = U.one("SELECT uuid, title FROM property_deals_lead_signals WHERE namespace_id = ? AND lead_uuid = ? AND uuid = ?",
+                ns, lead_uuid, out.signal_uuid)
+        end
+        local name = ((null(l.first_name) and "" or l.first_name) .. " " .. (null(l.last_name) and "" or l.last_name))
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then name = null(l.company_name) and "lead" or l.company_name end
+        return { subject_type = "chase", action = "send_lead_followup",
+            title = "Follow up " .. name .. " by " .. channel .. (signal and (": " .. G.text(signal.title, 80)) or "")
+                .. (to and "" or " (no " .. (channel == "email" and "email" or "phone number") .. " on file)"),
+            payload = { lead_uuid = lead_uuid, channel = channel, to = to, to_name = name,
+                subject = channel == "email" and (G.text(out.subject, 150) or ("Hello " .. name)) or nil,
+                body = body, signal_uuid = signal and signal.uuid or nil, signal_title = signal and signal.title or nil,
+                why = G.text(out.why, 300) } }
+    end,
+}
+
 A.ORDER = { "lead_triage", "property_enrichment", "offer_reasoning", "buyer_matcher", "legal_chaser", "booking_agent",
-    "document_checker", "compliance_assistant", "digest_writer", "investor_update" }
+    "document_checker", "compliance_assistant", "digest_writer", "investor_update", "lead_followup" }
 
 function A.get(key)
     local a = A[key]

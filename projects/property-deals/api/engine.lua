@@ -43,7 +43,7 @@ return function(app)
                 out.nightly.suppliers = require("property_deals.reports").update_supplier_stats(ns)
             elseif c == "signals" then
                 local Signals = require("property_deals.signals")
-                out.signals = { watch = Signals.watch(ns), new_companies = Signals.new_companies(ns, settings) }
+                out.signals = { watch = Signals.watch(ns, settings), new_companies = Signals.new_companies(ns, settings) }
             elseif c == "scout" then
                 local Scout = require("property_deals.scout")
                 out.scout = Scout.run(ns, settings)

@@ -119,6 +119,19 @@ def model_reply(body):
     agent = re.search(r"\[agent:(\w+)\]", system)
     agent = agent.group(1) if agent else None
     rec = records_of(messages)
+    if agent == "lead_followup":
+        news = rec.get("news") or []
+        use = news[0] if news else None
+        first = (rec.get("lead") or {}).get("first_name") or "there"
+        sender = (rec.get("sender") or {}).get("first_name") or "The team"
+        opener = ("Congratulations on %s." % use["title"].replace("Set up ", "setting up ")) if use else "Hope all is well."
+        if rec.get("channel") == "email":
+            return say({"signal_uuid": use["uuid"] if use else None, "subject": "Quick question, %s" % first,
+                        "body": "Hi %s,\n\n%s We buy and source property in Leeds and often have off-market deals. "
+                                "Are you looking for more stock this year?\n\n%s" % (first, opener, sender),
+                        "why": "Opens with their newest news"})
+        return say({"signal_uuid": use["uuid"] if use else None, "body": "Hi %s, %s Looking for more deals? - %s" % (
+            first, opener, sender), "why": "Short chat message with their news"})
     if agent == "reply_scorer":
         reply = allt.lower()
         if "call me" in reply:

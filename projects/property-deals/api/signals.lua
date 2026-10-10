@@ -8,6 +8,8 @@
 --   GET    /hot-leads                    hot in the last 7 days ?mine=true
 --   GET    /companies-house/officers     ?q=name -> officer ids to link a lead to (the watch then follows them)
 --   POST   /signals/run                  run the Companies House watch + new-company search now (managers)
+--   POST   /leads/:uuid/follow-up        AI drafts a personal follow-up { channel?: email|whatsapp|sms,
+--                                        signal_uuid?, note? } -> an approval; nothing is sent until approved
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -101,9 +103,27 @@ return function(app)
         return sdk.ok(rows)
     end))
 
+    app:post("/leads/:uuid/follow-up", sdk.handler({ permission = "property_deals_tasks.create" }, U.guard_create(function(self)
+        local lead = lead_of(self)
+        if not lead then return sdk.not_found("Lead") end
+        local body, err = sdk.body(self)
+        if not body then return sdk.error(400, err) end
+        local data, errors = sdk.validate(body, {
+            channel = { enum = { "email", "whatsapp", "sms" } }, signal_uuid = { type = "uuid" },
+            note = { type = "string", max = 500 },
+        })
+        if not data then return sdk.error(422, "Validation failed", errors) end
+        local out, ferr, status = require("property_deals.followups").start(sdk.namespace_id(self), lead.uuid, {
+            channel = data.channel, signal_uuid = data.signal_uuid, note = data.note, actor = sdk.user(self).uuid,
+            settings = sdk.settings(self) })
+        if not out then return sdk.error(status or 422, ferr) end
+        if out.error then return sdk.error(status or 422, out.error, { task_uuid = out.task_uuid }) end
+        return { status = 202, json = { success = true, data = out } }
+    end)))
+
     app:post("/signals/run", sdk.handler({ permission = "property_deals_settings.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
-        local watch = Signals.watch(ns)
+        local watch = Signals.watch(ns, sdk.settings(self))
         local fresh = Signals.new_companies(ns, sdk.settings(self))
         return sdk.ok({ watch = watch, new_companies = fresh })
     end)))

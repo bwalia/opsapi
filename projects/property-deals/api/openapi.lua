@@ -363,7 +363,8 @@ return function(app)
         response = Setup, description = "Missing (null) until POST /setup ran." })
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
-    local SignalRun = OBJ({ watch = OBJ({ leads = INT(), signals = INT(), errors = INT() }),
+    local SignalRun = OBJ({ watch = OBJ({ leads = INT(), signals = INT(), errors = INT(),
+            followups = INT("Follow-up drafts started for leads with news") }),
         new_companies = OBJ({ areas = INT(), companies = INT(), leads = INT() }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
         status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail",
@@ -420,6 +421,15 @@ return function(app)
     sdk.doc(app, "GET /companies-house/officers", { summary = "Find a Companies House officer to link to a lead",
         permission = "property_deals_deals.read", query = { q = S("Name, 3+ characters") }, errors = E422,
         response = ARR(OBJ({ officer_id = S(), name = S(), appointments = INT(), address = S(), born = S("MM/YYYY") })) })
+    sdk.doc(app, "POST /leads/:uuid/follow-up", { summary = "AI drafts a personal follow-up (approved before sending)",
+        permission = "property_deals_tasks.create", path = lid, status = 202, errors = E422,
+        description = "Starts the lead_followup agent on a follow-up task. The draft becomes an approval (action "
+            .. "send_lead_followup): email is sent through the workspace SMTP, SMS through the workspace's Android "
+            .. "SMS Gateway, WhatsApp becomes a click-to-chat link a person sends. 409 if the lead opted out or a "
+            .. "follow-up is already being drafted / waiting.",
+        body = OBJ({ channel = ENUM({ "email", "whatsapp", "sms" }), signal_uuid = UUID("News item to open with"),
+            note = S("A steer for the AI, e.g. 'mention the Leeds HMO'") }),
+        response = OBJ({ task_uuid = S(), run_uuid = UUID(), status = S() }) })
     sdk.doc(app, "POST /signals/run", { summary = "Run the Companies House watch now", permission = "property_deals_settings.manage",
         status = 200, response = SignalRun })
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
