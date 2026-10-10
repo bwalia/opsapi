@@ -544,6 +544,12 @@ return function(app)
                     params.settings = cjson.encode(params.settings)
                 end
 
+                if params.business_type ~= nil then
+                    local bt, bt_err = NamespaceQueries.businessType(params.business_type)
+                    if bt == nil then return error_response(400, bt_err) end
+                    params.business_type = bt
+                end
+
                 local ok, namespace = pcall(NamespaceQueries.update, self.namespace.id, params)
 
                 if not ok then
@@ -1677,8 +1683,16 @@ return function(app)
                 settings = cjson.encode(current)
             end
 
+            local business_type
+            if params.business_type ~= nil then
+                local bt_err
+                business_type, bt_err = NamespaceQueries.businessType(params.business_type)
+                if business_type == nil then return error_response(400, bt_err) end
+            end
+
             -- Update namespace
             local updated, err = NamespaceQueries.update(namespace.id, {
+                business_type = business_type,
                 name = params.name,
                 slug = params.slug,
                 description = params.description,

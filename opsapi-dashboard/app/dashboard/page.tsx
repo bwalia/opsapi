@@ -2,7 +2,7 @@
 
 import React, { useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
+import { Loader2, Users, ShoppingCart, Package, Store, DollarSign, Handshake, CalendarClock, AlertTriangle, Flame, PoundSterling, Hammer, Inbox } from 'lucide-react';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useMenu } from '@/hooks';
 import { StatsCard, RecentOrdersTable, OrdersChart, HealthStatus } from '@/components/dashboard';
@@ -11,7 +11,12 @@ import { Stagger, RevealItem } from '@/components/motion/Reveal';
 import { dashboardService } from '@/services';
 import { formatCurrency } from '@/lib/utils';
 import { useDataFetch } from '@/hooks';
-import type { DashboardStats, HealthStatus as HealthStatusType } from '@/types';
+import { useNamespace } from '@/contexts/NamespaceContext';
+import { resolveLayout, WIDGETS, type WidgetId } from '@/components/dashboard/home/widgets';
+import { fetchPropertySummary, propertyStat, DealsAtRisk, type PropertySummary } from '@/components/dashboard/home/PropertyWidgets';
+import HotLeads from '@/components/property-deals/HotLeads';
+import DueSoon from '@/components/property-deals/DueSoon';
+import type { DashboardStats, HealthStatus as HealthStatusType, NamespaceModule } from '@/types';
 
 // Static icons - defined outside component to prevent recreation
 const STAT_ICONS = {
@@ -20,20 +25,29 @@ const STAT_ICONS = {
   products: <Package className="w-6 h-6" />,
   stores: <Store className="w-6 h-6" />,
   revenue: <DollarSign className="w-6 h-6" />,
-} as const;
+  pd_active_deals: <Handshake className="w-6 h-6" />,
+  pd_due_today: <CalendarClock className="w-6 h-6" />,
+  pd_overdue: <AlertTriangle className="w-6 h-6" />,
+  pd_hot_leads_count: <Flame className="w-6 h-6" />,
+  pd_money_at_risk: <PoundSterling className="w-6 h-6" />,
+  pd_renovations: <Hammer className="w-6 h-6" />,
+  pd_approvals: <Inbox className="w-6 h-6" />,
+} as Record<string, React.ReactNode>;
 
-// Fetch function defined outside component to maintain referential equality
-const fetchDashboardData = async () => {
-  const [stats, health] = await Promise.all([
-    dashboardService.getDashboardStats(),
-    dashboardService.getHealthStatus(true),
+// One fetch per data source, only for the sources the visible widgets need.
+const fetchDashboardData = async (needs: { core: boolean; property: boolean; health: boolean }) => {
+  const [stats, health, property] = await Promise.all([
+    needs.core ? dashboardService.getDashboardStats() : Promise.resolve(null),
+    needs.health ? dashboardService.getHealthStatus(true) : Promise.resolve(null),
+    needs.property ? fetchPropertySummary() : Promise.resolve(undefined),
   ]);
-  return { stats, health };
+  return { stats, health, property };
 };
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { isLoading: permsLoading, landingPath } = usePermissions();
+  const { isLoading: permsLoading, landingPath, canRead } = usePermissions();
+  const { currentNamespace } = useNamespace();
   const { isHydrated: menuHydrated, isLoading: menuLoading } = useMenu();
 
   // Post-login landing is DATA-DRIVEN: each namespace role carries a
@@ -51,61 +65,46 @@ export default function DashboardPage() {
     }
   }, [permsLoading, menuReady, shouldRedirect, landingPath, router]);
 
-  // Single data fetch for all dashboard data using custom hook
+  // The workspace's widgets (business type default or its own list), minus what this person can't read.
+  const widgets = useMemo<WidgetId[]>(() => {
+    if (permsLoading) return [];
+    const settings = (currentNamespace?.settings || null) as Record<string, unknown> | null;
+    return resolveLayout(currentNamespace?.business_type, settings).filter((id) =>
+      canRead(WIDGETS[id].module as NamespaceModule));
+  }, [currentNamespace?.business_type, currentNamespace?.settings, canRead, permsLoading]);
+  const needs = useMemo(() => ({
+    core: widgets.some((id) => WIDGETS[id].source === 'core'),
+    property: widgets.some((id) => WIDGETS[id].source === 'property'),
+    health: widgets.includes('health'),
+  }), [widgets]);
+  const needsKey = `${needs.core}|${needs.property}|${needs.health}`;
+
+  const fetcher = useCallback(() => fetchDashboardData(needs), [needs]);
   const { data, isLoading, refetch } = useDataFetch<{
-    stats: DashboardStats;
-    health: HealthStatusType;
-  }>(fetchDashboardData, []);
+    stats: DashboardStats | null;
+    health: HealthStatusType | null;
+    property?: PropertySummary;
+  }>(fetcher, [needsKey]);
 
   // Memoize stats and health data extraction
   const stats = useMemo(() => data?.stats ?? null, [data?.stats]);
   const health = useMemo(() => data?.health ?? null, [data?.health]);
+  const property = data?.property;
 
-  // Memoize stats cards configuration
+  const CORE_STATS: Record<string, { value: string | number }> = useMemo(() => ({
+    users: { value: stats?.totalUsers || 0 },
+    orders: { value: stats?.totalOrders || 0 },
+    products: { value: stats?.totalProducts || 0 },
+    stores: { value: stats?.totalStores || 0 },
+    revenue: { value: formatCurrency(stats?.totalRevenue || 0) },
+  }), [stats]);
+
   const statsCards = useMemo(
-    () => [
-      {
-        id: 'users',
-        title: 'Total Users',
-        value: stats?.totalUsers || 0,
-        icon: STAT_ICONS.users,
-        trend: { value: 12, isPositive: true },
-        description: 'vs last month',
-      },
-      {
-        id: 'orders',
-        title: 'Total Orders',
-        value: stats?.totalOrders || 0,
-        icon: STAT_ICONS.orders,
-        trend: { value: 8, isPositive: true },
-        description: 'vs last month',
-      },
-      {
-        id: 'products',
-        title: 'Total Products',
-        value: stats?.totalProducts || 0,
-        icon: STAT_ICONS.products,
-        trend: { value: 5, isPositive: true },
-        description: 'vs last month',
-      },
-      {
-        id: 'stores',
-        title: 'Total Stores',
-        value: stats?.totalStores || 0,
-        icon: STAT_ICONS.stores,
-        trend: { value: 3, isPositive: true },
-        description: 'vs last month',
-      },
-      {
-        id: 'revenue',
-        title: 'Total Revenue',
-        value: formatCurrency(stats?.totalRevenue || 0),
-        icon: STAT_ICONS.revenue,
-        trend: { value: 15, isPositive: true },
-        description: 'vs last month',
-      },
-    ],
-    [stats]
+    () => widgets.filter((id) => WIDGETS[id].size === 'stat').map((id) => {
+      const p = id.startsWith('pd_') ? propertyStat(id, property) : { ...CORE_STATS[id], description: undefined };
+      return { id, title: WIDGETS[id].label, value: p.value, icon: STAT_ICONS[id], description: p.description };
+    }),
+    [widgets, property, CORE_STATS]
   );
 
   // Memoize chart data
@@ -160,7 +159,7 @@ export default function DashboardPage() {
 
       {/* Stats Cards — responsive grid, each card staggers in */}
       <Stagger
-        className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 lg:gap-6"
+        className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${statsCards.length > 5 ? 'xl:grid-cols-4 2xl:grid-cols-7' : 'xl:grid-cols-5'} gap-3 sm:gap-4 lg:gap-6`}
         gap={0.06}
       >
         {statsCards.map((card) => (
@@ -169,7 +168,6 @@ export default function DashboardPage() {
               title={card.title}
               value={card.value}
               icon={card.icon}
-              trend={card.trend}
               description={card.description}
               isLoading={isLoading}
             />
@@ -177,22 +175,32 @@ export default function DashboardPage() {
         ))}
       </Stagger>
 
-      {/* Charts and Health Status — equal-height columns on desktop, health scrolls internally */}
-      <RevealItem>
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 xl:h-[480px]">
-          <div className="xl:col-span-2 order-2 xl:order-1 min-h-0">
-            <OrdersChart data={chartData} isLoading={isLoading} />
+      {/* Panels, in the layout's order. Chart + health share a row when both are shown. */}
+      {(widgets.includes('orders_chart') || widgets.includes('health')) && (
+        <RevealItem>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 xl:h-[480px]">
+            {widgets.includes('orders_chart') && (
+              <div className={`${widgets.includes('health') ? 'xl:col-span-2' : 'xl:col-span-3'} order-2 xl:order-1 min-h-0`}>
+                <OrdersChart data={chartData} isLoading={isLoading} />
+              </div>
+            )}
+            {widgets.includes('health') && (
+              <div className={`${widgets.includes('orders_chart') ? '' : 'xl:col-span-3'} order-1 xl:order-2 min-h-0`}>
+                <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
+              </div>
+            )}
           </div>
-          <div className="order-1 xl:order-2 min-h-0">
-            <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
-          </div>
-        </div>
-      </RevealItem>
+        </RevealItem>
+      )}
 
-      {/* Recent Orders */}
-      <RevealItem>
-        <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />
-      </RevealItem>
+      {widgets.filter((id) => WIDGETS[id].size === 'full').map((id) => (
+        <RevealItem key={id}>
+          {id === 'recent_orders' && <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />}
+          {id === 'pd_hot_leads' && <HotLeads />}
+          {id === 'pd_due_soon' && <DueSoon />}
+          {id === 'pd_deals_at_risk' && <DealsAtRisk summary={property} />}
+        </RevealItem>
+      ))}
     </Stagger>
   );
 }

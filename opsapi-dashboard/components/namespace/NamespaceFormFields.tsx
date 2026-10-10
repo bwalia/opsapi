@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { Settings, Image as ImageIcon, Globe, Building2, Link2 } from 'lucide-react';
-import { Card, Input } from '@/components/ui';
+import { Card, Input, Select } from '@/components/ui';
+import { BUSINESS_TYPES } from '@/components/dashboard/home/widgets';
 
 /** The editable fields common to namespace Settings and the admin Edit page. */
 export interface NamespaceFieldValues {
@@ -11,6 +12,8 @@ export interface NamespaceFieldValues {
   domain: string;
   logo_url: string;
   banner_url: string;
+  /** '' = general */
+  business_type: string;
 }
 
 interface Props {
@@ -84,6 +87,21 @@ export default function NamespaceFormFields({ values, onChange, slug, disabled }
             <FieldLabel>Slug</FieldLabel>
             <Input value={slug} disabled className="bg-secondary-50 font-mono text-secondary-500" />
             <p className="text-xs text-secondary-500 mt-1">The slug is permanent — it can’t be changed after creation.</p>
+          </div>
+
+          <div>
+            <FieldLabel>Type of business</FieldLabel>
+            <Select
+              name="business_type"
+              value={values.business_type}
+              onChange={(e) => onChange('business_type', e.target.value)}
+              disabled={disabled}
+            >
+              {BUSINESS_TYPES.map((b) => (
+                <option key={b.value} value={b.value}>{b.label}</option>
+              ))}
+            </Select>
+            <p className="text-xs text-secondary-500 mt-1">Sets what the home dashboard shows first. People still only see what their role allows.</p>
           </div>
 
           <div>

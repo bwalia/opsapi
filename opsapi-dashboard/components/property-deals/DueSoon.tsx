@@ -75,7 +75,7 @@ export default function DueSoon() {
       ) : (
         <div className="grid gap-px bg-secondary-100 md:grid-cols-2 xl:grid-cols-4">
           {BUCKETS.map((b) => (
-            <section key={b.key} className="bg-white p-4 dark:bg-secondary-900" aria-label={b.label}>
+            <section key={b.key} className="bg-surface p-4" aria-label={b.label}>
               <h3 className={cn('mb-2 flex items-center justify-between text-sm font-semibold', b.tone)}>
                 {b.label}
                 <span className="rounded-full bg-secondary-100 px-2 text-xs text-secondary-700">{grouped[b.key].length}</span>

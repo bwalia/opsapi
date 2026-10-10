@@ -210,7 +210,7 @@ function NamespaceQueries.all(params)
         SELECT
             id, uuid, name, slug, description, domain, logo_url, banner_url,
             status, plan, settings, max_users, max_stores, owner_user_id,
-            project_code, created_at, updated_at,
+            project_code, business_type, created_at, updated_at,
             (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = namespaces.id AND status = 'active') as member_count
         FROM namespaces
         %s
@@ -281,6 +281,26 @@ end
 -- @param id string|number ID or UUID
 -- @param params table Fields to update
 -- @return table|nil The updated namespace or nil
+-- What a workspace does; picks its default home dashboard (the widgets on /dashboard).
+NamespaceQueries.BUSINESS_TYPES = {
+    general = true, ecommerce = true, property_portfolio_manager = true, field_service = true,
+    professional_services = true, healthcare = true, care_home = true, accounting = true,
+}
+
+--- Normalise a business_type from a request: "" -> NULL; unknown -> nil, error.
+function NamespaceQueries.businessType(v)
+    if v == nil then return nil end
+    local s = tostring(v):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if s == "" then return require("lapis.db").NULL end
+    if not NamespaceQueries.BUSINESS_TYPES[s] then
+        local list = {}
+        for k in pairs(NamespaceQueries.BUSINESS_TYPES) do list[#list + 1] = k end
+        table.sort(list)
+        return nil, "business_type must be one of: " .. table.concat(list, ", ")
+    end
+    return s
+end
+
 function NamespaceQueries.update(id, params)
     local namespace = NamespaceQueries.show(id)
     if not namespace then
@@ -322,7 +342,7 @@ function NamespaceQueries.getForUser(user_id)
     local query = [[
         SELECT
             n.id, n.uuid, n.name, n.slug, n.description, n.logo_url,
-            n.status, n.plan, n.settings,
+            n.status, n.plan, n.settings, n.business_type,
             nm.is_owner, nm.status as member_status, nm.joined_at,
             (
                 SELECT json_agg(json_build_object(
@@ -360,7 +380,7 @@ function NamespaceQueries.getAllForPlatformAdmin()
     local query = [[
         SELECT
             n.id, n.uuid, n.name, n.slug, n.description, n.logo_url,
-            n.status, n.plan, n.settings,
+            n.status, n.plan, n.settings, n.business_type,
             true as is_owner, 'active' as member_status, NULL as joined_at,
             (
                 SELECT json_agg(json_build_object(

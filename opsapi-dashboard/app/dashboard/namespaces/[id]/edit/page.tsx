@@ -16,11 +16,11 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import NamespaceFormFields, { type NamespaceFieldValues } from '@/components/namespace/NamespaceFormFields';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { namespaceService } from '@/services';
-import type { Namespace, NamespaceStatus, NamespacePlan } from '@/types';
+import type { CreateNamespaceDto, Namespace, NamespaceStatus, NamespacePlan } from '@/types';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 
-const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '' };
+const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '' };
 const STATUSES: NamespaceStatus[] = ['active', 'pending', 'suspended', 'archived'];
 const PLANS: NamespacePlan[] = ['free', 'starter', 'professional', 'enterprise'];
 
@@ -61,6 +61,7 @@ export default function EditNamespacePage() {
         domain: ns.domain || '',
         logo_url: ns.logo_url || '',
         banner_url: ns.banner_url || '',
+        business_type: ns.business_type || '',
       };
       const a: AdminFields = {
         status: ns.status,
@@ -101,6 +102,7 @@ export default function EditNamespacePage() {
     try {
       const updated = await namespaceService.updateNamespaceAdmin(namespaceId, {
         ...values,
+        business_type: values.business_type as CreateNamespaceDto['business_type'],
         status: admin.status,
         plan: admin.plan,
         max_users: Number(admin.max_users) || 0,
