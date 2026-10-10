@@ -9,18 +9,41 @@ import OfflineProvider from '@/components/offline/OfflineProvider';
 import OfflineIndicator from '@/components/offline/OfflineIndicator';
 import './globals.css';
 
-// Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height.
-// SELF-HOSTED via next/font/local (not next/font/google): the Turbopack
-// production build fetches Google fonts at build time, which fails on the CI
-// runner with no egress to fonts.gstatic.com ("Can't resolve
-// @vercel/turbopack-next/internal/font/google/font"). The variable woff2 covers
-// weights 200–800, so the same --font-jakarta token still drives 400–800.
-const jakarta = localFont({
-  src: './fonts/plus-jakarta-sans-latin-wght-normal.woff2',
+// Same type system as workstation-website (design/ws-theme.css there):
+// Poppins for body copy + UI, Unbounded for h1/h2 display headings, JetBrains
+// Mono for code and data. SELF-HOSTED via next/font/local (not
+// next/font/google): the Turbopack production build fetches Google fonts at
+// build time, which fails on the CI runner with no egress to fonts.gstatic.com.
+// Files are the latin subsets from @fontsource.
+const poppins = localFont({
+  src: [
+    { path: './fonts/poppins-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/poppins-latin-500-normal.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/poppins-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/poppins-latin-700-normal.woff2', weight: '700', style: 'normal' },
+  ],
   display: 'swap',
-  variable: '--font-jakarta',
-  weight: '200 800',
+  variable: '--ws-font-body',
 });
+
+const unbounded = localFont({
+  src: './fonts/unbounded-latin-wght-normal.woff2',
+  display: 'swap',
+  variable: '--ws-font-display',
+  weight: '200 900',
+});
+
+const jetbrainsMono = localFont({
+  src: [
+    { path: './fonts/jetbrains-mono-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/jetbrains-mono-latin-500-normal.woff2', weight: '500', style: 'normal' },
+  ],
+  display: 'swap',
+  variable: '--ws-font-mono',
+  preload: false,
+});
+
+const fontVariables = `${poppins.variable} ${unbounded.variable} ${jetbrainsMono.variable}`;
 
 export const metadata: Metadata = {
   title: {
@@ -52,7 +75,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
+    <html lang="en" className={fontVariables} suppressHydrationWarning>
       <body className="antialiased">
         {/* Skip to main content link for keyboard/screen reader users */}
         <a
