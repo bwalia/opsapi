@@ -509,6 +509,15 @@ export interface ConfirmDialogProps {
 
 export type NamespaceStatus = 'active' | 'suspended' | 'pending' | 'archived';
 export type NamespacePlan = 'free' | 'starter' | 'professional' | 'enterprise';
+export type BusinessType =
+  | 'general'
+  | 'ecommerce'
+  | 'property_portfolio_manager'
+  | 'field_service'
+  | 'professional_services'
+  | 'healthcare'
+  | 'care_home'
+  | 'accounting';
 export type NamespaceMemberStatus = 'active' | 'invited' | 'suspended' | 'removed';
 
 export interface Namespace {
@@ -523,6 +532,8 @@ export interface Namespace {
   status: NamespaceStatus;
   plan: NamespacePlan;
   settings?: Record<string, unknown>;
+  /** What the workspace does; picks its default home dashboard. Empty = general. */
+  business_type?: BusinessType | null;
   max_users: number;
   max_stores: number;
   owner_user_id?: number;
@@ -672,6 +683,7 @@ export interface CreateNamespaceDto {
   banner_url?: string;
   plan?: NamespacePlan;
   settings?: Record<string, unknown>;
+  business_type?: BusinessType | '';
   max_users?: number;
   max_stores?: number;
 }

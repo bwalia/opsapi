@@ -2594,6 +2594,10 @@ local _migrations = {
     ['zzns1_blank_namespace_domains_to_null'] = function()
         db.query("UPDATE namespaces SET domain = NULL WHERE domain IS NOT NULL AND btrim(domain) = ''")
     end,
+    -- What kind of business a workspace runs (drives its default home dashboard); NULL = general.
+    ['zzns2_namespace_business_type'] = function()
+        db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS business_type VARCHAR(50)")
+    end,
     -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
     ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
     -- Form builder: tables, then the RBAC module + menu (migrations/forms.lua)

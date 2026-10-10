@@ -88,7 +88,7 @@ function News({ items, leadUuid, onChanged }: { items: LeadSignal[]; leadUuid: s
           </li>
         ))}
       </ul>
-      <div className="grid gap-2 rounded-lg bg-secondary-50 p-2 dark:bg-secondary-900">
+      <div className="grid gap-2 rounded-lg bg-secondary-50 p-2">
         <div className="grid gap-2 sm:grid-cols-2">
           <Select label="What" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as SignalKind })}>
             {CAPTURE.map((k) => <option key={k} value={k}>{label(k)}</option>)}
@@ -146,7 +146,7 @@ function Replies({ items, leadUuid, onChanged }: { items: LeadReply[]; leadUuid:
           </li>
         ))}
       </ul>
-      <div className="grid gap-2 rounded-lg bg-secondary-50 p-2 dark:bg-secondary-900">
+      <div className="grid gap-2 rounded-lg bg-secondary-50 p-2">
         <Select label="Came by" value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value as ReplyChannel })}>
           {CHANNELS.map((c) => <option key={c} value={c}>{label(c)}</option>)}
         </Select>

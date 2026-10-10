@@ -16,9 +16,10 @@ import NamespaceFormFields, { type NamespaceFieldValues } from '@/components/nam
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import toast from 'react-hot-toast';
+import type { UpdateNamespaceDto } from '@/types';
 import Link from 'next/link';
 
-const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '' };
+const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '' };
 
 export default function NamespaceSettingsPage() {
   const { currentNamespace, isNamespaceOwner, refreshNamespaces } = useNamespace();
@@ -34,6 +35,7 @@ export default function NamespaceSettingsPage() {
         domain: currentNamespace.domain || '',
         logo_url: currentNamespace.logo_url || '',
         banner_url: currentNamespace.banner_url || '',
+        business_type: currentNamespace.business_type || '',
       };
       setInitial(next);
       setValues(next);
@@ -53,7 +55,7 @@ export default function NamespaceSettingsPage() {
     }
     setIsSaving(true);
     try {
-      await namespaceService.updateCurrentNamespace(values);
+      await namespaceService.updateCurrentNamespace(values as UpdateNamespaceDto);
       setInitial(values);
       toast.success('Settings saved');
       refreshNamespaces();
