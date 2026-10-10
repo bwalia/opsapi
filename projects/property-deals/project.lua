@@ -79,6 +79,8 @@ return {
         -- Native pages in opsapi-dashboard/app/dashboard/property-deals (gap map D7).
         { label = "Deals today", route = "/dashboard/property-deals/today", module = "property_deals_tasks", icon = "Target" },
         { label = "Deals", route = "/dashboard/property-deals/deals", module = "property_deals_deals", icon = "Kanban" },
+        { label = "Renovations", route = "/dashboard/property-deals/renovations", module = "property_deals_deals",
+          icon = "Hammer" },
         { label = "Approvals", route = "/dashboard/property-deals/approvals", module = "property_deals_approvals",
           icon = "CheckSquare" },
         { label = "Deal finder", route = "/dashboard/property-deals/map", module = "property_deals_properties", icon = "MapPin" },

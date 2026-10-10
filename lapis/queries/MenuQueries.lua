@@ -475,8 +475,10 @@ function MenuQueries.updateNamespaceMenuConfig(namespace_id, menu_key, data)
             settings = data.settings and cjson.encode(data.settings) or "{}",
             created_at = timestamp,
             updated_at = timestamp
-        })
-        return db.select("* FROM namespace_menu_config WHERE id = ?", result.id)[1]
+        }, "id")
+        -- db.insert only returns the row when asked; without "id" result.id was nil
+        -- and the read-back crashed (500) after the row had already been saved.
+        return db.select("* FROM namespace_menu_config WHERE id = ?", result[1].id)[1]
     end
 end
 

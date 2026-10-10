@@ -24,8 +24,8 @@ for owner, ns in (("owner_a", A), ("owner_b", B)):
 
 # --- Setup -------------------------------------------------------------------
 setup = expect("setup workspace A", call("POST", P + "/setup", "owner_a", A), 200)["data"]
-check("setup seeds 2 templates, 5 roles, UK holidays",
-      len(setup["created"]["templates"]) == 2 and len(setup["created"]["roles"]) == 5
+check("setup seeds 2 templates, 6 roles, UK holidays",
+      len(setup["created"]["templates"]) == 2 and len(setup["created"]["roles"]) == 6
       and setup["created"]["holidays"] >= 30, setup["created"])
 again = expect("setup again", call("POST", P + "/setup", "owner_a", A), 200)["data"]
 check("setup is idempotent", not again["created"]["templates"] and not again["created"]["roles"]

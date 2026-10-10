@@ -953,7 +953,7 @@ function AccountDetailContent() {
 
 export default function AccountDetailPage() {
   return (
-    <ProtectedPage module="crm" title="Account Details">
+    <ProtectedPage module="crm_accounts" title="Account Details">
       <AccountDetailContent />
     </ProtectedPage>
   );

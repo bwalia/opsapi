@@ -4,28 +4,53 @@
 -- property_deals module when the plugin is installed.
 local R, CRU = { "read" }, { "create", "read", "update" }
 
+-- Back-office modules a property business also runs on: leads/CRM, online
+-- orders, invoices, purchase orders, payments and renovation project boards.
+-- Unknown modules (a feature not deployed) are skipped by setup.
+local BACK_OFFICE = {
+    "dashboard", "crm_accounts", "crm_contacts", "crm_deals", "crm_pipelines", "crm_activities", "forms",
+    "customers", "orders", "products", "stores", "payments", "invoices", "purchase_orders", "tax_rates_config",
+    "accounting", "expense_management", "projects", "kanban", "chat", "reports", "templates",
+}
+
+local function with_back_office(perms, actions)
+    for _, m in ipairs(BACK_OFFICE) do perms[m] = perms[m] or actions end
+    return perms
+end
+
 return {
     {
         role_name = "pd_operator", display_name = "Property Deals — Operator", priority = 30,
         description = "Runs deals day to day: tasks, chases, bookings; approves plain operator-level drafts",
         landing_path = "/dashboard/property-deals/today",
-        permissions = {
+        permissions = with_back_office({
             property_deals_deals = CRU, property_deals_properties = CRU, property_deals_buyers = CRU,
             property_deals_tasks = CRU, property_deals_suppliers = CRU, property_deals_compliance = CRU,
             property_deals_approvals = CRU, property_deals_ai = { "create", "read" },
             property_deals_settings = R, property_deals_reports = R,
-        },
+        }, CRU),
     },
     {
         role_name = "pd_manager", display_name = "Property Deals — Manager", priority = 50,
         description = "Everything an operator can do, plus manager-only approvals, templates and settings",
         landing_path = "/dashboard/property-deals/today",
-        permissions = {
+        permissions = with_back_office({
             property_deals_deals = { "manage" }, property_deals_properties = { "manage" },
             property_deals_buyers = { "manage" }, property_deals_tasks = { "manage" },
             property_deals_suppliers = { "manage" }, property_deals_compliance = { "manage" },
             property_deals_approvals = { "manage" }, property_deals_ai = { "manage" },
             property_deals_settings = { "manage" }, property_deals_reports = { "manage" },
+        }, { "manage" }),
+    },
+    {
+        -- Builders and site managers: work the renovation boards (move cards, tick
+        -- checklists, add photos and comments) and see the deal they belong to.
+        role_name = "pd_builder", display_name = "Property Deals — Builder / site manager", priority = 20,
+        description = "Works renovation project boards and their tasks; reads the linked deal and property",
+        landing_path = "/dashboard/projects",
+        permissions = {
+            projects = CRU, kanban = CRU, property_deals_tasks = { "read", "update" },
+            property_deals_deals = R, property_deals_properties = R, purchase_orders = R, chat = CRU,
         },
     },
     {

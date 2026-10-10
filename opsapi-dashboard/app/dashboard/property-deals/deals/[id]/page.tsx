@@ -3,7 +3,7 @@
 /**
  * Property Deals — the deal page (SPEC §3.8 #3): header with stage, health and why, target
  * dates, money at risk and the slip forecast; tabs for Tasks, Enquiries & blockers, Chase log,
- * Documents, Compliance, Buyers/matches and Timeline. One call fills the page
+ * Documents, Compliance, Buyers/matches, Renovation (kanban build board) and Timeline. One call fills the page
  * (GET /deals/{id}/overview); tabs load their own lists.
  */
 import React, { useState } from 'react';
@@ -21,7 +21,7 @@ import MatchRow from '@/components/property-deals/MatchRow';
 import { usePdData, usePdMe } from '@/components/property-deals/usePd';
 import { cn } from '@/lib/utils';
 
-type TabKey = 'tasks' | 'enquiries' | 'chases' | 'documents' | 'compliance' | 'buyers' | 'timeline';
+type TabKey = 'tasks' | 'enquiries' | 'chases' | 'documents' | 'compliance' | 'buyers' | 'renovation' | 'timeline';
 const PARTIES = ['seller_solicitor', 'buyer_solicitor', 'seller', 'buyer', 'lender', 'freeholder', 'managing_agent', 'council', 'other'];
 
 export default function DealPage() {
@@ -150,6 +150,7 @@ function Deal() {
           { key: 'documents', label: 'Documents', count: o.documents?.reduce((a, x) => a + (x.count || 0), 0) },
           { key: 'compliance', label: 'Compliance' },
           { key: 'buyers', label: 'Buyers' },
+          { key: 'renovation', label: 'Renovation' },
           { key: 'timeline', label: 'Timeline' },
         ]}
       />
@@ -160,6 +161,7 @@ function Deal() {
         {tab === 'documents' && <DocumentsTab dealId={id} propertyId={d.property_uuid} />}
         {tab === 'compliance' && <ComplianceTab dealId={id} items={o.compliance || []} onChanged={ov.refresh} />}
         {tab === 'buyers' && <BuyersTab propertyId={d.property_uuid} />}
+        {tab === 'renovation' && <RenovationTab dealId={id} canCreate={can('deals', 'create')} />}
         {tab === 'timeline' && <TimelineTab dealId={id} />}
       </div>
 
@@ -410,6 +412,59 @@ function BuyersTab({ propertyId }: { propertyId?: string }) {
       ) : (
         <ul className="divide-y divide-secondary-100">
           {matches.data.map((m) => <MatchRow key={m.uuid} m={m} canSend={can('buyers', 'update')} onChanged={matches.refresh} />)}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function RenovationTab({ dealId, canCreate }: { dealId: string; canCreate: boolean }) {
+  const { data, error, loading, refresh } = usePdData(async () => (await pdService.renovations({ deal_uuid: dealId, status: 'all' })).data, [dealId]);
+  const [starting, setStarting] = useState(false);
+  if (loading && !data) return <Spinner />;
+  return (
+    <Card padding="none">
+      <ErrorNote error={error} />
+      {!data?.length ? (
+        <div className="space-y-3 p-6">
+          <Empty title="No renovation yet">Start one to get a build board (survey → strip-out → first fix → … → snagging) with dated jobs builders can work.</Empty>
+          {canCreate && (
+            <Button
+              isLoading={starting}
+              onClick={async () => {
+                setStarting(true);
+                try {
+                  const r = (await pdService.createRenovation({ deal_uuid: dealId })).data;
+                  toast.success(`Board created with ${r.jobs_total} jobs`);
+                  refresh();
+                } catch (e) {
+                  toast.error(pdErrorText(e));
+                } finally {
+                  setStarting(false);
+                }
+              }}
+            >
+              Start renovation
+            </Button>
+          )}
+        </div>
+      ) : (
+        <ul className="divide-y divide-secondary-100">
+          {data.map((r) => (
+            <li key={r.uuid} className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+              <div>
+                <div className="font-medium text-secondary-900">{r.name}</div>
+                <div className="text-secondary-500">
+                  {r.jobs_done}/{r.jobs_total} jobs done · finish by {dateText(r.due_date)}
+                  {r.jobs_overdue > 0 && <span className="font-semibold text-error-600"> · {r.jobs_overdue} overdue</span>}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Link href={`/dashboard/projects/${r.project_uuid}`}><Button size="sm">Open board</Button></Link>
+                <Link href={`/dashboard/purchase-orders?project_uuid=${r.project_uuid}`}><Button size="sm" variant="outline">Purchase orders</Button></Link>
+              </div>
+            </li>
+          ))}
         </ul>
       )}
     </Card>
