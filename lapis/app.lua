@@ -712,6 +712,7 @@ load_if("timesheets", "routes.timesheets")
 -- ============================================
 load_if("invoicing", "routes.invoices")
 load_if("invoicing", "routes.document-templates")
+load_if("invoicing", "routes.purchase-orders")
 
 -- ============================================
 -- FIELD SERVICE (service jobs, job phases, engineer site visits)

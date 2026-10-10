@@ -546,6 +546,7 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "invoices", name = "Invoices", description = "Invoice creation and management", category = "Finance" },
         { machine_name = "payments", name = "Payments", description = "Payment recording and tracking", category = "Finance" },
         { machine_name = "tax_rates_config", name = "Tax Rates", description = "Tax rate configuration", category = "Finance" },
+        { machine_name = "purchase_orders", name = "Purchase Orders", description = "Raise, send, receive and bill supplier purchase orders", category = "Finance" },
     },
 
     -- Accounting/Bookkeeping modules
