@@ -104,10 +104,20 @@ export const useNamespaceStore = create<NamespaceStore>()(
         set({ namespacesLoading: true, namespacesError: null });
         try {
           const response = await namespaceService.getUserNamespaces();
+          const list = response.data || [];
           set({
-            namespaces: response.data || [],
+            namespaces: list,
             namespacesLoading: false,
           });
+          // The current workspace is persisted in the browser; refresh it from the list so
+          // changes made since (rename, business type, logo) show without switching away and back.
+          const current = get().currentNamespace;
+          const fresh = current && list.find((n) => n.uuid === current.uuid || n.id === current.id);
+          if (current && fresh) {
+            const merged = { ...current, ...fresh };
+            set({ currentNamespace: merged });
+            namespaceService.setCurrentNamespace(merged);
+          }
           // Update user settings if included in response
           if (response.settings) {
             const currentSettings = get().userSettings;
