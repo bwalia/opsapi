@@ -125,9 +125,11 @@ local function watch_officer(ns, lead, since)
     return added
 end
 
---- One pass of the watch. @return { leads, signals, errors }
-function S.watch(ns)
-    local out = { leads = 0, signals = 0, errors = 0 }
+--- One pass of the watch. Leads with new news get a follow-up draft (property_deals.followups.auto).
+-- @return { leads, signals, errors, followups }
+function S.watch(ns, settings)
+    local out = { leads = 0, signals = 0, errors = 0, followups = 0 }
+    local fresh = {}
     if not C.of_kind(ns, "companies_house") then return out end
     local leads = db.query([[
         SELECT d.lead_uuid, d.company_number, d.ch_officer_id, l.company_name,
@@ -146,11 +148,19 @@ function S.watch(ns)
             if not null(lead.ch_officer_id) then added = added + watch_officer(ns, lead, since) end
             return added
         end)
-        if ok then out.signals = out.signals + n else
+        if ok then
+            out.signals = out.signals + n
+            if n > 0 then fresh[#fresh + 1] = lead.lead_uuid end
+        else
             out.errors = out.errors + 1
             ngx.log(ngx.WARN, "[property_deals] companies house watch lead=", lead.lead_uuid, ": ", tostring(n))
         end
         db.update("property_deals_lead_details", { ch_checked_at = db.raw("NOW()") }, { lead_uuid = lead.lead_uuid })
+    end
+    if #fresh > 0 then
+        local ok, n = pcall(require("property_deals.followups").auto, ns, fresh, settings)
+        out.followups = ok and n or 0
+        if not ok then ngx.log(ngx.WARN, "[property_deals] auto follow-ups: ", tostring(n)) end
     end
     return out
 end

@@ -8,7 +8,7 @@ return {
     at = "07:00",
     run = function(job)
         local S = require("property_deals.signals")
-        local w = S.watch(job.namespace_id)
+        local w = S.watch(job.namespace_id, job.settings)
         local n = S.new_companies(job.namespace_id, job.settings)
         if w.signals > 0 or n.leads > 0 or w.errors > 0 then
             ngx.log(ngx.NOTICE, "[property_deals] lead signals ns=", job.namespace_id, " leads=", w.leads, " signals=",

@@ -70,7 +70,7 @@ check("officer search returns the officer id", officers and officers[0]["officer
 res = call("POST", P + "/signals/run", "operator_s", S)
 check("only managers run the watch (403)", res[0] == 403, res)
 run = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run the watch")
-check("one lead watched, four new items, no errors", run["watch"] == {"leads": 1, "signals": 4, "errors": 0}, run)
+check("one lead watched, four new items, no errors", run["watch"] == {"leads": 1, "signals": 4, "errors": 0, "followups": 0}, run)
 sig = data(call("GET", P + f"/leads/{L}/signals", "operator_s", S), 200, "lead news")
 check("news newest first: charge, formed company, accounts, directorship",
       [s["kind"] for s in sig] == ["charge_registered", "company_formed", "company_filing", "officer_appointed"],
@@ -83,7 +83,7 @@ again = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run again a
 check("a lead checked in the last 20h is skipped", again["watch"]["leads"] == 0, again)
 sql(f"UPDATE property_deals_lead_details SET ch_checked_at = NULL WHERE lead_uuid = '{L}'")
 again = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run again later")
-check("the same news is never stored twice", again["watch"] == {"leads": 1, "signals": 0, "errors": 0}, again)
+check("the same news is never stored twice", again["watch"] == {"leads": 1, "signals": 0, "errors": 0, "followups": 0}, again)
 
 # New property companies in an area -> new leads
 expect("set the area", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,

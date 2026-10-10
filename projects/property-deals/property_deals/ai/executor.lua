@@ -9,6 +9,9 @@
 --   confirm_booking    email the chosen supplier, mark it confirmed, cancel the
 --                      other requests for the task → task done
 --   send_deal_pack     email a matched buyer the deal pack, mark the match sent
+--   send_lead_followup a personal follow-up to a lead: email (workspace SMTP) or SMS (the workspace's own
+--                      Android SMS Gateway) is sent; WhatsApp gives a click-to-chat link a person sends from
+--                      (no paid API). Refused when the lead opted out or has no lawful basis recorded.
 --   (anything else)    recorded as approved; nothing to run
 local cjson = require("cjson")
 local db = require("lapis.db")
@@ -238,6 +241,65 @@ X.actions.compliance_notes = function(ns, a, p, actor)
         noted = noted + #r
     end
     return { result = { checks_created = created, checks_noted = noted, mismatches = p.mismatches } }
+end
+
+--- Personal follow-up to a lead (lead_followup agent), after a person approved the exact text.
+X.actions.send_lead_followup = function(ns, a, p, actor)
+    if not U.is_uuid(p.lead_uuid) and type(p.lead_uuid) ~= "string" then U.fail(422, "No lead in the draft") end
+    local lead = U.one([[
+        SELECT l.uuid, l.first_name, l.company_name, NULLIF(l.email, '') AS email, NULLIF(l.phone, '') AS phone,
+               d.opted_out_at, d.consent_basis
+        FROM crm_leads l LEFT JOIN property_deals_lead_details d ON d.lead_uuid = l.uuid
+        WHERE l.namespace_id = ? AND l.uuid = ? AND l.deleted_at IS NULL
+    ]], ns, p.lead_uuid)
+    if not lead then U.fail(404, "Lead not found") end
+    local function null(v) return v == nil or v == db.NULL end
+    if not null(lead.opted_out_at) then U.fail(409, "The lead asked not to be contacted: nothing was sent") end
+    -- UK GDPR / PECR: a private person needs a recorded basis; a company contact (B2B) may be contacted.
+    local b2b = not null(lead.company_name) and tostring(lead.company_name) ~= ""
+    if null(lead.consent_basis) and not b2b then
+        U.fail(422, "No lawful basis recorded for this person: set the lead's consent basis, then approve again")
+    end
+    local channel = p.channel or "email"
+    local body = tostring(p.body or "")
+    -- The address comes from the lead record at send time (it may have been corrected since the draft).
+    local to = channel == "email" and lead.email or lead.phone
+    if null(to) then to = nil end
+    local result = { channel = channel, sent_to = to }
+    local status = "sent"
+    if channel == "email" then
+        X.send_email(ns, to, p.subject or a.title, body .. "\n\n--\nIf you'd rather not hear from us, just reply STOP.")
+    elseif channel == "sms" then
+        if not to then U.fail(422, "The lead has no phone number") end
+        local M = require("property_deals.messaging")
+        local text = body .. " Reply STOP to opt out."
+        if M.available(ns, "sms") then
+            local ok, err = M.send(ns, "sms", M.e164(to) or to, { body = text })
+            if not ok then U.fail(502, "SMS not sent: " .. tostring(err)) end
+        else
+            status, result.manual_link = "draft", "sms:" .. to:gsub("%s+", "") .. "?&body=" .. ngx.escape_uri(text)
+        end
+    elseif channel == "whatsapp" then
+        if not to then U.fail(422, "The lead has no phone number") end
+        local num = (require("property_deals.messaging").e164(to) or to):gsub("[^%d]", "")
+        status, result.manual_link = "draft", "https://wa.me/" .. num .. "?text=" .. ngx.escape_uri(body)
+    else
+        U.fail(422, "Unknown channel")
+    end
+    local chase = db.insert("property_deals_chases", {
+        namespace_id = ns, lead_uuid = lead.uuid, task_uuid = a.task_uuid, to_party = "other",
+        to_name = p.to_name, to_address = to, channel = channel, subject = p.subject, body = body,
+        status = status, sent_at = status == "sent" and db.raw("NOW()") or nil, sent_by_user_uuid = actor,
+        approval_uuid = a.uuid, outcome = "followup",
+    }, { returning = "*" })[1]
+    if U.is_uuid(p.signal_uuid) then
+        db.query("UPDATE property_deals_lead_signals SET used_at = NOW() WHERE namespace_id = ? AND uuid = ?", ns, p.signal_uuid)
+    end
+    db.query([[UPDATE property_deals_lead_details SET last_followup_at = NOW(), updated_at = NOW()
+        WHERE namespace_id = ? AND lead_uuid = ?]], ns, lead.uuid)
+    result.chase_uuid = chase.uuid
+    -- Sent: done. A click-to-send link: the task stays open until the person sends it and marks it done.
+    return { result = result, task_status = status == "sent" and "done" or "in_progress" }
 end
 
 function X.run(ns, a, actor)

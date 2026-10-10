@@ -4,10 +4,12 @@
  * On the lead drawer: "Recent news" (Companies House events found daily + posts a person captured) for
  * personal follow-ups, and "Replies" (emails matched by sender + WhatsApp / SMS / calls logged here), each
  * scored hot / warm / cold. A hot reply raises a "call now" task and alerts the lead's owner.
+ * "Draft a personal follow-up": the AI writes one message opening with their newest news; it waits in
+ * Approvals and nothing is sent until a person approves it.
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Newspaper, MessageSquareReply, Trash2, ExternalLink, Flame } from 'lucide-react';
+import { Newspaper, MessageSquareReply, Trash2, ExternalLink, Flame, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Select, Textarea } from '@/components/ui';
 import { pdService, pdErrorText, type LeadReply, type LeadSignal, type ReplyChannel, type SignalKind } from '@/services/property-deals.service';
@@ -37,15 +39,45 @@ export function TemperatureBadge({ temperature, score }: { temperature?: string 
 export default function LeadActivity({ leadUuid }: { leadUuid: string }) {
   const news = usePdData(async () => (await pdService.leadSignals(leadUuid)).data, [leadUuid]);
   const replies = usePdData(async () => (await pdService.leadReplies(leadUuid)).data, [leadUuid]);
+  const [channel, setChannel] = useState<'email' | 'whatsapp' | 'sms'>('email');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function followUp(signalUuid?: string) {
+    setBusy(true);
+    try {
+      await pdService.followUp(leadUuid, { channel, signal_uuid: signalUuid, note: note || undefined });
+      toast.success('Drafting — it will be waiting in Approvals in a moment');
+      setNote('');
+    } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(false); }
+  }
+
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <News items={news.data || []} leadUuid={leadUuid} onChanged={news.refresh} />
-      <Replies items={replies.data || []} leadUuid={leadUuid} onChanged={replies.refresh} />
-    </div>
+    <>
+      <div className="mt-4 flex flex-wrap items-end gap-2 rounded-lg border border-primary-200 bg-primary-500/5 p-3">
+        <Sparkles className="mb-2 h-4 w-4 text-primary-600" aria-hidden />
+        <Select label="Personal follow-up by" value={channel} onChange={(e) => setChannel(e.target.value as 'email' | 'whatsapp' | 'sms')}>
+          <option value="email">Email</option>
+          <option value="whatsapp">WhatsApp (you press send)</option>
+          <option value="sms">SMS</option>
+        </Select>
+        <div className="min-w-[12rem] flex-1">
+          <Input label="Steer for the AI (optional)" placeholder="e.g. mention the Leeds HMO" value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        <Button isLoading={busy} onClick={() => followUp()}>Draft follow-up</Button>
+        <Link href="/dashboard/property-deals/approvals" className="mb-2 text-sm text-primary-600 hover:underline">Approvals</Link>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <News items={news.data || []} leadUuid={leadUuid} onChanged={news.refresh} onFollowUp={followUp} />
+        <Replies items={replies.data || []} leadUuid={leadUuid} onChanged={replies.refresh} />
+      </div>
+    </>
   );
 }
 
-function News({ items, leadUuid, onChanged }: { items: LeadSignal[]; leadUuid: string; onChanged: () => void }) {
+function News({ items, leadUuid, onChanged, onFollowUp }: {
+  items: LeadSignal[]; leadUuid: string; onChanged: () => void; onFollowUp: (signalUuid: string) => void;
+}) {
   const [f, setF] = useState<{ kind: SignalKind; url: string; text: string }>({ kind: 'social_post', url: '', text: '' });
   const [busy, setBusy] = useState(false);
   return (
@@ -83,6 +115,9 @@ function News({ items, leadUuid, onChanged }: { items: LeadSignal[]; leadUuid: s
                 <a href={s.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary-600 hover:underline">
                   Open <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
+              )}
+              {s.used_at ? <span>used {dateText(s.used_at)}</span> : (
+                <button type="button" className="text-primary-600 hover:underline" onClick={() => onFollowUp(s.uuid)}>Follow up about this</button>
               )}
             </div>
           </li>

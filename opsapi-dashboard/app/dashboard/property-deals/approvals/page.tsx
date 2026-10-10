@@ -141,6 +141,12 @@ function Detail({ a, onDone }: { a: Approval; onDone: () => void }) {
       const s = res.data.status;
       toast.success(decision === 'reject' ? 'Rejected — the task is back with a person' : s === 'executed' ? 'Approved and done' : s === 'failed' ? 'Approved, but it couldn’t run (see the reason)' : res.data.waiting_for ? 'Approved — needs a second person' : 'Approved');
       if (s === 'failed') toast.error(String(asObj(res.data.execution_result).error || 'Execution failed'));
+      // WhatsApp (and SMS without a gateway): open the click-to-send link with the approved text.
+      const link = asObj(res.data.execution_result).manual_link;
+      if (s === 'executed' && typeof link === 'string' && /^(https:\/\/wa\.me\/|sms:)/.test(link)) {
+        window.open(link, '_blank', 'noopener,noreferrer');
+        toast.success('Opened — press send, then mark the follow-up task done');
+      }
       onDone();
     } catch (e) {
       const err = pdError(e);
@@ -196,9 +202,18 @@ function Detail({ a, onDone }: { a: Approval; onDone: () => void }) {
       <div className="mt-4 space-y-3">
         {isEmail ? (
           <>
+            {a.action === 'send_lead_followup' && (
+              <div className="rounded-lg bg-secondary-50 p-3 text-sm text-secondary-700">
+                <div>Personal follow-up by <b>{label(String(payload.channel || 'email'))}</b>{payload.signal_title ? <> · opens with: <i>{String(payload.signal_title)}</i></> : null}</div>
+                {payload.why ? <div className="mt-0.5 text-xs text-secondary-500">Why it’s personal: {String(payload.why)}</div> : null}
+                {payload.channel === 'whatsapp' && <div className="mt-0.5 text-xs text-secondary-500">Approving opens WhatsApp with this text ready to send (no paid API).</div>}
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label="To" value={String(draft.to ?? '')} disabled={!editing} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
-              <Input label="Subject" value={String(draft.subject ?? '')} disabled={!editing} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
+              {(a.action !== 'send_lead_followup' || (payload.channel ?? 'email') === 'email') && (
+                <Input label="Subject" value={String(draft.subject ?? '')} disabled={!editing} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
+              )}
             </div>
             <Textarea label="Message" rows={10} value={after} disabled={!editing} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
             {Array.isArray(payload.enquiry_updates) && (payload.enquiry_updates as unknown[]).length > 0 && (

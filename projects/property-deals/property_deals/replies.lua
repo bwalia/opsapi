@@ -163,6 +163,12 @@ function R.handle(ns, msg, settings)
             hot_reason = EXCLUDED.hot_reason,
             last_reply_at = GREATEST(property_deals_lead_details.last_reply_at, EXCLUDED.last_reply_at), updated_at = NOW()
     ]], ns, lead.uuid, s.temperature, s.score, s.reason:sub(1, 1000), msg.received_at)
+    if s.opted_out then
+        db.query([[UPDATE property_deals_lead_details SET opted_out_at = COALESCE(opted_out_at, NOW()), updated_at = NOW()
+            WHERE namespace_id = ? AND lead_uuid = ?]], ns, lead.uuid)
+        -- Drop any follow-up still waiting for approval: they asked us to stop.
+        pcall(require("property_deals.followups").cancel_pending, ns, lead.uuid, "The lead asked not to be contacted")
+    end
     if s.temperature ~= "hot" then return result end
 
     local minutes = math.max(1, math.min(240, tonumber(settings.hot_call_within_minutes) or 15))

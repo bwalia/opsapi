@@ -127,9 +127,9 @@ for kind, cfg, secret in (("postcodes", {"base_url": M + "/pc"}, None),
         body["secret"] = secret
     data(call("POST", P + "/connectors", "manager_s", S, body), 201, "connector " + kind)
 cat = data(call("GET", P + "/ai/agents", "operator_s", S), 200, "agent catalogue")
-check("all 10 agents from SPEC §3.5 in the catalogue", [a["key"] for a in cat] == ["lead_triage", "property_enrichment",
+check("all 10 SPEC §3.5 agents + the lead follow-up in the catalogue", [a["key"] for a in cat] == ["lead_triage", "property_enrichment",
       "offer_reasoning", "buyer_matcher", "legal_chaser", "booking_agent", "document_checker", "compliance_assistant",
-      "digest_writer", "investor_update"], [a["key"] for a in cat])
+      "digest_writer", "investor_update", "lead_followup"], [a["key"] for a in cat])
 
 # --- 1. Lead triage ------------------------------------------------------------------------------------------------
 lead = expect("seller lead with call notes", call("POST", API + "/api/v2/crm/leads", "operator_s", S, {"first_name": "Pat",
