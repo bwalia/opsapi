@@ -13,6 +13,61 @@ import type { components } from '@/types/property-deals.generated';
 type S = components['schemas'];
 
 export type Me = S['PropertyDealsMe'];
+
+// Renovations + due list (api/renovations.lua). Hand-written until the next
+// `scripts/generate.mjs` run adds PropertyDealsRenovation / PropertyDealsDueItem.
+export interface Renovation {
+  uuid: string;
+  project_uuid: string;
+  board_uuid?: string | null;
+  deal_uuid?: string | null;
+  deal_name?: string | null;
+  property_uuid?: string | null;
+  address?: string | null;
+  postcode?: string | null;
+  template_key: string;
+  name: string;
+  status: string;
+  budget?: number | string | null;
+  budget_spent?: number | string | null;
+  budget_currency?: string | null;
+  start_date?: string | null;
+  due_date?: string | null;
+  jobs_total: number;
+  jobs_done: number;
+  jobs_overdue: number;
+  created_at: string;
+  builders_added?: string[];
+}
+export interface RenovationCreate {
+  deal_uuid?: string;
+  property_uuid?: string;
+  name?: string;
+  budget?: number;
+  start_date?: string;
+  target_end_date?: string;
+  builder_user_uuids?: string[];
+}
+export interface DueItem {
+  kind: 'deal_task' | 'renovation_job';
+  uuid: string;
+  title: string;
+  due_at: string;
+  overdue: boolean;
+  status: string;
+  deal_uuid?: string | null;
+  deal_name?: string | null;
+  project_uuid?: string | null;
+  project_name?: string | null;
+  column_name?: string | null;
+  assignee?: string | null;
+}
+export interface DueList {
+  days: number;
+  everyone: boolean;
+  items: DueItem[];
+}
+
 export type Today = S['PropertyDealsToday'];
 export type Deal = S['PropertyDealsDeal'];
 export type DealCreate = S['PropertyDealsDealCreate'];
@@ -170,6 +225,10 @@ export const pdService = {
   setupState: () => get<unknown>('/setup'),
   setup: () => send<unknown>('post', '/setup'),
   today: (limit = 50) => get<Today>('/today', { limit }),
+  due: (days = 7, mine = false) => get<DueList>('/due', { days, mine: mine ? 'true' : undefined }),
+  renovations: (params?: { status?: 'active' | 'completed' | 'all'; deal_uuid?: string }) =>
+    get<Renovation[]>('/renovations', params),
+  createRenovation: (body: RenovationCreate) => send<Renovation>('post', '/renovations', body),
   digest: () => get<Digest>('/digest'),
 
   // Deals

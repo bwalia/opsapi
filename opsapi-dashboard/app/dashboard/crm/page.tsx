@@ -1247,7 +1247,7 @@ function CrmPageContent() {
 
 export default function CrmPage() {
   return (
-    <ProtectedPage module="crm" title="CRM">
+    <ProtectedPage module="crm_accounts" title="CRM">
       <CrmPageContent />
     </ProtectedPage>
   );

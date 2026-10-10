@@ -1,4 +1,4 @@
-# Property Deals API (contract v1.3 — Phase 7)
+# Property Deals API (contract v1.4)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -82,6 +82,26 @@ GET /api/v2/property-deals/today?limit=50
 ```
 **Live updates:** poll `GET /today` every 30–60 s. Health and urgency are recomputed every minute,
 and after every change made through the API. A WebSocket feed is not part of v1.
+
+### 2.1a Due this week — `GET /due?days=7&mine=`
+Deal tasks and renovation jobs with a due date within `days` (default 7, max 60), overdue first. Managers
+(`property_deals_approvals.manage`) get the whole team (`everyone: true`) unless `mine=true`; everyone
+else gets the tasks they own and the renovation jobs they're assigned. A job is done once its card is in
+a Done column (or completed/cancelled).
+```json
+{ "data": { "days": 7, "everyone": true, "items": [
+  { "kind": "renovation_job", "uuid": "…", "title": "Survey and schedule of works", "due_at": "2026-10-08T17:00:00Z",
+    "overdue": true, "status": "open", "deal_uuid": "…", "deal_name": "3 Brick Row", "project_uuid": "…",
+    "project_name": "Renovation — 3 Brick Row", "column_name": "Survey & quotes", "assignee": "Sam Builder" } ] } }
+```
+
+### 2.1b Renovations — `GET /renovations`, `POST /renovations`
+A renovation is a core kanban project (open it at `/dashboard/projects/{project_uuid}`): its board's
+columns are the build stages and its cards are dated jobs (`seed/renovation_standard.lua`, ~50 days,
+stretched to `target_end_date`). `POST` takes `{ deal_uuid?, property_uuid?, name?, budget?,
+start_date?, target_end_date?, builder_user_uuids? }`; the builders are added as project members.
+The list returns progress (`jobs_total`, `jobs_done`, `jobs_overdue`), budget/spent and the board uuid;
+filter with `?status=active|completed|all&deal_uuid=`.
 
 ### 2.2 Leads (extend the existing page)
 
@@ -414,6 +434,13 @@ engine events). Use it for WhatsApp/Slack.
 | [web-buyer-directory](api-requests/web-buyer-directory.md) | Done: `GET /buyer-profiles/directory?q=&pof_status=` — profiles with the buyer's `name` and `email` |
 
 ## 7. Changes
+
+- **v1.4:**
+  - `GET /due` (deal tasks + renovation jobs due soon) and the "Due this week" card on Today.
+  - Renovations on kanban boards: `GET/POST /renovations`, a Renovations page and a deal tab.
+  - Seeded roles include the back-office modules (CRM, orders, invoices, purchase orders, payments,
+    projects); new `pd_builder` role for builders and site managers.
+  - The `property` deployment preset now includes invoicing.
 
 - **v1.3 (Phase 7):**
   - The other seven agents: lead triage, property enrichment, offer reasoning (manager-only), buyer

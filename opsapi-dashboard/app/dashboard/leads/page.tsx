@@ -471,7 +471,7 @@ function LeadsPageContent() {
 export default function LeadsPage() {
   return (
     <>
-      <ProtectedPage module="crm" title="Leads">
+      <ProtectedPage module="crm_accounts" title="Leads">
         <LeadsPageContent />
       </ProtectedPage>
       <TourHost />
