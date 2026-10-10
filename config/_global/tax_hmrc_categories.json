@@ -9,7 +9,7 @@
       "label": "Accountancy, Legal and Other Professional Fees",
       "mtd_field_name": "professionalFees",
       "mtd_section": "periodExpenses",
-      "uuid": "60267a53-0d60-4941-ab0b-c7b0e403d2ef"
+      "uuid": "3046b387-00de-4219-bc46-2ba0b16a1fc6"
     },
     {
       "box": "27a",
@@ -20,7 +20,7 @@
       "label": "Advertising and Marketing",
       "mtd_field_name": "advertisingCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "226f7a57-a37e-4abc-bd6e-ab15f67135fa"
+      "uuid": "0148b0f5-3086-4d63-9646-be9917dbba2c"
     },
     {
       "box": "29a",
@@ -31,7 +31,7 @@
       "label": "Irrecoverable Debts",
       "mtd_field_name": "irrecoverableDebts",
       "mtd_section": "periodExpenses",
-      "uuid": "0d46e28a-5403-4f21-a8cc-76c2c6dbf775"
+      "uuid": "8a6aa232-b47f-49ae-ba0e-4005b220269e"
     },
     {
       "box": "28",
@@ -40,7 +40,7 @@
       "is_tax_deductible": true,
       "key": "capital_allowances",
       "label": "Capital Allowances",
-      "uuid": "1ec3d473-7757-40e6-b00c-ccd602f463a7"
+      "uuid": "32030cf3-a45f-461d-907a-1ffc3a6dd5ee"
     },
     {
       "box": "19",
@@ -51,7 +51,7 @@
       "label": "Car, Van and Travel Expenses",
       "mtd_field_name": "carVanTravelExpenses",
       "mtd_section": "periodExpenses",
-      "uuid": "b63045cc-04ad-4b4e-970b-dc1337cc2e2d"
+      "uuid": "80b10802-83ef-4236-b300-e9ebf5169d02"
     },
     {
       "box": "17",
@@ -62,7 +62,7 @@
       "label": "Cost of Goods Sold",
       "mtd_field_name": "costOfGoods",
       "mtd_section": "periodExpenses",
-      "uuid": "24ec9cfb-6ec3-417d-aa3d-e0f33e58fd08"
+      "uuid": "0ea2fb65-7bad-4c16-ab33-0499acc02609"
     },
     {
       "box": "27",
@@ -73,7 +73,7 @@
       "label": "Depreciation and Loss/Profit on Sale of Assets",
       "mtd_field_name": "depreciation",
       "mtd_section": "periodExpenses",
-      "uuid": "5806d80c-1bcd-4ea7-be22-cdf50d05fbed"
+      "uuid": "6141668b-5d7a-48ce-a345-6825e618c975"
     },
     {
       "box": "25b",
@@ -84,7 +84,7 @@
       "label": "Business Entertainment",
       "mtd_field_name": "businessEntertainmentCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "a1a195ec-df98-4889-ba21-9e66e527c8ff"
+      "uuid": "b7b6fa2f-62ad-4a33-804f-844770938941"
     },
     {
       "box": "24",
@@ -95,7 +95,7 @@
       "label": "Interest and Other Finance Charges",
       "mtd_field_name": "interestOnBankOtherLoans",
       "mtd_section": "periodExpenses",
-      "uuid": "f7656363-740c-47a9-9e66-9068885a4beb"
+      "uuid": "93f00011-e38c-40e1-a141-15f65afc16ce"
     },
     {
       "box": "26",
@@ -106,7 +106,7 @@
       "label": "Other Allowable Business Expenses",
       "mtd_field_name": "otherExpenses",
       "mtd_section": "periodExpenses",
-      "uuid": "fdeed390-4fb5-4a53-9a50-eb122ce7f583"
+      "uuid": "5844020d-067f-4865-9402-3092490e1497"
     },
     {
       "box": "16",
@@ -117,7 +117,7 @@
       "label": "Other Business Income",
       "mtd_field_name": "other",
       "mtd_section": "periodIncome",
-      "uuid": "5e07586c-92b0-4b4f-a661-55b80d69bc65"
+      "uuid": "d3928f8b-2bcb-4d67-a755-b372214be37a"
     },
     {
       "box": "21",
@@ -128,7 +128,7 @@
       "label": "Rent, Rates, Power and Insurance Costs",
       "mtd_field_name": "premisesRunningCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "7f66c81a-a7e2-4b9d-9212-8d23334a5459"
+      "uuid": "5493d092-a23e-400a-b940-b75a82acdbe9"
     },
     {
       "box": "22",
@@ -139,7 +139,7 @@
       "label": "Repairs and Maintenance",
       "mtd_field_name": "maintenanceCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "d3e60011-26ab-4aec-8ac1-b09be288c1a7"
+      "uuid": "bb54322c-30d4-40f7-868e-61e387005f69"
     },
     {
       "box": "20a",
@@ -150,7 +150,7 @@
       "label": "Payments to Subcontractors",
       "mtd_field_name": "paymentsToSubcontractors",
       "mtd_section": "periodExpenses",
-      "uuid": "ca517f24-a448-4f5c-bf3e-cc11408d79ae"
+      "uuid": "e09304eb-4e1b-4fd5-8c7e-270ce42bbee3"
     },
     {
       "box": "25",
@@ -161,7 +161,7 @@
       "label": "Phone, Fax, Stationery and Other Office Costs",
       "mtd_field_name": "adminCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "56df882a-f19c-4ab5-9a19-9a0165270e6a"
+      "uuid": "a7bbc337-fe6f-4c0c-881d-1a807d717c39"
     },
     {
       "box": "15",
@@ -172,7 +172,7 @@
       "label": "Turnover/Sales",
       "mtd_field_name": "turnover",
       "mtd_section": "periodIncome",
-      "uuid": "fe6bca38-d37f-488a-b835-e013a91a5bcd"
+      "uuid": "50f25fad-4075-418f-b510-9be6386e1079"
     },
     {
       "box": "32",
@@ -181,7 +181,7 @@
       "is_tax_deductible": true,
       "key": "use_of_home",
       "label": "Use of Home as Office",
-      "uuid": "5f9ac13f-f232-4724-abe7-167e5e9557e2"
+      "uuid": "bb72795a-54a8-4213-92b4-b32d0b63b779"
     },
     {
       "box": "20",
@@ -192,13 +192,13 @@
       "label": "Wages, Salaries and Other Staff Costs",
       "mtd_field_name": "wagesAndStaffCosts",
       "mtd_section": "periodExpenses",
-      "uuid": "6f92647c-40bf-4ce3-be2f-3bbb04f59c9d"
+      "uuid": "8244c360-9add-473d-8e66-062d81d18e3c"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
   "key": "key",
   "namespace_scope": "global",
-  "namespace_slug": "system",
+  "namespace_slug": "tax-copilot",
   "registry_version": 1,
   "table": "tax_hmrc_categories"
 }
