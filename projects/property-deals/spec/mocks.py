@@ -7,11 +7,13 @@ One process, three ports, run as the `pd-mock` container in the sandbox network:
       /down/v1/chat/completions   a cloud provider that is down (503) - fallback order tests
       /js/api/v1/...              JobShout: login, agents, tasks/launch, task-runs, approvals, decide
       /gmail/...  /m365/...       Gmail API and Microsoft Graph mail, sharing one mailbox
+      /ntfy/<topic>  /tg/bot<token>/sendMessage  /smsgw/message   staff alert channels (see /_alerts)
       /_ctl  /_log  /_smtp  /_mail/inbox   test control and inspection
   :2525 SMTP sink (no auth, no TLS)
   :1143 IMAP (plain; LOGIN, EXAMINE, UID SEARCH, UID FETCH, LOGOUT) on the same mailbox
 """
 import base64
+import datetime
 import email.utils
 import json
 import re
@@ -31,6 +33,7 @@ STATE = {
     "js_approvals": {},    # approval_id -> {...}
     "js_launches": [],
     "s3": {},              # "/bucket/key" -> bytes
+    "alerts": [],          # staff alerts: ntfy / Telegram / SMS gateway
 }
 JS_AGENT = "11111111-2222-4333-8444-555555555555"
 POSTCODES = {"YO1 7AA": (53.96, -1.08), "YO1 9AB": (53.962, -1.085), "YO10 5DD": (53.947, -1.05),
@@ -116,6 +119,13 @@ def model_reply(body):
     agent = re.search(r"\[agent:(\w+)\]", system)
     agent = agent.group(1) if agent else None
     rec = records_of(messages)
+    if agent == "reply_scorer":
+        reply = allt.lower()
+        if "call me" in reply:
+            return say({"score": 92, "temperature": "hot", "reason": "Asks to be called today"})
+        if "not right now" in reply:
+            return say({"score": 45, "temperature": "warm", "reason": "Interested, but later"})
+        return say({"score": 20, "temperature": "cold", "reason": "No sign of interest"})
     if agent == "lead_triage":
         notes = json.dumps(rec.get("lead", {})).lower()
         return say({"lead_kind": "seller", "situation": "probate" if "probate" in notes else "other",
@@ -243,6 +253,8 @@ class Http(BaseHTTPRequestHandler):
                 return self.send(200, STATE["log"])
             if p == "/_smtp":
                 return self.send(200, STATE["smtp"])
+            if p == "/_alerts":
+                return self.send(200, STATE["alerts"])
             if p == "/_js":
                 return self.send(200, {"launches": STATE["js_launches"], "approvals": STATE["js_approvals"],
                                        "runs": STATE["js_runs"]})
@@ -281,12 +293,31 @@ class Http(BaseHTTPRequestHandler):
                     STATE["log"] = []
                 if b.get("reset_all"):
                     STATE.update(log=[], smtp=[], mailbox=[], jobshout_down=False, js_runs={}, js_approvals={},
-                                 js_launches=[], s3={})
+                                 js_launches=[], s3={}, alerts=[])
+                if b.get("reset_alerts"):
+                    STATE["alerts"] = []
                 if b.get("decide_external"):
                     a = STATE["js_approvals"][b["decide_external"]]
                     a.update(status=b.get("status", "approved"), decided_by=str(uuid.uuid4()), decided_at=now_iso(),
                              reason=b.get("reason"))
                 return self.send(200, {"ok": True})
+            if p.startswith("/ntfy/"):
+                STATE["alerts"].append({"channel": "ntfy", "to": p[len("/ntfy/"):], "title": self.headers.get("Title"),
+                                        "priority": self.headers.get("Priority"), "auth": self.headers.get("Authorization"),
+                                        "text": b.get("_raw", json.dumps(b))})
+                return self.send(200, {"id": "n1"})
+            m = re.match(r"^/tg/bot([^/]+)/sendMessage$", p)
+            if m:
+                if m.group(1) != "tg-token":
+                    return self.send(401, {"ok": False, "description": "Unauthorized"})
+                STATE["alerts"].append({"channel": "telegram", "to": str(b.get("chat_id")), "text": b.get("text")})
+                return self.send(200, {"ok": True})
+            if p == "/smsgw/message":
+                if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"gw:gw-pass").decode():
+                    return self.send(401, {"message": "Unauthorized"})
+                for n in b.get("phoneNumbers", []):
+                    STATE["alerts"].append({"channel": "sms", "to": n, "text": b.get("message")})
+                return self.send(202, {"id": "sms1", "state": "Pending"})
             if p == "/_mail/inbox":
                 n = len(STATE["mailbox"]) + 1
                 ts = time.time()
@@ -358,6 +389,38 @@ class Http(BaseHTTPRequestHandler):
         if p.startswith("/ch/"):
             if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"ch-key:").decode():
                 return self.send(401, {"error": "Invalid Authorization"})
+            today = datetime.date.today()
+            ago = lambda d: (today - datetime.timedelta(days=d)).isoformat()  # noqa: E731
+            if p.startswith("/ch/search/officers"):
+                return self.send(200, {"items": [{"title": "Jo SMITH", "appointment_count": 3, "address_snippet": "York",
+                                                  "date_of_birth": {"month": 4, "year": 1980},
+                                                  "links": {"self": "/officers/OFF123/appointments"}}]})
+            if p.startswith("/ch/officers/OFF123/appointments"):
+                return self.send(200, {"items": [
+                    {"appointed_on": ago(5), "officer_role": "director",
+                     "appointed_to": {"company_number": "07654321", "company_name": "ELM PROPERTY HOLDINGS LTD"}},
+                    {"appointed_on": ago(30), "officer_role": "director",
+                     "appointed_to": {"company_number": "01234567", "company_name": "ACME HOMES LTD"}},
+                    {"appointed_on": "2015-01-01", "officer_role": "secretary",
+                     "appointed_to": {"company_number": "00000001", "company_name": "OLD CO LTD"}}]})
+            if p.startswith("/ch/company/07654321/officers"):
+                return self.send(200, {"items": [{"name": "SMITH, Jo Anne", "officer_role": "director", "appointed_on": ago(5),
+                                                  "links": {"officer": {"appointments": "/officers/OFF123/appointments"}}}]})
+            if p.startswith("/ch/company/07654321"):
+                return self.send(200, {"company_name": "ELM PROPERTY HOLDINGS LTD", "company_status": "active",
+                                       "date_of_creation": ago(5), "sic_codes": ["68100"]})
+            if p.startswith("/ch/company/01234567/filing-history"):
+                return self.send(200, {"items": [
+                    {"transaction_id": "TX1", "date": ago(3), "category": "mortgage", "type": "MR01",
+                     "description": "mortgage-create-with-deed-with-charge-number-charge-creation-date"},
+                    {"transaction_id": "TX2", "date": ago(10), "category": "accounts", "type": "AA",
+                     "description": "accounts-with-accounts-type-micro-entity"},
+                    {"transaction_id": "TX0", "date": "2019-02-01", "category": "incorporation", "type": "NEWINC",
+                     "description": "incorporation-company"}]})
+            if p.startswith("/ch/advanced-search/companies"):
+                return self.send(200, {"items": [{"company_number": "07654321", "company_name": "ELM PROPERTY HOLDINGS LTD",
+                                                  "date_of_creation": ago(5), "sic_codes": ["68100"],
+                                                  "registered_office_address": {"locality": "Leeds"}}]})
             if p.startswith("/ch/search/companies"):
                 return self.send(200, {"items": [{"company_number": "01234567", "title": "ACME HOMES LTD", "company_status": "active",
                                                   "date_of_creation": "2019-02-01", "address_snippet": "1 High St, York"}]})

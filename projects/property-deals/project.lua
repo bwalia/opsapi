@@ -153,5 +153,15 @@ return {
         match_w_yield = { type = "integer", label = "Match weight: yield / discount vs target", default = 20, min = 0, max = 100 },
         match_w_condition = { type = "integer", label = "Match weight: condition vs refurb appetite", default = 10,
                               min = 0, max = 100 },
+        -- Hot replies and lead news (personal follow-ups, step 1).
+        hot_score_threshold = { type = "integer", label = "A reply is hot from score", default = 70, min = 1, max = 100,
+                                description = "0-100, from the AI reading of the reply (or the rules without a provider)." },
+        hot_call_within_minutes = { type = "integer", label = "Call a hot lead within (minutes)", default = 15, min = 1,
+                                    max = 240, description = "The call task is due then; the SLA engine escalates it after." },
+        ch_new_company_areas = { type = "string", label = "Find new property companies in (towns, comma separated)",
+                                 default = "", description = "Daily: companies formed in the last week with the SIC codes "
+                                     .. "below become new leads. Empty = off. Needs a Companies House connector." },
+        ch_new_company_sic = { type = "string", label = "SIC codes for new property companies",
+                               default = "68100,68209,68320,41100" },
     },
 }

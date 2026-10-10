@@ -13,6 +13,7 @@ import { pdService } from '@/services/property-deals.service';
 import { PdPage, Stat, UrgencyScore, TaskStatusBadge, HealthBadge, gbp, dueText, Empty, ErrorNote, Spinner, BASE } from '@/components/property-deals/ui';
 import TaskActions from '@/components/property-deals/TaskActions';
 import DueSoon from '@/components/property-deals/DueSoon';
+import HotLeads from '@/components/property-deals/HotLeads';
 import { usePdData } from '@/components/property-deals/usePd';
 import { startTour } from '@/components/property-deals/Tour';
 import { cn } from '@/lib/utils';
@@ -58,6 +59,8 @@ function Today() {
             <Stat label="Approvals waiting" value={data.approvals_waiting_count ?? data.approvals_waiting.length} tone={data.approvals_waiting.length ? 'warning' : undefined} tour="today-approvals" />
             <Stat label="Money at risk" value={gbp(data.money_at_risk)} tone={(data.money_at_risk ?? 0) > 0 ? 'error' : undefined} hint="Late penalties if dates slip" />
           </div>
+
+          <HotLeads />
 
           <DueSoon />
 

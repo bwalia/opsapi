@@ -1,7 +1,8 @@
 -- Leads with the Property Deals extension (gap map D2). The lead itself stays
 -- in crm_leads (created through /api/v2/crm/leads); these routes read it joined
 -- with property_deals_lead_details and edit the extension.
---   GET /leads                 list  ?lead_kind=&situation=&status=&vulnerable=true&deadline_before=&q=&sort=deadline|created
+--   GET /leads                 list  ?lead_kind=&situation=&status=&temperature=hot|warm|cold&vulnerable=true
+--                                    &deadline_before=&q=&sort=deadline|created|last_reply
 --   GET /leads/:uuid           one lead + details
 --   PUT /leads/:uuid/details   create or update the extension (only fields sent)
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -12,7 +13,8 @@ local db = require("lapis.db")
 local U = require("property_deals.util")
 
 local FIELDS = {
-    lead_kind = { enum = { "seller", "buyer_investor", "landlord", "agent_referral", "other" } },
+    lead_kind = { enum = { "seller", "buyer_investor", "landlord", "agent_referral", "agent", "solicitor", "broker",
+                           "other" } },
     situation = { enum = { "probate", "broken_chain", "divorce", "relocation", "care_fees", "repossession_risk",
                            "tenanted", "unmortgageable", "other" } },
     situation_note = { type = "text" },
@@ -25,6 +27,10 @@ local FIELDS = {
     privacy_notice_sent_at = { type = "datetime" },
     retention_until = { type = "date" },
     property_uuid = { type = "uuid" },
+    -- The Companies House news watch: their company, and/or them as an officer (GET /companies-house/officers).
+    company_number = { type = "string", max = 10 },
+    ch_officer_id = { type = "string", max = 80 },
+    social_profiles = { type = "json", label = "Profile links, e.g. [{\"network\": \"linkedin\", \"url\": ...}]" },
 }
 
 local SELECT = [[
@@ -41,7 +47,7 @@ return function(app)
     app:get("/leads", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
         local p = self.params
         local where = { "l.namespace_id = " .. db.escape_literal(sdk.namespace_id(self)), "l.deleted_at IS NULL" }
-        for _, col in ipairs({ "lead_kind", "situation" }) do
+        for _, col in ipairs({ "lead_kind", "situation", "temperature" }) do
             if p[col] and p[col] ~= "" then where[#where + 1] = "d." .. col .. " = " .. db.escape_literal(p[col]) end
         end
         for _, col in ipairs({ "status", "source", "owner_user_uuid" }) do
@@ -56,7 +62,8 @@ return function(app)
             where[#where + 1] = "(l.first_name ILIKE " .. like .. " OR l.last_name ILIKE " .. like
                 .. " OR l.email ILIKE " .. like .. " OR l.phone ILIKE " .. like .. ")"
         end
-        local order = p.sort == "deadline" and "d.deadline_date ASC NULLS LAST, l.created_at DESC" or "l.created_at DESC"
+        local order = p.sort == "deadline" and "d.deadline_date ASC NULLS LAST, l.created_at DESC"
+            or p.sort == "last_reply" and "d.last_reply_at DESC NULLS LAST, l.created_at DESC" or "l.created_at DESC"
         local page, per_page, offset = sdk.page(p)
         local w = table.concat(where, " AND ")
         local rows = db.query(SELECT .. " WHERE " .. w .. " ORDER BY " .. order .. " LIMIT " .. per_page .. " OFFSET " .. offset)
@@ -82,6 +89,11 @@ return function(app)
         if not body then return sdk.error(400, err) end
         local data, errors = sdk.validate(body, FIELDS, true)
         if not data then return sdk.error(422, "Validation failed", errors) end
+        if data.company_number then
+            data.company_number = data.company_number:upper():gsub("[^%w]", "")
+            if data.company_number == "" then data.company_number = db.NULL end
+        end
+        if data.company_number or data.ch_officer_id then data.ch_checked_at = db.NULL end -- watch it on the next run
 
         local existing = U.one("SELECT id FROM property_deals_lead_details WHERE namespace_id = ? AND lead_uuid = ?", ns, lead.uuid)
         if existing then

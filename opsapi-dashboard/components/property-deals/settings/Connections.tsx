@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Data connectors (EPC register, Price Paid, Companies House, postcodes, paid-feed stubs),
+ * Data connectors (EPC register, Price Paid, Companies House, postcodes, paid-feed stubs, and the free
+ * staff alert channels ntfy / Telegram / Android SMS Gateway),
  * mailboxes the legal chaser reads (IMAP / Gmail / Microsoft 365), and my notification
  * preferences. Secrets: write-only ("set" + Replace).
  */
@@ -23,6 +24,10 @@ const KINDS: { value: string; label: string; secret?: string; fields: { name: st
   { value: 'searchland', label: 'Searchland (stub)', secret: 'API key', fields: [], hint: 'No adapter yet: import their CSV export.' },
   { value: 'streetdata', label: 'Street Data (stub)', secret: 'API key', fields: [], hint: 'No adapter yet: import their CSV export.' },
   { value: 'homedata', label: 'Homedata (stub)', secret: 'API key', fields: [], hint: 'No adapter yet: import their CSV export.' },
+  // Staff alert channels (hot leads): free / open source.
+  { value: 'ntfy', label: 'ntfy (open-source push alerts)', secret: 'Access token (optional)', fields: [{ name: 'base_url', label: 'Server (https://ntfy.sh or your own)' }, { name: 'topic_prefix', label: 'Topic prefix (each person gets <prefix>-<id>)' }], hint: 'Free, open source. Each person subscribes to their topic in the ntfy app (shown under My notifications).' },
+  { value: 'telegram', label: 'Telegram bot (alerts)', secret: 'Bot token (from @BotFather)', fields: [], hint: 'Free. Each person messages the bot, then puts their chat id under My notifications.' },
+  { value: 'sms_gateway', label: 'Android SMS Gateway (texts from your phone)', secret: 'Password', fields: [{ name: 'base_url', label: 'Gateway URL (e.g. https://api.sms-gate.app/3rdparty/v1)' }, { name: 'username', label: 'Username' }], hint: 'Open source (sms-gate.app): texts go from your own Android phone and SIM, no per-message API fee.' },
 ];
 const MAIL: Record<string, { label: string; secret: string; fields: { name: string; label: string; type?: string }[] }> = {
   imap: { label: 'IMAP', secret: 'Password', fields: [{ name: 'host', label: 'Server' }, { name: 'port', label: 'Port (993)', type: 'number' }, { name: 'username', label: 'Username' }, { name: 'mailbox', label: 'Folder (INBOX)' }] },
@@ -193,6 +198,7 @@ function MailModal({ m, onClose, onSaved }: { m: Partial<MailConnector>; onClose
 }
 
 const CATS: { key: keyof NotificationPreferences; label: string }[] = [
+  { key: 'hot_lead' as keyof NotificationPreferences, label: 'Hot lead — call now' },
   { key: 'sla_warning', label: 'Due soon (SLA warning)' },
   { key: 'overdue', label: 'Overdue' },
   { key: 'escalated', label: 'Escalated to me' },
@@ -202,10 +208,18 @@ const CATS: { key: keyof NotificationPreferences; label: string }[] = [
   { key: 'agent_update', label: "AI couldn't finish" },
   { key: 'deal_scout' as keyof NotificationPreferences, label: 'Deal scout alerts' },
 ];
+const CHANNELS: { key: 'push' | 'email' | 'ntfy' | 'telegram' | 'sms'; label: string }[] = [
+  { key: 'push', label: 'App push' },
+  { key: 'email', label: 'Email' },
+  { key: 'ntfy', label: 'ntfy' },
+  { key: 'telegram', label: 'Telegram' },
+  { key: 'sms', label: 'SMS' },
+];
+type Chan = Partial<Record<'push' | 'email' | 'ntfy' | 'telegram' | 'sms', boolean>>;
 
 export function MyNotifications() {
   const prefs = usePdData(async () => (await pdService.notificationPrefs()).data, []);
-  const p = prefs.data as unknown as Record<string, { push: boolean; email: boolean } | { from: string; to: string } | undefined>;
+  const p = prefs.data as unknown as Record<string, Chan | { from: string; to: string } | string | undefined>;
   async function save(body: Record<string, unknown>) {
     try { const r = (await pdService.saveNotificationPrefs(body)).data; prefs.setData(r); toast.success('Saved'); } catch (e) { toast.error(pdErrorText(e)); }
   }
@@ -214,22 +228,41 @@ export function MyNotifications() {
   return (
     <Card>
       <h3 className="font-semibold text-secondary-900">My notifications</h3>
-      <p className="text-sm text-secondary-500">In-app notifications always arrive. Choose push (phone) and email per kind.</p>
-      <table className="mt-4 w-full text-sm">
-        <thead className="text-left text-xs text-secondary-500"><tr><th className="py-1">Notification</th><th>Push</th><th>Email</th></tr></thead>
-        <tbody>
-          {CATS.map((c) => {
-            const v = (p?.[c.key as string] as { push: boolean; email: boolean } | undefined) || { push: true, email: true };
-            return (
-              <tr key={c.key as string} className="border-t border-secondary-100">
-                <td className="py-2">{c.label}</td>
-                <td><Switch checked={v.push} onChange={(x) => save({ [c.key]: { push: x } })} aria-label={`${c.label} push`} /></td>
-                <td><Switch checked={v.email} onChange={(x) => save({ [c.key]: { email: x } })} aria-label={`${c.label} email`} /></td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <p className="text-sm text-secondary-500">
+        In-app notifications always arrive. App push goes to the Workstation CRM app. ntfy, Telegram and SMS work once the workspace adds those connectors.
+      </p>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-secondary-500">
+            <tr><th className="py-1">Notification</th>{CHANNELS.map((ch) => <th key={ch.key}>{ch.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {CATS.map((c) => {
+              const v = (p?.[c.key as string] as Chan | undefined) || {};
+              return (
+                <tr key={c.key as string} className="border-t border-secondary-100">
+                  <td className="py-2">{c.label}</td>
+                  {CHANNELS.map((ch) => (
+                    <td key={ch.key}>
+                      <Switch checked={Boolean(v[ch.key] ?? (ch.key === 'push' || ch.key === 'email'))} onChange={(x) => save({ [c.key]: { [ch.key]: x } })} aria-label={`${c.label} ${ch.label}`} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="flex items-end gap-2">
+          <Input label="My ntfy topic (optional)" placeholder="Leave empty for the workspace default" defaultValue={(p?.ntfy_topic as string) || ''} id="pd-ntfy-topic" />
+          <Button variant="outline" onClick={() => save({ ntfy_topic: (document.getElementById('pd-ntfy-topic') as HTMLInputElement).value || null })}>Save</Button>
+        </div>
+        <div className="flex items-end gap-2">
+          <Input label="My Telegram chat id" placeholder="Message the bot, then e.g. 123456789" defaultValue={(p?.telegram_chat_id as string) || ''} id="pd-tg-chat" />
+          <Button variant="outline" onClick={() => save({ telegram_chat_id: (document.getElementById('pd-tg-chat') as HTMLInputElement).value || null })}>Save</Button>
+        </div>
+      </div>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <Input type="time" label="Quiet from" defaultValue={q?.from || ''} id="pd-quiet-from" />
         <Input type="time" label="Quiet until" defaultValue={q?.to || ''} id="pd-quiet-to" />
@@ -238,7 +271,7 @@ export function MyNotifications() {
           const to = (document.getElementById('pd-quiet-to') as HTMLInputElement).value;
           save({ quiet_hours: from && to ? { from, to } : null });
         }}>Save quiet hours</Button>
-        <span className="text-xs text-secondary-500">Holds back push (workspace time). The digest still comes.</span>
+        <span className="text-xs text-secondary-500">Holds back push, ntfy, Telegram and SMS (workspace time). Email and the digest still come.</span>
       </div>
     </Card>
   );

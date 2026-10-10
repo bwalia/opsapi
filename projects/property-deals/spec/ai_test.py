@@ -135,7 +135,8 @@ check("defaults: everything on", all(pf[c]["push"] and pf[c]["email"] for c in
       ("sla_warning", "overdue", "escalated", "approval_requested", "digest", "compliance_expiring")), pf)
 pf = data(call("PUT", P + "/notification-preferences", "operator_s", S,
                {"overdue": {"push": False}, "quiet_hours": {"from": "21:00", "to": "07:00"}}), 200, "save preferences")
-check("only the fields sent changed", pf["overdue"] == {"push": False, "email": True} and pf["sla_warning"]["push"]
+check("only the fields sent changed", pf["overdue"] == {"push": False, "email": True, "ntfy": False, "telegram": False,
+      "sms": False} and pf["sla_warning"]["push"]
       and pf["quiet_hours"] == {"from": "21:00", "to": "07:00"}, pf)
 res = call("PUT", P + "/notification-preferences", "operator_s", S, {"overdue": {"push": "no"}, "bogus": {}})
 check("bad preferences → 422 with details", res[0] == 422 and {"overdue", "bogus"} <= set(res[1].get("details", {})), res)

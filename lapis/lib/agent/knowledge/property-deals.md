@@ -12,6 +12,7 @@ Deals for buying and selling homes, from first lead to completion. Rules (not AI
 ## Pages
 - **Today** (/dashboard/property-deals/today): "Due this week" first — deal tasks and renovation jobs grouped Overdue / Today / Tomorrow / Later (managers see the whole team, with an Only mine switch; 7/14/30 days) — then my open tasks by urgency score (hover the score for why), red deals, approvals waiting, money at risk. Each task: Do it, Let AI do it, Assign, Snooze (needs a reason), Log contact. Take the tour restarts the guided tour.
 - **Renovations** (/dashboard/property-deals/renovations): build projects. Each is a kanban project (open it under Projects) whose columns are the stages — Survey & quotes, Strip-out, Structural, First fix, Plastering, Second fix, Decorating, Snagging & sign-off, Done — with dated job cards. Start one here or from a deal's Renovation tab; pick builders/site managers to add to the board. Builders get the "Builder / site manager" role. Purchase orders for the job are linked from each renovation.
+- **Hot leads** (top of Today): leads who just replied keenly — call them now (Call button dials, Called closes the task). On a lead (Leads page drawer): Companies House links (company number, officer — Find on Companies House), Recent news (checked daily; paste a post they made — we never fetch social networks), Replies (emails arrive automatically; log WhatsApp/SMS/call replies — a hot one raises a call task and alerts the owner by app push, email, ntfy, Telegram or SMS as set up). Alert channels: Deals settings → Data connectors (ntfy, Telegram bot, Android SMS Gateway — free/open source) and My notifications.
 - **Deals** (/dashboard/property-deals/deals): board by stage (dragging checks the stage gate and lists what is missing) or list. New deal creates a property and the first stage's tasks.
 - **Deal page** (/dashboard/property-deals/deals/{uuid}): health and reasons, target and forecast dates, money at risk, stage track with Move to / Next; tabs Tasks, Enquiries & blockers, Chase log, Documents, Compliance, Buyers, Timeline.
 - **Approvals**: AI drafts and requests with agent, model and cost; Edit, Approve, or Reject with a note (the agent redrafts with it).
@@ -21,6 +22,9 @@ Deals for buying and selling homes, from first lead to completion. Rules (not AI
 ## Read-only answers
 - My tasks and the day: `GET /api/v2/property-deals/today`
 - What's due soon (deal tasks + renovation jobs): `GET /api/v2/property-deals/due?days=7`
+- Leads to call now (hot replies): `GET /api/v2/property-deals/hot-leads`
+- A lead's recent news (Companies House, captured posts): `GET /api/v2/property-deals/leads/{uuid}/signals`
+- A lead's replies and how hot they were: `GET /api/v2/property-deals/leads/{uuid}/replies`
 - Renovations and their progress: `GET /api/v2/property-deals/renovations`
 - A deal page in one call: `GET /api/v2/property-deals/deals/{uuid}/overview`
 - Why a deal is red: `GET /api/v2/property-deals/deals/{uuid}/health`

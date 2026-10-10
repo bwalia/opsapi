@@ -363,9 +363,11 @@ return function(app)
         response = Setup, description = "Missing (null) until POST /setup ran." })
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
+    local SignalRun = OBJ({ watch = OBJ({ leads = INT(), signals = INT(), errors = INT() }),
+        new_companies = OBJ({ areas = INT(), companies = INT(), leads = INT() }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
         status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail",
-            "scout", "nightly" })) }),
+            "scout", "nightly", "signals" })) }),
         response = OBJ({ sla = OBJ({ warned = INT(), overdue = INT(), escalated = INT() }), health = OBJ({ deals = INT() }),
                          compliance_expiry = OBJ({ expired = INT(), warned = INT(), pof_expired = INT() }),
                          digest = OBJ({ sent = INT() }),
@@ -374,14 +376,58 @@ return function(app)
                          mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }),
                          scout = OBJ({ searches = INT(), alerts = INT(), synced = OBJ({ connectors = INT(),
                              postcodes = INT(), stored = INT() }) }),
-                         nightly = OBJ({ suppliers = INT(), inbound = INT(), agent_runs = INT(), market = INT() }) }),
+                         nightly = OBJ({ suppliers = INT(), inbound = INT(), agent_runs = INT(), market = INT() }),
+                         signals = SignalRun }),
         errors = E422 })
 
+    local LeadSignal = schema("LeadSignal", OBJ({
+        uuid = UUID(), lead_uuid = S(), kind = ENUM({ "company_formed", "officer_appointed", "company_filing",
+            "charge_registered", "social_post", "website", "news", "note" }),
+        source = ENUM({ "companies_house", "manual", "share" }), title = S(), summary = S(), url = S(),
+        occurred_at = DT(), data = ANY("Source details (company number, SIC codes, role...)"),
+        used_at = DT("When a follow-up last quoted it"), created_by_user_uuid = S(), created_at = DT(),
+    }))
+    local LeadReply = schema("LeadReply", OBJ({
+        uuid = UUID(), lead_uuid = S(), deal_uuid = UUID(), channel = ENUM({ "email", "sms", "whatsapp", "phone", "social", "other" }),
+        from_address = S(), from_name = S(), subject = S(), received_at = DT(), body_text = S(),
+        reply_temperature = ENUM({ "hot", "warm", "cold" }), reply_score = INT("0-100"), reply_reason = S("Why"),
+        hot_task_uuid = S("The \"call now\" task a hot reply raised"), matched_by = S(), logged_by_user_uuid = S(),
+        alerted = INT("People alerted (POST only)"), scored_by = ENUM({ "ai", "rules" }, "POST only"),
+    }))
+    local HotLead = schema("HotLead", OBJ({
+        lead_uuid = S(), first_name = S(), last_name = S(), company_name = S(), phone = S(), email = S(),
+        owner_user_uuid = S(), lead_kind = S(), hot_score = INT(), hot_reason = S(), last_reply_at = DT(),
+        call_task_uuid = S(), call_due_at = DT(),
+    }))
+    local lid = { uuid = S("Lead uuid") }
+    sdk.doc(app, "GET /leads/:uuid/signals", { summary = "A lead's recent news", permission = "property_deals_deals.read",
+        path = lid, response = ARR(LeadSignal), errors = E404, query = { limit = INT("Default 50, max 200") } })
+    sdk.doc(app, "POST /leads/:uuid/signals", { summary = "Capture a post, page or note about a lead",
+        permission = "property_deals_deals.update", path = lid, response = LeadSignal, errors = E422,
+        description = "Paste what they posted (or its link). Social networks are never fetched by the server.",
+        body = OBJ({ kind = ENUM({ "social_post", "website", "news", "note" }), text = S(), url = S(), title = S(),
+            occurred_at = DT() }, { "kind" }) })
+    sdk.doc(app, "DELETE /signals/:id", { summary = "Delete a signal", permission = "property_deals_deals.update",
+        path = { id = UUID() }, status = 200, response = OBJ({ deleted = BOOL() }), errors = E404 })
+    sdk.doc(app, "GET /leads/:uuid/replies", { summary = "A lead's replies, scored", permission = "property_deals_deals.read",
+        path = lid, response = ARR(LeadReply), errors = E404 })
+    sdk.doc(app, "POST /leads/:uuid/replies", { summary = "Log a reply (WhatsApp, SMS, call, DM): scored, hot -> call alert",
+        permission = "property_deals_deals.update", path = lid, response = LeadReply, errors = E422,
+        body = OBJ({ channel = ENUM({ "whatsapp", "sms", "phone", "social", "email", "other" }), text = S(),
+            received_at = DT(), from_name = S(), subject = S() }, { "channel", "text" }) })
+    sdk.doc(app, "GET /hot-leads", { summary = "Leads whose last reply was hot (7 days)", permission = "property_deals_tasks.read",
+        response = ARR(HotLead), query = { mine = BOOL("Only leads I own"), limit = INT() } })
+    sdk.doc(app, "GET /companies-house/officers", { summary = "Find a Companies House officer to link to a lead",
+        permission = "property_deals_deals.read", query = { q = S("Name, 3+ characters") }, errors = E422,
+        response = ARR(OBJ({ officer_id = S(), name = S(), appointments = INT(), address = S(), born = S("MM/YYYY") })) })
+    sdk.doc(app, "POST /signals/run", { summary = "Run the Companies House watch now", permission = "property_deals_settings.manage",
+        status = 200, response = SignalRun })
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
         paginated = true, response = ARR(Lead), query = {
             lead_kind = S(), situation = S(), status = S(), source = S(), owner_user_uuid = S(),
+            temperature = ENUM({ "hot", "warm", "cold" }, "From the last reply"),
             vulnerable = ENUM({ "true" }), deadline_before = DATE(), q = S("Name, email or phone"),
-            sort = ENUM({ "created", "deadline" }) } })
+            sort = ENUM({ "created", "deadline", "last_reply" }) } })
     sdk.doc(app, "GET /leads/:uuid", { summary = "A lead with its Property Deals fields", permission = "property_deals_deals.read",
         response = Lead, errors = E404, path = { uuid = S("CRM lead uuid") } })
     sdk.doc(app, "PUT /leads/:uuid/details", { summary = "Set a lead's Property Deals fields", status = 200,
@@ -566,11 +612,18 @@ return function(app)
         matched_by = ENUM({ "reference", "sender" }), chase_uuid = UUID("The chase this replied to"),
         agent_run_uuid = UUID("Legal chaser run it started"), processed_at = DT(),
     }, { "uuid", "from_address" }))
-    local Channel = OBJ({ push = BOOL(), email = BOOL() })
+    local Channel = OBJ({ push = BOOL("App push (WSLCRM iOS/Android) + in-app"), email = BOOL(),
+        ntfy = BOOL("ntfy connector; off unless turned on"), telegram = BOOL("Telegram bot connector; off unless turned on"),
+        sms = BOOL("Android SMS Gateway connector; off unless turned on") })
     local Prefs = schema("NotificationPreferences", OBJ({
         sla_warning = Channel, overdue = Channel, escalated = Channel, approval_requested = Channel, digest = Channel,
-        compliance_expiring = Channel, agent_update = Channel,
-        quiet_hours = OBJ({ from = S("HH:MM"), to = S("HH:MM") }, { "from", "to" }, "Workspace time; holds back push, not the digest"),
+        compliance_expiring = Channel, agent_update = Channel, deal_scout = Channel,
+        hot_lead = OBJ({ push = BOOL(), email = BOOL(), ntfy = BOOL(), telegram = BOOL(), sms = BOOL() }, nil,
+            "A lead replied and looks keen: call them now. Every channel is on by default."),
+        ntfy_topic = S("My ntfy topic (default <topic_prefix>-<first 12 of my user uuid>)"),
+        telegram_chat_id = S("My chat id with the workspace's Telegram bot"),
+        quiet_hours = OBJ({ from = S("HH:MM"), to = S("HH:MM") }, { "from", "to" },
+            "Workspace time; holds back push, ntfy, Telegram and SMS, not email or the digest"),
     }))
     local Chase = OBJ({ uuid = UUID(), deal_uuid = UUID(), lead_uuid = S(), task_uuid = S(), to_party = S(), to_name = S(),
         to_address = S(), channel = S(), subject = S(), body = S(), outcome = S(), status = S(), sent_at = DT(),

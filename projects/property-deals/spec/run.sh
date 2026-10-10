@@ -74,7 +74,7 @@ MOCK_PORT=$(docker port pd-mock-$ID 8080/tcp | head -1 | sed 's/.*://')
 export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
 export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
 # ONLY=ai_test (etc.) runs one suite while iterating.
-SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test perf_test}
+SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test signals_test perf_test}
 ( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
