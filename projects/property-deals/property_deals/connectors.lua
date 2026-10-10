@@ -6,9 +6,14 @@
 --   kind             what                                   config                      secret
 --   epc              EPC register (domestic certificates)    base_url?, email            API key
 --   price_paid       HM Land Registry Price Paid             base_url?                   —
---   companies_house  Companies House (Ltd/SPV buyers)        base_url?                   API key
+--   companies_house  Companies House (Ltd/SPV buyers, lead   base_url?                   API key
+--                    news watch, new property companies)
 --   postcodes        postcode → lat/lng (postcodes.io)       base_url?                   —
 --   csv              auction catalogues, agent feeds         record_type?                —
+--   ntfy             staff alerts (open-source push)         base_url?, topic_prefix     access token?
+--   telegram         staff alerts (Telegram bot)             base_url?                   bot token
+--   sms_gateway      staff texts from your own Android phone base_url, username         password
+--                    (Android SMS Gateway, open source)
 --   propertydata, searchland, streetdata, homedata          base_url?                   API key   (stubs)
 --
 -- Adapters return records for property_deals_market_records:
@@ -95,6 +100,10 @@ C.KINDS.price_paid = {
 C.KINDS.companies_house = { label = "Companies House", secret = true, lookup = true }
 C.KINDS.postcodes = { label = "Postcode lookup (postcodes.io)", lookup = true }
 C.KINDS.csv = { label = "CSV import" }
+-- Staff alert channels (property_deals.messaging): free / open-source, not run.
+C.KINDS.ntfy = { label = "ntfy (open-source push alerts)", secret = true, lookup = true }
+C.KINDS.telegram = { label = "Telegram bot (alerts)", secret = true, lookup = true }
+C.KINDS.sms_gateway = { label = "Android SMS Gateway (texts from your phone)", secret = true, lookup = true }
 for _, k in ipairs({ "propertydata", "searchland", "streetdata", "homedata" }) do
     C.KINDS[k] = { label = k .. " (stub)", secret = true, stub = true }
 end
@@ -226,6 +235,11 @@ local function ch(ns, path)
         { headers = { Authorization = H.basic(key, "") } })
     if not data then return nil, "Companies House: " .. err, status == 404 and 404 or 502 end
     return data
+end
+
+--- Raw Companies House GET (path from the API root), for the lead news watch.
+function C.companies_house(ns, path)
+    return ch(ns, path)
 end
 
 function C.company_search(ns, q)

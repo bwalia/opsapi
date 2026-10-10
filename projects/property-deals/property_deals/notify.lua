@@ -12,14 +12,21 @@ local N = {}
 -- category, plus quiet hours (workspace time zone) that hold back push. In-app
 -- notifications always arrive. No saved row = everything on.
 N.CATEGORIES = { "sla_warning", "overdue", "escalated", "approval_requested", "digest", "compliance_expiring",
-    "agent_update", "deal_scout" }
+    "agent_update", "deal_scout", "hot_lead" }
 local CATEGORY_OF = { sla_warning = "sla_warning", task_overdue = "overdue", task_escalated = "escalated",
     approval_requested = "approval_requested", daily_digest = "digest", compliance_expiring = "compliance_expiring",
-    agent_update = "agent_update", scout_alert = "deal_scout" }
+    agent_update = "agent_update", scout_alert = "deal_scout", hot_lead = "hot_lead" }
+-- ntfy, Telegram and SMS (free / open-source connectors, property_deals.messaging) are off unless a
+-- category turns them on; a hot lead ("call them now") has them on by default.
+N.CHANNELS = { "push", "email", "ntfy", "telegram", "sms" }
+local TEXT_ON = { hot_lead = true }
 
 local function defaults()
     local p = {}
-    for _, c in ipairs(N.CATEGORIES) do p[c] = { push = true, email = true } end
+    for _, c in ipairs(N.CATEGORIES) do
+        local on = TEXT_ON[c] == true
+        p[c] = { push = true, email = true, ntfy = on, telegram = on, sms = on }
+    end
     return p
 end
 
@@ -30,11 +37,16 @@ function N.prefs(ns, user_uuid)
     local saved = row and U.json(row.prefs) or {}
     for _, c in ipairs(N.CATEGORIES) do
         if type(saved[c]) == "table" then
-            if saved[c].push ~= nil then p[c].push = saved[c].push == true end
-            if saved[c].email ~= nil then p[c].email = saved[c].email == true end
+            for _, ch in ipairs(N.CHANNELS) do
+                if saved[c][ch] ~= nil then p[c][ch] = saved[c][ch] == true end
+            end
         end
     end
     if type(saved.quiet_hours) == "table" then p.quiet_hours = saved.quiet_hours end
+    -- Where this person gets ntfy / Telegram alerts.
+    for _, k in ipairs({ "ntfy_topic", "telegram_chat_id" }) do
+        if type(saved[k]) == "string" and saved[k] ~= "" then p[k] = saved[k] end
+    end
     return p
 end
 
@@ -45,16 +57,21 @@ function N.save_prefs(ns, user_uuid, input)
     local current = N.prefs(ns, user_uuid)
     local errors = {}
     for k, v in pairs(input) do
-        if current[k] and k ~= "quiet_hours" then
-            if type(v) ~= "table" then errors[k] = "{ push?, email? }"
+        if type(current[k]) == "table" and k ~= "quiet_hours" then
+            if type(v) ~= "table" then errors[k] = "{ push?, email?, ntfy?, telegram?, sms? }"
             else
-                for _, ch in ipairs({ "push", "email" }) do
+                for _, ch in ipairs(N.CHANNELS) do
                     if v[ch] ~= nil then
                         if type(v[ch]) ~= "boolean" then errors[k] = ch .. " must be true or false"
                         else current[k][ch] = v[ch] end
                     end
                 end
             end
+        elseif k == "ntfy_topic" or k == "telegram_chat_id" then
+            if v == require("cjson").null or v == false or v == "" then current[k] = nil
+            elseif type(v) ~= "string" or #v > 120 or not v:match("^[%w%-_@%.]+$") then
+                errors[k] = "letters, digits, - _ @ . (max 120)"
+            else current[k] = v end
         elseif k == "quiet_hours" then
             if v == require("cjson").null or v == false then current.quiet_hours = nil
             elseif type(v) ~= "table" or type(v.from) ~= "string" or type(v.to) ~= "string"
@@ -83,17 +100,17 @@ local function quiet_now(ns, q)
     return now >= q.from or now < q.to -- over midnight, e.g. 21:00-07:00
 end
 
---- May this user get `channel` (push|email) for notification kind `kind` now?
+--- May this user get `channel` (push|email|ntfy|telegram|sms) for notification kind `kind` now?
 function N.allowed(ns, user_uuid, kind, channel)
     local cat = CATEGORY_OF[kind]
-    if not cat then return true end
+    if not cat then return channel == "push" or channel == "email" end
     local p = N.prefs(ns, user_uuid)
-    if p[cat] and p[cat][channel] == false then
+    if p[cat] and p[cat][channel] ~= true then
         -- A workspace may make escalations to managers impossible to mute.
         local s = require("helper.plugin-sdk").settings("property_deals", ns) or {}
         if not (cat == "escalated" and s.escalations_always_notify == true) then return false end
     end
-    if channel == "push" and cat ~= "digest" and quiet_now(ns, p.quiet_hours) then return false end
+    if channel ~= "email" and cat ~= "digest" and quiet_now(ns, p.quiet_hours) then return false end
     return true
 end
 

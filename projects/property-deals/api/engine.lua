@@ -1,5 +1,6 @@
 -- Run the workflow engine's checks now, for this workspace only (managers):
---   POST /engine/run { "checks": ["sla", "health", "compliance_expiry", "digest", "agents", "mail", "scout", "nightly"] }
+--   POST /engine/run { "checks": ["sla", "health", "compliance_expiry", "digest", "agents", "mail", "scout", "nightly",
+--                                 "signals"] }
 --   (default: sla + health)
 -- The same work the scheduled jobs do (jobs/*.lua); useful after bulk edits and in tests.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -9,7 +10,7 @@ local sdk = require("helper.plugin-sdk")
 local U = require("property_deals.util")
 
 local CHECKS = { sla = true, health = true, compliance_expiry = true, digest = true, agents = true, mail = true,
-    scout = true, nightly = true }
+    scout = true, nightly = true, signals = true }
 
 return function(app)
     app:post("/engine/run", sdk.handler({ permission = "property_deals_settings.manage" }, U.guard(function(self)
@@ -40,6 +41,9 @@ return function(app)
             elseif c == "nightly" then
                 out.nightly = require("property_deals.retention").run(ns, settings)
                 out.nightly.suppliers = require("property_deals.reports").update_supplier_stats(ns)
+            elseif c == "signals" then
+                local Signals = require("property_deals.signals")
+                out.signals = { watch = Signals.watch(ns), new_companies = Signals.new_companies(ns, settings) }
             elseif c == "scout" then
                 local Scout = require("property_deals.scout")
                 out.scout = Scout.run(ns, settings)

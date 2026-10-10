@@ -1,4 +1,4 @@
-# Property Deals API (contract v1.4)
+# Property Deals API (contract v1.5)
 
 Read this before building the web dashboard (SPEC §3.8) or the iOS app (SPEC §3.9).
 It goes screen by screen: which call fills each screen, and what it returns. Types:
@@ -102,6 +102,26 @@ stretched to `target_end_date`). `POST` takes `{ deal_uuid?, property_uuid?, nam
 start_date?, target_end_date?, builder_user_uuids? }`; the builders are added as project members.
 The list returns progress (`jobs_total`, `jobs_done`, `jobs_overdue`), budget/spent and the board uuid;
 filter with `?status=active|completed|all&deal_uuid=`.
+
+### 2.1c Hot leads — `GET /hot-leads`, lead news and replies
+Customer request: personal follow-ups and "call them now" alerts.
+- **News** `GET /leads/{id}/signals`: Companies House events from the daily watch (a company they formed,
+  a new directorship, filings, a new charge, often a mortgaged purchase) and posts a person captured with
+  `POST /leads/{id}/signals { kind: social_post|website|news|note, text?, url? }`. Social networks are
+  never fetched by the server. Link a lead with `PUT /leads/{id}/details { company_number, ch_officer_id }`
+  (find the officer with `GET /companies-house/officers?q=`). New property companies (SIC 68xxx/41100)
+  in the `ch_new_company_areas` setting become leads (`source = companies_house`).
+- **Replies** `GET /leads/{id}/replies`: emails matched to the lead by sender (`matched_by = lead`) and
+  replies logged with `POST /leads/{id}/replies { channel: whatsapp|sms|phone|social|email|other, text }`.
+  Each is scored 0-100 (`reply_temperature` hot/warm/cold, `reply_reason`) by the workspace's AI provider
+  (rules without one); an opt-out is always cold.
+- **Hot** (score >= `hot_score_threshold`, default 70): one "Call <name> now" task due in
+  `hot_call_within_minutes` (default 15, escalated by the SLA engine), for the lead's owner (else managers),
+  and alerts: app push (Workstation CRM) + in-app, email, and the free channels the workspace set up as
+  connectors: `ntfy` (open-source push), `telegram` (bot), `sms_gateway` (Android SMS Gateway, texts from
+  your own phone). Per-person switches and addresses (`ntfy_topic`, `telegram_chat_id`) are in
+  `/notification-preferences` (category `hot_lead`). `GET /hot-leads` lists leads whose call task is
+  still open.
 
 ### 2.2 Leads (extend the existing page)
 
@@ -434,6 +454,14 @@ engine events). Use it for WhatsApp/Slack.
 | [web-buyer-directory](api-requests/web-buyer-directory.md) | Done: `GET /buyer-profiles/directory?q=&pof_status=` — profiles with the buyer's `name` and `email` |
 
 ## 7. Changes
+
+- **v1.5:**
+  - Lead news (`/leads/{id}/signals`, Companies House watch + captured posts, `jobs/lead_signals.lua`
+    daily, `POST /signals/run`), replies (`/leads/{id}/replies`, email matched by sender), reply scoring and
+    hot-lead call alerts (`/hot-leads`), officer search.
+  - Free / open-source alert connectors: `ntfy`, `telegram`, `sms_gateway`; preference channels `ntfy`,
+    `telegram`, `sms` and category `hot_lead`.
+  - Lead kinds `agent`, `solicitor`, `broker`; leads filter `temperature`, sort `last_reply`.
 
 - **v1.4:**
   - `GET /due` (deal tasks + renovation jobs due soon) and the "Due this week" card on Today.

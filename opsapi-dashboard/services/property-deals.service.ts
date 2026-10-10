@@ -62,6 +62,60 @@ export interface DueItem {
   column_name?: string | null;
   assignee?: string | null;
 }
+// Lead news + replies (api/signals.lua). Hand-written until the next generate run.
+export type SignalKind = 'company_formed' | 'officer_appointed' | 'company_filing' | 'charge_registered' | 'social_post' | 'website' | 'news' | 'note';
+export interface LeadSignal {
+  uuid: string;
+  lead_uuid: string;
+  kind: SignalKind;
+  source: 'companies_house' | 'manual' | 'share';
+  title: string;
+  summary?: string | null;
+  url?: string | null;
+  occurred_at: string;
+  used_at?: string | null;
+  created_at: string;
+}
+export type ReplyChannel = 'email' | 'sms' | 'whatsapp' | 'phone' | 'social' | 'other';
+export interface LeadReply {
+  uuid: string;
+  lead_uuid: string;
+  channel: ReplyChannel;
+  from_address?: string | null;
+  from_name?: string | null;
+  subject?: string | null;
+  received_at: string;
+  body_text?: string | null;
+  reply_temperature?: 'hot' | 'warm' | 'cold' | null;
+  reply_score?: number | null;
+  reply_reason?: string | null;
+  hot_task_uuid?: string | null;
+  matched_by?: string | null;
+  alerted?: number;
+  scored_by?: 'ai' | 'rules';
+}
+export interface HotLead {
+  lead_uuid: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  company_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  owner_user_uuid?: string | null;
+  lead_kind?: string | null;
+  hot_score?: number | null;
+  hot_reason?: string | null;
+  last_reply_at?: string | null;
+  call_task_uuid?: string | null;
+  call_due_at?: string | null;
+}
+export interface ChOfficer {
+  officer_id: string;
+  name: string;
+  appointments?: number;
+  address?: string;
+  born?: string;
+}
 export interface DueList {
   days: number;
   everyone: boolean;
@@ -225,6 +279,16 @@ export const pdService = {
   setupState: () => get<unknown>('/setup'),
   setup: () => send<unknown>('post', '/setup'),
   today: (limit = 50) => get<Today>('/today', { limit }),
+  leadSignals: (leadUuid: string) => get<LeadSignal[]>(`/leads/${leadUuid}/signals`),
+  addLeadSignal: (leadUuid: string, body: { kind: SignalKind; text?: string; url?: string; title?: string }) =>
+    send<LeadSignal>('post', `/leads/${leadUuid}/signals`, body),
+  deleteSignal: (uuid: string) => send<{ deleted: boolean }>('delete', `/signals/${uuid}`),
+  leadReplies: (leadUuid: string) => get<LeadReply[]>(`/leads/${leadUuid}/replies`),
+  logLeadReply: (leadUuid: string, body: { channel: ReplyChannel; text: string; received_at?: string }) =>
+    send<LeadReply>('post', `/leads/${leadUuid}/replies`, body),
+  hotLeads: (mine = false) => get<HotLead[]>('/hot-leads', { mine: mine ? 'true' : undefined }),
+  chOfficers: (q: string) => get<ChOfficer[]>('/companies-house/officers', { q }),
+  runSignals: () => send<Record<string, unknown>>('post', '/signals/run'),
   due: (days = 7, mine = false) => get<DueList>('/due', { days, mine: mine ? 'true' : undefined }),
   renovations: (params?: { status?: 'active' | 'completed' | 'all'; deal_uuid?: string }) =>
     get<Renovation[]>('/renovations', params),

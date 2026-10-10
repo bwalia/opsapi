@@ -3,6 +3,7 @@
 -- data (property_deals_inbound_messages) and matched to a deal by rules:
 --   1. the deal reference we put in every outbound subject, "[PD-1a2b3c4d]"
 --   2. else the sender is a party (contact / firm email) on exactly one active deal
+--   3. else the sender is exactly one lead: the reply is scored and a hot one raises a "call now" alert
 -- A match marks the last chase to that party as replied (rules, not AI), updates
 -- the deal's health, and starts the legal chaser on the deal's chase task when
 -- the workspace has an AI provider. Text is never treated as instructions.
@@ -398,6 +399,16 @@ local function match_deal(ns, m)
     return nil, nil
 end
 
+--- A reply from a lead (not on a deal): the sender's address is exactly one lead's email.
+local function match_lead(ns, m)
+    if not m.from_address then return nil end
+    local rows = db.query([[
+        SELECT uuid FROM crm_leads WHERE namespace_id = ? AND LOWER(email) = ? AND deleted_at IS NULL
+        ORDER BY updated_at DESC LIMIT 2
+    ]], ns, m.from_address)
+    return #rows == 1 and rows[1].uuid or nil
+end
+
 local function received(v)
     if type(v) ~= "string" or v == "" then return db.raw("NOW()") end
     -- RFC 2822 dates parse in Postgres once the weekday and zone name are trimmed.
@@ -407,14 +418,16 @@ end
 
 function M.ingest(ns, conn, m)
     local deal_uuid, matched_by = match_deal(ns, m)
+    local lead_uuid = not deal_uuid and match_lead(ns, m) or nil
+    if lead_uuid then matched_by = "lead" end
     local row = db.query([[
         INSERT INTO property_deals_inbound_messages (namespace_id, connector_uuid, external_id, from_address, from_name,
-            to_address, subject, received_at, body_text, deal_uuid, matched_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?, ?, ?)
+            to_address, subject, received_at, body_text, deal_uuid, matched_by, lead_uuid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?, ?, ?, ?)
         ON CONFLICT (namespace_id, external_id) DO NOTHING RETURNING *
     ]], ns, conn and conn.uuid or db.NULL, tostring(m.external_id):sub(1, 255), m.from_address or db.NULL,
         m.from_name or db.NULL, m.to_address or db.NULL, m.subject or db.NULL, received(m.received_at),
-        tostring(m.body_text or ""):sub(1, 60000), deal_uuid or db.NULL, matched_by or db.NULL)[1]
+        tostring(m.body_text or ""):sub(1, 60000), deal_uuid or db.NULL, matched_by or db.NULL, lead_uuid or db.NULL)[1]
     if not row then return nil end
     if deal_uuid then
         -- The last unanswered chase to this sender (or this deal, for a reference match) now has its reply.
@@ -442,6 +455,11 @@ function M.ingest(ns, conn, m)
                 if run then db.update("property_deals_inbound_messages", { agent_run_uuid = run.uuid }, { id = row.id }) end
             end
         end
+    end
+    if lead_uuid then
+        -- Score the reply; a hot one raises a "call now" task and alerts (property_deals.replies).
+        local ok, err = pcall(require("property_deals.replies").handle, ns, row)
+        if not ok then ngx.log(ngx.WARN, "[property_deals] reply scoring: ", tostring(err)) end
     end
     db.update("property_deals_inbound_messages", { processed_at = db.raw("NOW()") }, { id = row.id })
     return row
