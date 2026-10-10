@@ -124,7 +124,8 @@ check("CRM company link is namespace-scoped",
     q:find("FROM crm_accounts WHERE uuid = ? AND namespace_id = ?", 1, true))
 check("project link is namespace-scoped",
     q:find("FROM kanban_projects WHERE uuid = ? AND namespace_id = ?", 1, true))
-check("no numeric ids in responses", q:find("row.internal_id = nil", 1, true) and q:find("row.namespace_id = nil", 1, true))
+check("no numeric ids in responses",
+    q:find("row.internal_id = nil", 1, true) and q:find("row.namespace_id = nil", 1, true))
 check("PO number is an atomic per-namespace upsert", q:find("ON CONFLICT (namespace_id) DO UPDATE", 1, true))
 check("receive and bill lock the PO row", select(2, q:gsub("find_row%(uuid, namespace_id, true%)", "")) >= 3)
 
@@ -139,7 +140,8 @@ check("guard = auth + requirePermission(purchase_orders)",
 check("routes pass self.namespace.id", not r:find("PurchaseOrderQueries%.%a+%(self%.params%.uuid%)"))
 check("static paths registered before :uuid",
     r:find('"/api/v2/purchase-orders/stats"', 1, true) < r:find('"/api/v2/purchase-orders/:uuid"', 1, true)
-    and r:find('"/api/v2/purchase-orders/items/:item_uuid"', 1, true) < r:find('"/api/v2/purchase-orders/:uuid"', 1, true))
+    and r:find('"/api/v2/purchase-orders/items/:item_uuid"', 1, true)
+        < r:find('"/api/v2/purchase-orders/:uuid"', 1, true))
 check("email escapes HTML", r:find("html_escape(it.description)", 1, true) ~= nil)
 
 print("Wiring:")
@@ -150,7 +152,8 @@ check("migrations gated on invoicing",
     m:find('load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.purchase-orders")', 1, true) ~= nil)
 for i = 1, 5 do
     check("migration step " .. i .. " registered",
-        m:find("conditional_array%(ProjectConfig%.FEATURES%.INVOICING, purchase_order_migrations, " .. i .. "%)") ~= nil)
+        m:find("conditional_array%(ProjectConfig%.FEATURES%.INVOICING, purchase_order_migrations, "
+            .. i .. "%)") ~= nil)
 end
 local mig = read("lapis/migrations/purchase-orders.lua")
 check("migration is idempotent", select(2, mig:gsub("IF NOT EXISTS", "")) >= 8)

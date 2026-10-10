@@ -482,20 +482,22 @@ function PurchaseOrderQueries.update(uuid, namespace_id, params)
     if not HEADER_EDITABLE[row.status] then
         return err("Cannot edit a purchase order with status: " .. row.status, "conflict")
     end
-    if params.supplier_name ~= nil and blank(params.supplier_name) then
-        return err("supplier_name cannot be blank")
-    end
 
     local link_params = {
         supplier_company_uuid = params.supplier_company_uuid,
         project_uuid = params.project_uuid,
-        supplier_name = params.supplier_name or row.supplier_name,
+        supplier_name = params.supplier_name == nil and row.supplier_name or params.supplier_name,
         supplier_email = params.supplier_email or row.supplier_email,
         supplier_phone = params.supplier_phone or row.supplier_phone,
         supplier_address = params.supplier_address or row.supplier_address,
     }
     local ok, e, code = resolve_links(namespace_id, link_params)
     if not ok then return nil, e, code end
+    -- A blank name may be filled from the linked CRM company; otherwise refuse it.
+    if params.supplier_name ~= nil and blank(params.supplier_name) then
+        if blank(link_params.supplier_name) then return err("supplier_name cannot be blank") end
+        params.supplier_name = link_params.supplier_name
+    end
 
     local sets, values = {}, {}
     for _, f in ipairs(HEADER_FIELDS) do
