@@ -127,7 +127,7 @@ function NamespaceQueries.create(data)
         name = data.name,
         slug = slug,
         description = data.description,
-        domain = data.domain,
+        domain = (data.domain and not tostring(data.domain):match("^%s*$")) and data.domain or nil,
         logo_url = data.logo_url,
         banner_url = data.banner_url,
         status = data.status or "active",
@@ -293,6 +293,12 @@ function NamespaceQueries.update(id, params)
     -- Don't allow updating certain fields
     params.id = nil
     params.uuid = nil
+
+    -- A cleared custom domain is NULL, not "": domain is UNIQUE, so two
+    -- workspaces saving an empty domain field collided (409 on rename).
+    if params.domain ~= nil and tostring(params.domain):match("^%s*$") then
+        params.domain = require("lapis.db").NULL
+    end
 
     namespace:update(params)
     return namespace

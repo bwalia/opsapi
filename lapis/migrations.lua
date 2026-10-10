@@ -2579,6 +2579,10 @@ local _migrations = {
     -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
     ['zzai1_namespace_ai_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 1),
     ['zzai2_idempotency_keys'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 2),
+    -- A blank custom domain is NULL, not "" (namespaces.domain is UNIQUE: two "" collided on rename).
+    ['zzns1_blank_namespace_domains_to_null'] = function()
+        db.query("UPDATE namespaces SET domain = NULL WHERE domain IS NOT NULL AND btrim(domain) = ''")
+    end,
     -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
     ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
     -- Form builder: tables, then the RBAC module + menu (migrations/forms.lua)
