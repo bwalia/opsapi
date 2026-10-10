@@ -251,7 +251,10 @@ return function(app)
 
         local sent, mail_err = Mail.send({ to = to, subject = subject, html = html, attachments = attachments })
         if not sent then
-            return { status = 502, json = { success = false, error = "Could not send email: " .. tostring(mail_err) } }
+            -- The mail server's reply stays in the log: it can echo addresses and server details.
+            ngx.log(ngx.ERR, "[purchase-orders] email ", po.uuid, " failed: ", tostring(mail_err))
+            return { status = 502, json = { success = false,
+                error = "Could not send the email. Check the workspace mail settings and try again." } }
         end
 
         local status = po.status
