@@ -337,6 +337,28 @@ return function(app)
         description = "Permissions per Property Deals module, so screens can hide what a role can't do." })
     sdk.doc(app, "GET /today", { summary = "Today screen", permission = "property_deals_tasks.read", response = Today,
         query = { limit = INT("Tasks to return (default 50, max 200)") } })
+    local Renovation = schema("Renovation", OBJ({
+        uuid = UUID(), project_uuid = S("Kanban project uuid: open it at /dashboard/projects/<uuid>"), board_uuid = S(),
+        deal_uuid = UUID(), deal_name = S(), property_uuid = UUID(), address = S(), postcode = S(), template_key = S(),
+        name = S(), status = S(), budget = MONEY(), budget_spent = MONEY(), budget_currency = S(),
+        start_date = DATE(), due_date = DATE(), jobs_total = INT(), jobs_done = INT(), jobs_overdue = INT(),
+        created_at = DT(), builders_added = ARR(S("User uuid added to the project")),
+    }))
+    local DueItem = schema("DueItem", OBJ({
+        kind = ENUM({ "deal_task", "renovation_job" }), uuid = S("Kanban task uuid"), title = S(), due_at = DT(),
+        overdue = BOOL(), status = S(), deal_uuid = UUID(), deal_name = S(), project_uuid = S(), project_name = S(),
+        column_name = S("Build stage (renovation jobs)"), assignee = S(),
+    }))
+    sdk.doc(app, "GET /renovations", { summary = "Renovation projects with progress", permission = "property_deals_deals.read",
+        response = ARR(Renovation), query = { status = ENUM({ "active", "completed", "all" }), deal_uuid = UUID() } })
+    sdk.doc(app, "POST /renovations", { summary = "Start a renovation (kanban project with build-stage columns)",
+        permission = "property_deals_deals.create", response = Renovation, errors = E422,
+        body = OBJ({ deal_uuid = UUID(), property_uuid = UUID(), name = S(), budget = MONEY(), currency = S(),
+            start_date = DATE(), target_end_date = DATE("The standard jobs are spread to finish by this date"),
+            builder_user_uuids = ARR(S("Workspace members to add to the board")) }) })
+    sdk.doc(app, "GET /due", { summary = "Deal tasks and renovation jobs due soon", permission = "property_deals_tasks.read",
+        response = OBJ({ days = INT(), everyone = BOOL("True when a manager sees the whole team"), items = ARR(DueItem) }),
+        query = { days = INT("Look-ahead in days (default 7, max 60)"), mine = BOOL("Managers: only my own") } })
     sdk.doc(app, "GET /setup", { summary = "Workspace setup state", permission = "property_deals_settings.read",
         response = Setup, description = "Missing (null) until POST /setup ran." })
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",

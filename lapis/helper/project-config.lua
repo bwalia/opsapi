@@ -208,11 +208,15 @@ ProjectConfig.PROJECT_FEATURES = {
     },
 
     -- Property deals back office: the property_deals plugin (projects/property-deals)
-    -- builds on CRM (leads, contacts, companies, deals) and kanban (tasks, epics).
+    -- builds on CRM (leads, contacts, companies, deals) and kanban (tasks, epics,
+    -- renovation boards); invoicing (invoices, payments, purchase orders) and
+    -- ecommerce (online orders, products, stores) run the back office.
     property = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.CRM,
         ProjectConfig.FEATURES.KANBAN,
+        ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.ECOMMERCE,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.FORMS,
