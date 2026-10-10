@@ -237,6 +237,9 @@ export default function PurchaseLedgerPage() {
             aria-label="Filter by category"
           >
             <option value="">All Categories</option>
+            <option value="purchases">Purchases</option>
+            <option value="materials">Materials</option>
+            <option value="subcontractors">Subcontractors</option>
             <option value="office">Office</option>
             <option value="travel">Travel</option>
             <option value="utilities">Utilities</option>

@@ -361,6 +361,8 @@ local timesheet_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.T
 -- Invoicing
 local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-system") or {}
 local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-menu-items") or {}
+-- Purchase Orders (raise/send/receive/bill supplier POs) ride on the invoicing feature
+local purchase_order_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.purchase-orders") or {}
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
@@ -1900,6 +1902,15 @@ local _migrations = {
     ['741_seed_invoicing_modules'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 2),
     ['742_grant_invoicing_permissions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 3),
     ['743_enable_invoicing_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 4),
+
+    -- Purchase Orders (zzpo*): tables, menu item next to Invoices, RBAC module,
+    -- owner/admin grants, per-namespace menu enablement. 'zzpo' sorts after every
+    -- numbered key (namespaces, menu_items, modules, roles all exist by then).
+    ['zzpo1_purchase_orders_tables'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 1),
+    ['zzpo2_purchase_orders_menu_item'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 2),
+    ['zzpo3_purchase_orders_module'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 3),
+    ['zzpo4_purchase_orders_grants'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 4),
+    ['zzpo5_purchase_orders_enable_menu'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 5),
 
     -- =========================================================================
     -- KAFKA / AUDIT SYSTEM (560-561)
