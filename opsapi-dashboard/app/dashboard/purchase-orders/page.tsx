@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Search,
   ClipboardCheck,
@@ -88,10 +88,12 @@ function PurchaseOrdersPageContent() {
   const [statusFilter, setStatusFilter] = useState<PurchaseOrderStatus | 'all'>('all');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [debouncedSupplier, setDebouncedSupplier] = useState('');
-  const [projectFilter, setProjectFilter] = useState('');
+  // ?project_uuid= (from a renovation's "Purchase orders" button) opens pre-filtered.
+  const initialProject = useSearchParams().get('project_uuid') || '';
+  const [projectFilter, setProjectFilter] = useState(initialProject);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(!!initialProject);
   const [projectOptions, setProjectOptions] = useState<{ value: string; label: string }[] | null>(null);
 
   // Pagination & sorting
@@ -485,7 +487,9 @@ function PurchaseOrdersPageContent() {
 export default function PurchaseOrdersPage() {
   return (
     <ProtectedPage module="purchase_orders" title="Purchase Orders">
-      <PurchaseOrdersPageContent />
+      <Suspense fallback={null}>
+        <PurchaseOrdersPageContent />
+      </Suspense>
     </ProtectedPage>
   );
 }
