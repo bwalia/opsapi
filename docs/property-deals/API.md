@@ -440,7 +440,7 @@ engine events). Use it for WhatsApp/Slack.
   - Renovations on kanban boards: `GET/POST /renovations`, a Renovations page and a deal tab.
   - Seeded roles include the back-office modules (CRM, orders, invoices, purchase orders, payments,
     projects); new `pd_builder` role for builders and site managers.
-  - The `property` deployment preset now includes invoicing and e-commerce.
+  - The `property` deployment preset now includes invoicing.
 
 - **v1.3 (Phase 7):**
   - The other seven agents: lead triage, property enrichment, offer reasoning (manager-only), buyer
