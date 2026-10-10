@@ -17,9 +17,12 @@ local function null(v) return v == nil or v == db.NULL end
 
 local OPT_OUT = { "not interested", "unsubscribe", "remove me", "stop contacting", "don't contact", "do not contact",
     "no thanks", "no thank you", "leave me alone", "take me off" }
-local KEEN = { "call me", "ring me", "give me a call", "phone me", "interested", "yes please", "let's talk", "lets talk",
-    "keen", "when can", "can we", "book a", "viewing", "how much", "what price", "send me", "available", "sounds good",
-    "tell me more", "i'd like", "i would like", "asap" }
+-- Asking for a call / viewing / offer is hot on its own; the rest is interest.
+local CALL_NOW = { "call me", "ring me", "phone me", "give me a call", "call back", "call you", "can you call",
+    "speak today", "talk today", "free now", "free after", "free this", "book a viewing", "arrange a viewing",
+    "make an offer", "asap" }
+local KEEN = { "interested", "yes please", "let's talk", "lets talk", "keen", "when can", "can we", "book a", "viewing",
+    "how much", "what price", "send me", "available", "sounds good", "tell me more", "i'd like", "i would like" }
 
 local function has_any(text, list)
     for _, w in ipairs(list) do
@@ -33,8 +36,10 @@ function R.rules(text)
     local opt = has_any(t, OPT_OUT) or (t:match("^%s*stop%s*$") and "stop")
     if opt then return { score = 0, temperature = "cold", reason = "Asked not to be contacted (\"" .. opt .. "\")", opted_out = true } end
     local score, why = 30, {}
+    local now = has_any(t, CALL_NOW)
     local keen = has_any(t, KEEN)
-    if keen then score = score + 35; why[#why + 1] = "says \"" .. keen .. "\"" end
+    if now then score = score + 50; why[#why + 1] = "asks to talk now (\"" .. now .. "\")"
+    elseif keen then score = score + 30; why[#why + 1] = "says \"" .. keen .. "\"" end
     if t:match("%+?%d[%d%s]%d%d%d[%d%s]+%d%d%d") then score = score + 15; why[#why + 1] = "gave a phone number" end
     if t:find("?", 1, true) then score = score + 10; why[#why + 1] = "asked a question" end
     if #t < 12 then score = score - 10 end

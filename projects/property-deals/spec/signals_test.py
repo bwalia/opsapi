@@ -118,6 +118,14 @@ check("scored by rules without an AI provider, not hot, no task", r["scored_by"]
 r = data(call("POST", P + f"/leads/{L}/replies", "operator_s", S, {"channel": "sms",
          "text": "Please remove me from your list"}), 201, "log an opt-out")
 check("an opt-out is cold and says why", r["reply_temperature"] == "cold" and "not to be contacted" in r["reply_reason"], r)
+tom = expect("a second lead", call("POST", API + "/api/v2/crm/leads", "operator_s", S, {"first_name": "Tom",
+             "last_name": "Rule", "owner_user_uuid": OP}), 201)
+tom = (tom.get("data") or tom)["uuid"]
+r = data(call("POST", P + f"/leads/{tom}/replies", "operator_s", S, {"channel": "whatsapp",
+         "text": "Yes please, call me this afternoon - free after 2"}), 201, "a call request, no AI")
+check("without AI, asking to be called is hot by the rules", r["scored_by"] == "rules" and r["reply_temperature"] == "hot"
+      and r["reply_score"] >= 70 and "asks to talk now" in r["reply_reason"] and r.get("hot_task_uuid"), r)
+data(call("PUT", P + f"/tasks/{r['hot_task_uuid']}", "operator_s", S, {"pd_status": "done"}), 200, "Tom called")
 res = call("POST", P + f"/leads/{L}/replies", "operator_s", S, {"channel": "pigeon", "text": "hi"})
 check("unknown channel refused (422)", res[0] == 422, res)
 
@@ -167,8 +175,8 @@ check("hot leads: Sarah with her call task", len(hl) == 1 and hl[0]["lead_uuid"]
 check("'mine' for the manager is empty", not data(call("GET", P + "/hot-leads?mine=true", "manager_s", S), 200, "mine"))
 lead_now = data(call("GET", P + f"/leads/{L}", "operator_s", S), 200, "lead after replies")
 check("lead shows hot, why and when", lead_now["details"]["temperature"] == "hot" and lead_now["details"]["last_reply_at"], lead_now)
-check("filter leads by temperature", [x["uuid"] for x in data(call("GET", P + "/leads?temperature=hot", "operator_s", S), 200,
-      "hot filter")] == [L])
+check("filter leads by temperature", sorted(x["uuid"] for x in data(call("GET", P + "/leads?temperature=hot", "operator_s", S),
+      200, "hot filter")) == sorted([L, tom]))
 
 # Preferences are respected: Telegram off for hot leads -> no Telegram alert.
 data(call("PUT", P + "/notification-preferences", "operator_s", S, {"hot_lead": {"telegram": False}}), 200, "telegram off")
