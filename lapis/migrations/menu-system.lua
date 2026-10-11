@@ -262,7 +262,7 @@ return {
             },
             {
                 key = "chat",
-                name = "Chat",
+                name = "AI Navigator",
                 icon = "MessageSquare",
                 path = "/dashboard/chat",
                 module = "chat",

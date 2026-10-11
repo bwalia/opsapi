@@ -181,7 +181,8 @@ return function(app)
 
     -- A run still "running" after this long died with its worker (restart /
     -- deploy) — report it as failed rather than spinning forever.
-    local STALE_SECONDS = 600
+    -- A run with several model calls at up to AI_TIMEOUT_MS each (5 min) can legitimately take a while.
+    local STALE_SECONDS = 1800
     local MAX_STORED_TURNS = 40
     local MAX_MODEL_TURNS = 20
     -- Records returned by tools are resent only for the latest assistant turns;

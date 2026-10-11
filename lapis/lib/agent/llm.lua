@@ -143,11 +143,15 @@ local function args_table(a)
     return {}
 end
 
+-- How long to wait for one model answer. Self-hosted models on shared hardware can queue for minutes,
+-- so the default is 5 minutes (AI_TIMEOUT_MS overrides).
+local DEFAULT_TIMEOUT_MS = tonumber(env("AI_TIMEOUT_MS") or "") or 300000
+
 local function post(cfg, url, headers, body, timeout_ms)
     local encoded, enc_err = cjson.encode(body)
     if not encoded then return nil, "Could not encode the model request: " .. tostring(enc_err) end
     local httpc = http.new()
-    httpc:set_timeout(timeout_ms or 120000)
+    httpc:set_timeout(timeout_ms or DEFAULT_TIMEOUT_MS)
     headers["Content-Type"] = "application/json"
     local res, err = httpc:request_uri(url, { method = "POST", body = encoded, headers = headers,
         -- ponytail: TLS verify off to match the rest of the AI clients; turn on

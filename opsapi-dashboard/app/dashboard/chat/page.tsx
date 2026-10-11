@@ -997,7 +997,7 @@ export default function ChatPage() {
   const memberCount = members.length || activeChannel?.member_count || 0;
 
   return (
-    <ProtectedPage module="chat" title="Chat">
+    <ProtectedPage module="chat" title="AI Navigator">
       <div className="flex h-[calc(100dvh-9rem)] min-h-[520px] overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-sm">
         {/* ---------- Left rail: channels + DMs ---------- */}
         <aside
