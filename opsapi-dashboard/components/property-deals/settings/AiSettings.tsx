@@ -14,6 +14,8 @@ import { ErrorNote, Spinner, label, dateText } from '../ui';
 import { usePdData } from '../usePd';
 
 const TYPES: { value: AiProvider['provider_type']; label: string; url?: string; local?: boolean }[] = [
+  // The deployment's own self-hosted model (the one the chat assistant uses): no key, data stays on our servers.
+  { value: 'platform' as AiProvider['provider_type'], label: 'Platform model (self-hosted — same as the chat assistant)', local: true },
   { value: 'anthropic', label: 'Anthropic (Claude)' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Google Gemini' },
@@ -119,7 +121,7 @@ function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClos
             <Input label="Output cost (USD per million tokens)" type="number" step="any" min={0} value={String(f.output_cost_per_mtok)} onChange={s('output_cost_per_mtok')} />
           </>
         )}
-        <div className="sm:col-span-2">
+        {String(type) !== 'platform' && <div className="sm:col-span-2">
           {replacing ? (
             <Input label={type === 'jobshout' ? 'Password' : 'API key'} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} helperText={p.has_secret ? 'Leave empty to keep the saved one.' : type === 'ollama' || type === 'openai_compatible' ? 'Optional for local servers.' : undefined} />
           ) : (
@@ -128,7 +130,7 @@ function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClos
               <Button size="sm" variant="outline" onClick={() => setReplacing(true)}>Replace</Button>
             </div>
           )}
-        </div>
+        </div>}
         <label className="flex items-center gap-2 text-sm"><Switch checked={Boolean(f.is_local)} onChange={(v) => setF({ ...f, is_local: v })} /> Local (on your own servers: allowed for local-only jobs)</label>
         <label className="flex items-center gap-2 text-sm"><Switch checked={Boolean(f.enabled)} onChange={(v) => setF({ ...f, enabled: v })} /> Enabled</label>
       </div>
