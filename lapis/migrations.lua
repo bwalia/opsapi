@@ -2598,6 +2598,10 @@ local _migrations = {
     ['zzns2_namespace_business_type'] = function()
         db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS business_type VARCHAR(50)")
     end,
+    -- The Chat menu item is the AI Navigator (assistant + team chat). Workspaces that renamed it keep theirs.
+    ['zzmn1_chat_menu_is_ai_navigator'] = function()
+        db.query("UPDATE menu_items SET name = 'AI Navigator', updated_at = NOW() WHERE key = 'chat' AND name = 'Chat'")
+    end,
     -- A workspace may opt in to the deployment's own (self-hosted) model as an AI provider.
     ['zzai2_platform_model_provider'] = function()
         db.query([[
