@@ -15,8 +15,8 @@
     Env: VOICE_URL (base, e.g. http://speaches:8000), VOICE_API_KEY (optional),
     VOICE_STT_MODEL (default Systran/faster-whisper-small), VOICE_TTS_MODEL
     (default speaches-ai/Kokoro-82M-v1.0-ONNX), VOICE_TTS_VOICE (default bf_emma,
-    a British voice), VOICE_LANGUAGE (default en). A server on the private
-    network needs OPSAPI_AI_ALLOW_PRIVATE=true, like a local model.
+    a British voice), VOICE_LANGUAGE (default en). VOICE_URL is operator config,
+    so it may be a private (LAN) address.
 ]]
 
 local cjson = require("cjson.safe")
@@ -33,13 +33,12 @@ local function env(name, default)
     return default
 end
 
+-- VOICE_URL is deployment config set by operators (Helm values / env), not user input, so it may point at a
+-- private address (the voice server on the LAN) without opening OPSAPI_AI_ALLOW_PRIVATE for user-entered URLs.
 local function base()
     local url = env("VOICE_URL")
-    if not url then return nil end
-    url = url:gsub("/+$", "")
-    local ok = require("lib.ai-providers").url_ok(url)
-    if not ok then return nil end
-    return url
+    if not url or not url:match("^https?://[%w%.%-]+") then return nil end
+    return (url:gsub("/+$", ""))
 end
 
 local function headers(extra)
