@@ -132,6 +132,29 @@ return function(app)
             proposals = ARR(Proposal), model = S(), prompt_version = S(), run_ref = S() }, { "proposals" }),
         response = OBJ({ capture_uuid = UUID(), interaction = Interaction, proposed_updates = ARR(ProposedUpdate) }),
         errors = { ["422"] = "Validation failed, or a proposal isn't grounded in the interaction" } })
+    local SheetRow = schema("SheetRow", OBJ({ uuid = UUID(), target_table = S(), target_uuid = S(), field = S(),
+        label = S("How the field reads on the sheet"), kind = ENUM({ "stated", "inferred", "proposed" }),
+        kind_label = S("e.g. SOPHIE'S JUDGEMENT, UNCONFIRMED"), old_value = ANY(), new_value = ANY(), confidence = NUM(),
+        is_inferred = BOOL(), material = BOOL(), source_quote = S(), status = ENUM({ "proposed", "confirmed", "corrected",
+            "rejected" }), owner = OBJ({ user_uuid = S(), name = S() }, nil, "Next actions: who will own it") }))
+    local Sheet = schema("CaptureSheet", OBJ({ interaction = Interaction, author = S("First name, for own notes"),
+        run = OBJ({ uuid = UUID(), status = S(), model = S(), prompt_version = S(), error = S() }),
+        proposals = ARR(SheetRow), counts = OBJ({ proposed = INT(), confirmed = INT(), corrected = INT(), rejected = INT(),
+            material = INT("Material rows still waiting") }) }))
+    doc("POST /captures/start", { summary = "Capture a voice note (its transcript) or a typed note; the PA proposes",
+        permission = "property_pa_records.create", status = 201,
+        body = OBJ({ text = S(), channel = ENUM({ "voice", "note", "call", "meeting", "email", "whatsapp", "sms" }),
+            opportunity_uuid = UUID(), person_uuid = S(), audio_document_uuid = UUID() }, { "text" }),
+        response = OBJ({ interaction = Interaction, pa = OBJ({ run_uuid = UUID(), status = S(),
+            error = S("Why the PA wasn't asked (the note is saved anyway)") }) }) })
+    doc("GET /interactions/:id/capture", { summary = "The confirm sheet for a note", permission = "property_pa_updates.read",
+        path = { id = S() }, response = Sheet, errors = E404 })
+    doc("POST /interactions/:id/decide", { summary = "Confirm / correct / reject rows; confirm_rest confirms the rest",
+        permission = "property_pa_updates.update", path = { id = S() },
+        body = OBJ({ decisions = ARR(OBJ({ uuid = UUID(), action = ENUM({ "confirm", "correct", "reject" }),
+            value = ANY("For correct") }, { "uuid", "action" })), confirm_rest = BOOL() }),
+        response = OBJ({ results = ARR(OBJ({ uuid = UUID(), action = S(), ok = BOOL(), status = S(), error = S() })),
+            sheet = Sheet }), errors = E422 })
     doc("GET /proposed-updates", { summary = "Proposed updates", permission = "property_pa_updates.read",
         query = { status = S("Comma separated"), capture_uuid = UUID(), target_uuid = S() }, response = ARR(ProposedUpdate) })
     doc("GET /proposed-updates/:id", { summary = "A proposed update", permission = "property_pa_updates.read", path = id,

@@ -80,6 +80,16 @@ return function(app)
         end
         local errors = ungrounded(proposals, I.text(ns, interaction.uuid))
         if next(errors) then return sdk.error(422, "Validation failed", { proposals = errors }) end
+        -- Audit (P10): a capture the PA makes for a capture run is tied to that run, its model and prompt version.
+        local pa_run = U.one([[SELECT uuid, model, prompt_version FROM property_deals_agent_runs WHERE namespace_id = ?
+            AND provider = 'jobshout-pa' AND input_snapshot ->> 'interaction_uuid' = ? ORDER BY id DESC LIMIT 1]],
+            ns, interaction.uuid)
+        if pa_run then
+            meta.run_ref = meta.run_ref or pa_run.uuid
+            if not meta.model and pa_run.model ~= db.NULL then meta.model = pa_run.model end
+        end
+        local hv = ngx.req.get_headers()["x-jobshout-prompt-version"]
+        if not meta.prompt_version and type(hv) == "string" and #hv <= 80 then meta.prompt_version = hv end
         local capture = db.query("SELECT gen_random_uuid() AS u")[1].u
         local rows, perrs = P.propose(ns, proposals, { capture_uuid = capture, source_interaction_uuid = interaction.uuid,
             model = meta.model, prompt_version = meta.prompt_version, run_ref = meta.run_ref }, sdk.settings(self))

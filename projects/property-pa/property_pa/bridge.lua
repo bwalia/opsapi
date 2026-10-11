@@ -46,7 +46,7 @@ function B.get(ns, uuid, user_uuid)
         ns, uuid, B.PROVIDER, user_uuid)
 end
 
---- req = { message, mode, role, opportunity_uuid?, inputs? } @return run row
+--- req = { message, mode, role, opportunity_uuid?, interaction_uuid?, inputs? } @return run row
 function B.ask(ns, user_uuid, settings, req)
     local role = req.role or "seller_agent"
     local agent_id = nz(role == "manager" and settings.jobshout_manager_agent_id or settings.jobshout_seller_agent_id)
@@ -59,6 +59,7 @@ function B.ask(ns, user_uuid, settings, req)
     local inputs = { mode = req.mode }
     for k, v in pairs(req.inputs or {}) do inputs[k] = v end
     if req.opportunity_uuid then inputs.opportunity_id = req.opportunity_uuid end
+    if req.interaction_uuid then inputs.interaction_uuid = req.interaction_uuid end
     local skill = B.SKILLS[req.mode]
     local skills = skill and { skill } or nil
     -- One JobShout task per person and role: every turn is a new run on it.
@@ -83,7 +84,8 @@ function B.ask(ns, user_uuid, settings, req)
         namespace_id = ns, agent_key = agent_key, provider = B.PROVIDER, provider_uuid = row.uuid,
         model = "jobshout:" .. agent_id, status = "running", trigger = "manual",
         input_snapshot = db.raw(db.escape_literal(cjson.encode({ mode = req.mode, role = role, message = req.message,
-            opportunity_uuid = req.opportunity_uuid, skill = skill or cjson.null })) .. "::jsonb"),
+            opportunity_uuid = req.opportunity_uuid, interaction_uuid = req.interaction_uuid,
+            skill = skill or cjson.null })) .. "::jsonb"),
         jobshout_task_id = tostring(task_id or ""), jobshout_run_id = tostring(run_id),
         triggered_by_user_uuid = user_uuid, started_at = db.raw("NOW()"),
     }, { returning = { "uuid" } })[1]
@@ -167,6 +169,14 @@ function B.finish(ns, run, data)
     end
     -- Only a running run is finished (a webhook and a poll may race; the first one wins).
     db.update("property_deals_agent_runs", upd, { namespace_id = ns, uuid = run.uuid, status = "running" })
+    -- What the run wrote while it was running (captures) gets the model and prompt version it really used (P10).
+    if upd.model or upd.prompt_version then
+        for _, t in ipairs({ "pa_proposed_updates", "pa_field_facts" }) do
+            db.query("UPDATE " .. t .. [[ SET model = COALESCE(?, model), prompt_version = COALESCE(prompt_version, ?),
+                updated_at = NOW() WHERE namespace_id = ? AND run_ref = ?]], upd.model or db.NULL,
+                upd.prompt_version or db.NULL, ns, run.uuid)
+        end
+    end
     return U.one(B.SELECT .. " WHERE namespace_id = ? AND uuid = ?::uuid", ns, run.uuid)
 end
 

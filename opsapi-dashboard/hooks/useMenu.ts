@@ -135,6 +135,7 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Leaf: icons.Leaf,
     Hammer: icons.Hammer,
     Handshake: icons.Handshake,
+    NotebookPen: icons.NotebookPen,
     Newspaper: icons.Newspaper,
   };
   NORMALIZED_MAP = {};

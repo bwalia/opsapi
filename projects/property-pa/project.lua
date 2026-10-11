@@ -47,6 +47,10 @@ return {
     },
 
     menu = {
+        -- Native pages in opsapi-dashboard/app/dashboard/property-pa.
+        { label = "PA capture", route = "/dashboard/property-pa/capture", module = "property_pa_records", icon = "NotebookPen" },
+        { label = "My opportunities", route = "/dashboard/property-pa/opportunities", module = "property_pa_records",
+          icon = "Users" },
         -- opsapi:menu (make:resource adds entries above this line)
     },
 
