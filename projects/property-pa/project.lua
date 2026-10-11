@@ -48,9 +48,12 @@ return {
 
     menu = {
         -- Native pages in opsapi-dashboard/app/dashboard/property-pa.
+        { label = "PA today", route = "/dashboard/property-pa/today", module = "property_pa_records", icon = "Sunrise" },
         { label = "PA capture", route = "/dashboard/property-pa/capture", module = "property_pa_records", icon = "NotebookPen" },
         { label = "My opportunities", route = "/dashboard/property-pa/opportunities", module = "property_pa_records",
           icon = "Users" },
+        { label = "PA knowledge", route = "/dashboard/property-pa/knowledge", module = "property_pa_knowledge",
+          icon = "BookOpen" },
         -- opsapi:menu (make:resource adds entries above this line)
     },
 

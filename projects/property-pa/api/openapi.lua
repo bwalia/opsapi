@@ -189,6 +189,36 @@ return function(app)
     doc("POST /knowledge/:id/retire", { summary = "Retire a rule (history kept)", permission = "property_pa_knowledge.read",
         path = id, response = Knowledge })
 
+    local Signal = OBJ({ key = S(), weight = INT(), text = S(), ref = S("The record it came from") })
+    local Card = schema("TodayCard", OBJ({ rank = INT(), score = INT("Sum of the signal weights"), opportunity_uuid = UUID(),
+        title = S(), kind = S(), person_name = S(), property_address = S(), why_now = S(), action = S("Recommended action"),
+        objective = S(), minutes = INT(), signals = ARR(Signal), next_action = OBJ({ task_uuid = S(), title = S(), due_at = DT() }) }))
+    local Line = OBJ({ text = S(), ref = S(), label = S("stated / judgement, unconfirmed / inference"), is_inferred = BOOL() })
+    local Rule = OBJ({ key = S(), version = INT(), scope = S(), title = S(), rule = S(), ref = S() })
+    doc("GET /today", { summary = "My opportunities ranked by explainable rules (P01)", permission = "property_pa_records.read",
+        query = { minutes = INT("Time budget, 5-600: which cards fit and what waits") },
+        response = OBJ({ cards = ARR(Card), weights = OBJ({}), budget = OBJ({ minutes = INT(), used = INT(),
+            fits = ARR(Card), waits = ARR(OBJ({})) }) }) })
+    doc("GET /today/why/:opportunity_id", { summary = "Why it ranks where it does: signals, weights, sources (P07)",
+        permission = "property_pa_records.read", path = { opportunity_id = UUID() },
+        response = OBJ({ rank = INT(), of = INT(), score = INT(), signals = ARR(Signal), weights = OBJ({}), action = S(),
+            objective = S(), explanation = S() }), errors = E404 })
+    doc("GET /prepare/:opportunity_id", { summary = "Prepare Me: a brief where every line cites its record (P02)",
+        permission = "property_pa_records.read", path = { opportunity_id = UUID() },
+        response = schema("PrepareBrief", OBJ({ opportunity_uuid = UUID(), title = S(), person_name = S(),
+            snapshot = ARR(Line), last_interaction = OBJ({ text = S(), at = DT(), channel = S(), ref = S() }),
+            price = ARR(Line), decision_makers = ARR(Line), promises = ARR(Line), objections = ARR(Line),
+            unknowns = ARR(S()), questions = ARR(OBJ({ field = S(), question = S() })), triggers = ARR(S()),
+            playbook = ARR(Rule), objective = S(), recommended_action = S(), why_now = ARR(Signal) })), errors = E404 })
+    doc("GET /coach/:opportunity_id", { summary = "Coach: known vs assumed, questions before any figure, the rules (P06)",
+        permission = "property_pa_records.read", path = { opportunity_id = UUID() }, query = { situation = S() },
+        response = OBJ({ known = ARR(Line), assumed = ARR(Line), questions = ARR(S()), playbook = ARR(Rule),
+            next_step = S(), never = S() }), errors = E404 })
+    doc("POST /knowledge/teach", { summary = "Teach the PA a rule (managers can approve it in the same step)",
+        permission = "property_pa_knowledge.create", status = 201, body = OBJ({ statement = S(), title = S(), key = S(),
+            scope = ENUM({ "personal", "team", "company" }), domain = S(), rationale = S(), triggers = ARR(S()),
+            approve = BOOL() }, { "statement" }), response = Knowledge,
+        errors = { ["403"] = "Only managers approve company or team rules" } })
     doc("GET /briefing", { summary = "My day for the PA", permission = "property_pa_records.read", response = OBJ({}) })
     doc("GET /context/:opportunity_id", { summary = "Every fact the PA may use about an opportunity, each with a ref",
         permission = "property_pa_records.read", path = { opportunity_id = UUID() }, response = OBJ({}), errors = E404 })

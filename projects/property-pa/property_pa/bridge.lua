@@ -117,7 +117,7 @@ end
 local function arr(v) return setmetatable(type(v) == "table" and v or {}, cjson.array_mt) end
 
 --- Check a parsed answer. @return result shown to the user
-function B.check(ns, out)
+function B.check(ns, out, mode)
     local refs = {}
     for _, s in ipairs(type(out.sources) == "table" and out.sources or {}) do refs[#refs + 1] = B.ref(s) end
     local claims = {}
@@ -130,7 +130,25 @@ function B.check(ns, out)
             table.insert(verdict.violations, { kind = "unknown_ref", ref = ref, message = "source not found in this workspace" })
         end
     end
+    -- Authority (P06): the PA coaches with questions; it never recommends paying more. Offers are a person's call.
+    local phrase = (mode == "coach" or out.mode == "coach") and require("property_pa.brief").recommends_higher_offer(out.answer)
+    if phrase then
+        verdict.ok = false
+        table.insert(verdict.violations, { kind = "higher_offer", message = "coaching may not recommend a higher offer ('"
+            .. phrase .. "'); suggest questions and hand the decision to someone with authority" })
+    end
     return verdict
+end
+
+--- Why an answer isn't shown, in words a person can act on.
+function B.withheld_text(verdict)
+    for _, v in ipairs(verdict.violations) do
+        if v.kind == "higher_offer" then
+            return "The PA's answer suggested paying more. That is a decision for someone with authority, so it isn't "
+                .. "shown. Ask the PA for the questions to ask first, or hand it to your manager."
+        end
+    end
+    return "The PA's answer cited something that isn't on record, so it isn't shown. Ask again, or open the record."
 end
 
 --- Store a finished run. data = JobShout run (poll) or webhook `data`. Idempotent: a finished run stays as it is.
@@ -154,11 +172,11 @@ function B.finish(ns, run, data)
                 withheld = "The PA's answer couldn't be checked (" .. perr .. "), so it isn't shown.",
                 violations = arr({}) }
         else
-            local verdict = B.check(ns, out)
+            local snap = U.json(run.input_snapshot)
+            local verdict = B.check(ns, out, type(snap) == "table" and snap.mode or nil)
             result = { contract_ok = true, grounded = verdict.ok, mode = out.mode,
                 answer = verdict.ok and out.answer or cjson.null,
-                withheld = (not verdict.ok) and "The PA's answer cited something that isn't on record, so it isn't "
-                    .. "shown. Ask again, or open the record." or cjson.null,
+                withheld = (not verdict.ok) and B.withheld_text(verdict) or cjson.null,
                 violations = verdict.violations, sources = arr(out.sources), unknowns = arr(out.unknowns),
                 inferences = arr(out.inferences), actions = arr(out.actions), needs_human = out.needs_human == true }
         end

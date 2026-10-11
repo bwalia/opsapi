@@ -5,15 +5,16 @@
  * confirmation, next actions with their reasons, offers and events, the timeline, and each field's change
  * history (P10: source, model, prompt version, who confirmed; P11: corrections keep the history).
  */
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { ArrowLeft, History, NotebookPen } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, Card, Modal } from '@/components/ui';
 import { ErrorNote, Spinner, dateText, dueText } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { valueText } from '@/components/property-pa/ConfirmSheet';
+import PaPanels, { type Panel } from '@/components/property-pa/PaPanels';
 import { paService, type Change, type Fact, type Opportunity } from '@/services/property-pa.service';
 
 const FIELDS: { key: keyof Opportunity & string; label: string }[] = [
@@ -60,7 +61,16 @@ function HistoryModal({ oppId, field, label, onClose }: { oppId: string; field: 
 }
 
 export default function OpportunityPage() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <OpportunityView />
+    </Suspense>
+  );
+}
+
+function OpportunityView() {
   const { id } = useParams<{ id: string }>();
+  const panel = useSearchParams().get('panel');
   const { data: o, error, loading } = usePdData(() => paService.opportunity(id), [id], 30_000);
   const { data: tl } = usePdData(() => paService.timeline(id), [id], 30_000);
   const [hist, setHist] = useState<{ field: string; label: string } | null>(null);
@@ -136,6 +146,8 @@ export default function OpportunityPage() {
           )}
         </Card>
       </div>
+
+      <PaPanels opportunityId={o.uuid} initial={(['prepare', 'coach', 'ask'].includes(panel || '') ? panel : 'prepare') as Panel} />
 
       <Card className="space-y-3">
         <h3 className="font-semibold text-secondary-900">Timeline</h3>

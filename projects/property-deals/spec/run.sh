@@ -76,7 +76,7 @@ export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="dock
 export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
 # ONLY=ai_test (etc.) runs one suite while iterating.
 # Suites not found here are looked up in the Property PA plugin's spec (projects/property-pa/spec).
-SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test pa_brain_test pa_week2_test perf_test}
+SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test pa_brain_test pa_week2_test pa_week3_test perf_test}
 ( for s in $SUITES; do f="$HERE/$s.py"; [ -f "$f" ] || f="$ROOT/projects/property-pa/spec/$s.py"
     python3 -I "$f" || exit 1; done ) || {
   echo "--- server errors ---"

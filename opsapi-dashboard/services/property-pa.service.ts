@@ -153,6 +153,137 @@ export interface PersonHit {
   property_address?: string | null;
 }
 
+export interface Signal {
+  key: string;
+  weight: number;
+  text: string;
+  ref?: string | null;
+}
+
+export interface TodayCard {
+  rank: number;
+  score: number;
+  opportunity_uuid: string;
+  title: string;
+  kind: string;
+  person_name?: string | null;
+  property_address?: string | null;
+  why_now: string;
+  action: string;
+  objective: string;
+  minutes: number;
+  signals: Signal[];
+  next_action?: { task_uuid: string; title: string; due_at?: string | null } | null;
+}
+
+export interface Today {
+  cards: TodayCard[];
+  weights: Record<string, number>;
+  budget?: { minutes: number; used: number; fits: TodayCard[]; waits: { opportunity_uuid: string; title: string; minutes: number }[] };
+}
+
+export interface Why {
+  rank: number;
+  of: number;
+  score: number;
+  signals: Signal[];
+  weights: Record<string, number>;
+  action: string;
+  objective: string;
+  explanation: string;
+}
+
+export interface BriefLine {
+  text: string;
+  ref: string;
+  label?: string;
+  is_inferred?: boolean;
+}
+
+export interface Rule {
+  key: string;
+  version: number;
+  scope: string;
+  title: string;
+  rule: string;
+  ref: string;
+}
+
+export interface PrepareBrief {
+  opportunity_uuid: string;
+  title: string;
+  person_name?: string | null;
+  snapshot: BriefLine[];
+  last_interaction?: (BriefLine & { at?: string; channel?: string }) | null;
+  price: BriefLine[];
+  decision_makers: BriefLine[];
+  promises: (BriefLine & { at?: string })[];
+  objections: BriefLine[];
+  unknowns: string[];
+  questions: { field: string; question: string }[];
+  playbook: Rule[];
+  objective: string;
+  recommended_action: string;
+  why_now: Signal[];
+}
+
+export interface Coaching {
+  known: BriefLine[];
+  assumed: BriefLine[];
+  questions: string[];
+  playbook: Rule[];
+  next_step: string;
+  never: string;
+}
+
+export interface Knowledge {
+  uuid: string;
+  key: string;
+  domain: string;
+  scope: 'personal' | 'team' | 'company';
+  status: 'draft' | 'approved' | 'retired';
+  current_version: number;
+  title?: string | null;
+  rule?: string | null;
+  rationale?: string | null;
+  triggers?: string[];
+  approved_by_user_uuid?: string | null;
+  approved_at?: string | null;
+}
+
+export interface PendingKnowledge {
+  uuid: string;
+  key: string;
+  scope: string;
+  version: number;
+  title: string;
+  rule: string;
+  rationale?: string | null;
+  triggers?: string[];
+  proposed_by_ai: boolean;
+  created_at: string;
+}
+
+export type PaMode = 'today' | 'prepare' | 'capture' | 'coach' | 'ask' | 'handoff' | 'manager_today' | 'teach';
+
+export interface PaRun {
+  uuid: string;
+  status: 'running' | 'succeeded' | 'failed';
+  model?: string | null;
+  prompt_version?: string | null;
+  error?: string | null;
+  output?: {
+    grounded: boolean;
+    contract_ok?: boolean;
+    answer?: string | null;
+    withheld?: string | null;
+    sources?: { type: string; id: string; label?: string }[];
+    unknowns?: string[];
+    inferences?: string[];
+    needs_human?: boolean;
+  } | null;
+}
+
 type Env<T> = { data: T; meta?: { page?: number; per_page?: number; total?: number } };
 
 export const paService = {
@@ -172,6 +303,40 @@ export const paService = {
   },
   async people(q: string) {
     return (await apiClient.get<Env<PersonHit[]>>(`${BASE}/people?q=${encodeURIComponent(q)}`)).data.data;
+  },
+  async today(minutes?: number) {
+    return (await apiClient.get<Env<Today>>(`${BASE}/today${minutes ? `?minutes=${minutes}` : ''}`)).data.data;
+  },
+  async why(id: string) {
+    return (await apiClient.get<Env<Why>>(`${BASE}/today/why/${id}`)).data.data;
+  },
+  async prepare(id: string) {
+    return (await apiClient.get<Env<PrepareBrief>>(`${BASE}/prepare/${id}`)).data.data;
+  },
+  async coach(id: string, situation?: string) {
+    const q = situation ? `?situation=${encodeURIComponent(situation)}` : '';
+    return (await apiClient.get<Env<Coaching>>(`${BASE}/coach/${id}${q}`)).data.data;
+  },
+  async knowledge(params: { q?: string; status?: string } = {}) {
+    return (await apiClient.get<Env<Knowledge[]>>(`${BASE}/knowledge${buildQueryString(params)}`)).data.data;
+  },
+  async pendingKnowledge() {
+    return (await apiClient.get<Env<PendingKnowledge[]>>(`${BASE}/knowledge/pending`)).data.data;
+  },
+  async decideKnowledge(id: string, version: number, approve: boolean) {
+    return (await apiClient.post<Env<Knowledge>>(`${BASE}/knowledge/${id}/versions/${version}/${approve ? 'approve' : 'reject'}`, {}, JSON_HDR)).data.data;
+  },
+  async retireKnowledge(id: string) {
+    return (await apiClient.post<Env<Knowledge>>(`${BASE}/knowledge/${id}/retire`, {}, JSON_HDR)).data.data;
+  },
+  async teach(body: { statement: string; title?: string; scope?: 'personal' | 'team' | 'company'; domain?: string; triggers?: string[]; rationale?: string; approve?: boolean }) {
+    return (await apiClient.post<Env<Knowledge & { version?: number }>>(`${BASE}/knowledge/teach`, body, JSON_HDR)).data.data;
+  },
+  async ask(body: { message: string; mode?: PaMode; opportunity_uuid?: string }) {
+    return (await apiClient.post<Env<PaRun>>(`${BASE}/ask`, body, JSON_HDR)).data.data;
+  },
+  async run(id: string) {
+    return (await apiClient.get<Env<PaRun>>(`${BASE}/ask/${id}`)).data.data;
   },
   async startCapture(body: { text: string; channel?: 'voice' | 'note' | 'call'; opportunity_uuid?: string }) {
     return (
