@@ -25,6 +25,13 @@ host: int-opsapi.workstation.co.uk
 # this isolated release.
 projectCode: all
 
+# Plain, non-secret env for this release (templates/deployment.yaml → extraEnv).
+extraEnv:
+  # Voice for the assistant (lapis/routes/voice.lua): the self-hosted Speaches server
+  # (faster-whisper + Kokoro) next to Ollama on the LAN. Audio never leaves our machines.
+  VOICE_URL: "http://192.168.1.177:8015"
+  VOICE_TTS_VOICE: "bf_emma"
+
 # Password-reset email link target (the Next.js dashboard, unchanged — the
 # API moving to workstation.co.uk does not move the frontend). Migration 489
 # bootstraps namespaces.allowed_redirect_origins from this.

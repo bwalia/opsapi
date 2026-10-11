@@ -162,6 +162,11 @@ spec:
               value: {{ .Values.otpSuppressForEmailRegex | default "^diytaxreturnmail\\+e2e-.*@gmail\\.com$|^diytaxreturnmail@gmail\\.com$|@e2e\\.invalid$|@admin\\.com$" | quote }}
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "all" | quote }}
+            {{- range $name, $value := .Values.extraEnv }}
+            # Plain (non-secret) settings for this env from the values file (extraEnv).
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
             {{- if and .Values.redis .Values.redis.enabled }}
             # ── Redis (templates/redis.yaml) ───────────────────────────────
             # Chat WebSocket events cross pods through it, and /ready fails while
