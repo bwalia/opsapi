@@ -15,6 +15,9 @@
       openai_compatible  openai                         required: LM Studio, vLLM, llama.cpp server, LocalAI, …
       ollama             openai (Ollama's /v1)          http://localhost:11434/v1
       jobshout           —                              required (JobShout server; username + password)
+      platform           the deployment's own model     — (AI_PROVIDER / OLLAMA_URL env: the self-hosted model the
+                                                          chat assistant uses). Opt-in per workspace; only offered
+                                                          when that model is self-hosted (Ollama), for GDPR.
 
     Secrets are sealed with AES-256-GCM (helper/secret-box.lua) and never
     returned: a browser sees `has_secret` and `secret_hint` ("…a1b2").
@@ -47,7 +50,19 @@ Providers.TYPES = {
     openai_compatible = { adapter = "openai", needs_url = true },
     ollama = { adapter = "openai", url = "http://localhost:11434/v1", is_local = true },
     jobshout = { needs_url = true, user = true },
+    platform = { platform = true, is_local = true },
 }
+
+--- The deployment's own model, when it is self-hosted (Ollama). nil, reason otherwise.
+function Providers.platform_cfg()
+    local Llm = require("lib.agent.llm")
+    local d = Llm.default
+    if not d or d.provider ~= "ollama" then
+        return nil, "the platform model is not self-hosted here (only a self-hosted Ollama can be shared)"
+    end
+    if not Llm.configured(d) then return nil, "no platform model is configured (OLLAMA_URL)" end
+    return { provider = d.provider, label = "Platform model", model = d.model, key = d.key, url = d.url }
+end
 
 local function null(v) return v == nil or v == db.NULL end
 local function blank(v) return null(v) or v == "" end
@@ -118,7 +133,14 @@ function Providers.save(ns, actor, b, existing)
     local ptype = b.provider_type or (existing and existing.provider_type)
     local spec = Providers.TYPES[ptype or ""]
     if not spec then errors.provider_type = "one of anthropic, openai, gemini, azure_openai, mistral, "
-        .. "openai_compatible, ollama, jobshout" end
+        .. "openai_compatible, ollama, jobshout, platform" end
+    if spec and spec.platform then
+        local ok, why = Providers.platform_cfg()
+        if not ok then errors.provider_type = why end
+        if b.base_url ~= nil and b.base_url ~= "" and b.base_url ~= cjson.null then
+            errors.base_url = "the platform model has no URL to set"
+        end
+    end
     if not existing or b.name ~= nil then
         if type(b.name) ~= "string" or b.name == "" or #b.name > 120 then errors.name = "required, up to 120 characters"
         else row.name = b.name end
@@ -187,6 +209,12 @@ end
 --- Llm.chat config for a provider row (nil, err for jobshout or a bad URL).
 function Providers.cfg(row, model)
     local spec = Providers.TYPES[row.provider_type]
+    if spec and spec.platform then
+        local cfg, err = Providers.platform_cfg()
+        if not cfg then return nil, err end
+        if not blank(model) then cfg.model = model elseif not blank(row.default_model) then cfg.model = row.default_model end
+        return cfg
+    end
     if not spec or not spec.adapter then return nil, row.provider_type .. " is not a model provider" end
     local url = (not blank(row.base_url) and row.base_url or spec.url or ""):gsub("/+$", "")
     local ok, err = Providers.url_ok(url)

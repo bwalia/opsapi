@@ -111,6 +111,7 @@ function W.setup(ns, user_uuid, settings)
         templates = ensure_templates(ns, user_uuid),
         holidays = ensure_holidays(ns, settings.jurisdiction or "england-and-wales"),
     }
+    require("property_deals.playbook").ensure(ns)
     db.update("property_deals_workspaces", {
         setup_at = db.raw("NOW()"), setup_by_user_uuid = user_uuid, updated_at = db.raw("NOW()"),
     }, { namespace_id = ns })

@@ -1,6 +1,6 @@
 'use client';
 
-/** Property Deals — Settings (SPEC §3.8 #9): templates, SLA & urgency, AI, connectors, mailboxes, my notifications. */
+/** Property Deals — Settings (SPEC §3.8 #9): playbook, templates, SLA & urgency, AI, connectors, mailboxes, my notifications. */
 import React, { useState } from 'react';
 import { Settings } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -10,9 +10,10 @@ import { useIsNamespaceOwner } from '@/contexts/NamespaceContext';
 import TemplateEditor from '@/components/property-deals/settings/TemplateEditor';
 import PluginSettings from '@/components/property-deals/settings/PluginSettings';
 import AiSettings from '@/components/property-deals/settings/AiSettings';
+import PlaybookEditor from '@/components/property-deals/settings/PlaybookEditor';
 import { DataConnectors, Mailboxes, MyNotifications } from '@/components/property-deals/settings/Connections';
 
-type Tab = 'templates' | 'rules' | 'ai' | 'data' | 'mail' | 'me';
+type Tab = 'playbook' | 'templates' | 'rules' | 'ai' | 'data' | 'mail' | 'me';
 
 export default function SettingsPage() {
   return (
@@ -37,6 +38,7 @@ function SettingsBody() {
           tabs={[
             ...(can('settings', 'read')
               ? ([
+                  { key: 'playbook', label: 'Playbook (AI)' },
                   { key: 'templates', label: 'Workflow templates' },
                   { key: 'rules', label: 'SLA, urgency & more' },
                   { key: 'ai', label: 'AI & JobShout' },
@@ -48,6 +50,7 @@ function SettingsBody() {
           ]}
         />
       </div>
+      {tab === 'playbook' && <PlaybookEditor canEdit={owner || can('settings', 'manage')} />}
       {tab === 'templates' && <TemplateEditor canEdit={canEdit} />}
       {tab === 'rules' && <PluginSettings canEdit={owner || can('settings', 'manage')} />}
       {tab === 'ai' && <AiSettings canEditProviders={owner || can('settings', 'manage')} canEditPlugin={canEdit} />}

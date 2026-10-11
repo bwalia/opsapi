@@ -2598,6 +2598,19 @@ local _migrations = {
     ['zzns2_namespace_business_type'] = function()
         db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS business_type VARCHAR(50)")
     end,
+    -- A workspace may opt in to the deployment's own (self-hosted) model as an AI provider.
+    ['zzai2_platform_model_provider'] = function()
+        db.query([[
+            DO $$ BEGIN
+                IF to_regclass('namespace_ai_providers') IS NOT NULL THEN
+                    ALTER TABLE namespace_ai_providers DROP CONSTRAINT IF EXISTS namespace_ai_providers_provider_type_check;
+                    ALTER TABLE namespace_ai_providers ADD CONSTRAINT namespace_ai_providers_provider_type_check
+                        CHECK (provider_type IN ('anthropic', 'openai', 'gemini', 'azure_openai', 'mistral',
+                            'openai_compatible', 'ollama', 'jobshout', 'platform'));
+                END IF;
+            END $$
+        ]])
+    end,
     -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
     ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
     -- Form builder: tables, then the RBAC module + menu (migrations/forms.lua)

@@ -116,6 +116,14 @@ export interface ChOfficer {
   address?: string;
   born?: string;
 }
+export interface PlaybookSection {
+  uuid: string;
+  key: string;
+  title: string;
+  body: string;
+  position: number;
+  updated_at?: string | null;
+}
 export interface DueList {
   days: number;
   everyone: boolean;
@@ -289,6 +297,9 @@ export const pdService = {
   hotLeads: (mine = false) => get<HotLead[]>('/hot-leads', { mine: mine ? 'true' : undefined }),
   chOfficers: (q: string) => get<ChOfficer[]>('/companies-house/officers', { q }),
   runSignals: () => send<Record<string, unknown>>('post', '/signals/run'),
+  playbooks: () => get<PlaybookSection[]>('/playbooks'),
+  savePlaybook: (key: string, body: { title?: string; body?: string; position?: number }) =>
+    send<PlaybookSection>('put', `/playbooks/${encodeURIComponent(key)}`, body),
   followUp: (leadUuid: string, body: { channel?: 'email' | 'whatsapp' | 'sms'; signal_uuid?: string; note?: string }) =>
     send<{ task_uuid: string; run_uuid?: string; status: string }>('post', `/leads/${leadUuid}/follow-up`, body),
   due: (days = 7, mine = false) => get<DueList>('/due', { days, mine: mine ? 'true' : undefined }),

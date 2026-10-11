@@ -430,6 +430,23 @@ return function(app)
         body = OBJ({ channel = ENUM({ "email", "whatsapp", "sms" }), signal_uuid = UUID("News item to open with"),
             note = S("A steer for the AI, e.g. 'mention the Leeds HMO'") }),
         response = OBJ({ task_uuid = S(), run_uuid = UUID(), status = S() }) })
+    local Playbook = schema("PlaybookSection", OBJ({ uuid = UUID(), key = S(), title = S(), body = S("Markdown"),
+        position = INT(), updated_by_user_uuid = S(), updated_at = DT() }))
+    sdk.doc(app, "GET /playbooks", { summary = "The workspace playbook (how we operate)", permission = "property_deals_deals.read",
+        response = ARR(Playbook), description = "Seeded from a default UK property playbook the first time; the PA and "
+            .. "the follow-up agent follow it." })
+    sdk.doc(app, "PUT /playbooks/:key", { summary = "Create or edit a playbook section", permission = "property_deals_settings.manage",
+        path = { key = S("lowercase, digits, _") }, status = 200, response = Playbook, errors = E422,
+        body = OBJ({ title = S(), body = S("Markdown, max 20000"), position = INT() }) })
+    sdk.doc(app, "DELETE /playbooks/:key", { summary = "Delete a playbook section", permission = "property_deals_settings.manage",
+        path = { key = S() }, status = 200, response = OBJ({ deleted = BOOL() }), errors = E404 })
+    sdk.doc(app, "GET /pa/briefing", { summary = "The PA's briefing: my day + the playbook in one call",
+        permission = "property_deals_tasks.read",
+        response = OBJ({ me = OBJ({ name = S(), is_manager = BOOL() }), today = DATE(),
+            counts = OBJ({ open = INT(), overdue = INT(), due_today = INT() }), hot_leads = ARR(HotLead),
+            my_tasks = ARR(ANY("Task: task_uuid, title, pd_status, due_at, overdue, urgency_score, deal/lead")),
+            approvals_waiting = ARR(ANY("uuid, title, action, rule")), deals_at_risk = ARR(ANY("uuid, name, money_at_risk")),
+            fresh_news = ARR(ANY("lead_uuid, lead_name, title, occurred_at")), playbook = S("Markdown") }) })
     sdk.doc(app, "POST /signals/run", { summary = "Run the Companies House watch now", permission = "property_deals_settings.manage",
         status = 200, response = SignalRun })
     sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
