@@ -458,6 +458,8 @@ safe_load_routes("routes.employees")
 -- AI assistant (/api/chat/agent*): CORE, so the page assistant works in every
 -- deployment, not only those with chat. Table: chat_agent_runs (core migration).
 safe_load_routes("routes.chat-agent")
+-- Voice for the assistant (speech-to-text / text-to-speech on our own voice server; off until VOICE_URL).
+safe_load_routes("routes.voice")
 -- AI usage reports (ai_usage, metered by lib/agent/llm on every model call): CORE.
 safe_load_routes("routes.ai-usage")
 -- Namespace template library ({{slot}} templates for CMS pages + domain sync).

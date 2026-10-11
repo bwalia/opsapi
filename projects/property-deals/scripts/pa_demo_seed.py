@@ -42,7 +42,7 @@ soon = lambda h: (datetime.now(timezone.utc) + timedelta(hours=h)).strftime("%Y-
 LEADS = [
     {"first_name": "Sarah", "last_name": "Lane", "email": "sarah.lane.demo@example.invalid", "phone": "07700 900456",
      "company_name": "Lane Property Holdings Ltd (demo)", "kind": "buyer_investor",
-     "news": [("company_formed", "Set up Lane Property Holdings Ltd last week (demo)"),
+     "news": [("news", "Set up Lane Property Holdings Ltd last week (demo)"),
               ("social_post", "(demo) Posted on LinkedIn: 'Just completed on our third HMO in Leeds — looking for the next one!'")]},
     {"first_name": "Tom", "last_name": "Rule", "email": "tom.rule.demo@example.invalid", "phone": "07700 900789",
      "company_name": None, "kind": "seller", "situation": "probate", "consent": "consent",

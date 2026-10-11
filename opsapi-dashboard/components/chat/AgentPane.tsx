@@ -10,15 +10,21 @@
  * Two homes: the chat page (no `path` — the all-round assistant) and the page
  * assistant panel on every dashboard page (`path` = the page; the server picks
  * that page's guide, tools and its own separate history).
+ *
+ * Voice (operators and QA testers): an animated face, a mic (speech-to-text on our
+ * own voice server) and "speak replies" (our text-to-speech, else a voice on this
+ * device). The typed transcript stays the record.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Loader2, Check, AlertCircle, X, Trash2 } from 'lucide-react';
+import { Sparkles, Send, Loader2, Check, AlertCircle, X, Trash2, Mic, Square, Volume2, VolumeX } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import { chatService, type AgentTurn, type AgentAction, type AgentScope } from '@/services/chat.service';
 import { onChatEvent } from '@/store/chat-realtime.store';
+import { useVoice } from '@/hooks/useVoice';
+import AvatarFace, { type FaceMood } from './AvatarFace';
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
 // styling that sits on the neutral assistant bubble.
@@ -105,6 +111,11 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
   const watching = useRef<string | null>(null);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
+  const voice = useVoice();
+  const [speakReplies, setSpeakReplies] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.localStorage.getItem('assistant-speak-replies') === '1');
+  // How many assistant replies we've already heard (or that were there when the pane opened).
+  const spokenRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -142,6 +153,25 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, thinking, pending]);
+
+  // Speak each new reply when "speak replies" is on (never the history already on screen).
+  const { speak } = voice;
+  useEffect(() => {
+    if (!loaded || thinking) return;
+    const replies = turns.filter((t) => t.role === 'assistant');
+    if (spokenRef.current === null) { spokenRef.current = replies.length; return; }
+    if (replies.length > spokenRef.current) {
+      spokenRef.current = replies.length;
+      if (speakReplies) void speak(replies[replies.length - 1].content);
+    }
+  }, [turns, thinking, loaded, speakReplies, speak]);
+
+  const toggleSpeak = () => {
+    const next = !speakReplies;
+    setSpeakReplies(next);
+    window.localStorage.setItem('assistant-speak-replies', next ? '1' : '0');
+    if (!next) voice.stopSpeaking();
+  };
 
   const newChat = async () => {
     if (thinking) return;
@@ -218,6 +248,27 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     }
   };
 
+  const mic = async () => {
+    if (voice.state === 'listening') {
+      try {
+        const text = await voice.finish();
+        if (text) void send(text);
+        else toast("Didn't catch that — try again", { icon: '🎙️' });
+      } catch {
+        toast.error('Could not turn that into text');
+      }
+      return;
+    }
+    try {
+      await voice.listen();
+    } catch {
+      toast.error('Microphone not available — allow it in the browser');
+    }
+  };
+
+  const mood: FaceMood = voice.state === 'listening' || voice.state === 'transcribing' || voice.state === 'speaking'
+    ? voice.state : thinking ? 'thinking' : 'idle';
+
   const AgentAvatar = ({ size = 'md' }: { size?: 'sm' | 'md' }) => (
     <span
       className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-700 text-white ${
@@ -233,7 +284,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     // letting the list scroll, pushing the composer off-screen.
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-secondary-200 px-4 py-2.5">
-        <AgentAvatar />
+        <AvatarFace mood={mood} level={voice.level} size={44} label={pageTitle || 'Assistant'} />
         <div className="min-w-0">
           <h1 className="truncate text-sm font-bold text-secondary-900">
             AI Assistant{pageTitle ? ` · ${pageTitle}` : ''}
@@ -243,6 +294,16 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
           </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleSpeak}
+            aria-pressed={speakReplies}
+            aria-label={speakReplies ? 'Stop speaking replies' : 'Speak replies'}
+            title={speakReplies ? 'Replies are read aloud' : 'Read replies aloud'}
+            className={`flex h-8 w-8 items-center justify-center rounded-md transition hover:bg-secondary-100 ${speakReplies ? 'text-primary-600' : 'text-secondary-500'}`}
+          >
+            {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+          </button>
           {turns.length > 0 && (
             <button
               type="button"
@@ -315,6 +376,15 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
                       <MarkdownMessage text={t.content} />
                     )}
                   </div>
+                  {!mine && (
+                    <button
+                      type="button"
+                      onClick={() => (voice.state === 'speaking' ? voice.stopSpeaking() : void voice.speak(t.content))}
+                      className="mt-0.5 self-start text-[11px] text-secondary-400 transition hover:text-primary-600"
+                    >
+                      {voice.state === 'speaking' ? 'Stop' : 'Read aloud'}
+                    </button>
+                  )}
                   {acted.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {acted.map((a, ai) => (
@@ -398,6 +468,20 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
             style={{ outline: 'none', boxShadow: 'none' }}
             className="max-h-40 min-h-6 flex-1 resize-none bg-transparent py-1 text-sm text-secondary-900 placeholder:text-secondary-400 disabled:opacity-60"
           />
+          {voice.status?.stt && (
+            <button
+              type="button"
+              onClick={mic}
+              disabled={thinking || voice.state === 'transcribing'}
+              aria-label={voice.state === 'listening' ? 'Stop and send what I said' : 'Speak to the assistant'}
+              title={voice.state === 'listening' ? 'Stop and send' : 'Speak'}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition disabled:opacity-50 ${
+                voice.state === 'listening' ? 'bg-error-600 text-white hover:bg-error-700' : 'text-secondary-500 hover:bg-secondary-100 hover:text-primary-600'
+              }`}
+            >
+              {voice.state === 'transcribing' ? <Loader2 className="h-4 w-4 animate-spin" /> : voice.state === 'listening' ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => send(draft)}
@@ -410,6 +494,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
         </div>
         <p className="mt-1 px-1 text-[11px] text-secondary-400">
           The assistant can create and change data in your workspace — review what it does.
+          {voice.state === 'listening' && ' · Listening… press ■ to send.'}
         </p>
       </div>
     </section>
