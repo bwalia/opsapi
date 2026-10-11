@@ -12,7 +12,7 @@
                                       -> { text }
       POST /api/v2/voice/speak        { text, voice? } (max 2000 chars) -> audio/mpeg
 
-    Env: VOICE_URL (base, e.g. http://speaches:8000), VOICE_API_KEY (optional),
+    Env: VOICE_URL or PA_STT_URL (base, e.g. http://speaches:8000; PA_STT_URL wins), VOICE_API_KEY (optional),
     VOICE_STT_MODEL (default Systran/faster-whisper-small), VOICE_TTS_MODEL
     (default speaches-ai/Kokoro-82M-v1.0-ONNX), VOICE_TTS_VOICE (default bf_emma,
     a British voice), VOICE_LANGUAGE (default en). VOICE_URL is operator config,
@@ -36,7 +36,8 @@ end
 -- VOICE_URL is deployment config set by operators (Helm values / env), not user input, so it may point at a
 -- private address (the voice server on the LAN) without opening OPSAPI_AI_ALLOW_PRIVATE for user-entered URLs.
 local function base()
-    local url = env("VOICE_URL")
+    -- PA_STT_URL (Property PA naming, the private UK GPU's speech server) wins over VOICE_URL.
+    local url = env("PA_STT_URL") or env("VOICE_URL")
     if not url or not url:match("^https?://[%w%.%-]+") then return nil end
     return (url:gsub("/+$", ""))
 end

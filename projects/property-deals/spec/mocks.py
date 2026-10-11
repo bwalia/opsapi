@@ -32,6 +32,8 @@ STATE = {
     "js_runs": {},         # run_id -> {status, execution_id, output}
     "js_approvals": {},    # approval_id -> {...}
     "js_launches": [],
+    "js_task_runs": [],    # POST /tasks/{id}/run bodies (Property PA turns)
+    "pa_answer": None,     # the next Property PA run's output (set via /_ctl)
     "s3": {},              # "/bucket/key" -> bytes
     "alerts": [],          # staff alerts: ntfy / Telegram / SMS gateway
 }
@@ -269,10 +271,13 @@ class Http(BaseHTTPRequestHandler):
             if p == "/_alerts":
                 return self.send(200, STATE["alerts"])
             if p == "/_js":
-                return self.send(200, {"launches": STATE["js_launches"], "approvals": STATE["js_approvals"],
+                return self.send(200, {"launches": STATE["js_launches"], "task_runs": STATE["js_task_runs"],
+                                       "approvals": STATE["js_approvals"],
                                        "runs": STATE["js_runs"]})
             if p.startswith("/js/api/v1/"):
                 return self.jobshout("GET", p[len("/js/api/v1"):], {})
+            if p.startswith("/ghl/contacts/"):
+                return self.ghl(p)
             if p.startswith("/gmail/gmail/v1/users/me/messages"):
                 return self.gmail(p)
             if p.startswith("/m365/v1.0/users/"):
@@ -301,12 +306,12 @@ class Http(BaseHTTPRequestHandler):
             if p == "/down/v1/chat/completions":
                 return self.send(503, {"error": {"message": "overloaded"}})
             if p == "/_ctl":
-                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down",)})
+                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down", "pa_answer")})
                 if b.get("reset_log"):
                     STATE["log"] = []
                 if b.get("reset_all"):
                     STATE.update(log=[], smtp=[], mailbox=[], jobshout_down=False, js_runs={}, js_approvals={},
-                                 js_launches=[], s3={}, alerts=[])
+                                 js_launches=[], js_task_runs=[], pa_answer=None, s3={}, alerts=[])
                 if b.get("reset_alerts"):
                     STATE["alerts"] = []
                 if b.get("decide_external"):
@@ -464,8 +469,15 @@ class Http(BaseHTTPRequestHandler):
             if b.get("password") != "js-pass":
                 return self.send(401, {"error": "invalid credentials"})
             return self.send(200, {"access_token": "js-token", "refresh_token": "r"})
-        if self.headers.get("Authorization") != "Bearer js-token":
+        # a signed-in service user, or an org API key (jsk_)
+        if self.headers.get("Authorization") not in ("Bearer js-token", "Bearer jsk_test_key"):
             return self.send(401, {"error": "unauthorized"})
+        m = re.match(r"^/tasks/([0-9a-f-]+)/run$", path)
+        if m and method == "POST":
+            STATE["js_task_runs"].append(dict(b, task_id=m.group(1)))
+            run_id = str(uuid.uuid4())
+            STATE["js_runs"][run_id] = self.pa_run(run_id, m.group(1), b)
+            return self.send(202, {"id": run_id, "status": "queued", "task_id": m.group(1)})
         if path == "/agents":
             return self.send(200, [{"id": JS_AGENT, "name": "Legal chaser (JobShout)", "description": "chases"}])
         if path == "/tasks/launch" and method == "POST":
@@ -473,6 +485,10 @@ class Http(BaseHTTPRequestHandler):
                 return self.send(503, {"error": "maintenance"})
             run_id, exec_id, appr = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
             STATE["js_launches"].append(b)
+            if b.get("context"):  # a Property PA run: no approval, the answer comes from STATE["pa_answer"]
+                task_id = str(uuid.uuid4())
+                STATE["js_runs"][run_id] = self.pa_run(run_id, task_id, b)
+                return self.send(202, {"kind": "run", "run_id": run_id, "task": {"id": task_id}})
             STATE["js_runs"][run_id] = {"id": run_id, "task_id": str(uuid.uuid4()), "agent_id": b.get("agent_id"),
                                         "status": "running", "execution_id": exec_id, "output": None,
                                         "total_tokens": 900, "cost_usd": 0.012, "latency_ms": 1500}
@@ -506,6 +522,27 @@ class Http(BaseHTTPRequestHandler):
                      decided_at=now_iso())
             return self.send(200, a)
         return self.send(404, {"error": "no route " + path})
+
+    def pa_run(self, run_id, task_id, b):
+        """A Property PA run: completes on the first poll with the answer the test set."""
+        return {"id": run_id, "task_id": task_id, "agent_id": b.get("agent_id"), "status": "completed",
+                "execution_id": str(uuid.uuid4()), "output": STATE["pa_answer"], "error_message": None,
+                "total_tokens": 1200, "cost_usd": 0, "latency_ms": 2400, "context": b.get("context"),
+                "skill_slugs": b.get("skill_slugs"), "model_provider": "openai_compatible",
+                "model_name": "qwen3.8:latest", "prompt_version": "seller-pa@1.1.0"}
+
+    # GoHighLevel (LeadConnector v2) ------------------------------------------
+    def ghl(self, p):
+        if self.headers.get("Authorization") != "Bearer ghl-token" or self.headers.get("Version") != "2021-07-28":
+            return self.send(401, {"message": "Invalid JWT"})
+        if "locationId=loc-1" not in p:
+            return self.send(422, {"message": "location not found"})
+        return self.send(200, {"contacts": [
+            {"id": "ghl-c-1", "firstName": "Michael", "lastName": "Grant", "email": "Michael.Grant@example.invalid",
+             "phone": "+447700900111"},
+            {"id": "ghl-c-2", "firstName": "Nadia", "lastName": "Khan", "email": "nadia.khan@example.invalid",
+             "phone": "+447700900222"},
+        ], "meta": {"total": 2, "startAfterId": None}})
 
     # Gmail ------------------------------------------------------------------
     def gmail(self, p):

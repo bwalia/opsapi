@@ -14,7 +14,7 @@
                                                         options.api_version)
       openai_compatible  openai                         required: LM Studio, vLLM, llama.cpp server, LocalAI, …
       ollama             openai (Ollama's /v1)          http://localhost:11434/v1
-      jobshout           —                              required (JobShout server; username + password)
+      jobshout           —                              required (JobShout server; username + password, or a jsk_ API key)
       platform           the deployment's own model     — (AI_PROVIDER / OLLAMA_URL env: the self-hosted model the
                                                           chat assistant uses). Opt-in per workspace; only offered
                                                           when that model is self-hosted (Ollama), for GDPR.

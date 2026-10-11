@@ -18,10 +18,10 @@ trap cleanup EXIT
 mkdir -p "$W/src"
 # rsync where available, else tar (e.g. inside a colima VM).
 if command -v rsync >/dev/null; then
-  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals) | grep -v '^lapis/logs/' \
+  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals projects/property-pa) | grep -v '^lapis/logs/' \
     | rsync -a --files-from=- "$ROOT/" "$W/src/"
 else
-  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals | grep -v '^lapis/logs/' \
+  (cd "$ROOT" && git ls-files -co --exclude-standard lapis projects/property-deals projects/property-pa | grep -v '^lapis/logs/' \
     | tar -cf - -T -) | tar -xf - -C "$W/src"
 fi
 mkdir -p "$W/src/lapis/logs" "$W/src/projects"
@@ -48,6 +48,7 @@ docker run -d --name pd-api-$ID --network "$NET" -p 127.0.0.1::80 -v "$W/src/lap
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e OPSAPI_AI_ALLOW_PRIVATE=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e AI_FALLBACK_PROVIDER=none \
   -e VOICE_URL=http://pd-mock:8080/voice \
+  -e GHL_API_URL=http://pd-mock:8080/ghl -e OPSAPI_INTEGRATIONS_ALLOW_PRIVATE=true \
   -e MINIO_ENDPOINT=http://pd-mock:8080 -e MINIO_ACCESS_KEY=minio -e MINIO_SECRET_KEY=minio123 -e MINIO_BUCKET=pd-docs \
   -e REDIS_ENABLED=false lapis-lapis >/dev/null
 sleep 6
@@ -56,7 +57,7 @@ migrate() { docker exec -w /app pd-api-$ID lapis migrate > "$W/migrate-$1.log" 2
 migrate 1; migrate 2
 echo "ok    migrations ran twice"
 # Restored-database case: forget the plugin's tracking rows and run them all again.
-docker exec pd-pg-$ID psql -U postgres -d e2e -qc "DELETE FROM project_migrations WHERE project_code = 'property_deals'"
+docker exec pd-pg-$ID psql -U postgres -d e2e -qc "DELETE FROM project_migrations WHERE project_code IN ('property_deals', 'property_pa')"
 migrate 3
 echo "ok    plugin migrations re-ran from scratch (idempotent)"
 docker exec pd-api-$ID sh -c 'kill -HUP $(cat /app/logs/nginx.pid)'; sleep 3
@@ -75,9 +76,14 @@ MOCK_PORT=$(docker port pd-mock-$ID 8080/tcp | head -1 | sed 's/.*://')
 export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="docker exec -i pd-pg-$ID psql -U postgres -d e2e -tA -c"
 export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
 # ONLY=ai_test (etc.) runs one suite while iterating.
-SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test perf_test}
-( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
+# Suites not found here are looked up in the Property PA plugin's spec (projects/property-pa/spec).
+SUITES=${ONLY:-api_test scenario_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test pa_brain_test pa_week2_test pa_week3_test pa_week4_test perf_test}
+( for s in $SUITES; do f="$HERE/$s.py"; [ -f "$f" ] || f="$ROOT/projects/property-pa/spec/$s.py"
+    python3 -I "$f" || exit 1; done ) || {
   echo "--- server errors ---"
   docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
     | grep -A2 "\[property_deals\]" | grep -v -E "^\s+/|^--" | sed 's/.*\[property_deals\] //' | cut -c1-400 | sort -u | tail -10
+  # Unhandled errors (500s): the raw error the error handler tried to record.
+  docker exec pd-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \
+    | grep -o "'SYSTEM_500', '[^']*" | cut -c15-400 | sort -u | tail -5
   exit 1; }

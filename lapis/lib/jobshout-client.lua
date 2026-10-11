@@ -1,15 +1,18 @@
 --[[
     JobShout client (core): a workspace's JobShout link is a namespace_ai_providers
     row with provider_type = 'jobshout', base_url = the API root (…/api/v1),
-    username = a JobShout service user's email, secret = its password (sealed).
+    username = a JobShout service user's email, secret = its password (sealed);
+    or secret = an org API key ("jsk_…"; username is then just a label), used as the bearer as is.
 
-    JobShout has no API keys (gap map §6): we sign in, keep the 15-minute access
-    token in the shared cache for 13 minutes, and sign in again when it expires
-    or a call answers 401. Refresh tokens rotate, so we don't keep them.
+    With a password we sign in, keep the 15-minute access token in the shared
+    cache for 13 minutes, and sign in again when it expires or a call answers
+    401. Refresh tokens rotate, so we don't keep them.
 
       JobShout.ping(ns, row)                         sign in + list agents
       JobShout.agents(ns, row)                       GET /agents
       JobShout.launch(ns, row, { agent_id, project_id, values })   POST /tasks/launch (any 2xx)
+      JobShout.run_task(ns, row, task_id, { agent_id, prompt, context, skill_slugs, inputs })
+                                                     POST /tasks/{id}/run (202, a new run on the same task)
       JobShout.run(ns, row, run_id)                  GET /task-runs/{id}
       JobShout.approvals(ns, row, status)            GET /approvals?status=
       JobShout.decide(ns, row, approval_id, decision, reason)   POST /approvals/{id}/decide
@@ -58,6 +61,7 @@ local function token(ns, row, fresh)
     end
     local password = require("lib.ai-providers").secret(row)
     if not password then return nil, "JobShout password is not set" end
+    if password:sub(1, 4) == "jsk_" then return password end -- an org API key: no sign-in
     local data, err, status = request(row, "POST", "/auth/login", { email = row.username, password = password })
     if not data then return nil, err, status end
     local t = data.access_token or (type(data.tokens) == "table" and data.tokens.access_token)
@@ -92,6 +96,10 @@ end
 
 function JobShout.launch(ns, row, req)
     return call(ns, row, "POST", "/tasks/launch", req)
+end
+
+function JobShout.run_task(ns, row, task_id, req)
+    return call(ns, row, "POST", "/tasks/" .. ngx.escape_uri(task_id) .. "/run", req)
 end
 
 function JobShout.run(ns, row, run_id)
