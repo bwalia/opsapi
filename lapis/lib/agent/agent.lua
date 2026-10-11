@@ -104,7 +104,9 @@ end
 -- Bounds the tool-call loop so a confused model can't spin forever. Each
 -- iteration is one model round-trip (~seconds on the local model).
 local MAX_ITERATIONS = 8
-local REQUEST_TIMEOUT_MS = 120000
+-- One model answer may take a while on a shared self-hosted model: lib/agent/llm's default
+-- (AI_TIMEOUT_MS, 5 minutes). nil = that default.
+local REQUEST_TIMEOUT_MS = nil
 -- Same call failing this many times in one turn = stop and say so.
 local MAX_REPEATED_FAILURES = 2
 
@@ -129,6 +131,7 @@ end
 -- @param opts.tools    table   tool definitions (Ollama function schema)
 -- @param opts.execute  function(name, args) -> (result_table|nil, err_string|nil)
 -- @param opts.usage    table   who/what each model call is metered to (lib/agent/llm)
+-- @param opts.cfg      table?  model config to use instead of the server default (lib/ai-providers cfg)
 -- @return { reply=string, actions={ {name,args,result,error}, ... }, pending? } | nil, err
 function Agent.run(opts)
     local messages = {}
@@ -148,6 +151,7 @@ function Agent.run(opts)
     for _ = 1, MAX_ITERATIONS do
         local msg, err = Llm.chat(messages, opts.tools, {
             temperature = 0.2, max_tokens = 2048, timeout_ms = REQUEST_TIMEOUT_MS, usage = opts.usage,
+            cfg = opts.cfg,  -- the workspace's own choice of model for the assistant, when it set one
         })
         if not msg then
             return nil, err

@@ -307,11 +307,33 @@ return function(app)
         return turns
     end
 
+    -- The model the workspace chose for its assistant: an enabled workspace AI provider with
+    -- options.assistant = true (e.g. the platform model with a faster default_model). nil = server default.
+    local function assistant_model(namespace_id)
+        local okp, Providers = pcall(require, "lib.ai-providers")
+        if not okp or not namespace_id then return nil end
+        local okq, rows = pcall(Providers.list, namespace_id, true)
+        if not okq then return nil end
+        for _, row in ipairs(rows or {}) do
+            local opts = row.options
+            if type(opts) == "string" then
+                local okd, dec = pcall(cjson.decode, opts)
+                opts = okd and dec or {}
+            end
+            if type(opts) == "table" and opts.assistant == true then
+                local cfg = Providers.cfg(row)
+                if cfg then return cfg end
+            end
+        end
+        return nil
+    end
+
     -- Background worker (ngx.timer): runs the agent, stores the outcome, and
     -- pushes "agent:done" to the user's open tabs.
     local function run_in_background(premature, job)
         if premature then return end
         local ok, result, err = pcall(Agent.run, {
+            cfg = job.cfg,
             system = job.system,
             messages = job.conversation,
             tools = job.tools,
@@ -587,6 +609,7 @@ return function(app)
             -- after this response is sent, independent of the browser.
             local ok, terr = ngx.timer.at(0, run_in_background, {
                 run_uuid = run_uuid,
+                cfg = assistant_model(ns.id),
                 ctx = request_ctx(self, ns, user, scope, tool_names),
                 page_path = page_path,
                 tools = tools,
