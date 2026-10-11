@@ -29,7 +29,9 @@ projectCode: all
 extraEnv:
   # Voice for the assistant (lapis/routes/voice.lua): the self-hosted Speaches server
   # (faster-whisper + Kokoro) next to Ollama on the LAN. Audio never leaves our machines.
-  VOICE_URL: "http://192.168.1.177:8015"
+  # Server-to-server plain http on 8014; https://192.168.1.177:8015 (Caddy, self-signed) is for browsers
+  # (Speaches' own page needs https for the microphone).
+  VOICE_URL: "http://192.168.1.177:8014"
   VOICE_TTS_VOICE: "bf_emma"
 
 # Password-reset email link target (the Next.js dashboard, unchanged — the
