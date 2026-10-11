@@ -314,6 +314,14 @@ class Http(BaseHTTPRequestHandler):
                     a.update(status=b.get("status", "approved"), decided_by=str(uuid.uuid4()), decided_at=now_iso(),
                              reason=b.get("reason"))
                 return self.send(200, {"ok": True})
+            if p == "/voice/v1/audio/transcriptions":
+                raw = b.get("_raw", "")
+                ok = 'name="model"' in raw and 'filename="speech.' in raw and "FAKE-AUDIO" in raw
+                return self.send(200 if ok else 400, {"text": " What needs my attention today? "} if ok else {"error": "bad multipart"})
+            if p == "/voice/v1/audio/speech":
+                if not b.get("input") or b.get("response_format") != "mp3":
+                    return self.send(400, {"error": "bad request"})
+                return self.send(200, raw=b"ID3-FAKE-MP3:" + b["voice"].encode())
             if p.startswith("/ntfy/"):
                 STATE["alerts"].append({"channel": "ntfy", "to": p[len("/ntfy/"):], "title": self.headers.get("Title"),
                                         "priority": self.headers.get("Priority"), "auth": self.headers.get("Authorization"),

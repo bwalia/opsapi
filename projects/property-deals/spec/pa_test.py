@@ -6,9 +6,11 @@
 """
 import os
 import sys
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pdtest import API, P, USERS, call, check, expect, finish, workspace  # noqa: E402
+from pdtest import API, P, USERS, call, check, expect, finish, jwt, workspace  # noqa: E402
 
 
 def data(res, status, name):
@@ -73,5 +75,39 @@ check("non-members get no briefing", res[0] in (401, 403, 404), res)
 res = call("POST", API + "/api/v2/namespace/ai-providers", "owner_s", S, {"name": "Platform", "provider_type": "platform"})
 check("platform model refused when the deployment has none self-hosted (422 with why)",
       res[0] == 422 and "platform model" in str(res[1]).lower(), res)
+
+# --- Voice for the assistant (our own voice server; mock in the sandbox) -------------------------------------------
+def raw(method, path, body, ctype, user="operator_s"):
+    req = urllib.request.Request(API + path, data=body, method=method,
+                                 headers={"Authorization": "Bearer " + jwt(user), "Content-Type": ctype})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), dict(e.headers)
+
+
+st = data(call("GET", API + "/api/v2/voice/status", "operator_s", S), 200, "voice status")
+check("voice is on when VOICE_URL is set", st == {"stt": True, "tts": True, "voice": "bf_emma"}, st)
+code, body, _ = raw("POST", "/api/v2/voice/transcribe", b"FAKE-AUDIO-BYTES", "audio/webm;codecs=opus")
+check("speech → text (multipart to our voice server, trimmed)", code == 200
+      and '"What needs my attention today?"' in body.decode(), (code, body[:200]))
+code, body, _ = raw("POST", "/api/v2/voice/transcribe", b"x", "text/plain")
+check("non-audio refused (415)", code == 415, code)
+code, body, _ = raw("POST", "/api/v2/voice/transcribe", b"", "audio/webm")
+check("empty audio refused (400)", code == 400, code)
+code, body, hdrs = raw("POST", "/api/v2/voice/speak", b'{"text": "Hello Sarah", "voice": "bm_george"}', "application/json")
+check("text → mp3 in the chosen voice", code == 200 and body == b"ID3-FAKE-MP3:bm_george"
+      and hdrs.get("Content-Type", "").startswith("audio/mpeg"), (code, body[:60], hdrs.get("Content-Type")))
+code, body, _ = raw("POST", "/api/v2/voice/speak", b'{"text": "   "}', "application/json")
+check("nothing to say refused (400)", code == 400, code)
+req = urllib.request.Request(API + "/api/v2/voice/speak", data=b'{"text":"hi"}', method="POST",
+                             headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=30)
+    anon = 200
+except urllib.error.HTTPError as e:
+    anon = e.code
+check("voice needs a signed-in user (401)", anon == 401, anon)
 
 sys.exit(finish())
