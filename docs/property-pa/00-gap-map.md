@@ -19,15 +19,24 @@ The PA can be built mostly on what OpsAPI already has (the `property_deals` plug
 - An editable playbook.
 - pgvector (already used by the shop module).
 
-**Decision for you: where model routing lives.** The prompt says every model call goes through **JobShout's model routing**. JobShout (origin/master `2788297`) has blocking gaps for this (§5):
-- One server-wide OpenAI-compatible slot and only a single fallback hop.
-- Per-org provider settings are stored but **never used** for routing.
-- A run paused for approval reports `completed` with **empty output**, and post-approval output never reaches the task run.
-- Approval decisions time out at 30 s; approvals fail on the native tool-calling path.
-- No API keys or service accounts, no outbound webhooks, no speech-to-text.
-- Approvals and knowledge can be fetched across tenants by id.
+**Decision (Balinder, 11 Oct): JobShout is the agent platform; OpsAPI is the system of record.**
+- **JobShout** runs every PA agent: role prompts, tool allowlists, approvals, the run log, knowledge
+  retrieval (pgvector) and **all model routing** to the private UK GPU (OpenAI-compatible; swapped by config).
+  No "army of agents" is built inside OpsAPI.
+- **OpsAPI** owns the data (people, properties, opportunities, deals, interactions, tasks, knowledge records),
+  the **tasks, boards and teams** where humans and AI agents work together, the PA screens, speech-to-text
+  plumbing, and the deterministic parts (priority engine, fact/inference store, audit). JobShout agents
+  read and write OpsAPI only through OpsAPI's API, as a service account, with the workspace's permissions.
+- OpsAPI's own small AI layer (`lib/ai-providers`, page assistant) stays as the fallback/UX layer; new PA
+  intelligence goes to JobShout.
 
-**Recommendation: OpsAPI's `lib/ai-providers` is the single routing layer for the PoC.** It is already per-workspace, has an ordered fallback, a local-only flag, metering per call (`ai_usage`), and the model is swappable by config. The private UK GPU endpoint is added as an `openai_compatible` provider. JobShout stays an optional agent runner for later, once its gaps are fixed. Alternatively, fix JobShout first; that is about a week (§5), before any PA work.
+**Week 0 therefore starts with making JobShout fit for this** (it doesn't fully work today; §5). We own it, so fix it:
+1. **Approvals:** a run paused for approval must report `awaiting_approval`, not `completed`; after the decision the task run gets the real output and status; decide resumes asynchronously (no 30 s cut-off); the native tool-calling path pauses instead of failing.
+2. **Model routing per org:** use the stored per-org provider configs (`llm_provider_configs`), so an org can point at its private OpenAI-compatible endpoint with an ordered fallback; env stays the default.
+3. **Tenant isolation:** org checks on approval get/decide and on knowledge CRUD.
+4. **Service access:** org API keys (or service accounts) so OpsAPI can call JobShout without a user login; an outbound webhook (or SSE) for `run.completed` / `approval.requested` / `approval.decided`.
+5. **Role-aware runs:** per-run role context (skills per role, plus the user's role passed through) so one Seller PA / Manager PA agent pair serves each workspace.
+6. **Knowledge:** org-scoped knowledge with versions and an approval status (or keep versioned knowledge in OpsAPI and push approved rules to JobShout's index; to decide in Week 1).
 
 ## 2. Entities (build prompt §3) → OpsAPI tables
 
@@ -120,7 +129,7 @@ On int: `VOICE_URL=http://192.168.1.177:8014`, the LAN Mac. For the PRD: point `
   - OpsAPI already calls it with a service user (see `docs/property-deals/jobshout.md`).
 - **Speech-to-text:** none.
 
-If JobShout must be the routing layer, fix first: per-org routing to a configurable OpenAI-compatible URL; correct run status after approvals; async decide; an org check on approvals and knowledge; API keys. Estimate about 1 week.
+JobShout is the routing and agent layer (decided). Fix list and order: §1 "Week 0". Estimate about 1 week.
 
 ## 6. Risks and unknowns
 
@@ -128,7 +137,7 @@ If JobShout must be the routing layer, fix first: per-org routing to a configura
 2. **Missing client documents** (PRD, How It Works, Supplier Response): fixture details, the exact P01–P12 wording and the PoC checklist are unconfirmed.
 3. **Extraction accuracy** on voice notes (P03/P09): needs the private model's JSON-schema quality; the P01–P12 regression suite guards model changes.
 4. **Groundedness (P02/P05):** enforce with deterministic fact assembly and a validator, not prompt wording alone.
-5. **The JobShout decision** (§1) changes week 0–1 scope.
+5. **JobShout fixes** (§1) come first in week 0; the local checkout has someone's unsaved work on `feat/launch-design`, so fixes are done on a separate branch from `origin/master`.
 6. **GHL and Outlook:** no live accounts yet; build against mocks, then need test tenants and Graph `Mail.ReadWrite` consent.
 7. **Data protection:** real client data only on the private GPU; fake data in development (already the rule in OpsAPI's AI layer: workspace providers only, local-only flag).
 8. **Scope creep:** 11 new tables; keep the PoC to Seller Agent + Manager as the prompt says.
