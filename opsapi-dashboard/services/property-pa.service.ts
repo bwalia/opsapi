@@ -284,6 +284,73 @@ export interface PaRun {
   } | null;
 }
 
+export interface Handoff {
+  uuid: string;
+  question: string;
+  pa_recommendation?: string | null;
+  context?: Record<string, unknown> | null;
+  opportunity_uuid?: string | null;
+  opportunity_title?: string | null;
+  from_name?: string | null;
+  reply?: string | null;
+  status?: string;
+  created_at: string;
+}
+
+export interface RefItem {
+  opportunity_uuid?: string;
+  uuid?: string;
+  title: string;
+  text?: string;
+  ref?: string;
+  owner_name?: string | null;
+  days?: number;
+  score?: number;
+  why_now?: string | null;
+  action?: string;
+  due_at?: string;
+  name?: string;
+  money_at_risk?: number | string;
+}
+
+export interface ManagerToday {
+  handoffs: Handoff[];
+  unusual_negotiations: RefItem[];
+  relationship_risks: RefItem[];
+  overdue_actions: RefItem[];
+  deal_risks: RefItem[];
+  top_opportunities: RefItem[];
+  open_opportunities: number;
+  handled: number;
+  summary: string;
+}
+
+export interface Metrics {
+  days: number;
+  capture: { captures: number; proposals: number; waiting: number; confirmed: number; corrected: number; rejected: number;
+    accepted_as_proposed: number | null; correction_rate: number | null; rejection_rate: number | null; median_seconds_to_confirm: number | null };
+  answers: { runs: number; succeeded: number; failed: number; grounded: number; withheld: number; grounded_rate: number | null;
+    p50_seconds: number | null; p90_seconds: number | null };
+  follow_through: { next_actions_open: number; next_actions_overdue: number; next_actions_done: number; opportunities_gone_quiet: number };
+  handoffs: { total: number; waiting: number; median_seconds_to_reply: number | null };
+}
+
+export interface StatusCheck {
+  key: string;
+  ok: boolean;
+  text: string;
+  fix: string;
+  optional?: boolean;
+}
+
+export interface AuditRow extends Change {
+  target_table: string;
+  target_uuid: string;
+  source_interaction_uuid?: string | null;
+  confirmed_by_name?: string | null;
+  superseded: boolean;
+}
+
 type Env<T> = { data: T; meta?: { page?: number; per_page?: number; total?: number } };
 
 export const paService = {
@@ -337,6 +404,30 @@ export const paService = {
   },
   async run(id: string) {
     return (await apiClient.get<Env<PaRun>>(`${BASE}/ask/${id}`)).data.data;
+  },
+  async managerToday() {
+    return (await apiClient.get<Env<ManagerToday>>(`${BASE}/manager/today`)).data.data;
+  },
+  async metrics(days = 30) {
+    return (await apiClient.get<Env<Metrics>>(`${BASE}/metrics?days=${days}`)).data.data;
+  },
+  async status() {
+    return (await apiClient.get<Env<{ ready: boolean; checks: StatusCheck[]; limits: Record<string, number> }>>(`${BASE}/status`)).data.data;
+  },
+  async audit(params: { target_uuid?: string; per_page?: number } = {}) {
+    return (await apiClient.get<Env<AuditRow[]>>(`${BASE}/audit${buildQueryString(params)}`)).data.data;
+  },
+  async handoff(body: { to_user_uuid: string; question: string; opportunity_uuid?: string; pa_recommendation?: string; context?: Record<string, unknown> }) {
+    return (await apiClient.post<Env<Handoff>>(`${BASE}/handoffs`, body, JSON_HDR)).data.data;
+  },
+  async reply(id: string, reply: string, decision?: string) {
+    return (await apiClient.post<Env<Handoff>>(`${BASE}/handoffs/${id}/reply`, { reply, decision }, JSON_HDR)).data.data;
+  },
+  async importMail() {
+    return (await apiClient.post<Env<{ imported: number; considered: number }>>(`${BASE}/integrations/mail/import`, {}, JSON_HDR)).data.data;
+  },
+  async syncGhl() {
+    return (await apiClient.post<Env<{ created: number; updated: number; unchanged: number }>>(`${BASE}/integrations/ghl/sync`, {}, JSON_HDR)).data.data;
   },
   async startCapture(body: { text: string; channel?: 'voice' | 'note' | 'call'; opportunity_uuid?: string }) {
     return (

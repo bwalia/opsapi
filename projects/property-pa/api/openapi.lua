@@ -208,7 +208,8 @@ return function(app)
         response = schema("PrepareBrief", OBJ({ opportunity_uuid = UUID(), title = S(), person_name = S(),
             snapshot = ARR(Line), last_interaction = OBJ({ text = S(), at = DT(), channel = S(), ref = S() }),
             price = ARR(Line), decision_makers = ARR(Line), promises = ARR(Line), objections = ARR(Line),
-            unknowns = ARR(S()), questions = ARR(OBJ({ field = S(), question = S() })), triggers = ARR(S()),
+            manager_replies = ARR(Line), unknowns = ARR(S()), questions = ARR(OBJ({ field = S(), question = S() })),
+            triggers = ARR(S()),
             playbook = ARR(Rule), objective = S(), recommended_action = S(), why_now = ARR(Signal) })), errors = E404 })
     doc("GET /coach/:opportunity_id", { summary = "Coach: known vs assumed, questions before any figure, the rules (P06)",
         permission = "property_pa_records.read", path = { opportunity_id = UUID() }, query = { situation = S() },
@@ -219,6 +220,35 @@ return function(app)
             scope = ENUM({ "personal", "team", "company" }), domain = S(), rationale = S(), triggers = ARR(S()),
             approve = BOOL() }, { "statement" }), response = Knowledge,
         errors = { ["403"] = "Only managers approve company or team rules" } })
+    local Item = OBJ({ opportunity_uuid = UUID(), title = S(), owner_user_uuid = S(), text = S(), ref = S() })
+    doc("GET /manager/today", { summary = "Manager Today: exceptions only (scene 10, P08)", permission = "property_pa_handoffs.read",
+        description = "Managers only (property_pa_knowledge.manage).",
+        response = schema("ManagerToday", OBJ({ handoffs = ARR(OBJ({ uuid = UUID(), question = S(), pa_recommendation = S(),
+            context = OBJ({}), opportunity_uuid = UUID(), opportunity_title = S(), from_name = S(), created_at = DT(), ref = S() })),
+            unusual_negotiations = ARR(Item), relationship_risks = ARR(OBJ({ uuid = UUID(), title = S(), days = INT(),
+                temperature = S(), owner_name = S(), text = S(), ref = S() })), overdue_actions = ARR(OBJ({})),
+            deal_risks = ARR(OBJ({})), top_opportunities = ARR(OBJ({ opportunity_uuid = UUID(), title = S(), score = INT(),
+                why_now = S(), ref = S() })), open_opportunities = INT(), handled = INT(), summary = S() })),
+        errors = { ["403"] = "For managers" } })
+    doc("GET /metrics", { summary = "Is the PA working? Capture accuracy, groundedness, speed, follow-through",
+        permission = "property_pa_records.read", query = { days = INT("1-365, default 30") },
+        response = schema("Metrics", OBJ({ days = INT(), capture = OBJ({ captures = INT(), proposals = INT(), waiting = INT(),
+            confirmed = INT(), corrected = INT(), rejected = INT(), accepted_as_proposed = NUM(), correction_rate = NUM(),
+            rejection_rate = NUM(), median_seconds_to_confirm = INT() }), answers = OBJ({ runs = INT(), succeeded = INT(),
+            failed = INT(), grounded = INT(), withheld = INT(), grounded_rate = NUM(), p50_seconds = INT(), p90_seconds = INT() }),
+            follow_through = OBJ({ next_actions_open = INT(), next_actions_overdue = INT(), next_actions_done = INT(),
+                opportunities_gone_quiet = INT() }), handoffs = OBJ({ total = INT(), waiting = INT(),
+                median_seconds_to_reply = INT() }) })), errors = { ["403"] = "For managers" } })
+    doc("POST /integrations/mail/import", { summary = "Inbound email (Outlook / Gmail / IMAP) onto timelines, once each",
+        permission = "property_pa_records.create", response = OBJ({ imported = INT(), considered = INT() }) })
+    doc("POST /integrations/ghl/sync", { summary = "Pull GoHighLevel contacts (read only; also hourly)",
+        permission = "property_pa_knowledge.manage", response = OBJ({ created = INT(), updated = INT(), unchanged = INT(),
+            pages = INT() }), errors = { ["409"] = "GHL not set up", ["502"] = "GHL unreachable or refused" } })
+    doc("POST /runs/sweep", { summary = "Poll PA runs without a webhook; fail ones past the timeout",
+        permission = "property_pa_knowledge.manage", response = OBJ({ polled = INT(), finished = INT(), timed_out = INT() }) })
+    doc("GET /status", { summary = "Go-live checklist", permission = "property_pa_records.read",
+        response = OBJ({ ready = BOOL(), checks = ARR(OBJ({ key = S(), ok = BOOL(), text = S(), fix = S(), optional = BOOL() })),
+            limits = OBJ({ running_per_person = INT(), per_person_per_hour = INT(), run_timeout_minutes = INT() }) }) })
     doc("GET /briefing", { summary = "My day for the PA", permission = "property_pa_records.read", response = OBJ({}) })
     doc("GET /context/:opportunity_id", { summary = "Every fact the PA may use about an opportunity, each with a ref",
         permission = "property_pa_records.read", path = { opportunity_id = UUID() }, response = OBJ({}), errors = E404 })

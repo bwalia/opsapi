@@ -46,8 +46,21 @@ function B.get(ns, uuid, user_uuid)
         ns, uuid, B.PROVIDER, user_uuid)
 end
 
+-- Limits per person (hardening for real use): runs in flight, and runs per hour.
+B.MAX_RUNNING = 3
+B.MAX_PER_HOUR = 60
+B.TIMEOUT_MINUTES = 30
+
 --- req = { message, mode, role, opportunity_uuid?, interaction_uuid?, inputs? } @return run row
 function B.ask(ns, user_uuid, settings, req)
+    local load = U.one([[SELECT COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS hour
+        FROM property_deals_agent_runs WHERE namespace_id = ? AND provider = ? AND triggered_by_user_uuid = ?
+        AND created_at > NOW() - INTERVAL '1 hour']], ns, B.PROVIDER, user_uuid)
+    if load.running >= B.MAX_RUNNING then
+        U.fail(429, "Your PA is still working on " .. load.running .. " questions. Wait for one to finish.")
+    end
+    if load.hour >= B.MAX_PER_HOUR then U.fail(429, "That's " .. load.hour .. " questions this hour. Try again later.") end
     local role = req.role or "seller_agent"
     local agent_id = nz(role == "manager" and settings.jobshout_manager_agent_id or settings.jobshout_seller_agent_id)
     if not agent_id then U.fail(409, "The PA isn't connected: set the JobShout " .. (role == "manager" and "Manager" or "Seller")
@@ -196,6 +209,28 @@ function B.finish(ns, run, data)
         end
     end
     return U.one(B.SELECT .. " WHERE namespace_id = ? AND uuid = ?::uuid", ns, run.uuid)
+end
+
+--- Background sweep (jobs/pa_runs.lua): poll runs whose webhook hasn't arrived, and fail runs that never finish.
+-- @return { polled, finished, timed_out }
+function B.sweep(ns)
+    local out = { polled = 0, finished = 0, timed_out = 0 }
+    for _, r in ipairs(db.query(B.SELECT .. [[ WHERE namespace_id = ? AND provider = ? AND status = 'running'
+        AND started_at < NOW() - INTERVAL '1 minute' ORDER BY started_at LIMIT 50]], ns, B.PROVIDER)) do
+        local stale = U.one("SELECT (?::timestamptz < NOW() - make_interval(mins => ?)) AS s", r.started_at, B.TIMEOUT_MINUTES)
+        if stale and stale.s then
+            db.update("property_deals_agent_runs", { status = "failed", error = "The PA didn't answer within "
+                .. B.TIMEOUT_MINUTES .. " minutes", finished_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+                { namespace_id = ns, uuid = r.uuid, status = "running" })
+            out.timed_out = out.timed_out + 1
+        else
+            local ok, done = pcall(B.poll, ns, r)
+            out.polled = out.polled + 1
+            if ok and done and done.status ~= "running" then out.finished = out.finished + 1 end
+            if not ok then ngx.log(ngx.WARN, "[property_pa] sweep poll: ", tostring(done)) end
+        end
+    end
+    return out
 end
 
 --- Poll JobShout once for a running run. @return run row (finished or still running)

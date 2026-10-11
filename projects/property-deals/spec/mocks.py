@@ -276,6 +276,8 @@ class Http(BaseHTTPRequestHandler):
                                        "runs": STATE["js_runs"]})
             if p.startswith("/js/api/v1/"):
                 return self.jobshout("GET", p[len("/js/api/v1"):], {})
+            if p.startswith("/ghl/contacts/"):
+                return self.ghl(p)
             if p.startswith("/gmail/gmail/v1/users/me/messages"):
                 return self.gmail(p)
             if p.startswith("/m365/v1.0/users/"):
@@ -528,6 +530,19 @@ class Http(BaseHTTPRequestHandler):
                 "total_tokens": 1200, "cost_usd": 0, "latency_ms": 2400, "context": b.get("context"),
                 "skill_slugs": b.get("skill_slugs"), "model_provider": "openai_compatible",
                 "model_name": "qwen3.8:latest", "prompt_version": "seller-pa@1.1.0"}
+
+    # GoHighLevel (LeadConnector v2) ------------------------------------------
+    def ghl(self, p):
+        if self.headers.get("Authorization") != "Bearer ghl-token" or self.headers.get("Version") != "2021-07-28":
+            return self.send(401, {"message": "Invalid JWT"})
+        if "locationId=loc-1" not in p:
+            return self.send(422, {"message": "location not found"})
+        return self.send(200, {"contacts": [
+            {"id": "ghl-c-1", "firstName": "Michael", "lastName": "Grant", "email": "Michael.Grant@example.invalid",
+             "phone": "+447700900111"},
+            {"id": "ghl-c-2", "firstName": "Nadia", "lastName": "Khan", "email": "nadia.khan@example.invalid",
+             "phone": "+447700900222"},
+        ], "meta": {"total": 2, "startAfterId": None}})
 
     # Gmail ------------------------------------------------------------------
     def gmail(self, p):

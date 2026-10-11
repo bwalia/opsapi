@@ -15,6 +15,7 @@ import { ErrorNote, Spinner, dateText, dueText } from '@/components/property-dea
 import { usePdData } from '@/components/property-deals/usePd';
 import { valueText } from '@/components/property-pa/ConfirmSheet';
 import PaPanels, { type Panel } from '@/components/property-pa/PaPanels';
+import AskManager from '@/components/property-pa/AskManager';
 import { paService, type Change, type Fact, type Opportunity } from '@/services/property-pa.service';
 
 const FIELDS: { key: keyof Opportunity & string; label: string }[] = [
@@ -86,7 +87,12 @@ function OpportunityView() {
     <div className="space-y-6">
       <Link href="/dashboard/property-pa/opportunities" className="inline-flex items-center gap-1 text-sm text-secondary-500"><ArrowLeft className="h-4 w-4" /> Opportunities</Link>
       <PageHeader title={o.title} description={[o.person_name, o.property_address, o.property_postcode].filter(Boolean).join(' · ')}
-        actions={<Link href={`/dashboard/property-pa/capture?opportunity=${o.uuid}`}><Button leftIcon={<NotebookPen className="h-4 w-4" />}>Capture</Button></Link>} />
+        actions={
+          <>
+            <AskManager opportunity={o} />
+            <Link href={`/dashboard/property-pa/capture?opportunity=${o.uuid}`}><Button leftIcon={<NotebookPen className="h-4 w-4" />}>Capture</Button></Link>
+          </>
+        } />
       <ErrorNote error={error} />
 
       {waiting.size > 0 && (

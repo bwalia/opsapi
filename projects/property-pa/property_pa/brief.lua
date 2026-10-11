@@ -135,6 +135,16 @@ function Br.prepare(ns, id, user_uuid)
         pr[#pr + 1] = { text = e.title, at = e.at, ref = "pa_events:" .. e.uuid, label = "stated" }
     end
     b.promises = arr(pr)
+    -- Manager replies to handoffs about this opportunity (P08: the reply comes back into the next brief).
+    local mr = {}
+    for _, h in ipairs(db.query([[SELECT h.uuid, h.question, h.reply, h.replied_at,
+        COALESCE(NULLIF(u.first_name, ''), u.email) AS who FROM pa_handoffs h LEFT JOIN users u ON u.uuid = h.to_user_uuid
+        WHERE h.namespace_id = ? AND h.opportunity_uuid = ?::uuid AND h.status IN ('replied', 'closed')
+        AND h.replied_at > NOW() - INTERVAL '30 days' ORDER BY h.replied_at DESC LIMIT 5]], ns, o.uuid)) do
+        mr[#mr + 1] = { text = tostring(h.who) .. " replied to \"" .. h.question .. "\": " .. h.reply, at = h.replied_at,
+            ref = "pa_handoffs:" .. h.uuid, label = "stated" }
+    end
+    b.manager_replies = arr(mr)
     -- Likely objections (from what's recorded only)
     local obj = {}
     if not null(o.primary_concern) then obj[#obj + 1] = fact("primary_concern", o.primary_concern) end
