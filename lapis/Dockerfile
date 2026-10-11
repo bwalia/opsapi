@@ -19,6 +19,7 @@ ARG OPSAPI_BASE=bwalia/opsapi-base:latest
 # A plain `docker build` gets this empty stage instead: the plugin folder is
 # then empty and the loader skips it (no project.lua).
 FROM scratch AS property_deals_plugin
+FROM scratch AS property_pa_plugin
 
 FROM ${OPSAPI_BASE}
 
@@ -113,6 +114,8 @@ COPY schema-updates.lua production-schema-upgrade.lua ecommerce-migrations.lua /
 #    Exception: first-party plugins built into the image, from named build
 #    contexts (see property_deals_plugin above). Dev bind mounts still win.
 COPY --from=property_deals_plugin . /app/projects/property-deals/
+# Property PA imports property_deals modules from its sibling folder (projects/property-deals).
+COPY --from=property_pa_plugin . /app/projects/property-pa/
 COPY bin /app/bin
 ENV PATH="/app/bin:${PATH}"
 # The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,
