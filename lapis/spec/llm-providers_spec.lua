@@ -175,6 +175,23 @@ check("POSTs to OLLAMA_URL/api/chat", captured.url == "https://ollama.example/ap
 check("gateway gets a JWT minted from the secret", captured.headers["x-api-key"] == "eyJ.minted.sig")
 check("think off, reply capped", b.think == false and b.options.num_predict == 2048)
 check("tool calls get ids", msg.tool_calls[1].id == "call_1" and msg.tool_calls[1]["function"].arguments.question == "Which day?")
+check("streams (keeps a proxy from cutting a long silent request)", b.stream == true)
+-- A real streamed answer: NDJSON lines, content in pieces, counts on the final line.
+local mock_new = package.loaded["resty.http"].new
+package.loaded["resty.http"].new = function()
+    return { set_timeout = function() end, request_uri = function(_, url, req)
+        captured = { url = url, headers = req.headers, body = cjson.decode(req.body) }
+        return { status = 200, body = table.concat({
+            cjson.encode({ message = { role = "assistant", content = "Call " }, done = false }),
+            cjson.encode({ message = { role = "assistant", content = "Sarah now." }, done = false }),
+            cjson.encode({ message = { role = "assistant", content = "" }, done = true, prompt_eval_count = 40, eval_count = 7 }),
+        }, "\n") }
+    end }
+end
+msg = Llm.chat(CONVO, TOOLS, {})
+check("streamed pieces are joined", msg and msg.content == "Call Sarah now.", msg and msg.content)
+check("token counts from the final line", msg and msg.usage.input == 40 and msg.usage.output == 7)
+package.loaded["resty.http"].new = mock_new
 
 print("unknown provider falls back to ollama:")
 Llm = load_llm({ AI_PROVIDER = "nonsense" })

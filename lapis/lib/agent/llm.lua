@@ -147,6 +147,31 @@ end
 -- so the default is 5 minutes (AI_TIMEOUT_MS overrides).
 local DEFAULT_TIMEOUT_MS = tonumber(env("AI_TIMEOUT_MS") or "") or 300000
 
+--- Ollama with stream = true answers as NDJSON lines; merge them into one non-streamed answer.
+-- Streaming keeps bytes flowing while the model writes, so a proxy in front of the model never
+-- sees a long silent connection (they cut those, e.g. at 120 s).
+local function merge_ndjson(text)
+    local out, last, content, calls = nil, nil, {}, nil
+    for line in tostring(text or ""):gmatch("[^\r\n]+") do
+        local chunk = cjson.decode(line)
+        if type(chunk) == "table" then
+            if chunk.error then return { error = chunk.error } end
+            local m = type(chunk.message) == "table" and chunk.message or {}
+            if type(m.content) == "string" then content[#content + 1] = m.content end
+            if type(m.tool_calls) == "table" and #m.tool_calls > 0 then
+                calls = calls or {}
+                for _, tc in ipairs(m.tool_calls) do calls[#calls + 1] = tc end
+            end
+            last = chunk
+            if chunk.done then out = chunk end
+        end
+    end
+    out = out or last  -- a server that ignored stream and sent one object
+    if not out then return nil end
+    out.message = { role = "assistant", content = table.concat(content), tool_calls = calls }
+    return out
+end
+
 local function post(cfg, url, headers, body, timeout_ms)
     local encoded, enc_err = cjson.encode(body)
     if not encoded then return nil, "Could not encode the model request: " .. tostring(enc_err) end
@@ -158,7 +183,13 @@ local function post(cfg, url, headers, body, timeout_ms)
         -- with a trusted CA bundle (lua_ssl_trusted_certificate is set in prod).
         ssl_verify = false })
     if not res then return nil, "Model request failed: " .. tostring(err) end
-    local data = cjson.decode(res.body or "")
+    local data
+    if body.stream == true and res.status < 400 then
+        data = merge_ndjson(res.body)
+        if type(data) == "table" and data.error then
+            return nil, cfg.provider .. ": " .. tostring(data.error):sub(1, 400), 502
+        end
+    else data = cjson.decode(res.body or "") end
     if res.status >= 400 then
         local e = type(data) == "table" and data.error
         local msg = type(e) == "table" and (e.message or cjson.encode(e)) or e or res.body
@@ -215,7 +246,7 @@ local function ollama_chat(cfg, messages, tools, opts)
         wire[i] = w
     end
     local body = {
-        model = cfg.model, messages = wire, stream = false, think = false,
+        model = cfg.model, messages = wire, stream = true, think = false,
         format = opts.json and "json" or nil,
         -- num_predict caps each reply: a looping model otherwise generates
         -- forever and pins an Ollama slot after we time out (seen on hh193).
