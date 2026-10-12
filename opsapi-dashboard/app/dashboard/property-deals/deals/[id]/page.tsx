@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle, CircleDot, FileUp, Plus, AlertTriangle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Button, Card, Input, Modal, Select, Textarea } from '@/components/ui';
+import { Button, Card, Input, Modal, Select, Textarea, buttonClass } from '@/components/ui';
 import { pdService, pdErrorText, type DealOverview, type Gate } from '@/services/property-deals.service';
 import {
   PdPage, HealthBadge, Tabs, gbp, dateText, dueText, Spinner, ErrorNote, Empty, UrgencyScore, TaskStatusBadge, BASE, label,
@@ -460,8 +460,8 @@ function RenovationTab({ dealId, canCreate }: { dealId: string; canCreate: boole
                 </div>
               </div>
               <div className="flex gap-2">
-                <Link href={`/dashboard/projects/${r.project_uuid}`}><Button size="sm">Open board</Button></Link>
-                <Link href={`/dashboard/purchase-orders?project_uuid=${r.project_uuid}`}><Button size="sm" variant="outline">Purchase orders</Button></Link>
+                <Link className={buttonClass('primary', 'sm')} href={`/dashboard/projects/${r.project_uuid}`}>Open board</Link>
+                <Link className={buttonClass('outline', 'sm')} href={`/dashboard/purchase-orders?project_uuid=${r.project_uuid}`}>Purchase orders</Link>
               </div>
             </li>
           ))}

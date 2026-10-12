@@ -12,7 +12,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Modal, Select, Table } from '@/components/ui';
 import { pdService, pdErrorText, type Supplier } from '@/services/property-deals.service';
 import { PdPage, ErrorNote, label } from '@/components/property-deals/ui';
-import { usePdData, usePdMe } from '@/components/property-deals/usePd';
+import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import type { TableColumn } from '@/types';
 
 const KINDS = ['epc_assessor', 'surveyor', 'solicitor', 'broker', 'bridging_lender', 'builder', 'letting_agent', 'auction_house', 'managing_agent', 'searches_provider'];
@@ -31,7 +31,8 @@ function Suppliers() {
   const [kind, setKind] = useState('');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('name');
-  const list = usePdData(async () => (await pdService.suppliers({ kind: kind || undefined, q: q || undefined, sort, per_page: 100 })).data, [kind, q, sort]);
+  const qd = useDebounced(q);
+  const list = usePdData(async () => (await pdService.suppliers({ kind: kind || undefined, q: qd || undefined, sort, per_page: 100 })).data, [kind, qd, sort]);
   const [adding, setAdding] = useState(false);
   const [nearest, setNearest] = useState(false);
   const cols: TableColumn<Supplier>[] = [

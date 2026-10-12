@@ -12,6 +12,13 @@ import { LAYER_COLOURS } from './mapColours';
 
 const HEALTH: Record<string, string> = { red: '#dc2626', amber: '#f59e0b', green: '#16a34a' };
 
+// Map tiles: OpenStreetMap's own server (single host, no {s}) by default, which is for light use
+// only (https://operations.osmfoundation.org/policies/tiles/). For real traffic set
+// NEXT_PUBLIC_MAP_TILE_URL (+ NEXT_PUBLIC_MAP_TILE_ATTRIBUTION, HTML) to your tile provider at build time.
+const TILE_URL = process.env.NEXT_PUBLIC_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = process.env.NEXT_PUBLIC_MAP_TILE_ATTRIBUTION
+  || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
 function Clicks({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   useMapEvents({ click: (e) => onPick(e.latlng.lat, e.latlng.lng) });
   return null;
@@ -26,7 +33,7 @@ export default function MapView({ center, radiusMiles, features, onPick, onSelec
 }) {
   return (
     <MapContainer center={[center.lat, center.lng]} zoom={10} className="h-[60vh] min-h-[420px] w-full rounded-xl" scrollWheelZoom>
-      <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
       <Clicks onPick={onPick} />
       <Circle center={[center.lat, center.lng]} radius={radiusMiles * 1609.344} pathOptions={{ color: '#6366f1', weight: 1, fillOpacity: 0.05 }} />
       {features.map((f) => {

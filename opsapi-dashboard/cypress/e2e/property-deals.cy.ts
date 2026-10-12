@@ -26,7 +26,6 @@ function visitAs(s: Session, path: string) {
       win.localStorage.setItem('auth-storage', JSON.stringify({ state: { token: s.token, user: s.user, isAuthenticated: true }, version: 0 }));
       win.localStorage.setItem('current_namespace', JSON.stringify(s.namespace));
       win.localStorage.setItem('namespace-storage', JSON.stringify({ state: { currentNamespace: s.namespace, namespacePermissions: null, isNamespaceOwner: false, userSettings: null }, version: 0 }));
-      win.localStorage.setItem('pd-tour-seen', '1');
     },
   });
 }

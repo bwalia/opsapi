@@ -27,11 +27,12 @@ export const voiceService = {
   },
 
   /** Text → spoken audio (mp3). */
-  async speak(text: string, voice?: string): Promise<Blob> {
+  async speak(text: string, voice?: string, signal?: AbortSignal): Promise<Blob> {
     const res = await apiClient.post<Blob>('/api/v2/voice/speak', { text, voice }, {
       headers: { 'Content-Type': 'application/json' },
       responseType: 'blob',
       timeout: 60000,
+      signal,
     });
     return res.data;
   },

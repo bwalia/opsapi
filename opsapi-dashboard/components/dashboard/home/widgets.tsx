@@ -66,7 +66,7 @@ export const LAYOUTS: Record<'general' | BusinessType, WidgetId[]> = {
   ecommerce: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'recent_orders'],
   property_portfolio_manager: [
     'pd_active_deals', 'pd_due_today', 'pd_overdue', 'pd_hot_leads_count', 'pd_money_at_risk', 'pd_renovations',
-    'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk', 'recent_orders',
+    'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk',
   ],
   // Until these have their own widgets they start from the general layout.
   field_service: ['users', 'orders', 'revenue', 'health'],

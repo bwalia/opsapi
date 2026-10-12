@@ -14,13 +14,15 @@ import { ErrorNote, Spinner, Empty } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { paService } from '@/services/property-pa.service';
 import { pdErrorText } from '@/services/property-deals.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 type Scope = 'personal' | 'team' | 'company';
 
-function Teach({ onDone }: { onDone: () => void }) {
+function Teach({ onDone, isManager }: { onDone: () => void; isManager: boolean }) {
   const [statement, setStatement] = useState('');
   const [title, setTitle] = useState('');
-  const [scope, setScope] = useState<Scope>('company');
+  const [scope, setScope] = useState<Scope>(isManager ? 'company' : 'personal');
+  const canApprove = isManager || scope === 'personal'; // the route: managers for company/team rules
   const [triggers, setTriggers] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (approve: boolean) => {
@@ -57,7 +59,7 @@ function Teach({ onDone }: { onDone: () => void }) {
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="outline" disabled={!statement.trim()} isLoading={busy} onClick={() => submit(false)}>Propose</Button>
-        <Button disabled={!statement.trim()} isLoading={busy} onClick={() => submit(true)}>Teach now</Button>
+        {canApprove && <Button disabled={!statement.trim()} isLoading={busy} onClick={() => submit(true)}>Teach now</Button>}
       </div>
       <p className="text-xs text-secondary-400">&quot;Teach now&quot; approves it straight away: managers for company and team rules, anyone for their own.</p>
     </Card>
@@ -65,6 +67,15 @@ function Teach({ onDone }: { onDone: () => void }) {
 }
 
 export default function KnowledgePage() {
+  return (
+    <PaPage module="property_pa_knowledge">
+      <Knowledge />
+    </PaPage>
+  );
+}
+
+function Knowledge() {
+  const { can, isManager } = usePaCan();
   const rules = usePdData(() => paService.knowledge(), []);
   const pending = usePdData(() => paService.pendingKnowledge(), []);
   const refresh = () => { rules.refresh(); pending.refresh(); };
@@ -80,7 +91,8 @@ export default function KnowledgePage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader title="PA knowledge" description="The rules your PA follows. Versioned and approved." icon={<BookOpen className="h-6 w-6" />} />
-      <Teach onDone={refresh} />
+      {can('property_pa_knowledge', 'create') && <Teach onDone={refresh} isManager={isManager} />}
+      <ErrorNote product="Property PA" error={pending.error} />
       {!!pending.data?.length && (
         <Card className="space-y-3">
           <h3 className="font-semibold text-secondary-900">Waiting for approval</h3>
@@ -91,15 +103,17 @@ export default function KnowledgePage() {
                   {p.proposed_by_ai && <Badge size="sm" variant="info" className="ml-2">from the PA</Badge>}</p>
                 <p className="text-sm text-secondary-700">{p.rule}</p>
               </div>
-              <div className="flex gap-1">
-                <Button size="sm" leftIcon={<Check className="h-4 w-4" />} onClick={() => decide(p.uuid, p.version, true)}>Approve</Button>
-                <Button size="sm" variant="ghost" leftIcon={<X className="h-4 w-4" />} onClick={() => decide(p.uuid, p.version, false)}>Reject</Button>
-              </div>
+              {(isManager || p.scope === 'personal') && (
+                <div className="flex gap-1">
+                  <Button size="sm" leftIcon={<Check className="h-4 w-4" />} onClick={() => decide(p.uuid, p.version, true)}>Approve</Button>
+                  <Button size="sm" variant="ghost" leftIcon={<X className="h-4 w-4" />} onClick={() => decide(p.uuid, p.version, false)}>Reject</Button>
+                </div>
+              )}
             </div>
           ))}
         </Card>
       )}
-      <ErrorNote error={rules.error} />
+      <ErrorNote product="Property PA" error={rules.error} />
       {rules.loading && !rules.data ? <Spinner /> : !rules.data?.length ? <Empty title="No rules yet" /> : (
         <Card className="space-y-3">
           <h3 className="font-semibold text-secondary-900">In use</h3>

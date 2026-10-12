@@ -1,4 +1,4 @@
-export { default as Button } from './Button';
+export { default as Button, buttonClass } from './Button';
 export { default as Input } from './Input';
 export { default as DateTimeField } from './DateTimeField';
 export { default as Textarea } from './Textarea';

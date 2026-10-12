@@ -20,6 +20,8 @@ interface NamespaceState {
   namespaces: NamespaceWithMembership[];
   namespacesLoading: boolean;
   namespacesError: string | null;
+  /** The list has been fetched this session (an empty list then means "no workspaces"). */
+  namespacesLoaded: boolean;
 
   // User namespace settings (USER-FIRST Architecture)
   userSettings: UserNamespaceSettings | null;
@@ -80,6 +82,24 @@ interface NamespaceActions {
 
 type NamespaceStore = NamespaceState & NamespaceActions;
 
+/**
+ * A workspace's combined permissions from the roles the list returns (what the backend merges per
+ * request). null = can't tell from the list (an owner with no role gets a server-side full-access
+ * fallback), so keep what we have.
+ */
+function permissionsFromRoles(ns: NamespaceWithMembership): NamespacePermissions | null {
+  const roles = Array.isArray(ns.roles) ? ns.roles : [];
+  if (!roles.length) return ns.is_owner ? null : {};
+  const merged: Record<string, PermissionAction[]> = {};
+  for (const role of roles) {
+    for (const [module, actions] of Object.entries(namespaceService.parsePermissions(role.permissions))) {
+      if (!Array.isArray(actions)) continue;
+      merged[module] = Array.from(new Set([...(merged[module] || []), ...actions]));
+    }
+  }
+  return merged;
+}
+
 export const useNamespaceStore = create<NamespaceStore>()(
   persist(
     (set, get) => ({
@@ -90,6 +110,7 @@ export const useNamespaceStore = create<NamespaceStore>()(
       namespaces: [],
       namespacesLoading: false,
       namespacesError: null,
+      namespacesLoaded: false,
       userSettings: null,
       userSettingsLoading: false,
       isSwitching: false,
@@ -108,15 +129,27 @@ export const useNamespaceStore = create<NamespaceStore>()(
           set({
             namespaces: list,
             namespacesLoading: false,
+            namespacesLoaded: true,
           });
           // The current workspace is persisted in the browser; refresh it from the list so
-          // changes made since (rename, business type, logo) show without switching away and back.
+          // changes made since (rename, business type, logo, roles and permissions, ownership)
+          // show without switching away and back.
           const current = get().currentNamespace;
           const fresh = current && list.find((n) => n.uuid === current.uuid || n.id === current.id);
           if (current && fresh) {
             const merged = { ...current, ...fresh };
-            set({ currentNamespace: merged });
+            const permissions = permissionsFromRoles(fresh);
+            set({
+              currentNamespace: merged,
+              isNamespaceOwner: Boolean(fresh.is_owner),
+              ...(permissions ? { namespacePermissions: permissions } : {}),
+            });
             namespaceService.setCurrentNamespace(merged);
+          } else if (current && list.length === 0) {
+            // Removed from (or deactivated in) the last workspace: stop acting in it. With other
+            // workspaces left, NamespaceContext switches to the default/first one.
+            set({ currentNamespace: null, namespacePermissions: null, isNamespaceOwner: false });
+            namespaceService.setCurrentNamespace(null);
           }
           // Update user settings if included in response
           if (response.settings) {
@@ -254,6 +287,7 @@ export const useNamespaceStore = create<NamespaceStore>()(
           isNamespaceOwner: false,
           namespaces: [],
           namespacesError: null,
+          namespacesLoaded: false,
           switchError: null,
           userSettings: null,
         });

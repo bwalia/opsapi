@@ -14,7 +14,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Badge } from '@/components/ui';
 import { pdService, pdErrorText, type MapFeature, type MatchWithBreakdown } from '@/services/property-deals.service';
 import { PdPage, ErrorNote, Spinner, gbp, dateText, label, BASE, HealthBadge } from '@/components/property-deals/ui';
-import { usePdData, usePdMe } from '@/components/property-deals/usePd';
+import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import MatchRow from '@/components/property-deals/MatchRow';
 import { LAYER_COLOURS } from '@/components/property-deals/mapColours';
 
@@ -39,7 +39,8 @@ function Finder() {
   const [radius, setRadius] = useState(25);
   const [layers, setLayers] = useState<string[]>(['properties', 'deals', 'sold_prices', 'listings']);
   const [selected, setSelected] = useState<MapFeature | null>(null);
-  const map = usePdData(async () => (await pdService.map({ lat: center.lat, lng: center.lng, radius_miles: radius, layers: layers.join(',') })).data, [center.lat, center.lng, radius, layers.join(',')]);
+  const radiusQ = useDebounced(radius, 400); // the circle follows the slider; the search waits for it to settle
+  const map = usePdData(async () => (await pdService.map({ lat: center.lat, lng: center.lng, radius_miles: radiusQ, layers: layers.join(',') })).data, [center.lat, center.lng, radiusQ, layers.join(',')]);
 
   return (
     <div className="space-y-6">
@@ -132,6 +133,7 @@ function Selected({ f, canSend, onClose }: { f: MapFeature; canSend: boolean; on
 }
 
 function Searches({ center, radius, layers, onOpen }: { center: { lat: number; lng: number }; radius: number; layers: string[]; onOpen: (lat: number, lng: number, r: number) => void }) {
+  const { can } = usePdMe();
   const searches = usePdData(async () => (await pdService.savedSearches()).data, []);
   const alerts = usePdData(async () => (await pdService.scoutAlerts({ unseen: 'true' })).data, []);
   const [name, setName] = useState('');
@@ -139,26 +141,33 @@ function Searches({ center, radius, layers, onOpen }: { center: { lat: number; l
     <Card data-tour="map-searches">
       <h2 className="font-semibold text-secondary-900">Saved searches</h2>
       <p className="text-sm text-secondary-500">The deal scout re-runs these every morning and alerts you.</p>
-      <div className="mt-3 flex gap-2">
-        <Input placeholder="Name this pin + radius" value={name} onChange={(e) => setName(e.target.value)} aria-label="Search name" />
-        <Button leftIcon={<Save className="h-4 w-4" />} disabled={!name} onClick={async () => {
-          try { await pdService.saveSearch({ name, lat: center.lat, lng: center.lng, radius_miles: radius, filters: { layers } }); toast.success('Saved'); setName(''); searches.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
-        }}>Save</Button>
-      </div>
+      {can('properties', 'create') && (
+        <div className="mt-3 flex gap-2">
+          <Input placeholder="Name this pin + radius" value={name} onChange={(e) => setName(e.target.value)} aria-label="Search name" />
+          <Button leftIcon={<Save className="h-4 w-4" />} disabled={!name} onClick={async () => {
+            try { await pdService.saveSearch({ name, lat: center.lat, lng: center.lng, radius_miles: radius, filters: { layers } }); toast.success('Saved'); setName(''); searches.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
+          }}>Save</Button>
+        </div>
+      )}
       <ul className="mt-3 divide-y divide-secondary-100 text-sm">
         {(searches.data || []).map((s) => (
           <li key={s.uuid} className="flex items-center justify-between gap-2 py-2">
             <button type="button" className="text-left text-primary-600 hover:underline" onClick={() => s.lat !== undefined && s.lng !== undefined && onOpen(Number(s.lat), Number(s.lng), Number(s.radius_miles || 25))}>{s.name}</button>
             <span className="flex gap-1">
               <Button size="sm" variant="ghost" aria-label={`Run ${s.name}`} onClick={async () => { try { const r = (await pdService.runSearch(s.uuid)).data; toast.success(`New ${r.new}, reduced ${r.reduced}, stale ${r.stale}, cash only ${r.cash_only}`); alerts.refresh(); } catch (e) { toast.error(pdErrorText(e)); } }}><Play className="h-4 w-4" /></Button>
-              <Button size="sm" variant="ghost" aria-label={`Delete ${s.name}`} onClick={async () => { try { await pdService.deleteSearch(s.uuid); searches.refresh(); } catch (e) { toast.error(pdErrorText(e)); } }}><Trash2 className="h-4 w-4" /></Button>
+              {can('properties', 'delete') && (
+                <Button size="sm" variant="ghost" aria-label={`Delete ${s.name}`} onClick={async () => {
+                  if (!window.confirm(`Delete the saved search “${s.name}”? The deal scout stops re-running it.`)) return;
+                  try { await pdService.deleteSearch(s.uuid); searches.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
+                }}><Trash2 className="h-4 w-4" /></Button>
+              )}
             </span>
           </li>
         ))}
       </ul>
       <div className="mt-4 flex items-center justify-between">
         <h3 className="flex items-center gap-1.5 font-medium text-secondary-900"><Bell className="h-4 w-4" aria-hidden /> New alerts</h3>
-        {(alerts.data || []).length > 0 && <Button size="sm" variant="ghost" onClick={async () => { await pdService.markAlertsSeen(); alerts.refresh(); }}>Mark all seen</Button>}
+        {(alerts.data || []).length > 0 && <Button size="sm" variant="ghost" onClick={async () => { try { await pdService.markAlertsSeen(); alerts.refresh(); } catch (e) { toast.error(pdErrorText(e)); } }}>Mark all seen</Button>}
       </div>
       <ul className="mt-2 space-y-2 text-sm">
         {(alerts.data || []).length === 0 && <li className="text-secondary-500">Nothing new.</li>}

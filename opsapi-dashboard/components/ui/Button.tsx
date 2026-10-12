@@ -12,6 +12,33 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   rightIcon?: React.ReactNode;
 }
 
+const baseStyles =
+  'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+
+const variants = {
+  primary:
+    'bg-primary-500 text-white hover:bg-primary-600 focus:ring-primary-500 shadow-sm hover:shadow-md',
+  secondary:
+    'bg-secondary-800 text-secondary-50 hover:bg-secondary-900 focus:ring-secondary-500 shadow-sm hover:shadow-md',
+  outline:
+    'border-2 border-primary-500 text-primary-500 hover:bg-primary-50 focus:ring-primary-500',
+  ghost:
+    'text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900 focus:ring-secondary-500',
+  danger:
+    'bg-error-500 text-white hover:bg-error-600 focus:ring-error-500 shadow-sm hover:shadow-md',
+};
+
+const sizes = {
+  sm: 'h-8 px-3 text-sm gap-1.5',
+  md: 'h-10 px-4 text-sm gap-2',
+  lg: 'h-12 px-6 text-base gap-2.5',
+};
+
+/** Button looks for a link (`<Link className={buttonClass('outline', 'sm')}>`): never a button inside a link. */
+export function buttonClass(variant: NonNullable<ButtonProps['variant']> = 'primary', size: NonNullable<ButtonProps['size']> = 'md', className?: string): string {
+  return cn(baseStyles, variants[variant], sizes[size], className);
+}
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
@@ -27,32 +54,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const baseStyles =
-      'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
-
-    const variants = {
-      primary:
-        'bg-primary-500 text-white hover:bg-primary-600 focus:ring-primary-500 shadow-sm hover:shadow-md',
-      secondary:
-        'bg-secondary-800 text-secondary-50 hover:bg-secondary-900 focus:ring-secondary-500 shadow-sm hover:shadow-md',
-      outline:
-        'border-2 border-primary-500 text-primary-500 hover:bg-primary-50 focus:ring-primary-500',
-      ghost:
-        'text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900 focus:ring-secondary-500',
-      danger:
-        'bg-error-500 text-white hover:bg-error-600 focus:ring-error-500 shadow-sm hover:shadow-md',
-    };
-
-    const sizes = {
-      sm: 'h-8 px-3 text-sm gap-1.5',
-      md: 'h-10 px-4 text-sm gap-2',
-      lg: 'h-12 px-6 text-base gap-2.5',
-    };
-
     return (
       <button
         ref={ref}
-        className={cn(baseStyles, variants[variant], sizes[size], className)}
+        className={buttonClass(variant, size, className)}
         disabled={disabled || isLoading}
         {...props}
       >

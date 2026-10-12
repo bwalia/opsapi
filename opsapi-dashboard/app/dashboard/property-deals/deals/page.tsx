@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Modal, Select, Table } from '@/components/ui';
 import { pdService, pdErrorText, type DealBoard, type Deal, type Gate } from '@/services/property-deals.service';
 import { PdPage, HealthBadge, gbp, dateText, Spinner, ErrorNote, Empty, BASE, label } from '@/components/property-deals/ui';
-import { usePdData, usePdMe } from '@/components/property-deals/usePd';
+import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import type { TableColumn } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -204,7 +204,8 @@ function DealList() {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('money_at_risk');
   const [page, setPage] = useState(1);
-  const list = usePdData(async () => pdService.deals({ q, sort, page, per_page: 25 }), [q, sort, page]);
+  const qd = useDebounced(q);
+  const list = usePdData(async () => pdService.deals({ q: qd, sort, page, per_page: 25 }), [qd, sort, page]);
   const cols: TableColumn<Deal>[] = [
     { key: 'name', header: 'Deal', render: (d) => <span className="font-medium text-secondary-900">{d.name}</span> },
     { key: 'stage_key', header: 'Stage', render: (d) => label(d.stage_key) },

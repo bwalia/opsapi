@@ -3,17 +3,19 @@
 /**
  * Guided tour of every Property Deals page and option (no dependency): it highlights a
  * `data-tour` anchor, explains it, and walks from page to page. The step survives
- * navigation (localStorage). Start it with startTour() ("Take the tour" on Today); it starts
- * by itself once for demo accounts (email containing "demo").
+ * navigation (localStorage, per workspace). It starts only when asked: startTour() ("Take the
+ * tour" on Today) or a link with ?tour=1.
  */
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { pdService } from '@/services/property-deals.service';
+import { useNamespaceStore } from '@/store/namespace.store';
 
 const KEY = 'pd-tour';
-const SEEN = 'pd-tour-seen';
+// Per workspace: the remembered deal (dealUuid) belongs to the workspace the tour started in.
+const storeKey = () => `${KEY}:${useNamespaceStore.getState().currentNamespace?.uuid || 'default'}`;
 const B = '/dashboard/property-deals';
 
 type Step = { route: string; target?: string; title: string; body: string };
@@ -51,24 +53,18 @@ type State = { active: boolean; step: number; dealUuid?: string };
 function read(): State {
   if (typeof window === 'undefined') return { active: false, step: 0 };
   try {
-    return JSON.parse(localStorage.getItem(KEY) || '') as State;
+    return JSON.parse(localStorage.getItem(storeKey()) || '') as State;
   } catch {
     return { active: false, step: 0 };
   }
 }
 function write(s: State) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  localStorage.setItem(storeKey(), JSON.stringify(s));
   window.dispatchEvent(new Event(KEY));
 }
 
 export function startTour() {
   write({ active: true, step: 0 });
-}
-
-export function maybeAutoStartTour(email?: string) {
-  if (typeof window === 'undefined' || !email || !/demo/i.test(email) || localStorage.getItem(SEEN)) return;
-  localStorage.setItem(SEEN, '1');
-  startTour();
 }
 
 export default function TourHost() {
@@ -87,7 +83,6 @@ export default function TourHost() {
   const step = STEPS[state.step];
 
   const stop = useCallback(() => {
-    localStorage.setItem(SEEN, '1');
     write({ active: false, step: 0 });
   }, []);
 
@@ -163,7 +158,10 @@ export default function TourHost() {
   useEffect(() => {
     if (!state.active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') stop();
+      if (e.key === 'Escape') return stop();
+      // Arrow keys belong to whatever field the user is typing in.
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
       if (e.key === 'ArrowRight') go(state.step + 1);
       if (e.key === 'ArrowLeft') go(state.step - 1);
     };
@@ -178,7 +176,7 @@ export default function TourHost() {
         top: Math.min(window.innerHeight - 220, rect.bottom + 12),
         left: Math.max(12, Math.min(window.innerWidth - 372, rect.left)),
       }
-    : { top: window.innerHeight / 2 - 110, left: window.innerWidth / 2 - 180 };
+    : { top: window.innerHeight / 2 - 110, left: Math.max(12, window.innerWidth / 2 - 180) };
 
   return (
     <div className="fixed inset-0 z-[2000]" aria-live="polite">
@@ -200,7 +198,7 @@ export default function TourHost() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="pd-tour-title"
-        className="absolute w-[360px] rounded-xl border border-secondary-200 bg-surface-elevated p-4 shadow-2xl"
+        className="absolute w-[min(360px,calc(100vw-24px))] rounded-xl border border-secondary-200 bg-surface-elevated p-4 shadow-2xl"
         style={pop}
       >
         <div className="flex items-start justify-between gap-2">

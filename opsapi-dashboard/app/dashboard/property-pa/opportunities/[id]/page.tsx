@@ -10,13 +10,14 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { ArrowLeft, History, NotebookPen } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Badge, Button, Card, Modal } from '@/components/ui';
+import { Badge, Button, Card, Modal, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner, dateText, dueText } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { valueText } from '@/components/property-pa/ConfirmSheet';
 import PaPanels, { type Panel } from '@/components/property-pa/PaPanels';
 import AskManager from '@/components/property-pa/AskManager';
 import { paService, type Change, type Fact, type Opportunity } from '@/services/property-pa.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const FIELDS: { key: keyof Opportunity & string; label: string }[] = [
   { key: 'motivation', label: 'Motivation' },
@@ -39,7 +40,7 @@ function HistoryModal({ oppId, field, label, onClose }: { oppId: string; field: 
   const { data, error, loading } = usePdData(() => paService.history('pa_opportunities', oppId, field), [oppId, field]);
   return (
     <Modal isOpen onClose={onClose} title={`History: ${label}`}>
-      <ErrorNote error={error} />
+      <ErrorNote product="Property PA" error={error} />
       {loading && !data ? <Spinner /> : (
         <ol className="space-y-3">
           {(data || []).map((c: Change) => (
@@ -63,21 +64,24 @@ function HistoryModal({ oppId, field, label, onClose }: { oppId: string; field: 
 
 export default function OpportunityPage() {
   return (
-    <Suspense fallback={<Spinner />}>
-      <OpportunityView />
-    </Suspense>
+    <PaPage>
+      <Suspense fallback={<Spinner />}>
+        <OpportunityView />
+      </Suspense>
+    </PaPage>
   );
 }
 
 function OpportunityView() {
   const { id } = useParams<{ id: string }>();
+  const { can } = usePaCan();
   const panel = useSearchParams().get('panel');
   const { data: o, error, loading } = usePdData(() => paService.opportunity(id), [id], 30_000);
   const { data: tl } = usePdData(() => paService.timeline(id), [id], 30_000);
   const [hist, setHist] = useState<{ field: string; label: string } | null>(null);
 
   if (loading && !o) return <Spinner />;
-  if (!o) return <ErrorNote error={error} />;
+  if (!o) return <ErrorNote product="Property PA" error={error} />;
   const waiting = new Map<string, number>();
   for (const p of o.pending_updates || []) {
     if (p.source_interaction_uuid) waiting.set(p.source_interaction_uuid, (waiting.get(p.source_interaction_uuid) || 0) + 1);
@@ -89,11 +93,13 @@ function OpportunityView() {
       <PageHeader title={o.title} description={[o.person_name, o.property_address, o.property_postcode].filter(Boolean).join(' · ')}
         actions={
           <>
-            <AskManager opportunity={o} />
-            <Link href={`/dashboard/property-pa/capture?opportunity=${o.uuid}`}><Button leftIcon={<NotebookPen className="h-4 w-4" />}>Capture</Button></Link>
+            {can('property_pa_handoffs', 'create') && <AskManager opportunity={o} />}
+            {can('property_pa_records', 'create') && can('property_pa_updates', 'create') && (
+              <Link className={buttonClass()} href={`/dashboard/property-pa/capture?opportunity=${o.uuid}`}><NotebookPen className="h-4 w-4" aria-hidden />Capture</Link>
+            )}
           </>
         } />
-      <ErrorNote error={error} />
+      <ErrorNote product="Property PA" error={error} />
 
       {waiting.size > 0 && (
         <Card className="border-warning-300 bg-warning-50/40">

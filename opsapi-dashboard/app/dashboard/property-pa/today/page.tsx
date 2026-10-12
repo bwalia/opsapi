@@ -9,15 +9,16 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { Sunrise, RefreshCw, HelpCircle, NotebookPen, FileText } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Badge, Button, Card } from '@/components/ui';
+import { Badge, Button, Card, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner, Empty } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { cn } from '@/lib/utils';
 import { paService, type TodayCard } from '@/services/property-pa.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const BUDGETS = [0, 30, 60, 120];
 
-function Card1({ c, dimmed }: { c: TodayCard; dimmed?: boolean }) {
+function Card1({ c, dimmed, canCapture }: { c: TodayCard; dimmed?: boolean; canCapture: boolean }) {
   const [why, setWhy] = useState(false);
   return (
     <Card className={cn('space-y-2', dimmed && 'opacity-60')} data-testid="today-card">
@@ -36,8 +37,10 @@ function Card1({ c, dimmed }: { c: TodayCard; dimmed?: boolean }) {
       <p className="text-sm"><span className="font-medium text-secondary-900">Aim: </span>{c.objective}</p>
       <div className="flex flex-wrap gap-2 pt-1">
         <Button size="sm" variant="ghost" leftIcon={<HelpCircle className="h-4 w-4" />} onClick={() => setWhy(!why)}>Why #{c.rank}?</Button>
-        <Link href={`/dashboard/property-pa/opportunities/${c.opportunity_uuid}?panel=prepare`}><Button size="sm" variant="outline" leftIcon={<FileText className="h-4 w-4" />}>Prepare me</Button></Link>
-        <Link href={`/dashboard/property-pa/capture?opportunity=${c.opportunity_uuid}`}><Button size="sm" variant="outline" leftIcon={<NotebookPen className="h-4 w-4" />}>Capture</Button></Link>
+        <Link className={buttonClass('outline', 'sm')} href={`/dashboard/property-pa/opportunities/${c.opportunity_uuid}?panel=prepare`}><FileText className="h-4 w-4" aria-hidden />Prepare me</Link>
+        {canCapture && (
+          <Link className={buttonClass('outline', 'sm')} href={`/dashboard/property-pa/capture?opportunity=${c.opportunity_uuid}`}><NotebookPen className="h-4 w-4" aria-hidden />Capture</Link>
+        )}
       </div>
       {why && (
         <div className="rounded-lg bg-secondary-50 p-3 text-sm" data-testid="why">
@@ -59,6 +62,16 @@ function Card1({ c, dimmed }: { c: TodayCard; dimmed?: boolean }) {
 }
 
 export default function PaTodayPage() {
+  return (
+    <PaPage>
+      <PaToday />
+    </PaPage>
+  );
+}
+
+function PaToday() {
+  const { can } = usePaCan();
+  const canCapture = can('property_pa_records', 'create') && can('property_pa_updates', 'create');
   const [minutes, setMinutes] = useState(0);
   const { data, error, loading, refresh } = usePdData(() => paService.today(minutes || undefined), [minutes], 60_000);
   const fits = new Set((data?.budget?.fits || []).map((c) => c.opportunity_uuid));
@@ -76,7 +89,7 @@ export default function PaTodayPage() {
           </Button>
         ))}
       </div>
-      <ErrorNote error={error} />
+      <ErrorNote product="Property PA" error={error} />
       {loading && !data ? <Spinner /> : !data?.cards.length ? (
         <Empty title="Nothing on your list">Opportunities you own show here, ranked.</Empty>
       ) : (
@@ -87,7 +100,7 @@ export default function PaTodayPage() {
               {data.budget.waits.length ? ` Waiting: ${data.budget.waits.map((w) => w.title.split(' — ')[0]).join(', ')}.` : ''}
             </p>
           )}
-          <div className="space-y-3">{shown.map((c) => <Card1 key={c.opportunity_uuid} c={c} dimmed={!!data.budget && !fits.has(c.opportunity_uuid)} />)}</div>
+          <div className="space-y-3">{shown.map((c) => <Card1 key={c.opportunity_uuid} c={c} canCapture={canCapture} dimmed={!!data.budget && !fits.has(c.opportunity_uuid)} />)}</div>
           {quiet.length > 0 && <p className="text-sm text-secondary-500">Everything else ({quiet.length}) has nothing pressing today.</p>}
         </>
       )}

@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import { Badge, Button, Card, Textarea } from '@/components/ui';
 import { ErrorNote, Spinner, Tabs } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
-import { paService, type BriefLine, type PaMode, type PaRun, type Rule } from '@/services/property-pa.service';
+import { paService, pollWhileRunning, type BriefLine, type PaMode, type PaRun, type Rule } from '@/services/property-pa.service';
 import { pdErrorText } from '@/services/property-deals.service';
 
 export type Panel = 'prepare' | 'coach' | 'ask';
@@ -53,7 +53,7 @@ function Rules({ rules }: { rules: Rule[] }) {
 function Prepare({ id }: { id: string }) {
   const { data: b, error, loading } = usePdData(() => paService.prepare(id), [id]);
   if (loading && !b) return <Spinner />;
-  if (!b) return <ErrorNote error={error} />;
+  if (!b) return <ErrorNote product="Property PA" error={error} />;
   return (
     <div className="space-y-4" data-testid="prepare">
       <div className="rounded-lg bg-primary-50 p-3 text-sm">
@@ -78,7 +78,7 @@ function Prepare({ id }: { id: string }) {
 function Coach({ id }: { id: string }) {
   const { data: c, error, loading } = usePdData(() => paService.coach(id), [id]);
   if (loading && !c) return <Spinner />;
-  if (!c) return <ErrorNote error={error} />;
+  if (!c) return <ErrorNote product="Property PA" error={error} />;
   return (
     <div className="space-y-4" data-testid="coach">
       <Section title="Known" lines={c.known} />
@@ -98,15 +98,18 @@ function Ask({ id, mode }: { id: string; mode: PaMode }) {
   const [msg, setMsg] = useState('');
   const [run, setRun] = useState<PaRun | null>(null);
   const [busy, setBusy] = useState(false);
-  const t = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (t.current) clearTimeout(t.current); }, []);
+  const [slow, setSlow] = useState(false); // still running after the poll's 10 minutes
+  const ctl = useRef<AbortController | null>(null);
+  useEffect(() => () => ctl.current?.abort(), []);
   const poll = async (rid: string) => {
+    ctl.current?.abort();
+    const c = new AbortController();
+    ctl.current = c;
+    setSlow(false);
     try {
-      const r = await paService.run(rid);
-      setRun(r);
-      if (r.status === 'running') t.current = setTimeout(() => poll(rid), 4000);
+      if (await pollWhileRunning(() => paService.run(rid), (r) => r.status === 'running', setRun, { signal: c.signal }) === 'timeout') setSlow(true);
     } catch (e) {
-      toast.error(pdErrorText(e));
+      if (!c.signal.aborted) toast.error(pdErrorText(e));
     }
   };
   const send = async () => {
@@ -127,9 +130,11 @@ function Ask({ id, mode }: { id: string; mode: PaMode }) {
       <Textarea rows={3} value={msg} onChange={(e) => setMsg(e.target.value)}
         placeholder={mode === 'coach' ? "Sarah won't move below £235k… what would you do?" : 'Ask your PA about this opportunity'} />
       <div className="flex justify-end">
-        <Button leftIcon={<Sparkles className="h-4 w-4" />} isLoading={busy} disabled={!msg.trim() || run?.status === 'running'} onClick={send}>Ask</Button>
+        <Button leftIcon={<Sparkles className="h-4 w-4" />} isLoading={busy} disabled={!msg.trim() || (run?.status === 'running' && !slow)} onClick={send}>Ask</Button>
       </div>
-      {run?.status === 'running' && <p className="flex items-center gap-2 text-sm text-secondary-500"><Loader2 className="h-4 w-4 animate-spin" /> Thinking. On our private model this can take a few minutes.</p>}
+      {run?.status === 'running' && (slow
+        ? <p className="text-sm text-warning-700">Still working on it. Come back to this opportunity later for the answer.</p>
+        : <p className="flex items-center gap-2 text-sm text-secondary-500"><Loader2 className="h-4 w-4 animate-spin" /> Thinking. On our private model this can take a few minutes.</p>)}
       {run?.status === 'failed' && <p className="text-sm text-error-600">The PA couldn&apos;t answer: {run.error}</p>}
       {out && out.answer && (
         <Card className="space-y-2 bg-secondary-50">

@@ -10,15 +10,16 @@ import Link from 'next/link';
 import { ShieldCheck, Check, Reply, ExternalLink, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Card, Textarea } from '@/components/ui';
+import { Button, Card, Textarea, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner, dateText } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { paService, type Handoff, type RefItem } from '@/services/property-pa.service';
 import { pdErrorText } from '@/services/property-deals.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const opp = (id?: string | null) => (id ? `/dashboard/property-pa/opportunities/${id}` : '#');
 
-function DecisionCard({ h, onDone }: { h: Handoff; onDone: () => void }) {
+function DecisionCard({ h, onDone, canReply }: { h: Handoff; onDone: () => void; canReply: boolean }) {
   const [replying, setReplying] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,16 +45,16 @@ function DecisionCard({ h, onDone }: { h: Handoff; onDone: () => void }) {
       )}
       {replying && <Textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Your answer" />}
       <div className="flex flex-wrap gap-2">
-        {h.pa_recommendation && !replying && (
+        {canReply && h.pa_recommendation && !replying && (
           <Button size="sm" leftIcon={<Check className="h-4 w-4" />} isLoading={busy}
             onClick={() => send(`Agreed: ${h.pa_recommendation}`, h.pa_recommendation || undefined)}>Agree</Button>
         )}
-        {replying ? (
+        {canReply && (replying ? (
           <Button size="sm" isLoading={busy} disabled={!text.trim()} onClick={() => send(text.trim())}>Send reply</Button>
         ) : (
           <Button size="sm" variant="outline" leftIcon={<Reply className="h-4 w-4" />} onClick={() => setReplying(true)}>Reply</Button>
-        )}
-        {h.opportunity_uuid && <Link href={opp(h.opportunity_uuid)}><Button size="sm" variant="ghost" leftIcon={<ExternalLink className="h-4 w-4" />}>Open deal</Button></Link>}
+        ))}
+        {h.opportunity_uuid && <Link className={buttonClass('ghost', 'sm')} href={opp(h.opportunity_uuid)}><ExternalLink className="h-4 w-4" aria-hidden />Open deal</Link>}
       </div>
     </Card>
   );
@@ -70,19 +71,28 @@ function List({ title, items, render }: { title: string; items: RefItem[]; rende
 }
 
 export default function ManagerTodayPage() {
+  return (
+    <PaPage module="property_pa_handoffs" manager>
+      <ManagerToday />
+    </PaPage>
+  );
+}
+
+function ManagerToday() {
+  const { can } = usePaCan();
   const { data, error, loading, refresh } = usePdData(() => paService.managerToday(), [], 60_000);
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader title="Manager today" description="Only what needs you" icon={<ShieldCheck className="h-6 w-6" />}
         actions={<Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={refresh}>Refresh</Button>} />
-      <ErrorNote error={error} />
+      <ErrorNote product="Property PA" error={error} />
       {loading && !data ? <Spinner /> : data && (
         <>
           <p className="text-base font-medium text-secondary-900">{data.summary}</p>
           {data.handoffs.length > 0 && (
             <div className="space-y-3">
               <h3 className="font-semibold text-secondary-900">Decisions waiting ({data.handoffs.length})</h3>
-              {data.handoffs.map((h) => <DecisionCard key={h.uuid} h={h} onDone={refresh} />)}
+              {data.handoffs.map((h) => <DecisionCard key={h.uuid} h={h} onDone={refresh} canReply={can('property_pa_handoffs', 'update')} />)}
             </div>
           )}
           <List title="Unusual negotiations" items={data.unusual_negotiations}
