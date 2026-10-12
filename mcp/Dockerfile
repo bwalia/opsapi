@@ -1,7 +1,8 @@
 # OpsAPI MCP server — Streamable HTTP (POST /mcp, GET /healthz).
 # Holds no OpsAPI key: every client sends its own "Authorization: Bearer opsk_…".
 #   docker build -t opsapi-mcp ./mcp
-#   docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk opsapi-mcp
+#   docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk -e MCP_HOST=mcp.example.com opsapi-mcp
+# MCP_HOST = the host name clients use (without it only localhost is answered); MCP_ALLOWED_ORIGINS = browser origins.
 
 FROM node:22-alpine AS build
 WORKDIR /app

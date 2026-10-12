@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createHttpServer } from "../dist/http.js";
+import { createHttpServer, hostName } from "../dist/http.js";
 
 const KEY = "opsk_" + "a1".repeat(24);
 const P1 = "11111111-1111-4111-8111-111111111111";
@@ -66,6 +66,63 @@ test("limits and non-POST methods", async () => {
   const health = await fetch(mcpUrl.replace("/mcp", "/healthz"));
   assert.equal(health.status, 200);
   assert.equal(upstreamCalls.length, 0);
+});
+
+/** POST /mcp with any Host / Origin (fetch can't set Host). */
+const raw = (url, headers) =>
+  new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request(
+      { host: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { "Content-Type": "application/json", ...headers } },
+      (res) => {
+        let b = "";
+        res.on("data", (c) => (b += c));
+        res.on("end", () => resolve({ status: res.statusCode, body: b ? JSON.parse(b) : null }));
+      }
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify(rpc));
+  });
+
+test("hostName keeps only a plain host name", () => {
+  assert.equal(hostName("MCP.Example.com:8787"), "mcp.example.com");
+  assert.equal(hostName("[::1]:80"), "[::1]");
+  assert.equal(hostName("127.0.0.1"), "127.0.0.1");
+  for (const bad of [undefined, "", "evil.com@127.0.0.1", "a/b", "a b", "x:y:z"]) assert.equal(hostName(bad), undefined, bad);
+});
+
+test("another Host, or any Origin by default, gets 403 before auth and never reaches OpsAPI", async () => {
+  const auth = { Authorization: `Bearer ${KEY}` };
+  for (const headers of [
+    { ...auth, Host: "evil.example" },
+    { ...auth, Host: "evil.example:" + new URL(mcpUrl).port },
+    { Host: "rebind.attacker.test" },
+    { ...auth, Origin: "https://evil.example" },
+    { ...auth, Origin: "null" },
+  ]) {
+    const res = await raw(mcpUrl, headers);
+    assert.equal(res.status, 403, JSON.stringify(headers));
+    assert.equal(res.body.error.code, -32000);
+  }
+  // localhost is the same machine: allowed by default, so this one reaches the auth check.
+  assert.equal((await raw(mcpUrl, { Host: `localhost:${new URL(mcpUrl).port}` })).status, 401);
+  assert.equal(upstreamCalls.length, 0);
+});
+
+test("MCP_HOST and MCP_ALLOWED_ORIGINS: only the configured host and origins get through", async () => {
+  const s = createHttpServer({
+    opsapiUrl: "http://127.0.0.1:9", log: () => {}, allowedHosts: ["mcp.example.com:443"], allowedOrigins: ["https://app.example/"],
+  });
+  const url = (await listen(s)) + "/mcp";
+  try {
+    assert.equal((await raw(url, {})).status, 403, "the listen address is not a configured host");
+    assert.equal((await raw(url, { Host: "mcp.example.com" })).status, 401);
+    assert.equal((await raw(url, { Host: "MCP.example.com:8443", Origin: "https://APP.example" })).status, 401);
+    assert.equal((await raw(url, { Host: "mcp.example.com", Origin: "https://other.example" })).status, 403);
+  } finally {
+    s.close();
+    s.closeAllConnections();
+  }
 });
 
 test("an MCP client lists tools and calls one; the caller's key and namespace are forwarded", async () => {

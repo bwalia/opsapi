@@ -249,3 +249,22 @@ test("OpsAPI errors surface as tool errors with the status", async (t) => {
   assert.ok(r.isError);
   assert.match(text(r), /OpsAPI 404 on GET \/api\/v2\/kanban\/tasks\/.*: no such route/);
 });
+
+test("ids must be uuids and PR links https: anything else is refused before OpsAPI is called", async (t) => {
+  const calls = fakeOpsApi(t, {});
+  const client = await connect();
+  const refused = async (name, args) => {
+    const r = await client.callTool({ name, arguments: args }).catch((e) => ({ isError: true, content: [{ text: e.message }] }));
+    assert.ok(r.isError, `${name} ${JSON.stringify(args)}`);
+  };
+  for (const id of ["../users", `${T1}/../../users`, `${T1}?x=1`, "1", ""]) {
+    await refused("get_task", { task_uuid: id });
+    await refused("add_comment", { task_uuid: id, content: "hi" });
+    await refused("log_time", { task_uuid: id, minutes: 5 });
+  }
+  for (const pr_url of ["http://github.com/o/r/pull/1", "javascript:alert(1)", "ftp://x/y", "github.com/o/r/pull/1"]) {
+    await refused("set_task_pr", { task_uuid: T1, pr_url });
+    await refused("complete_task", { task_uuid: T1, pr_url });
+  }
+  assert.equal(calls.length, 0);
+});
