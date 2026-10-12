@@ -1,9 +1,10 @@
--- AI runs for users (docs/AI_RUNNER.md §22.3, §23.3). Who may start: ai_runs.create and (the task's assignee,
--- ai_runs.manage or owner/admin of its kanban project). Who sees: own runs (requested, or on a task assigned to
--- them), project owners/admins their project's runs, ai_runs.manage all. Cancel / retry / messages: requester or
--- ai_runs.manage. Start approvals: managers (R.is_manager). Permission requests: per approval_policy.deciders.
--- Start and retry check the workspace guards first (§24.2): caps, the daily token limit, then similar work (which
--- `confirm_similar: true` accepts).
+-- AI runs for users (docs/AI_RUNNER.md §22.3, §23.3, §25.1). Who may start: ai_runs.create and (the task's
+-- assignee, ai_runs.manage or owner/admin of its kanban project), on a runner they may use (R.runner_access_sql;
+-- else 403). Editing the prompt: ai_runs.manage. Who sees: own runs (requested, or on a task assigned to them),
+-- project owners/admins their project's runs, ai_runs.manage all. Cancel / retry / messages: requester or
+-- ai_runs.manage. Start approvals: managers (R.is_manager), never the requester. Permission requests: per
+-- approval_policy.deciders (R.can_decide). Start and retry check the workspace guards (§24.2): caps, the daily
+-- token limit, then similar work (which `confirm_similar: true` accepts).
 --   POST /tasks/:task_uuid/runs/preview     prompt, runners, suggested folder, conflicts (+ similar), limits,
 --                                           needs_approval
 --   POST /tasks/:task_uuid/runs             start (Idempotency-Key) -> 201 run | 409 { conflict } | 422
@@ -39,6 +40,7 @@ COLS = table.concat(COLS, ", ") .. ", r.task_snapshot"
 
 local NOT_ALLOWED = "Only the task's assignee, an owner or admin of its project, or an AI runs manager can start "
     .. "an AI run on this task"
+local APPROVE_OWN = "You can't approve a run you asked for; another manager must"
 
 local function view(r)
     local v = {}
@@ -121,11 +123,14 @@ local function list(self, ns, params)
     return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
 end
 
-local function runners(ns)
-    local out = {}
-    for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. [[ FROM ar_runners r
-        WHERE r.namespace_id = ? AND r.status <> 'revoked' ORDER BY lower(r.name), r.id LIMIT 100]], ns)) do
-        out[i] = R.runner_view(r)
+-- The runners the caller may use for a task of this project (§25.1).
+local function runners(self, ns, project_uuid)
+    local cond, args = R.runner_access_sql(self, ns, project_uuid)
+    args[#args + 1] = ns
+    local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
+    for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. " FROM ar_runners r WHERE " .. cond
+        .. " AND r.namespace_id = ? AND r.status <> 'revoked' ORDER BY lower(r.name), r.id LIMIT 100", unpack(args))) do
+        out[i] = R.runner_view(r, show_access)
     end
     return out
 end
@@ -140,9 +145,12 @@ return function(app)
             runner_uuid = { type = "uuid" }, profile = { max = 80 }, repo_path = { max = 1024 },
         })
         if not d then U.invalid(errors) end
-        local list_ = runners(ns)
+        local list_ = runners(self, ns, task.project_uuid)
         local runner_uuid = type(d.runner_uuid) == "string" and d.runner_uuid:lower() or nil
-        if not runner_uuid then
+        if runner_uuid then
+            local r, usable = R.usable_runner(self, ns, runner_uuid, task.project_uuid)
+            if r and not usable then return sdk.error(403, R.CANT_USE_RUNNER) end
+        else
             for _, r in ipairs(list_) do
                 if r.status == "online" then runner_uuid = r.uuid break end
             end
@@ -177,7 +185,7 @@ return function(app)
 
     app:post("/tasks/:task_uuid/runs", sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
         return sdk.idempotent(self, function()
-            local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+            local ns = sdk.namespace_id(self)
             local task = task_or_404(ns, self.params.task_uuid)
             local allowed, privileged, assignee = R.can_start(self, task)
             if not allowed then return sdk.error(403, NOT_ALLOWED) end
@@ -192,21 +200,19 @@ return function(app)
             local path = U.path(d.repo_path)
             if not path then U.invalid({ repo_path = "must be an absolute folder path" }) end
             if d.prompt and not privileged then
-                return sdk.error(403, "Only an AI runs manager or an owner or admin of the project can edit the prompt")
+                return sdk.error(403, "Only an AI runs manager can edit the prompt")
             end
-            R.check_guards(self, ns, task, d.confirm_similar)
             local defaults = R.defaults(ns, task)
             local output_mode = d.output_mode or defaults.output_mode
             local tpl = R.template(ns)
             local prompt = d.prompt and U.clean(d.prompt) or R.render(tpl.body, task, { repo_path = path,
                 base_branch = defaults.base_branch, output_mode = output_mode })
             local key = ngx.req.get_headers()["Idempotency-Key"]
-            local run = R.create(ns, me, task, {
+            local run = R.create(self, ns, task, {
                 runner_uuid = d.runner_uuid:lower(), profile = d.profile, model = d.model, repo_path = path,
                 prompt = prompt, template_uuid = tpl.uuid, template_version = tpl.version, output_mode = output_mode,
                 pr_draft = defaults.pr_draft, pr_base = defaults.pr_base, base_branch = defaults.base_branch,
-                timeout_s = defaults.timeout_s, assignee_uuid = assignee,
-                requester_is_manager = R.is_manager(self, task.project_uuid),
+                timeout_s = defaults.timeout_s, assignee_uuid = assignee, confirm_similar = d.confirm_similar,
                 idempotency_key = type(key) == "string" and key:sub(1, 255) or nil,
             })
             return sdk.created(view(run))
@@ -252,8 +258,8 @@ return function(app)
             ORDER BY q.created_at DESC, q.id DESC LIMIT 200]], run.uuid, ns), R.request_view)
         v.turns = map(db.query("SELECT * FROM (" .. R.TURN_SQL .. [[ WHERE t.run_uuid = ? AND t.namespace_id = ?
             ORDER BY t.seq DESC LIMIT 200) x ORDER BY x.seq]], run.uuid, ns), R.turn_view)
-        v.can_decide = R.can_decide(self, run, R.settings(ns).approval_policy.deciders)
-        v.can_approve = run.status == "pending_approval" and R.is_manager(self, run.project_uuid)
+        v.can_decide = R.can_decide(self, run)
+        v.can_approve = R.can_approve(self, run)
         v.can_message = R.IS_ACTIVE[run.status] == true and R.may_control(self, run)
         return sdk.ok(v)
     end)))
@@ -270,7 +276,7 @@ return function(app)
 
     app:post("/runs/:uuid/retry", sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
         return sdk.idempotent(self, function()
-            local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+            local ns = sdk.namespace_id(self)
             local run = R.find_visible(self, ns, self.params.uuid)
             if not run then return sdk.not_found("Run") end
             if not R.may_control(self, run) then
@@ -283,30 +289,30 @@ return function(app)
             if not R.can_start(self, task) then return sdk.error(403, NOT_ALLOWED) end
             local d, errors = sdk.validate(body(self), { confirm_similar = { type = "boolean" } })
             if not d then U.invalid(errors) end
-            R.check_guards(self, ns, task, d.confirm_similar)
             local key = ngx.req.get_headers()["Idempotency-Key"]
-            local new = R.create(ns, me, task, {
+            local new = R.create(self, ns, task, {
                 runner_uuid = run.runner_uuid, profile = run.profile, model = run.model, repo_path = run.repo_path,
                 prompt = run.prompt, template_uuid = run.template_uuid, template_version = run.template_version,
                 output_mode = run.output_mode, pr_draft = run.pr_draft, pr_base = run.pr_base,
                 base_branch = run.base_branch, timeout_s = run.timeout_s, assignee_uuid = run.assignee_uuid,
-                attempt = run.attempt + 1, retry_of = run.uuid,
-                requester_is_manager = R.is_manager(self, task.project_uuid),
+                attempt = run.attempt + 1, retry_of = run.uuid, confirm_similar = d.confirm_similar,
                 idempotency_key = type(key) == "string" and key:sub(1, 255) or nil,
             })
             return sdk.created(view(new))
         end)
     end)))
 
-    -- Start approvals (§23.3): managers only, pending_approval runs only.
+    -- Start approvals (§23.3, §25.1): managers only, pending_approval runs only; nobody approves their own run.
     for action, apply in pairs({ approve = R.approve, reject = R.reject }) do
         app:post("/runs/:uuid/" .. action, sdk.handler({}, U.guard(function(self)
             local ns = sdk.namespace_id(self)
             local run = R.find(ns, self.params.uuid)
             if not run then return sdk.not_found("Run") end
             if not R.is_manager(self, run.project_uuid) then
-                return sdk.error(403, "Only an AI runs manager or an owner or admin of the project can " .. action
-                    .. " this run")
+                return sdk.error(403, "Only an AI run manager can " .. action .. " this run")
+            end
+            if action == "approve" and run.requested_by == sdk.user(self).uuid then
+                return sdk.error(403, APPROVE_OWN)
             end
             local d, errors = sdk.validate(body(self), { reason = { type = "text", max = 2000 } })
             if not d then U.invalid(errors) end
@@ -331,6 +337,12 @@ return function(app)
             if not R.IS_ACTIVE[now.status] then
                 U.fail(409, "This run isn't working right now (" .. now.status .. ")", { status = now.status })
             end
+            -- §25.7: the agent hasn't taken the ones already waiting; don't pile more on.
+            local queued = U.one([[SELECT COUNT(*)::int AS n FROM ar_run_turns WHERE run_uuid = ? AND role = 'user'
+                AND status = 'queued']], run.uuid).n
+            if queued >= R.MAX_QUEUED_TURNS then
+                U.fail(409, "This run already has " .. queued .. " messages waiting for the agent", { queued = queued })
+            end
             return R.insert_turn(run, { role = "user", status = "queued", author_user_uuid = me,
                 text = U.clean(U.redact(d.text)) })
         end)
@@ -343,10 +355,10 @@ return function(app)
     app:post("/runs/:uuid/requests/:req_uuid/decide", sdk.handler({}, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local run = R.find(ns, self.params.uuid)
-        local q = run and U.is_uuid(self.params.req_uuid) and U.one([[SELECT id FROM ar_run_requests
+        local q = run and U.is_uuid(self.params.req_uuid) and U.one([[SELECT id, rememberable FROM ar_run_requests
             WHERE uuid = ? AND run_uuid = ? AND namespace_id = ?]], self.params.req_uuid, run.uuid, ns)
         if not q then return sdk.not_found("Request") end
-        if not R.can_decide(self, run, R.settings(ns).approval_policy.deciders) then
+        if not R.can_decide(self, run) then
             return sdk.error(403, "The workspace's approval policy doesn't let you decide this run's requests")
         end
         local d, errors = sdk.validate(body(self), { decision = { required = true, enum = { "allow", "deny" } },
@@ -360,7 +372,7 @@ return function(app)
             remember = ? WHERE id = ? AND status = 'pending' RETURNING id]],
             d.decision == "allow" and "allowed" or "denied", sdk.user(self).uuid,
             type(d.reason) == "string" and d.reason ~= "" and U.clean(U.redact(d.reason)) or db.NULL,
-            d.decision == "allow" and d.remember == true, q.id)
+            d.decision == "allow" and d.remember == true and q.rememberable == true, q.id)
         if not done then
             local now = U.one("SELECT status FROM ar_run_requests WHERE id = ?", q.id)
             U.fail(409, "This request is no longer pending (" .. now.status .. ")", { status = now.status })
@@ -373,7 +385,6 @@ return function(app)
     -- actions use; move the rules into SQL if a workspace ever has more than that waiting at once.
     app:get("/waiting", sdk.handler({}, U.guard(function(self)
         local ns = sdk.namespace_id(self)
-        local deciders = R.settings(ns).approval_policy.deciders
         local requests = {}
         for _, q in ipairs(db.query([[
             SELECT q.*, NULL AS decided_by_name, r.requested_by, r.project_uuid, r.status AS run_status, r.task_uuid,
@@ -386,7 +397,7 @@ return function(app)
               AND r.status IN ]] .. R.ACTIVE_SQL .. [[
             ORDER BY q.created_at, q.id LIMIT 200
         ]], ns)) do
-            if R.can_decide(self, q, deciders) then
+            if R.can_decide(self, q) then
                 local v = R.request_view(q)
                 v.task = { uuid = q.task_uuid, title = U.null(q.task_title), task_number = U.null(q.task_number),
                     project_uuid = U.null(q.project_uuid) }
@@ -407,7 +418,7 @@ return function(app)
             LEFT JOIN users u ON u.uuid = r.requested_by
             WHERE r.namespace_id = ? AND r.status = 'pending_approval' ORDER BY r.created_at, r.id LIMIT 200
         ]], ns)) do
-            if R.is_manager(self, r.project_uuid) then approvals[#approvals + 1] = view(r) end
+            if R.can_approve(self, r) then approvals[#approvals + 1] = view(r) end
         end
         return sdk.ok({ requests = U.array(requests), approvals = U.array(approvals) })
     end)))

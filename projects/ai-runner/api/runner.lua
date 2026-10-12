@@ -6,7 +6,9 @@
 --                                              skips runs of profiles the runner reports unavailable
 --   POST /public/runner/runs/:uuid/status      { seq, status, question?, ... } compare-and-set; stale seq ignored
 --   POST /public/runner/runs/:uuid/events      { events: [{ seq, type, text?, data? }] } idempotent on (run, seq)
---   POST /public/runner/runs/:uuid/permissions              ask a person; idempotent on request_id
+--   POST /public/runner/runs/:uuid/permissions              ask a person; idempotent on request_id (409 when
+--                                                           reused for another tool or command); too large to
+--                                                           review or past the run's limit -> denied at once
 --   POST /public/runner/runs/:uuid/permissions/:req/wait    long-poll for the decision
 --   POST /public/runner/runs/:uuid/turns                    an agent turn + its usage; idempotent on turn
 --   POST /public/runner/runs/:uuid/turns/next               long-poll for people's messages
@@ -23,7 +25,9 @@ local R = require("ai_runner.runs")
 local MAX_EVENTS, MAX_EVENT_TEXT, MAX_EVENT_DATA = 200, 4096, 8192
 local MAX_INPUT, MAX_TURN_TEXT, INT_MAX = 8192, 8192, 2147483647
 local EVENT_TYPES = { log = true, progress = true, tool = true, usage = true }
-local BRANCH = "^[%w%._/%-]+$"
+local MAX_SUMMARY = 2000
+-- The one event a run gets when it reaches R.MAX_RUN_EVENTS (a seq no runner reaches, so it sorts last).
+local TRUNCATED_SEQ = 2147483647
 
 -- Lookup by hash: the comparison never touches the secret itself, so its timing tells nothing about it.
 local function auth()
@@ -68,14 +72,27 @@ local function stopping(run)
     return st == "cancelling" or R.TERMINAL[st] == true
 end
 
--- What a person sees for a permission request: the command, the file, the URL; else the input as JSON.
+-- What a person sees for a permission request: the command, the file, the URL; else the input as JSON. Unredacted
+-- and uncut: the caller checks its length, then stores safe_text of it.
 local function input_summary(input)
     local s = input.command or input.file_path or input.notebook_path or input.url or input.path or input.pattern
-    if type(s) ~= "string" then
-        local ok, enc = pcall(cjson.encode, input)
-        s = ok and enc or ""
+    return type(s) == "string" and s or U.canonical(input)
+end
+
+local EDITS = { Edit = true, Write = true, MultiEdit = true, NotebookEdit = true }
+
+-- §25.2: the rule key "allow for this run" matches exactly, and whether it may: Bash -> the command with its
+-- whitespace collapsed, never for one that chains, substitutes or redirects; a file edit -> the tool and the
+-- file; any other tool -> the tool and all of its input. @return key, rememberable
+local function rule_key(tool, input)
+    if tool == "Bash" then
+        local cmd = input.command
+        if type(cmd) ~= "string" then return "Bash " .. U.canonical(input), false end
+        return (cmd:gsub("%s+", " "):match("^ ?(.-) ?$")), not cmd:find("[;&|`$()<>\n\r\\]")
     end
-    return safe_text(s, 2000)
+    local file = EDITS[tool] and (input.file_path or input.notebook_path)
+    if type(file) == "string" then return tool .. " " .. file, true end
+    return tool .. " " .. U.canonical(input), true
 end
 
 local function num(v)
@@ -122,7 +139,7 @@ local function repos(list)
         local p = type(r) == "table" and U.path(str(r.path))
         if p and not seen[p] and #out < 1000 then
             seen[p] = true
-            out[#out + 1] = { path = p, remote = str(r.remote, 1024), branch = str(r.branch, 255),
+            out[#out + 1] = { path = p, remote = safe_text(r.remote, 1024), branch = str(r.branch, 255),
                 dirty = r.dirty == true }
         end
     end
@@ -245,8 +262,9 @@ return function(app)
         end
         if d.commit_sha and not d.commit_sha:match("^%x+$") then U.invalid({ commit_sha = "must be a git sha" }) end
         for _, k in ipairs({ "work_branch", "previous_branch" }) do
-            if d[k] and not d[k]:match(BRANCH) then U.invalid({ [k] = "must be a branch name" }) end
+            if d[k] and not U.is_branch(d[k]) then U.invalid({ [k] = "must be a branch name" }) end
         end
+        if d.pr_url then d.pr_url = U.redact(d.pr_url) end
         if d.error then d.error = U.clean(U.redact(d.error), 2000) end
         if d.summary then d.summary = U.clean(U.redact(d.summary), 8000) end
         if d.question then d.question = U.clean(U.redact(d.question), 4000) end
@@ -284,64 +302,112 @@ return function(app)
             rows[#rows + 1] = { seq = seq, type = e.type, data = data, text = safe_text(e.text, MAX_EVENT_TEXT) }
         end
         if #rows == 0 then return sdk.ok({ stored = 0 }) end
-        -- ponytail: no cap on events per run yet; add one (or MinIO chunks, §5) when long runs make the table heavy.
-        local res = db.query([[
-            INSERT INTO ar_run_events (run_uuid, namespace_id, seq, type, text, data)
-            SELECT ?, ?, x.seq, x.type, x.text, x.data
-            FROM jsonb_to_recordset(?::jsonb) AS x(seq int, type text, text text, data jsonb)
-            ON CONFLICT (run_uuid, seq) DO NOTHING
-        ]], run.uuid, runner.namespace_id, cjson.encode(rows))
-        return sdk.ok({ stored = res.affected_rows or 0 })
+        -- §25.7: at most R.MAX_RUN_EVENTS per run; past that they are dropped and the log says so once.
+        -- ponytail: counted from the (run_uuid, seq) index on every batch, not locked (one runner posts a run's
+        -- events, in order); keep a counter on ar_runs if 20k-entry counts ever show up.
+        local room = R.MAX_RUN_EVENTS - U.one("SELECT COUNT(*)::int AS n FROM ar_run_events WHERE run_uuid = ?",
+            run.uuid).n
+        local truncated = #rows > room
+        if truncated then rows = { unpack(rows, 1, math.max(room, 0)) } end
+        local stored = 0
+        if #rows > 0 then
+            stored = db.query([[
+                INSERT INTO ar_run_events (run_uuid, namespace_id, seq, type, text, data)
+                SELECT ?, ?, x.seq, x.type, x.text, x.data
+                FROM jsonb_to_recordset(?::jsonb) AS x(seq int, type text, text text, data jsonb)
+                ON CONFLICT (run_uuid, seq) DO NOTHING
+            ]], run.uuid, runner.namespace_id, cjson.encode(rows)).affected_rows or 0
+        end
+        if truncated then
+            db.query([[INSERT INTO ar_run_events (run_uuid, namespace_id, seq, type, text) VALUES (?, ?, ?, 'log', ?)
+                ON CONFLICT (run_uuid, seq) DO NOTHING]], run.uuid, runner.namespace_id, TRUNCATED_SEQ,
+                "Log truncated: this run reached " .. R.MAX_RUN_EVENTS .. " events, later ones are not kept")
+        end
+        return sdk.ok({ stored = stored, truncated = truncated })
     end)))
 
-    -- The permission bridge (§23.2): the runner is Claude's permission host and asks a person through OpsAPI.
+    -- The permission bridge (§23.2, §25.2, §25.4): the runner is Claude's permission host and asks a person through
+    -- OpsAPI. A request too large to review, or past the run's limit, is denied without asking anyone; "allow for
+    -- this run" covers only the same command (or file, or input) again.
     app:post("/public/runner/runs/:uuid/permissions", sdk.handler({ namespace = false }, U.guard(function(self)
         local runner = auth()
         local run = claimed_run(runner, self.params.uuid)
         local b = body(self)
         local d, errors = sdk.validate(b, { request_id = { required = true, max = 255 },
             tool = { required = true, max = 120 }, tool_use_id = { max = 255 }, description = { type = "text" },
-            blocked_path = { type = "text", max = 4096 }, rule_key = { max = 255 } })
+            blocked_path = { type = "text", max = 4096 } })
         if not d then U.invalid(errors) end
         if type(b.input) ~= "table" or (next(b.input) ~= nil and b.input[1] ~= nil) then
             U.invalid({ input = "must be an object" })
         end
         for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
-        local input = U.redact_value(b.input)
-        local ok, enc = pcall(cjson.encode, input)
-        if not ok or #enc > MAX_INPUT then enc = cjson.encode({ truncated = true }) end
+        local tool, input = U.clean(d.tool), U.redact_value(b.input)
+        local raw_summary = input_summary(b.input)
+        local summary = safe_text(raw_summary, MAX_SUMMARY)
+        local ok, raw_enc = pcall(cjson.encode, b.input)
+        local enc = ok and cjson.encode(input)
+        -- §25.4: the decider must see all of it.
+        local too_large = not ok or #raw_enc > MAX_INPUT or #enc > MAX_INPUT or U.chars(raw_summary) > MAX_SUMMARY
+        if not enc or #enc > MAX_INPUT then enc = cjson.encode({ truncated = true }) end
+        -- §25.2: the rule key comes from the input (the runner's rule_key is ignored). A request that had a secret
+        -- redacted is never remembered: two different commands may read the same once redacted.
+        local key, rememberable = rule_key(tool, input)
+        rememberable = rememberable and not too_large and rule_key(tool, b.input) == key
 
+        -- §25.4: a request id names one request; reused for another tool or command it gets 409, not that answer.
+        local function replay(found)
+            if found.tool ~= tool or found.input_summary ~= summary then
+                U.fail(409, "This request id was already used for a different request")
+            end
+            return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
+        end
         local function existing()
-            return U.one("SELECT uuid, status, reason FROM ar_run_requests WHERE run_uuid = ? AND request_id = ?",
-                run.uuid, d.request_id)
+            return U.one([[SELECT uuid, status, reason, tool, input_summary FROM ar_run_requests
+                WHERE run_uuid = ? AND request_id = ?]], run.uuid, d.request_id)
         end
         local found = existing()
-        if found then
-            return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
-        end
-        -- "Allow for this run" covers later requests of the same kind (same rule_key) at once.
-        local earlier = d.rule_key and U.one([[SELECT decided_by FROM ar_run_requests WHERE run_uuid = ?
-            AND rule_key = ? AND status = 'allowed' AND remember ORDER BY decided_at DESC LIMIT 1]], run.uuid,
-            d.rule_key)
+        if found then return replay(found) end
+
         local minutes = R.policy(run.namespace_id).permission_timeout_s / 60
-        local row = U.one([[
-            INSERT INTO ar_run_requests (run_uuid, namespace_id, kind, request_id, tool, input_summary, input,
-                description, blocked_path, rule_key, tool_use_id, status, decided_by, decided_at, reason, expires_at)
-            VALUES (?, ?, 'permission', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, NOW() + make_interval(mins => ?))
-            ON CONFLICT (run_uuid, request_id) DO NOTHING
-            RETURNING uuid, status, reason
-        ]], run.uuid, run.namespace_id, d.request_id, U.clean(d.tool), input_summary(b.input), enc,
-            safe_text(d.description, 2000) or db.NULL, d.blocked_path and U.clean(d.blocked_path) or db.NULL,
-            d.rule_key and U.clean(d.rule_key) or db.NULL, d.tool_use_id or db.NULL,
-            earlier and "allowed" or "pending", earlier and earlier.decided_by or db.NULL,
-            earlier and db.raw("NOW()") or db.NULL, earlier and "Allowed earlier in this run" or db.NULL, minutes)
-        if not row then -- the same request_id raced in
-            found = existing()
-            return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
+        -- Under the run's row lock: the per-run limit (§25.7) holds when requests come in together.
+        local row, capped = U.tx(function()
+            U.one("SELECT id FROM ar_runs WHERE id = ? FOR UPDATE", run.id)
+            if U.one("SELECT COUNT(*)::int AS n FROM ar_run_requests WHERE run_uuid = ?", run.uuid).n
+                >= R.MAX_RUN_REQUESTS then
+                return nil, true
+            end
+            local status, reason, by = "pending", nil, nil
+            if too_large then
+                status, reason = "denied", "Too large to review"
+            elseif rememberable then
+                local earlier = U.one([[SELECT decided_by FROM ar_run_requests WHERE run_uuid = ? AND tool = ?
+                    AND rule_key = ? AND status = 'allowed' AND remember AND rememberable
+                    ORDER BY decided_at DESC LIMIT 1]], run.uuid, tool, key)
+                if earlier then
+                    status, reason, by = "allowed", "Allowed earlier in this run (exact match)", earlier.decided_by
+                end
+            end
+            return U.one([[
+                INSERT INTO ar_run_requests (run_uuid, namespace_id, kind, request_id, tool, input_summary, input,
+                    description, blocked_path, rule_key, rememberable, tool_use_id, status, decided_by, decided_at,
+                    reason, expires_at)
+                VALUES (?, ?, 'permission', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    NOW() + make_interval(mins => ?))
+                ON CONFLICT (run_uuid, request_id) DO NOTHING
+                RETURNING uuid, status, reason
+            ]], run.uuid, run.namespace_id, d.request_id, tool, summary, enc,
+                safe_text(d.description, 2000) or db.NULL, safe_text(d.blocked_path) or db.NULL, key, rememberable,
+                d.tool_use_id or db.NULL, status, by or db.NULL, status ~= "pending" and db.raw("NOW()") or db.NULL,
+                reason or db.NULL, minutes)
+        end)
+        if capped then
+            return sdk.ok({ request = { uuid = cjson.null, status = "denied",
+                reason = "This run has asked for " .. R.MAX_RUN_REQUESTS .. " permissions, the most one run may" } })
         end
+        if not row then return replay(existing()) end -- the same request_id raced in
         R.notify(run)
-        if row.status == "pending" then -- not when "allow for this run" already covered it
-            R.alert(run, "permission", nil, U.clean(d.tool) .. ": " .. U.clean(input_summary(b.input) or "", 200))
+        if row.status == "pending" then -- not when it was denied or allowed at once
+            R.alert(run, "permission", nil, tool .. ": " .. U.clean(summary, 200))
         end
         return sdk.created({ request = { uuid = row.uuid, status = row.status, reason = U.null(row.reason) } })
     end)))
