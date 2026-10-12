@@ -34,6 +34,8 @@ export interface WidgetDef {
 export const WIDGET_IDS = [
   // Shop / core
   'users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'recent_orders',
+  // Projects
+  'my_tasks_today',
   // Property portfolio
   'pd_active_deals', 'pd_due_today', 'pd_overdue', 'pd_hot_leads_count', 'pd_money_at_risk', 'pd_renovations',
   'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk',
@@ -49,6 +51,7 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   orders_chart: { label: 'Revenue by month', module: 'orders', source: 'core', size: 'half' },
   health: { label: 'System health', module: 'dashboard', size: 'half' },
   recent_orders: { label: 'Recent orders', module: 'orders', source: 'core', size: 'full' },
+  my_tasks_today: { label: 'My tasks today', module: 'projects', size: 'full' },
   pd_active_deals: { label: 'Active deals', module: 'property_deals_deals', source: 'property', size: 'stat' },
   pd_due_today: { label: 'Tasks due today', module: 'property_deals_tasks', source: 'property', size: 'stat' },
   pd_overdue: { label: 'Overdue tasks', module: 'property_deals_tasks', source: 'property', size: 'stat' },
@@ -62,18 +65,18 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
 };
 
 export const LAYOUTS: Record<'general' | BusinessType, WidgetId[]> = {
-  general: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'recent_orders'],
-  ecommerce: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'recent_orders'],
+  general: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'my_tasks_today', 'recent_orders'],
+  ecommerce: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'my_tasks_today', 'recent_orders'],
   property_portfolio_manager: [
     'pd_active_deals', 'pd_due_today', 'pd_overdue', 'pd_hot_leads_count', 'pd_money_at_risk', 'pd_renovations',
     'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk',
   ],
   // Until these have their own widgets they start from the general layout.
-  field_service: ['users', 'orders', 'revenue', 'health'],
-  professional_services: ['users', 'orders', 'revenue', 'orders_chart', 'health'],
-  healthcare: ['users', 'health'],
-  care_home: ['users', 'health'],
-  accounting: ['users', 'revenue', 'orders_chart', 'health'],
+  field_service: ['users', 'orders', 'revenue', 'health', 'my_tasks_today'],
+  professional_services: ['users', 'orders', 'revenue', 'orders_chart', 'health', 'my_tasks_today'],
+  healthcare: ['users', 'health', 'my_tasks_today'],
+  care_home: ['users', 'health', 'my_tasks_today'],
+  accounting: ['users', 'revenue', 'orders_chart', 'health', 'my_tasks_today'],
 };
 
 /** The widget ids for a workspace, in order. Unknown ids in settings are dropped. */
