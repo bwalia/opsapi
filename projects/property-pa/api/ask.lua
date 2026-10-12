@@ -13,6 +13,9 @@ local U = require("property_deals.util")
 local B = require("property_pa.bridge")
 
 local MODES = { "today", "prepare", "capture", "coach", "ask", "handoff", "manager_today", "teach" }
+-- Modes in which the agent proposes or writes (as the pd_agent service account): the person asking must be allowed
+-- to make that change themselves. The other modes only read.
+local WRITES = { capture = "property_pa_updates", handoff = "property_pa_handoffs", teach = "property_pa_knowledge" }
 local MAX_SKEW = 300 -- seconds a webhook timestamp may be off
 
 local function view(r)
@@ -57,6 +60,9 @@ return function(app)
         end
         if B.MANAGER_ONLY[d.mode] and d.role ~= "manager" then
             return sdk.error(422, "Validation failed", { mode = d.mode .. " is a Manager PA mode" })
+        end
+        if WRITES[d.mode] and not sdk.can(self, WRITES[d.mode], "create") then
+            return sdk.error(403, "Permission denied: " .. d.mode .. " mode needs " .. WRITES[d.mode] .. ".create")
         end
         if body.inputs ~= nil and type(body.inputs) ~= "table" then
             return sdk.error(422, "Validation failed", { inputs = "must be an object" })

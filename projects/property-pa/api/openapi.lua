@@ -272,7 +272,11 @@ return function(app)
         permission = "property_pa_records.read", status = 202, body = OBJ({ message = S(), mode = ENUM({ "today",
             "prepare", "capture", "coach", "ask", "handoff", "manager_today", "teach" }), role = ENUM({ "seller_agent",
             "manager" }), opportunity_uuid = UUID(), inputs = OBJ({}) }, { "message" }), response = Run,
-        errors = { ["403"] = "Manager PA for managers only", ["409"] = "The PA isn't connected", ["502"] = "JobShout unreachable" } })
+        description = "Modes in which the agent writes (capture, handoff, teach) need the caller's own .create on "
+            .. "property_pa_updates / _handoffs / _knowledge. mode and opportunity_uuid always win over inputs.",
+        errors = { ["403"] = "Manager PA for managers only, or a writing mode the caller can't use",
+            ["409"] = "The PA isn't connected", ["429"] = "Too many questions, or over the daily AI limit",
+            ["502"] = "JobShout unreachable" } })
     doc("GET /ask/:id", { summary = "My PA run: running, or the checked answer", permission = "property_pa_records.read",
         path = id, response = Run, errors = E404 })
     doc("POST /public/jobshout/events", { summary = "JobShout webhook (run.completed / run.failed)",

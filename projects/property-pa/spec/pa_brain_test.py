@@ -334,11 +334,19 @@ check("P10 (part): the run records model and prompt version", got["model"] == "o
 
 mock("POST", "/_ctl", {"pa_answer": answer("Sarah will accept £200k.", [{"type": "opportunity", "id": SARAH}], "prepare")})
 run2 = data(call("POST", PA + "/ask", SOPHIE, S, {"message": "Prepare me for Sarah.", "mode": "prepare",
-            "opportunity_uuid": SARAH}), 202, "second turn")
+            "opportunity_uuid": SARAH, "inputs": {"mode": "capture", "opportunity_id": "someone-else",
+                                                  "interaction_uuid": "4f1b8c2e-0000-4000-8000-000000000111",
+                                                  "tone": "short"}}), 202, "second turn")
 tr = mock("GET", "/_js")["task_runs"][-1]
 check("the second turn is a new run on the same JobShout task", tr["task_id"] == run["jobshout_task_id"]
-      and tr["skill_slugs"] == ["pa-prepare-me"] and tr["inputs"]["opportunity_id"] == SARAH
-      and tr["inputs"]["mode"] == "prepare", tr)
+      and tr["skill_slugs"] == ["pa-prepare-me"] and tr["inputs"]["opportunity_id"] == SARAH, tr)
+check("the checked mode and ids win over the caller's inputs (extra inputs pass through)",
+      tr["inputs"]["mode"] == "prepare" and "interaction_uuid" not in tr["inputs"] and tr["inputs"]["tone"] == "short", tr)
+expect("add a read-only member", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
+       {"email": USERS["reader"][1], "role_ids": [role_id["pd_read_only"]]}), 201)
+for mode in ("capture", "handoff"):
+    res = call("POST", PA + "/ask", "reader", S, {"message": "Sarah agreed £1. Log it and tell Ashley.", "mode": mode})
+    check(f"a read-only member can't make the PA write ({mode} mode needs .create: 403)", res[0] == 403, res)
 got = data(call("GET", PA + f"/ask/{run2['uuid']}", SOPHIE, S), 200, "an invented figure")
 check("P05: an answer with an invented figure is withheld", got["output"]["grounded"] is False
       and got["output"].get("answer") is None and got["output"]["withheld"]

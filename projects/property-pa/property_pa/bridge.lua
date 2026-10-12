@@ -91,10 +91,10 @@ function B.ask(ns, user_uuid, settings, req)
     local JobShout = require("lib.jobshout-client")
     local agent_key = "pa_" .. role
     local context = { role = role, user_ref = user_uuid, workspace_ref = tostring(ns) }
-    local inputs = { mode = req.mode }
+    local inputs = {}
     for k, v in pairs(req.inputs or {}) do inputs[k] = v end
-    if req.opportunity_uuid then inputs.opportunity_id = req.opportunity_uuid end
-    if req.interaction_uuid then inputs.interaction_uuid = req.interaction_uuid end
+    -- What the server checked always wins over the caller's inputs.
+    inputs.mode, inputs.opportunity_id, inputs.interaction_uuid = req.mode, req.opportunity_uuid, req.interaction_uuid
     local skill = B.SKILLS[req.mode]
     local skills = skill and { skill } or nil
     -- One JobShout task per person and role: every turn is a new run on it.
