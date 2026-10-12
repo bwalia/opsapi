@@ -3,7 +3,7 @@
 /**
  * AI Runs — every run the user may see (own; all with ai_runs.manage), live: polls every 10 s while the tab is visible.
  * On top, "Waiting on you": permission requests and start approvals the user may decide, with quick actions,
- * and for managers the overview cards (§24.5).
+ * and for managers the overview cards (§24.5). Your own run waiting for approval shows no Approve / Reject (§25.1).
  */
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -17,6 +17,7 @@ import {
   requestTarget, runStatusLabel, runView, when,
 } from '@/components/ai-runner/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
+import { useAuthStore } from '@/store/auth.store';
 import {
   aiRunner, aiErrorText, type Overview, type Run, type Runner, type Waiting, type WaitingRequest,
 } from '@/services/ai-runner.service';
@@ -43,6 +44,7 @@ const requestRun = (r: WaitingRequest) => ({
 
 function WaitingOnYou({ waiting, onChanged }: { waiting: Waiting; onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const me = useAuthStore((s) => s.user?.uuid);
   const n = waiting.requests.length + waiting.approvals.length;
   if (!n) return null;
 
@@ -95,6 +97,7 @@ function WaitingOnYou({ waiting, onChanged }: { waiting: Waiting; onChanged: () 
         })}
         {waiting.approvals.map((run) => {
           const v = runView(run);
+          const mine = !!me && v.requesterUuid === me;
           return (
             <li key={run.uuid} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2">
               <Badge size="sm" variant="warning">Start approval</Badge>
@@ -105,10 +108,16 @@ function WaitingOnYou({ waiting, onChanged }: { waiting: Waiting; onChanged: () 
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" isLoading={busy === `approve:${run.uuid}`} disabled={!!busy} aria-label={`Approve the run of ${v.taskLabel}`}
-                  onClick={() => go(`approve:${run.uuid}`, () => aiRunner.approve(run.uuid), 'Approved: the run is queued')}>Approve</Button>
-                <Button size="sm" variant="danger" isLoading={busy === `reject:${run.uuid}`} disabled={!!busy} aria-label={`Reject the run of ${v.taskLabel}`}
-                  onClick={() => go(`reject:${run.uuid}`, () => aiRunner.reject(run.uuid), 'Rejected: the run is cancelled')}>Reject</Button>
+                {mine ? (
+                  <span className="text-xs text-secondary-600">Another manager must approve it.</span>
+                ) : (
+                  <>
+                    <Button size="sm" isLoading={busy === `approve:${run.uuid}`} disabled={!!busy} aria-label={`Approve the run of ${v.taskLabel}`}
+                      onClick={() => go(`approve:${run.uuid}`, () => aiRunner.approve(run.uuid), 'Approved: the run is queued')}>Approve</Button>
+                    <Button size="sm" variant="danger" isLoading={busy === `reject:${run.uuid}`} disabled={!!busy} aria-label={`Reject the run of ${v.taskLabel}`}
+                      onClick={() => go(`reject:${run.uuid}`, () => aiRunner.reject(run.uuid), 'Rejected: the run is cancelled')}>Reject</Button>
+                  </>
+                )}
                 {open(run.uuid, v.taskLabel)}
               </div>
             </li>
