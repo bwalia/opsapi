@@ -79,7 +79,8 @@ check("platform model refused when the deployment has none self-hosted (422 with
 # --- Voice for the assistant (our own voice server; mock in the sandbox) -------------------------------------------
 def raw(method, path, body, ctype, user="operator_s"):
     req = urllib.request.Request(API + path, data=body, method=method,
-                                 headers={"Authorization": "Bearer " + jwt(user), "Content-Type": ctype})
+                                 headers={"Authorization": "Bearer " + jwt(user), "Content-Type": ctype,
+                                          "X-Namespace-Id": S})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return r.status, r.read(), dict(r.headers)
