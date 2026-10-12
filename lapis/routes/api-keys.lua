@@ -12,6 +12,14 @@
       POST   /api/v2/api-keys        {name, scopes, expires_at?} → raw key, once
       GET    /api/v2/api-keys        list (never returns the key or its hash)
       DELETE /api/v2/api-keys/:uuid  revoke (idempotent)
+
+    Self-service personal keys — any active member, for themselves only (still
+    a JWT session; keys cannot mint keys). Bound to the caller, never stronger
+    than the caller's role (checked now and on every request, helper/api-key.lua):
+
+      POST   /api/v2/me/api-keys        {name, scopes?, expires_in_days?} → raw key, once
+      GET    /api/v2/me/api-keys        the caller's own self-service keys here
+      DELETE /api/v2/me/api-keys/:uuid  revoke one of them (404 for anyone else's)
 ]]
 
 local cjson = require("cjson")
@@ -19,8 +27,10 @@ local db = require("lapis.db")
 local ApiKeyHelper = require("helper.api-key")
 local ApiKeyQueries = require("queries.ApiKeyQueries")
 local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
+local NamespaceAuditLogQueries = require("queries.NamespaceAuditLogQueries")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local RateLimit = require("middleware.rate-limit")
 
 local function parse_body()
     ngx.req.read_body()
@@ -91,7 +101,47 @@ local function present(row)
         created_at = row.created_at,
         -- Which user this key acts as (nil = machine key).
         user_uuid = (row.user_uuid ~= nil and row.user_uuid ~= ngx.null and row.user_uuid ~= "") and row.user_uuid or nil,
+        -- "self" = minted by its owner (self-service); nil = by an admin.
+        created_via = row.created_via ~= ngx.null and row.created_via or nil,
     }
+end
+
+local function list_json(rows)
+    local data = {}
+    for _, row in ipairs(rows or {}) do
+        data[#data + 1] = present(row)
+    end
+    -- cjson encodes an empty Lua table as {}; a list must stay a list.
+    return { json = { success = true, data = #data > 0 and data or cjson.empty_array } }
+end
+
+--- Self-service endpoints: a real session of an active member of this
+-- workspace. Platform admins who are not members have no role to bound a key.
+local function member_session(handler)
+    return AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        local refused = refuse_api_key_auth(self)
+        if refused then return refused end
+        if not self.namespace_membership then
+            return {
+                json = { error = "Only members of this workspace can have personal API keys" },
+                status = 403
+            }
+        end
+        return handler(self)
+    end))
+end
+
+local function audit(self, action, key_uuid, values)
+    pcall(NamespaceAuditLogQueries.log, {
+        namespace_id = self.namespace.id,
+        user_id = self.namespace_membership.user_id,
+        action = action,
+        entity_type = "api_key",
+        entity_id = key_uuid,
+        new_values = values,
+        ip_address = RateLimit.getClientIP(),
+        user_agent = self.req.headers["user-agent"],
+    })
 end
 
 return function(app)
@@ -188,13 +238,7 @@ return function(app)
             local refused = refuse_api_key_auth(self)
             if refused then return refused end
 
-            local rows = ApiKeyQueries.listByNamespace(self.namespace.id)
-            local data = {}
-            for _, row in ipairs(rows or {}) do
-                data[#data + 1] = present(row)
-            end
-            -- cjson encodes an empty Lua table as {}; a list must stay a list.
-            return { json = { success = true, data = #data > 0 and data or cjson.empty_array } }
+            return list_json(ApiKeyQueries.listByNamespace(self.namespace.id))
         end)))
 
     app:delete("/api/v2/api-keys/:uuid", AuthMiddleware.requireAuth(
@@ -211,4 +255,118 @@ return function(app)
             ApiKeyQueries.revoke(self.params.uuid, self.namespace.id)
             return { json = { success = true } }
         end)))
+
+    -- ------------------------------------------------------------------
+    -- Self-service personal keys
+    -- ------------------------------------------------------------------
+
+    app:get("/api/v2/me/api-keys", member_session(function(self)
+        return list_json(ApiKeyQueries.listMine(self.namespace.id, self.current_user.uuid))
+    end))
+
+    app:post("/api/v2/me/api-keys", member_session(function(self)
+        local body = parse_body()
+        if not body then
+            return { json = { error = "Invalid JSON body" }, status = 400 }
+        end
+        local name = type(body.name) == "string" and body.name:match("^%s*(.-)%s*$") or ""
+        if name == "" or #name > 100 then
+            return { json = { error = "name is required (at most 100 characters)" }, status = 422 }
+        end
+
+        -- Never more than the caller holds right now. No scopes = the AI-agent
+        -- preset, narrowed to the caller's role; asked-for scopes must all be held.
+        local perms = self.namespace_permissions or {}
+        local scopes, scopes_err
+        if body.scopes == nil or body.scopes == cjson.null then
+            scopes = ApiKeyHelper.effective_scopes(ApiKeyHelper.AGENT_PRESET, perms)
+            if next(scopes) == nil then
+                scopes_err = "Your role in this workspace has no access to projects or tasks, "
+                    .. "so the AI agent preset would grant nothing"
+            end
+        else
+            scopes, scopes_err = ApiKeyHelper.check_self_scopes(body.scopes, perms)
+        end
+        if scopes_err then
+            return { json = { error = scopes_err }, status = 422 }
+        end
+
+        local days, days_err = ApiKeyHelper.self_expiry_days(
+            body.expires_in_days ~= cjson.null and body.expires_in_days or nil)
+        if not days then
+            return { json = { error = days_err }, status = 422 }
+        end
+
+        local user_uuid = self.current_user.uuid
+        if ApiKeyQueries.countActiveMine(self.namespace.id, user_uuid) >= ApiKeyHelper.SELF_MAX_ACTIVE then
+            return {
+                json = { error = "You already have " .. ApiKeyHelper.SELF_MAX_ACTIVE
+                    .. " active personal API keys in this workspace. Revoke one first." },
+                status = 422
+            }
+        end
+
+        local allowed, _, retry_after = RateLimit.check("me_api_keys:" .. user_uuid,
+            ApiKeyHelper.SELF_CREATES_PER_HOUR, 3600)
+        if not allowed then
+            ngx.header["Retry-After"] = tostring(retry_after)
+            return {
+                json = { error = "Too many API keys created. Please try again later.", retry_after = retry_after },
+                status = 429
+            }
+        end
+
+        local raw, key_prefix, key_hash = ApiKeyHelper.generate()
+        local row = ApiKeyQueries.create({
+            namespace_id = self.namespace.id,
+            name = name,
+            key_prefix = key_prefix,
+            key_hash = key_hash,
+            scopes = cjson.encode(scopes),
+            created_by = self.namespace_membership.user_id,
+            expires_at = db.raw(string.format("NOW() + make_interval(days => %d)", days)),
+            user_uuid = user_uuid,
+            created_via = ApiKeyHelper.SELF,
+        })
+        audit(self, "api_key.created", row.uuid, {
+            name = name, key_prefix = key_prefix, scopes = scopes,
+            expires_at = row.expires_at, created_via = ApiKeyHelper.SELF,
+        })
+
+        return {
+            json = {
+                success = true,
+                data = {
+                    key = raw,
+                    uuid = row.uuid,
+                    name = row.name,
+                    key_prefix = row.key_prefix,
+                    scopes = scopes,
+                    expires_at = row.expires_at,
+                    created_at = row.created_at,
+                    user_uuid = user_uuid,
+                    created_via = ApiKeyHelper.SELF,
+                },
+                meta = {
+                    note = "Store this key now — it cannot be retrieved again."
+                }
+            },
+            status = 201
+        }
+    end))
+
+    app:delete("/api/v2/me/api-keys/:uuid", member_session(function(self)
+        -- Owner + workspace + self-service in one lookup: anyone else's key is
+        -- simply "not found" (no hint that it exists).
+        local key = ApiKeyQueries.findMine(self.params.uuid, self.namespace.id, self.current_user.uuid)
+        if not key then
+            return { json = { error = "API key not found" }, status = 404 }
+        end
+        if ApiKeyQueries.revoke(key.uuid, self.namespace.id) then
+            audit(self, "api_key.revoked", key.uuid, {
+                name = key.name, key_prefix = key.key_prefix, created_via = ApiKeyHelper.SELF,
+            })
+        end
+        return { json = { success = true } }
+    end))
 end

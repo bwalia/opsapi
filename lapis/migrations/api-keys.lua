@@ -96,4 +96,16 @@ return {
             db.query("ALTER TABLE api_keys ADD COLUMN user_uuid varchar")
         end
     end,
+
+    -- ========================================================================
+    -- [3] How a key was minted. NULL = by a workspace admin (POST
+    -- /api/v2/api-keys, unchanged behaviour); 'self' = a member minted it for
+    -- themselves (POST /api/v2/me/api-keys). authenticate() narrows a 'self'
+    -- key to the owner's CURRENT role on every request.
+    -- ========================================================================
+    [3] = function()
+        if not column_exists("api_keys", "created_via") then
+            db.query("ALTER TABLE api_keys ADD COLUMN created_via varchar")
+        end
+    end,
 }

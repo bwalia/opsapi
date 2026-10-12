@@ -2492,6 +2492,8 @@ local _migrations = {
     ['845_create_api_keys'] = api_key_migrations[1],
     -- Optional user binding — a key can act as a specific user (personal token).
     ['846_add_api_keys_user_uuid'] = api_key_migrations[2],
+    -- Self-service personal keys (api_keys.created_via = 'self'). 'zzak' sorts after the numerics.
+    ['zzak1_api_keys_created_via'] = api_key_migrations[3],
 
     -- =========================================================================
     -- FIELD SERVICE (850-861). Feature-gated. Numbered after CRM (500s),
