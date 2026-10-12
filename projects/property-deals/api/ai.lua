@@ -6,8 +6,9 @@
 --                                           auto_pickup?, auto_pickup_at? "HH:MM" }
 --   GET  /ai/routes                       model chain per job type (classify, extract, draft, plan, chat, summarise)
 --   PUT  /ai/routes/:job_type             { chain: [{ provider_uuid, model? }], local_only?, max_tokens? }
---   GET  /ai/usage?days=30                spend today / in the window, by agent; caps
---   POST /tasks/:id/agent-run             "Let AI do it" → 202 with the run (poll GET /agent-runs/:id)
+--   GET  /ai/usage?days=30                spend and tokens today / in the window, by agent; caps
+--   POST /tasks/:id/agent-run             "Let AI do it" → 202 with the run (poll GET /agent-runs/:id); 409 when an
+--                                         agent is already on it; honours Idempotency-Key
 --   POST /agent-runs/:id/cancel           stop a queued/running run; the task goes back to a person
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -56,11 +57,14 @@ return function(app)
         local caps = Config.caps(sdk.settings(self))
         local total = 0
         for _, r in ipairs(by_agent) do total = total + (tonumber(r.cost_usd) or 0) end
-        return sdk.ok({ days = days, spent_today_usd = Config.spent_today(ns), spent_window_usd = total,
-            cap_day_usd = caps.day, cap_run_usd = caps.run, by_agent = sdk.array(by_agent) })
+        local spent, tokens = Config.spent_today(ns)
+        return sdk.ok({ days = days, spent_today_usd = spent, tokens_today = tokens, spent_window_usd = total,
+            cap_day_usd = caps.day, cap_run_usd = caps.run, cap_day_tokens = caps.day_tokens,
+            by_agent = sdk.array(by_agent) })
     end))
 
-    app:post("/tasks/:id/agent-run", sdk.handler({ permission = "property_deals_ai.create" }, U.guard(function(self)
+    local can_run = { permission = "property_deals_ai.create" }
+    app:post("/tasks/:id/agent-run", sdk.handler(can_run, U.guard_create(function(self)
         local body = sdk.body(self) or {}
         local ns = sdk.namespace_id(self)
         local run, err, status = require("property_deals.ai.runner").start(ns, self.params.id, {
