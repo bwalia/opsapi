@@ -67,6 +67,9 @@ function N.save_prefs(ns, user_uuid, input)
                     end
                 end
             end
+        elseif k == "ntfy_topic" and v == "generate" then
+            -- Anyone who knows an ntfy topic can read it: a fresh one with 128 random bits.
+            current[k] = "opsapi-" .. require("resty.string").to_hex(require("resty.random").bytes(16, true))
         elseif k == "ntfy_topic" or k == "telegram_chat_id" then
             if v == require("cjson").null or v == false or v == "" then current[k] = nil
             elseif type(v) ~= "string" or #v > 120 or not v:match("^[%w%-_@%.]+$") then
@@ -118,12 +121,27 @@ local function has_table(name)
     return U.one("SELECT to_regclass(?) IS NOT NULL AS ok", name).ok
 end
 
+--- The user ({ id, email, phone_no }) while they are an active member of this workspace, else nil.
+-- Every channel asks this first: someone removed from the workspace hears nothing more about it.
+function N.member(ns, user_uuid)
+    if user_uuid == nil or user_uuid == db.NULL then return nil end
+    return U.one([[
+        SELECT u.id, u.email, u.phone_no FROM users u
+        JOIN namespace_members m ON m.user_id = u.id AND m.status = 'active'
+        WHERE u.uuid = ? AND m.namespace_id = ?
+    ]], user_uuid, ns)
+end
+
 --- n = { kind, title, body, route, uuid, deal_uuid?, event? }
 -- @return number of users notified in-app
 function N.send(ns, user_uuids, n)
-    local seen, users = {}, {}
+    local seen, users, members = {}, {}, {}
     for _, u in ipairs(user_uuids or {}) do
-        if u and u ~= db.NULL and not seen[u] then seen[u] = true; users[#users + 1] = u end
+        if u and u ~= db.NULL and not seen[u] then
+            seen[u] = true
+            members[u] = N.member(ns, u)
+            if members[u] then users[#users + 1] = u end
+        end
     end
     if #users == 0 then return 0 end
     local ns_row = U.one("SELECT uuid FROM namespaces WHERE id = ?", ns)
@@ -135,15 +153,9 @@ function N.send(ns, user_uuids, n)
     if has_table("notifications") then
         local Helper = require("helper.notification-helper")
         for _, u in ipairs(users) do
-            -- Only members of this workspace hear about its deals.
-            local member = U.one([[
-                SELECT u.id FROM users u JOIN namespace_members m ON m.user_id = u.id AND m.status = 'active'
-                WHERE u.uuid = ? AND m.namespace_id = ?
-            ]], u, ns)
-            if member then
-                local ok, err = pcall(Helper.create, member.id, "property_deals." .. n.kind, n.title, n.body, data)
-                if ok then count = count + 1 else ngx.log(ngx.WARN, "[property_deals] in-app notification: ", tostring(err)) end
-            end
+            local ok, err = pcall(Helper.create, members[u].id, "property_deals." .. n.kind, n.title, n.body, data)
+            if ok then count = count + 1
+            else ngx.log(ngx.WARN, "[property_deals] in-app notification: ", tostring(err)) end
         end
     end
     local push_users = {}

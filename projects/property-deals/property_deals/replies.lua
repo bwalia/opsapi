@@ -7,7 +7,10 @@
 --   * Hot (score >= hot_score_threshold, default 70): a "Call <name> now" task due in hot_call_within_minutes
 --     (default 15) for the lead's owner (else the managers) — the SLA engine escalates it if nobody picks it
 --     up — plus app push (WSLCRM iOS/Android) + in-app, email, and the free channels the workspace set up
---     (ntfy, Telegram, SMS from its own phone), each as that person's preferences allow.
+--     (ntfy, Telegram, SMS from its own phone), each as that person's preferences allow. An owner who has
+--     left the workspace gets nothing: the managers are alerted and the task waits unassigned.
+--   * An emailed "unsubscribe" opts the lead out only when the sender was verified (DMARC pass); otherwise a
+--     person is asked to confirm it, so a forged From can't silence a lead.
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
@@ -109,10 +112,18 @@ local function name_of(lead)
     return n
 end
 
+--- Who acts on this lead: (task owner, people to alert). The owner while they are an active member; a lead
+-- nobody owns goes to a manager; an ex-member's lead waits unassigned and the managers are alerted.
+local function responsible(ns, lead)
+    local owner = not null(lead.owner_user_uuid) and lead.owner_user_uuid or nil
+    if owner and require("property_deals.notify").member(ns, owner) then return owner, { owner } end
+    local managers = require("property_deals.engine").managers(ns)
+    return not owner and managers[1] or nil, managers
+end
+
 --- Alert the people who should call: app push + in-app, email, ntfy, Telegram, SMS (as each person's prefs allow).
-local function alert(ns, lead, task, msg, minutes)
+local function alert(ns, lead, task, msg, minutes, who)
     local N = require("property_deals.notify")
-    local who = not null(lead.owner_user_uuid) and { lead.owner_user_uuid } or require("property_deals.engine").managers(ns)
     local first = not null(lead.first_name) and lead.first_name or name_of(lead)
     N.send(ns, who, { kind = "hot_lead", title = "Hot lead: call " .. first .. " now",
         body = first .. " just replied and looks keen. Call within " .. minutes .. " minutes while they're active.",
@@ -128,12 +139,13 @@ local function alert(ns, lead, task, msg, minutes)
             for _, u in ipairs(who) do
                 if N.allowed(ns, u, "hot_lead", ch) then allowed[#allowed + 1] = u end
             end
-            M.to_users(ns, ch, allowed, { title = "Hot lead: call " .. first .. " now", body = text })
+            M.to_users(ns, ch, allowed, { title = "Hot lead: call " .. first .. " now", body = text,
+                public = "New hot reply: open OpsAPI to call them" })
         end
     end
     for _, u in ipairs(who) do
         if N.allowed(ns, u, "hot_lead", "email") then
-            local row = U.one("SELECT email FROM users WHERE uuid = ?", u)
+            local row = N.member(ns, u)
             if row and not null(row.email) then
                 local esc = function(s) return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
                 N.email(row.email, "Hot lead: call " .. name_of(lead) .. " now",
@@ -146,9 +158,29 @@ local function alert(ns, lead, task, msg, minutes)
     return #who
 end
 
+--- One open task of a kind per lead (a second hot reply re-alerts on the same one). @return task row
+local function lead_task(ns, lead, kind, settings, fields)
+    local Tasks = require("property_deals.tasks")
+    local open = U.one([[
+        SELECT task_uuid FROM property_deals_task_details
+        WHERE namespace_id = ? AND lead_uuid = ? AND pd_status NOT IN ('done', 'cancelled')
+          AND metadata ->> 'kind' = ? LIMIT 1
+    ]], ns, lead.uuid, kind)
+    if open then return Tasks.get(ns, open.task_uuid) end
+    -- An unassigned task still needs someone on record as raising it: a manager.
+    local reporter = fields.owner_user_uuid or require("property_deals.engine").managers(ns)[1]
+    return U.tx(function()
+        require("property_deals.workspace").ensure(ns, reporter, settings)
+        fields.lead_uuid, fields.metadata.kind = lead.uuid, kind
+        return Tasks.create(ns, fields, reporter)
+    end)
+end
+
 --- Score a stored reply (property_deals_inbound_messages row with lead_uuid) and act on it.
--- @return { temperature, score, reason, hot_task_uuid? }
-function R.handle(ns, msg, settings)
+-- opts.defer_alerts: return the alerts as result.alert (a function) instead of sending them, so a
+-- caller inside a transaction sends them only after it commits.
+-- @return { temperature, score, reason, hot_task_uuid?, confirm_task_uuid? }
+function R.handle(ns, msg, settings, opts)
     settings = settings or require("helper.plugin-sdk").settings("property_deals", ns) or {}
     local lead = lead_row(ns, msg.lead_uuid)
     if not lead then return nil end
@@ -163,56 +195,62 @@ function R.handle(ns, msg, settings)
             hot_reason = EXCLUDED.hot_reason,
             last_reply_at = GREATEST(property_deals_lead_details.last_reply_at, EXCLUDED.last_reply_at), updated_at = NOW()
     ]], ns, lead.uuid, s.temperature, s.score, s.reason:sub(1, 1000), msg.received_at)
-    if s.opted_out then
+    local owner, who = responsible(ns, lead)
+    -- A person logged it, or the mail server checked the sender: trust an opt-out at once.
+    local verified = msg.matched_by == "logged" or msg.sender_verified == true
+    if s.opted_out and verified then
         db.query([[UPDATE property_deals_lead_details SET opted_out_at = COALESCE(opted_out_at, NOW()), updated_at = NOW()
             WHERE namespace_id = ? AND lead_uuid = ?]], ns, lead.uuid)
         -- Drop any follow-up still waiting for approval: they asked us to stop.
-        pcall(require("property_deals.followups").cancel_pending, ns, lead.uuid, "The lead asked not to be contacted")
+        pcall(U.tx, function()
+            require("property_deals.followups").cancel_pending(ns, lead.uuid, "The lead asked not to be contacted")
+        end)
+    elseif s.opted_out then
+        local task = lead_task(ns, lead, "opt_out_check", settings, {
+            title = "Check: did " .. name_of(lead) .. " ask not to be contacted?", priority = "high",
+            description = "An email from " .. tostring(null(msg.from_address) and "their address" or msg.from_address)
+                .. " asked us to stop, but the sender couldn't be verified (no DMARC pass), so the lead is not "
+                .. "opted out yet. If it really was them, log their message on the lead (Replies) and it is recorded.",
+            owner_user_uuid = owner, approval_rule = "none", metadata = { message_uuid = msg.uuid },
+        })
+        result.confirm_task_uuid = task.task_uuid
     end
     if s.temperature ~= "hot" then return result end
 
     local minutes = math.max(1, math.min(240, tonumber(settings.hot_call_within_minutes) or 15))
-    local Tasks = require("property_deals.tasks")
-    -- One open "call now" task per lead: a second hot reply re-alerts on the same task.
-    local open = U.one([[
-        SELECT task_uuid FROM property_deals_task_details
-        WHERE namespace_id = ? AND lead_uuid = ? AND pd_status NOT IN ('done', 'cancelled')
-          AND metadata ->> 'kind' = 'hot_lead_call' LIMIT 1
-    ]], ns, lead.uuid)
-    local task
-    if open then
-        task = Tasks.get(ns, open.task_uuid)
-    else
-        local owner = not null(lead.owner_user_uuid) and lead.owner_user_uuid or require("property_deals.engine").managers(ns)[1]
-        local phone = not null(lead.phone) and lead.phone or "no number on file"
-        task = U.tx(function()
-            require("property_deals.workspace").ensure(ns, owner, settings)
-            return Tasks.create(ns, {
-                title = "Call " .. name_of(lead) .. " now — they just replied",
-                description = "Phone: " .. phone .. "\nReply (" .. tostring(msg.channel or "email") .. "): "
-                    .. tostring(msg.body_text or ""):sub(1, 1500) .. "\n\nWhy hot: " .. s.reason,
-                lead_uuid = lead.uuid, owner_user_uuid = owner, priority = "critical",
-                due_at = os.date("!%Y-%m-%dT%H:%M:%SZ", ngx.time() + minutes * 60), sla_minutes = minutes,
-                approval_rule = "none", metadata = { kind = "hot_lead_call", message_uuid = msg.uuid },
-            }, owner)
-        end)
-    end
+    local phone = not null(lead.phone) and lead.phone or "no number on file"
+    -- The reply itself stays on the lead (retention clears it there); the task only points to it.
+    local task = lead_task(ns, lead, "hot_lead_call", settings, {
+        title = "Call " .. name_of(lead) .. " now — they just replied",
+        description = "Phone: " .. phone .. "\nThey replied by " .. tostring(msg.channel or "email")
+            .. ": read it on the lead (Replies).\n\nWhy hot: " .. s.reason,
+        owner_user_uuid = owner, priority = "critical",
+        due_at = os.date("!%Y-%m-%dT%H:%M:%SZ", ngx.time() + minutes * 60), sla_minutes = minutes,
+        approval_rule = "none", metadata = { message_uuid = msg.uuid },
+    })
     db.update("property_deals_inbound_messages", { hot_task_uuid = task.task_uuid }, { id = msg.id })
     msg.reply_reason = s.reason
     result.hot_task_uuid = task.task_uuid
-    result.alerted = alert(ns, lead, task, msg, minutes)
+    local send = function() return alert(ns, lead, task, msg, minutes, who) end
+    if opts and opts.defer_alerts then result.alert = send else result.alerted = send() end
     return result
 end
 
---- A person logs a reply that didn't come by email (WhatsApp, SMS, a call, a DM).
+--- A person logs a reply that didn't come by email (WhatsApp, SMS, a call, a DM). All or nothing: if
+-- scoring or the call task fails nothing is kept, so a retry can't log it twice. Alerts go after commit.
 function R.log(ns, lead_uuid, b, user_uuid)
-    local row = db.query([[
-        INSERT INTO property_deals_inbound_messages (namespace_id, external_id, lead_uuid, channel, from_name, subject,
-            received_at, body_text, matched_by, logged_by_user_uuid)
-        VALUES (?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, NOW()), ?, 'logged', ?) RETURNING *
-    ]], ns, "logged:" .. require("helper.global").generateUUID(), lead_uuid, b.channel, b.from_name or db.NULL,
-        b.subject or db.NULL, b.received_at or db.NULL, tostring(b.text):sub(1, 60000), user_uuid or db.NULL)[1]
-    local result = R.handle(ns, row)
+    local row, result = U.tx(function()
+        local r = db.query([[
+            INSERT INTO property_deals_inbound_messages (namespace_id, external_id, lead_uuid, channel, from_name,
+                subject, received_at, body_text, matched_by, logged_by_user_uuid)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, NOW()), ?, 'logged', ?) RETURNING *
+        ]], ns, "logged:" .. require("helper.global").generateUUID(), lead_uuid, b.channel, b.from_name or db.NULL,
+            b.subject or db.NULL, b.received_at or db.NULL, U.cut(tostring(b.text), 60000), user_uuid or db.NULL)[1]
+        return r, R.handle(ns, r, nil, { defer_alerts = true })
+    end)
+    if result and result.alert then
+        result.alerted, result.alert = result.alert(), nil
+    end
     return row, result
 end
 
@@ -220,7 +258,7 @@ function R.list(ns, lead_uuid, limit)
     return U.array(db.query([[
         SELECT uuid, lead_uuid, deal_uuid, channel, from_address, from_name, subject, received_at,
                LEFT(body_text, 2000) AS body_text, reply_temperature, reply_score, reply_reason, hot_task_uuid, matched_by,
-               logged_by_user_uuid
+               logged_by_user_uuid, sender_verified
         FROM property_deals_inbound_messages WHERE namespace_id = ? AND lead_uuid = ?
         ORDER BY received_at DESC LIMIT ?
     ]], ns, lead_uuid, limit or 50))

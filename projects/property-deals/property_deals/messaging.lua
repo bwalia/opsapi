@@ -1,8 +1,9 @@
 -- Instant alerts to staff (the "call this hot lead now" alert) over free / open-source channels,
 -- each a workspace connector (Settings → Data connectors):
---   ntfy         self-hosted or ntfy.sh push (open source). config { base_url?, topic_prefix }, secret = access token?
---                Each person subscribes to their topic in the ntfy app: their own (notification prefs ntfy_topic)
---                or <topic_prefix>-<first 12 of their user uuid>.
+--   ntfy         self-hosted or ntfy.sh push (open source). config { base_url? }, secret = access token?
+--                Anyone who knows a topic can read it, so only people who set their own topic get alerts
+--                (notification prefs ntfy_topic; "generate" makes a random one) and the text says only that
+--                something is waiting in OpsAPI.
 --   telegram     a Telegram bot (free Bot API). secret = bot token, config { base_url? }. Each person puts their
 --                chat id in notification prefs (telegram_chat_id) after messaging the bot.
 --   sms_gateway  Android SMS Gateway (open source, sms-gate.app): texts from your own phone + SIM.
@@ -46,28 +47,21 @@ function M.available(ns, channel)
     return M.connector(ns, channel) ~= nil
 end
 
---- Where `user_uuid` gets `channel`: { to } or nil (no number / topic / chat id).
-local function address(ns, channel, user_uuid, conn)
+--- Where `user_uuid` gets `channel`, or nil (not an active member here, or no number / topic / chat id).
+local function address(ns, channel, user_uuid)
+    local N = require("property_deals.notify")
+    local member = N.member(ns, user_uuid)
+    if not member then return nil end
     if channel == "sms" then
-        local row = U.one([[
-            SELECT u.phone_no FROM users u JOIN namespace_members m ON m.user_id = u.id AND m.status = 'active'
-            WHERE u.uuid = ? AND m.namespace_id = ?
-        ]], user_uuid, ns)
-        return row and not null(row.phone_no) and e164(row.phone_no) or nil
+        return not null(member.phone_no) and e164(member.phone_no) or nil
     end
-    local prefs = require("property_deals.notify").prefs(ns, user_uuid)
-    if channel == "telegram" then
-        return type(prefs.telegram_chat_id) == "string" and prefs.telegram_chat_id ~= "" and prefs.telegram_chat_id or nil
-    end
-    if channel == "ntfy" then
-        if type(prefs.ntfy_topic) == "string" and prefs.ntfy_topic ~= "" then return prefs.ntfy_topic end
-        local cfg = U.json(conn.config) or {}
-        local prefix = type(cfg.topic_prefix) == "string" and cfg.topic_prefix ~= "" and cfg.topic_prefix or nil
-        return prefix and (prefix .. "-" .. tostring(user_uuid):gsub("%-", ""):sub(1, 12)) or nil
-    end
+    local key = ({ telegram = "telegram_chat_id", ntfy = "ntfy_topic" })[channel]
+    local v = key and N.prefs(ns, user_uuid)[key]
+    return type(v) == "string" and v ~= "" and v or nil
 end
 
---- Send one alert. msg = { title, body, url? }. @return true | nil, error
+--- Send one alert. msg = { title, body, public?, url? }: ntfy gets only `public` (no names, numbers or
+-- message text: a topic is readable by anyone who knows it). @return true | nil, error
 function M.send(ns, channel, to, msg)
     local conn = M.connector(ns, channel)
     if not conn then return nil, "no " .. tostring(channel) .. " connector" end
@@ -75,7 +69,8 @@ function M.send(ns, channel, to, msg)
     local text = tostring(msg.body or ""):sub(1, 1500)
     local _, err
     if channel == "ntfy" then
-        local headers = { Title = tostring(msg.title or "OpsAPI"):sub(1, 200), Priority = "urgent", Tags = "telephone_receiver" }
+        text = tostring(msg.public or "Something needs you: open OpsAPI"):sub(1, 200)
+        local headers = { Title = "OpsAPI", Priority = "urgent", Tags = "telephone_receiver" }
         if msg.url then headers.Click = msg.url end
         if secret then headers.Authorization = "Bearer " .. secret end
         _, err = H.json(base(conn, "https://ntfy.sh") .. "/" .. ngx.escape_uri(to), { method = "POST", headers = headers,
@@ -109,7 +104,7 @@ function M.to_users(ns, channel, user_uuids, msg)
     if not conn then return 0 end
     local sent = 0
     for _, u in ipairs(user_uuids or {}) do
-        local to = address(ns, channel, u, conn)
+        local to = address(ns, channel, u)
         if to and M.send(ns, channel, to, msg) then sent = sent + 1 end
     end
     return sent

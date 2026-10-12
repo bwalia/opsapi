@@ -6,15 +6,25 @@
   * a reply (logged WhatsApp, or an email matched to the lead by sender) is scored: rules without AI, the model
     with it, opt-outs always cold; a hot one raises one "call now" task and alerts the owner on app push / in-app,
     ntfy, Telegram and SMS (free / open-source connectors), as their preferences allow
+  * a lead owner who left the workspace hears nothing more: the managers are alerted, the task waits unassigned
+  * ntfy only reaches people who set their own (random) topic, and never carries names, numbers or text
+  * an emailed "unsubscribe" opts out only a verified sender (DMARC pass); otherwise a person confirms it
+  * the PA can't log the user's call as the lead's reply, and closes a lead's task only with the chase that did it
+  * Companies House errors are counted and recorded, its rate limit stops the run; a failing area doesn't stop others
+  * mail sync: a busy inbox catches up over runs (Gmail / Graph paging, oldest first), a message that can't be stored
+    is skipped and kept as an error row, other charsets and long names are stored, one broken mailbox doesn't stop
+    the others, provider text never reaches the answer
   * other workspaces see none of it
 """
 import json
 import os
+import re
 import sys
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pdtest import API, P, USERS, call, check, expect, finish, sql, workspace  # noqa: E402
+from pdtest import API, P, USERS, call, check, expect, finish, jwt, sql, workspace  # noqa: E402
 
 MOCK = os.environ["PD_MOCK"]
 M = "http://pd-mock:8080"
@@ -29,6 +39,18 @@ def mock(method, path, body=None):
 
 def data(res, status, name):
     return expect(name, res, status).get("data") or {}
+
+
+def as_pa(method, url, user, ns, body=None):
+    """A call the page assistant makes for the user (it sends X-OpsAPI-Agent)."""
+    req = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Authorization": "Bearer " + jwt(user), "Content-Type": "application/json",
+                                          "X-Namespace-Id": ns, "X-OpsAPI-Agent": "1"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"null")
 
 
 OP = USERS["operator_s"][0]
@@ -84,12 +106,29 @@ check("a lead checked in the last 20h is skipped", again["watch"]["leads"] == 0,
 sql(f"UPDATE property_deals_lead_details SET ch_checked_at = NULL WHERE lead_uuid = '{L}'")
 again = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run again later")
 check("the same news is never stored twice", again["watch"] == {"leads": 1, "signals": 0, "errors": 0, "followups": 0}, again)
+NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
+ch_error = f"SELECT COALESCE(last_error, '') FROM property_deals_connectors WHERE namespace_id = {NSID} AND kind = 'companies_house'"
+mock("POST", "/_ctl", {"ch_429": True})
+sql(f"UPDATE property_deals_lead_details SET ch_checked_at = NULL WHERE lead_uuid = '{L}'")
+limited = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run while Companies House rate-limits us")
+check("rate limit: the run stops, counts it, and the lead stays due for the next run",
+      limited["watch"].get("rate_limited") is True and limited["watch"]["errors"] == 1
+      and sql(f"SELECT ch_checked_at IS NULL FROM property_deals_lead_details WHERE lead_uuid = '{L}'") == ["t"], limited)
+check("...and the connector's last_error says so", "rate limit" in sql(ch_error)[0], sql(ch_error))
+res = call("GET", P + "/companies-house/officers?q=Jo%20Smith", "operator_s", S)
+check("officer search while limited: 429, without Companies House's own text", res[0] == 429
+      and "Rate limit exceeded" not in json.dumps(res[1]), res)
+mock("POST", "/_ctl", {"ch_429": False})
+again = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run once the limit has passed")
+check("a clean run checks the lead and clears last_error", again["watch"]["errors"] == 0 and again["watch"]["leads"] == 1
+      and sql(ch_error) in ([], [""]), [again, sql(ch_error)])
 
 # New property companies in an area -> new leads
-expect("set the area", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
-       {"settings": {"ch_new_company_areas": "Leeds"}}), 200)
-run = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run with an area")
-check("one new property company found, one new lead", run["new_companies"] == {"areas": 1, "companies": 1, "leads": 1}, run)
+expect("set the areas (one of them fails at Companies House)", call("PUT", API + "/api/v2/namespace/plugins/property_deals",
+       "owner_s", S, {"settings": {"ch_new_company_areas": "Nowhere, Leeds"}}), 200)
+run = data(call("POST", P + "/signals/run", "manager_s", S), 200, "run with areas")
+check("the failing area is counted and the next one still runs: one new company, one new lead",
+      run["new_companies"] == {"areas": 2, "companies": 1, "leads": 1, "errors": 1}, run)
 new = data(call("GET", P + "/leads?source=companies_house", "operator_s", S), 200, "new-company leads")
 check("lead named after the director, kind buyer, linked to the company",
       len(new) == 1 and new[0]["first_name"] == "Jo" and new[0]["last_name"] == "Smith"
@@ -133,10 +172,12 @@ check("unknown channel refused (422)", res[0] == 422, res)
 data(call("POST", API + "/api/v2/namespace/ai-providers", "owner_s", S, {"name": "Local", "provider_type": "openai_compatible",
      "base_url": M + "/v1", "default_model": "qwen-local", "is_local": True}), 201, "local model")
 sql(f"UPDATE users SET phone_no = '07700 900111' WHERE uuid = '{OP}'")
-prefs = data(call("PUT", P + "/notification-preferences", "operator_s", S, {"telegram_chat_id": "555"}), 200,
-             "operator links Telegram")
+prefs = data(call("PUT", P + "/notification-preferences", "operator_s", S, {"telegram_chat_id": "555",
+             "ntfy_topic": "generate"}), 200, "operator links Telegram and makes a private ntfy topic")
 check("hot_lead is on for every channel by default", prefs["hot_lead"] == {"push": True, "email": True, "ntfy": True,
       "telegram": True, "sms": True} and prefs["telegram_chat_id"] == "555", prefs)
+TOPIC = prefs.get("ntfy_topic") or ""
+check("the generated ntfy topic has 128 random bits", re.match(r"^opsapi-[0-9a-f]{32}$", TOPIC) is not None, TOPIC)
 res = call("PUT", P + "/notification-preferences", "operator_s", S, {"telegram_chat_id": "x y;"})
 check("a bad chat id is refused (422)", res[0] == 422, res)
 mock("POST", "/_ctl", {"reset_alerts": True})
@@ -149,12 +190,13 @@ task = data(call("GET", P + f"/tasks/{hot['hot_task_uuid']}", "operator_s", S), 
 check("call task: for the owner, critical, on the lead, due in 15 minutes",
       task["owner_user_uuid"] == OP and task["priority"] == "critical" and task["lead_uuid"] == L
       and task["sla_minutes"] == 15 and task["title"] == "Call Sarah Lane now — they just replied", task)
-check("the task has the number and the reply", "07700 900456" in task["description"] and "call me" in task["description"],
-      task["description"])
+check("the task has the number but not the reply's text (that stays on the lead)", "07700 900456" in task["description"]
+      and "call me" not in task["description"], task["description"])
 alerts = mock("GET", "/_alerts")
 by = {a["channel"]: a for a in alerts}
-check("ntfy alert on the owner's topic, urgent", by.get("ntfy", {}).get("to") == "pd-" + OP.replace("-", "")[:12]
-      and by["ntfy"]["priority"] == "urgent" and by["ntfy"]["title"] == "Hot lead: call Sarah now", by.get("ntfy"))
+check("ntfy alert on the owner's own topic, urgent, saying only 'open OpsAPI'", by.get("ntfy", {}).get("to") == TOPIC
+      and by["ntfy"]["priority"] == "urgent" and "OpsAPI" in by["ntfy"]["text"]
+      and not re.search(r"Sarah|Lane|07700|call me", json.dumps(by["ntfy"])), by.get("ntfy"))
 check("Telegram alert to the linked chat", by.get("telegram", {}).get("to") == "555"
       and "Sarah Lane" in by["telegram"]["text"], by.get("telegram"))
 check("SMS from the gateway to the owner's mobile (E.164), with the lead's number",
@@ -188,6 +230,50 @@ check("Telegram muted, ntfy + SMS still sent", sorted(a["channel"] for a in mock
 data(call("PUT", P + f"/tasks/{hot['hot_task_uuid']}", "operator_s", S, {"pd_status": "done"}), 200, "called: task done")
 check("once called, the lead leaves 'call now'", not data(call("GET", P + "/hot-leads", "manager_s", S), 200, "hot after call"))
 
+# --- A lead owner who left the workspace hears nothing more ----------------------------------------------------------
+EX = USERS["reader"][0]
+expect("add a second operator", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
+       {"email": USERS["reader"][1], "role_ids": [role_id["pd_operator"]]}), 201)
+data(call("PUT", P + "/notification-preferences", "reader", S, {"telegram_chat_id": "777"}), 200, "they link Telegram")
+sql(f"UPDATE users SET phone_no = '07700 900777' WHERE uuid = '{EX}'")
+gone = expect("a lead they own", call("POST", API + "/api/v2/crm/leads", "operator_s", S, {"first_name": "Gail",
+              "last_name": "Gone", "phone": "07700 900888", "owner_user_uuid": EX}), 201)
+gone = (gone.get("data") or gone)["uuid"]
+sql(f"DELETE FROM namespace_members WHERE namespace_id = {NSID} AND user_id = (SELECT id FROM users WHERE uuid = '{EX}')")
+mock("POST", "/_ctl", {"reset_alerts": True})
+r = data(call("POST", P + f"/leads/{gone}/replies", "operator_s", S, {"channel": "whatsapp",
+         "text": "Yes please call me now"}), 201, "a hot reply on the ex-member's lead")
+call_task = data(call("GET", P + f"/tasks/{r.get('hot_task_uuid')}", "manager_s", S), 200, "its call task")
+check("the call task waits unassigned", r.get("hot_task_uuid") and not call_task.get("owner_user_uuid"), call_task)
+check("nothing reached the ex-member (Telegram, SMS)", not [a for a in mock("GET", "/_alerts")
+      if a["to"] in ("777", "+447700900777")], mock("GET", "/_alerts"))
+st, body = call("GET", API + "/api/v2/notifications?limit=50", "manager_s", S)
+check("the managers were alerted instead", "Hot lead: call Gail now" in [n.get("title") for n in (body.get("notifications") or [])],
+      body)
+check("logged once", sql(f"SELECT COUNT(*) FROM property_deals_inbound_messages WHERE lead_uuid = '{gone}'") == ["1"])
+
+# --- The PA: a call the user made is a chase, and it closes only the task that call did --------------------------------
+res = as_pa("POST", P + f"/leads/{tom}/replies", "operator_s", S, {"channel": "phone", "text": "I just spoke to Tom"})
+check("the PA can't log the user's call as Tom's reply (422)", res[0] == 422 and "chase" in json.dumps(res[1]), res)
+res = as_pa("POST", P + f"/leads/{tom}/replies", "operator_s", S, {"channel": "whatsapp", "text": "Maybe next month"})
+check("...but it can log a message Tom wrote", res[0] == 201, res)
+t1 = data(call("POST", P + "/tasks", "operator_s", S, {"title": "Call Tom back", "lead_uuid": tom, "owner_user_uuid": OP}),
+          201, "task: call Tom back")["task_uuid"]
+t2 = data(call("POST", P + "/tasks", "operator_s", S, {"title": "Send Tom our criteria", "lead_uuid": tom,
+          "owner_user_uuid": OP}), 201, "task: send Tom our criteria")["task_uuid"]
+res = as_pa("PUT", P + f"/tasks/{t1}", "operator_s", S, {"pd_status": "done"})
+check("the PA can't close a lead's task without the chase that did it (422)", res[0] == 422, res)
+chase = as_pa("POST", P + "/chases", "operator_s", S, {"lead_uuid": tom, "channel": "phone", "to_party": "seller",
+              "outcome": "spoke", "status": "sent", "body": "Spoke to Tom"})
+check("the PA logs the call as a chase", chase[0] == 201, chase)
+CH = (chase[1].get("data") or {}).get("uuid")
+res = as_pa("PUT", P + f"/tasks/{t1}", "operator_s", S, {"pd_status": "done", "evidence": {"chase_uuid": CH}})
+check("...and closes the task that call did", res[0] == 200 and res[1]["data"]["pd_status"] == "done", res)
+res = as_pa("PUT", P + f"/tasks/{t2}", "operator_s", S, {"pd_status": "done", "evidence": {"chase_uuid": CH}})
+check("one call closes one task: 'send Tom our criteria' stays open (422)", res[0] == 422
+      and data(call("GET", P + f"/tasks/{t2}", "operator_s", S), 200, "t2")["pd_status"] == "todo", res)
+data(call("PUT", P + f"/tasks/{t2}", "operator_s", S, {"pd_status": "done"}), 200, "a person closes it themselves")
+
 # --- Email reply matched to the lead by sender ----------------------------------------------------------------------
 imap = data(call("POST", P + "/mail-connectors", "manager_s", S, {"name": "Inbox", "kind": "imap", "secret": "imap-pass",
             "config": {"host": "pd-mock", "port": 1143, "ssl": False, "username": "deals@signal.test"}}), 201, "IMAP")
@@ -197,6 +283,77 @@ data(call("POST", P + f"/mail-connectors/{imap['uuid']}/sync", "manager_s", S), 
 emails = [x for x in data(call("GET", P + f"/leads/{L}/replies", "operator_s", S), 200, "replies") if x["channel"] == "email"]
 check("the email is on the lead, matched by sender and scored hot", len(emails) == 1 and emails[0]["matched_by"] == "lead"
       and emails[0]["reply_temperature"] == "hot", emails)
+
+# --- An emailed "unsubscribe" opts out only a verified sender -----------------------------------------------------
+una = expect("a lead with an email", call("POST", API + "/api/v2/crm/leads", "operator_s", S, {"first_name": "Una",
+             "last_name": "Spoof", "email": "una@spoof.test", "owner_user_uuid": OP}), 201)
+una = (una.get("data") or una)["uuid"]
+opted = f"SELECT opted_out_at IS NOT NULL FROM property_deals_lead_details WHERE lead_uuid = '{una}'"
+mock("POST", "/_mail/inbox", {"from": "Una Spoof <una@spoof.test>", "subject": "stop", "body": "Please unsubscribe me"})
+data(call("POST", P + f"/mail-connectors/{imap['uuid']}/sync", "manager_s", S), 200, "sync an unverified unsubscribe")
+check("an unverified sender doesn't opt the lead out", sql(opted) in ([], ["f"]), sql(opted))
+check("...a person is asked to confirm instead", sql(f"SELECT COUNT(*) FROM property_deals_task_details WHERE lead_uuid = '{una}' "
+      "AND metadata ->> 'kind' = 'opt_out_check'") == ["1"])
+mock("POST", "/_mail/inbox", {"from": "Una Spoof <una@spoof.test>", "subject": "stop", "body": "Please unsubscribe me",
+                               "auth": "dmarc=pass (p=none) header.from=spoof.test"})
+data(call("POST", P + f"/mail-connectors/{imap['uuid']}/sync", "manager_s", S), 200, "sync a verified unsubscribe")
+check("a verified sender is opted out at once", sql(opted) == ["t"], sql(opted))
+
+# --- Mail sync hardening ------------------------------------------------------------------------------------------
+MC = P + "/mail-connectors"
+res = call("POST", MC, "manager_s", S, {"name": "x", "kind": "imap", "secret": "p\r\nA2 LOGOUT",
+                                         "config": {"host": "pd-mock", "username": "u\r\nA1 x"}})
+check("IMAP credentials with line breaks are refused (422)", res[0] == 422 and "secret" in res[1]["details"]
+      and "config.username" in res[1]["details"], res)
+inbound = f"SELECT COUNT(*) FROM property_deals_inbound_messages WHERE namespace_id = {NSID} AND external_id LIKE "
+sql("CREATE OR REPLACE FUNCTION pd_test_poison() RETURNS trigger AS $$ BEGIN IF NEW.body_text LIKE '%POISON%' THEN "
+    "RAISE EXCEPTION 'poisoned'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql")
+sql("CREATE TRIGGER pd_test_poison BEFORE INSERT ON property_deals_inbound_messages FOR EACH ROW EXECUTE FUNCTION pd_test_poison()")
+try:
+    mock("POST", "/_mail/inbox", {"from": "Bad Mail <bad@mail.test>", "subject": "broken", "body": "POISON pill"})
+    mock("POST", "/_mail/inbox", {"from": ("Z" * 300) + " <long@names.test>", "subject": "Caf\u00e9",
+                                   "body": "Le caf\u00e9 est ferm\u00e9", "charset": "iso-8859-1"})
+    r = data(call("POST", MC + f"/{imap['uuid']}/sync", "manager_s", S), 200, "sync past a message that can't be stored")
+    check("the bad message is skipped and counted, the next one is stored", r.get("failed") == 1 and r.get("stored") == 1
+          and "could not be stored" in (r.get("error") or ""), r)
+    check("the bad message is kept as an error row (not lost)", sql(f"SELECT matched_by || '|' || from_address FROM "
+          f"property_deals_inbound_messages WHERE namespace_id = {NSID} AND subject = 'broken' AND external_id LIKE 'imap:%'")
+          == ["error|bad@mail.test"])
+    got = sql(f"SELECT body_text || '|' || length(from_name) FROM property_deals_inbound_messages WHERE namespace_id = {NSID} "
+              "AND external_id LIKE 'imap:%' AND from_address = 'long@names.test'")
+    check("a Latin-1 body is stored as UTF-8 and a 300-character name is cut to fit", got == ["Le café est fermé|255"], got)
+    r = data(call("POST", MC + f"/{imap['uuid']}/sync", "manager_s", S), 200, "sync again")
+    check("the bad message never comes back; last_error is cleared", r.get("fetched") == 0
+          and not data(call("GET", MC + f"/{imap['uuid']}", "manager_s", S), 200, "imap").get("last_error"), r)
+finally:
+    sql("DROP TRIGGER pd_test_poison ON property_deals_inbound_messages")
+gmail = data(call("POST", MC, "manager_s", S, {"name": "Gmail", "kind": "gmail", "secret": {"client_secret": "secret-ok",
+             "refresh_token": "rt"}, "config": {"client_id": "cid", "token_url": M + "/gmail/token", "api_base": M + "/gmail"}}),
+             201, "Gmail connector")
+m365 = data(call("POST", MC, "manager_s", S, {"name": "Outlook", "kind": "m365", "secret": "secret-ok",
+            "config": {"tenant_id": "t", "client_id": "c", "mailbox": "deals@signal.test", "token_url": M + "/m365/token",
+                       "api_base": M + "/m365"}}), 201, "Microsoft 365 connector")
+mock("POST", "/_mail/inbox", {"from": "Bulk News <bulk@news.test>", "subject": "Newsletter", "body": "hello", "count": 129})
+for c, prefix in ((gmail, "gmail:"), (m365, "m365:")):
+    first = data(call("POST", MC + f"/{c['uuid']}/sync", "manager_s", S), 200, f"{prefix} first sync")
+    second = data(call("POST", MC + f"/{c['uuid']}/sync", "manager_s", S), 200, f"{prefix} second sync")
+    third = data(call("POST", MC + f"/{c['uuid']}/sync", "manager_s", S), 200, f"{prefix} third sync")
+    stored = sql(inbound + f"'{prefix}%'")
+    check(f"{prefix} a busy inbox catches up over runs, oldest first, nothing skipped (100 + the rest, then nothing)",
+          first.get("stored") == 100 and second.get("stored", 0) > 0 and third.get("stored") == 0
+          and int(stored[0]) == 100 + second["stored"] and int(stored[0]) > 130, [first, second, third, stored])
+oldest = sql(f"SELECT COUNT(*) FROM property_deals_inbound_messages WHERE namespace_id = {NSID} AND external_id = 'gmail:m1'")
+check("Gmail read the oldest message too", oldest == ["1"], oldest)
+data(call("PUT", MC + f"/{gmail['uuid']}", "manager_s", S, {"secret": {"client_secret": "wrong", "refresh_token": "rt"}}), 200,
+     "break Gmail")
+res = call("POST", MC + f"/{gmail['uuid']}/sync", "manager_s", S)
+check("a broken mailbox says so plainly (502), without the provider's text", res[0] == 502
+      and res[1]["error"] == "Gmail sign-in failed" and "bad secret" not in json.dumps(res[1]), res)
+sql(f"UPDATE property_deals_mail_connectors SET last_synced_at = NULL WHERE uuid = '{gmail['uuid']}'")
+mock("POST", "/_mail/inbox", {"from": "Late Mail <late@mail.test>", "subject": "after", "body": "one more"})
+out = data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["mail"]}), 200, "sync every mailbox")
+check("one broken mailbox doesn't stop the others", out["mail"]["errors"] == 1 and out["mail"]["stored"] >= 2
+      and out["mail"]["connectors"] == 3, out["mail"])
 
 # --- Isolation ------------------------------------------------------------------------------------------------------
 B = workspace("owner_b", "Other Signals Co", "other-signals")

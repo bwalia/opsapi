@@ -1,6 +1,7 @@
 -- The PA (the chat assistant on Today) and the workspace playbook.
 --   GET    /pa/briefing          everything the PA needs to start: who I am, my day (urgent tasks, due, hot leads,
 --                                approvals, deals at risk) and the playbook. One call, so a small model stays on track.
+--                                Hot leads and lead news only for people with property_deals_leads.read.
 --   GET    /playbooks            the playbook sections (seeded from a default the first time)
 --   PUT    /playbooks/:key       { title?, body?, position? } create or edit a section (managers)
 --   DELETE /playbooks/:key       (managers)
@@ -86,7 +87,8 @@ return function(app)
             WHERE dl.namespace_id = ? AND dl.status = 'active' AND dl.health = 'red'
               AND (? OR cd.owner_user_uuid = ?) ORDER BY dl.money_at_risk DESC LIMIT 5
         ]], ns, manager, me)
-        local news = db.query([[
+        local leads_ok = sdk.can(self, "property_deals_leads", "read")
+        local news = not leads_ok and {} or db.query([[
             SELECT s.lead_uuid, NULLIF(TRIM(CONCAT(l.first_name, ' ', l.last_name)), '') AS lead_name, s.title, s.occurred_at
             FROM property_deals_lead_signals s JOIN crm_leads l ON l.uuid = s.lead_uuid AND l.deleted_at IS NULL
             WHERE s.namespace_id = ? AND s.used_at IS NULL AND s.created_at > NOW() - INTERVAL '7 days'
@@ -97,7 +99,7 @@ return function(app)
             me = { name = who.name, is_manager = manager },
             today = os.date("!%Y-%m-%d"),
             counts = counts,
-            hot_leads = Replies.hot(ns, manager and nil or me, 5),
+            hot_leads = leads_ok and Replies.hot(ns, manager and nil or me, 5) or sdk.array({}),
             my_tasks = sdk.array(tasks),
             approvals_waiting = sdk.array(approvals),
             deals_at_risk = sdk.array(red),

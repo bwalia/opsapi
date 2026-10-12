@@ -10,11 +10,12 @@
 --                    news watch, new property companies)
 --   postcodes        postcode → lat/lng (postcodes.io)       base_url?                   —
 --   csv              auction catalogues, agent feeds         record_type?                —
---   ntfy             staff alerts (open-source push)         base_url?, topic_prefix     access token?
+--   ntfy             staff alerts (open-source push)         base_url?                   access token?
 --   telegram         staff alerts (Telegram bot)             base_url?                   bot token
 --   sms_gateway      staff texts from your own Android phone base_url, username         password
 --                    (Android SMS Gateway, open source)
---   propertydata, searchland, streetdata, homedata          base_url?                   API key   (stubs)
+--   propertydata, searchland, streetdata, homedata          base_url?                   API key   (stubs: can't
+--                    be enabled until an adapter exists; use their CSV export)
 --
 -- Adapters return records for property_deals_market_records:
 --   { record_type, external_id, address, postcode, lat?, lng?, property_type?, tenure?, bedrooms?, price?,
@@ -105,7 +106,7 @@ C.KINDS.ntfy = { label = "ntfy (open-source push alerts)", secret = true, lookup
 C.KINDS.telegram = { label = "Telegram bot (alerts)", secret = true, lookup = true }
 C.KINDS.sms_gateway = { label = "Android SMS Gateway (texts from your phone)", secret = true, lookup = true }
 for _, k in ipairs({ "propertydata", "searchland", "streetdata", "homedata" }) do
-    C.KINDS[k] = { label = k .. " (stub)", secret = true, stub = true }
+    C.KINDS[k] = { label = k .. " (not available yet)", secret = true, stub = true }
 end
 
 -- ---------------------------------------------------------------------------
@@ -150,6 +151,12 @@ function C.save(ns, b, existing)
         errors.kind = "one of " .. table.concat(kinds, ", ")
     end
     if b.kind ~= nil then row.kind = b.kind end
+    local stub = C.KINDS[kind or ""] and C.KINDS[kind].stub
+    if stub and b.enabled ~= false and (b.enabled ~= nil or not existing or existing.enabled) then
+        -- Paid feeds need a provider contract and an adapter first: don't let one look switched on.
+        errors.kind = kind .. " isn't available yet: import their CSV export with POST /market-records/import "
+            .. "(or save it with enabled: false)"
+    end
     if not existing or b.name ~= nil then
         if type(b.name) ~= "string" or b.name == "" then errors.name = "required" else row.name = b.name:sub(1, 120) end
     end
@@ -233,7 +240,7 @@ local function ch(ns, path)
     if not key then return nil, "The Companies House connector has no API key", 422 end
     local data, err, status = H.json(base(conn, "https://api.company-information.service.gov.uk") .. path,
         { headers = { Authorization = H.basic(key, "") } })
-    if not data then return nil, "Companies House: " .. err, status == 404 and 404 or 502 end
+    if not data then return nil, "Companies House: " .. err, (status == 404 or status == 429) and status or 502 end
     return data
 end
 
@@ -289,7 +296,10 @@ function C.run(ns, conn, query)
     end
     if not spec.fetch then return nil, spec.label .. " is used on demand (lookups), not run" end
     local ok, records, err = pcall(spec.fetch, conn, C.secret(conn), query or {})
-    if not ok then records, err = nil, records end
+    if not ok then
+        ngx.log(ngx.ERR, "[property_deals] connector ", conn.kind, ": ", tostring(records))
+        records, err = nil, spec.label .. ": the import failed"
+    end
     if not records then
         db.update("property_deals_connectors", { last_error = tostring(err):sub(1, 500), updated_at = db.raw("NOW()") },
             { id = conn.id })

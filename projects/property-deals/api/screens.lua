@@ -16,7 +16,8 @@ local Engine = require("property_deals.engine")
 local Template = require("property_deals.template")
 local Days = require("property_deals.workdays")
 
-local MODULES = { "deals", "properties", "buyers", "tasks", "suppliers", "compliance", "approvals", "ai", "settings", "reports" }
+local MODULES = { "deals", "leads", "properties", "buyers", "tasks", "suppliers", "compliance", "approvals", "ai",
+    "settings", "reports" }
 local ACTIONS = { "read", "create", "update", "delete", "manage" }
 local PUBLIC_SETTINGS = { "timezone", "jurisdiction", "currency", "digest_time", "due_time", "sla_warn_pct",
                           "sla_breach_pct", "sla_reassign_pct", "escalation_action", "red_min_working_days" }

@@ -22,7 +22,8 @@ return {
     default_enabled = false,      -- opt-in per workspace (Workspace -> Plugins)
 
     modules = {
-        module("property_deals_deals", "Deals", "Deals, parties, seller leads and the deal timeline"),
+        module("property_deals_deals", "Deals", "Deals, parties and the deal timeline"),
+        module("property_deals_leads", "Leads", "Leads and their situation, replies and news, and the inbox"),
         module("property_deals_properties", "Properties", "Property records, valuations and documents"),
         module("property_deals_buyers", "Buyers", "Buyer profiles and matches"),
         module("property_deals_tasks", "Tasks", "Deal tasks, enquiries and the chase log"),
