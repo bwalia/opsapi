@@ -112,17 +112,20 @@ end
 
 --- Decide one proposal. action = confirm | correct | reject; value used for correct. @return row
 function P.decide(ns, id, action, value, user, settings)
-    local p = P.get(ns, id)
-    if not p then U.fail(404, "Proposed update not found") end
-    if p.status ~= "proposed" then U.fail(409, "Already " .. p.status) end
-    if action == "correct" then
-        local check = { target_table = p.target_table, target_uuid = p.target_uuid, field = p.field ~= "_create" and p.field or nil,
-            new_value = value }
-        local ok, err = F.validate(check)
-        if not ok then U.fail(422, "Validation failed", { value = err }) end
-    end
+    if not U.is_uuid(id) then U.fail(404, "Proposed update not found") end
     local created
     U.tx(function()
+        -- Locked, and checked inside the transaction: two people confirming at once can't both apply it.
+        local p = U.one(P.SELECT .. " WHERE namespace_id = ? AND uuid = ? FOR UPDATE", ns, id)
+        if not p then U.fail(404, "Proposed update not found") end
+        if p.status ~= "proposed" then U.fail(409, "Already " .. p.status) end
+        p.old_value, p.new_value = dec(p.old_value), dec(p.new_value)
+        if action == "correct" then
+            local check = { target_table = p.target_table, target_uuid = p.target_uuid,
+                field = p.field ~= "_create" and p.field or nil, new_value = value }
+            local ok, err = F.validate(check)
+            if not ok then U.fail(422, "Validation failed", { value = err }) end
+        end
         if action ~= "reject" then
             local v = action == "correct" and value or p.new_value
             if F.CREATES[p.target_table] then

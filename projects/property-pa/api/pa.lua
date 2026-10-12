@@ -149,8 +149,10 @@ return function(app)
             decision = { type = "text", max = 4000 } })
         if not d then return sdk.error(422, "Validation failed", errors) end
         U.tx(function()
-            db.update("pa_handoffs", { reply = d.reply, replied_at = db.raw("NOW()"), status = "replied",
-                updated_at = db.raw("NOW()") }, { id = h.id })
+            -- Only an open card is answered: a second reply at the same moment gets a 409, not a second decision.
+            local res = db.update("pa_handoffs", { reply = d.reply, replied_at = db.raw("NOW()"), status = "replied",
+                updated_at = db.raw("NOW()") }, { id = h.id, status = "open" })
+            if (res.affected_rows or 0) == 0 then U.fail(409, "Already replied") end
             -- The reply goes back onto the deal: a decision record and a note on the timeline.
             db.insert("pa_decisions", { namespace_id = ns, situation = h.question,
                 pa_recommendation = h.pa_recommendation or db.NULL, human_decision = d.decision or d.reply,

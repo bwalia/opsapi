@@ -10,6 +10,7 @@
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pa_common import ASHLEY, PA, PD, SOPHIE, data, mock, pa_answer, setup  # noqa: E402
@@ -116,6 +117,30 @@ g = data(call("POST", PA + "/integrations/ghl/sync", ASHLEY, S), 200, "pull agai
 check("a second pull changes nothing", g["created"] == 0 and g["updated"] == 0 and g["unchanged"] == 2, g)
 settings = call("GET", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S)
 check("the GHL token is never returned", "ghl-token" not in json.dumps(settings[1]), settings[0])
+
+# --- Deciding twice at the same moment ------------------------------------------------------------------------------------
+JAMES = fx["james"]["opportunity_uuid"]
+st = data(call("POST", PA + "/captures/start", SOPHIE, S, {"text": "James wants a second viewing on Saturday.",
+          "opportunity_uuid": JAMES}), 201, "a note on James")
+cap = data(call("POST", PA + "/captures", "agent", S, {"interaction_uuid": st["interaction"]["uuid"], "proposals": [
+    {"target_table": "next_action", "new_value": {"title": "Book James's second viewing", "due_at": "2030-01-05T10:00:00Z",
+     "opportunity_uuid": JAMES, "reason": "He asked for a second viewing"}, "source_quote": "a second viewing"}]}), 201,
+           "the PA proposes a next action")
+pid = cap["proposed_updates"][0]["uuid"]
+with ThreadPoolExecutor(6) as ex:
+    codes = sorted(r[0] for r in ex.map(lambda _: call("POST", PA + f"/proposed-updates/{pid}/confirm", SOPHIE, S),
+                                        range(6)))
+check("six confirms of one row at once: one applies it, the others get 409", codes == [200] + [409] * 5, codes)
+n = sql(f"SELECT COUNT(*) FROM property_deals_task_details WHERE created_from_interaction_uuid = '{st['interaction']['uuid']}'")
+check("and exactly one next action was made", n == ["1"], n)
+h2 = data(call("POST", PA + "/handoffs", SOPHIE, S, {"to_user_uuid": USERS[ASHLEY][0], "opportunity_uuid": JAMES,
+          "question": "Can James have the keys early?"}), 201, "another question for Ashley")
+with ThreadPoolExecutor(6) as ex:
+    codes = sorted(r[0] for r in ex.map(lambda _: call("POST", PA + f"/handoffs/{h2['uuid']}/reply", ASHLEY, S,
+                                                        {"reply": "No, wait for completion."}), range(6)))
+check("six replies to one card at once: one answers it, the others get 409", codes == [200] + [409] * 5, codes)
+n = sql(f"SELECT COUNT(*) FROM pa_decisions WHERE handoff_uuid = '{h2['uuid']}'")
+check("and exactly one decision was recorded", n == ["1"], n)
 
 # --- Hardening -----------------------------------------------------------------------------------------------------------
 mock("POST", "/_ctl", {"pa_answer": pa_answer("Fine.", [], "ask")})
