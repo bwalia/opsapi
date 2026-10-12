@@ -573,6 +573,7 @@ Verified against Claude Code 2.1.280 on 2026-10-12 (protocol probe, §23.0).
   - A denied agent is told the message and carries on.
   - Each `result` message ends a turn. Another `user` message on stdin starts the next turn in the same session; closing stdin ends the process.
   - Without `--permission-prompt-tool stdio`, nothing is asked and anything that would prompt is denied.
+  - Claude waits for the answer: a decision sent 150 s later was applied, so a person can take their time (the runner's own timeout decides).
 - **Read-only commands don't ask.** `echo`, `ls` and similar never prompt. Changes outside the session's working folder are refused outright.
 - **No `AskUserQuestion` tool in `-p` mode.** The agent asks by ending its reply with a line `NEEDS_INPUT: <question>`, which the default template now tells it to do.
 - **`--restricted` does not remove MCP servers.** Without `--strict-mcp-config`, the machine owner's own claude.ai connectors were loaded into the agent's session. Every Claude profile must pass `--strict-mcp-config`; the run's own MCP server comes in through `--mcp-config`.
