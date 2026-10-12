@@ -14,7 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pa_common import ASHLEY, PA, PD, SOPHIE, data, mock, pa_answer, setup  # noqa: E402
+from pa_common import ASHLEY, PA, PD, SOPHIE, data, mock, pa_answer, platform_admin, setup  # noqa: E402
 from pdtest import API, USERS, call, check, finish, sql  # noqa: E402
 
 S, fx = setup("PA Work", "pa-work", jobshout=True)
@@ -198,6 +198,25 @@ status = data(call("GET", PA + "/status", SOPHIE, S), 200, "go-live checklist")
 ok = {c["key"]: c["ok"] for c in status["checks"]}
 check("go-live checklist: playbook, JobShout, agents, webhook, speech, mail and GHL all ticked",
       status["ready"] is True and all(ok.values()), status["checks"])
+
+# --- Retention: old note text and transcripts go; the interaction stays ---------------------------------------------------
+old = data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "voice", "direction": "internal",
+           "opportunity_uuid": RICK, "transcript": "Rick's daughter Jo is on 07700 900999."}), 201, "a voice note")
+new = data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "note", "direction": "internal",
+           "opportunity_uuid": RICK, "raw_text": "Rick wants a call next week."}), 201, "a recent note")
+sql(f"UPDATE crm_activities SET activity_date = NOW() - INTERVAL '400 days' WHERE uuid = '{old['uuid']}'")
+res = call("POST", API + f"/api/v2/plugins/property_pa/jobs/retention/run?namespace_id={NSID}", platform_admin())
+check("the nightly retention job can be run now (platform admin)", res[0] == 200, res)
+row = []
+for _ in range(60):
+    row = sql(f"SELECT COALESCE(transcript, '-') || '|' || subject FROM crm_activities WHERE uuid = '{old['uuid']}'")
+    if row and row[0].startswith("-|"):
+        break
+    time.sleep(1)
+check("after 365 days (the default) the transcript and the subject made from it are removed; the row stays",
+      row == ["-|voice: (text removed)"], row)
+check("newer notes keep their words", sql(f"SELECT raw_text FROM crm_activities WHERE uuid = '{new['uuid']}'")
+      == ["Rick wants a call next week."])
 
 # --- P12: the CRM works with the AI switched off ---------------------------------------------------------------------------
 data(call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"settings": {"jobshout_provider_uuid": ""}}),

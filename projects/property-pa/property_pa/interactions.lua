@@ -91,6 +91,17 @@ function I.get(ns, uuid)
     return U.one(I.SELECT .. " WHERE a.namespace_id = ? AND a.uuid = ? AND a.deleted_at IS NULL", ns, uuid)
 end
 
+--- Retention: remove the words (note text, voice transcript, email body, and a subject made from them) of PA
+-- interactions older than `days`, keeping the row (who, when, channel, summary). Only PA rows (channel set).
+-- @return count
+function I.redact(ns, days)
+    return #db.query([[UPDATE crm_activities SET raw_text = NULL, transcript = NULL,
+            subject = CASE WHEN subject LIKE channel || ': %' THEN channel || ': (text removed)' ELSE subject END
+        WHERE namespace_id = ? AND channel IS NOT NULL AND (raw_text IS NOT NULL OR transcript IS NOT NULL)
+          AND activity_date < NOW() - make_interval(days => ?) RETURNING id]], ns,
+        math.max(30, math.floor(tonumber(days) or 365)))
+end
+
 --- The text of an interaction the PA may quote from (for grounding checks).
 function I.text(ns, uuid)
     local r = U.one([[SELECT CONCAT_WS(E'\n', raw_text, transcript, summary, description) AS t FROM crm_activities

@@ -83,6 +83,10 @@ return {
         ghl_location_id = { type = "string", label = "GoHighLevel location id", default = "",
             description = "Contacts are pulled from this location every hour (read only)." },
         ghl_token = { type = "string", label = "GoHighLevel private integration token", secret = true },
+        retention_text_days = { type = "integer", label = "Keep note, transcript and email text for (days)",
+            default = 365, min = 30, max = 3650,
+            description = "After this the words of PA notes, voice transcripts and imported emails are removed; the "
+                .. "interaction itself (who, when, channel, subject, summary) stays." },
         material_fields = { type = "string", label = "Fields that always need a person to confirm",
             default = "expectation_price,offer_amount,decision_makers,next_action_at",
             description = "Comma separated. Proposed updates to these are never applied without confirmation." },
