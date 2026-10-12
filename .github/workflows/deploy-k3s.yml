@@ -654,6 +654,12 @@ jobs:
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
           if [ -z "$TAG" ]; then
             REF="${{ needs.build.outputs.image_ref }}"
+            # A push that built nothing (e.g. auto-tag failed, so build was skipped) must not
+            # quietly re-roll an old :latest as if it were this commit.
+            if [ -z "$REF" ] && [ "${{ github.event_name }}" = push ]; then
+              echo "::error::no image was built for this commit (build: ${{ needs.build.result }}); not deploying :latest"
+              exit 1
+            fi
             if [ -n "$REF" ]; then TAG="${REF##*:}"; else TAG="latest"; fi
           fi
           echo "Deploying release '${RELEASE_NAME}' to namespace '${TARGET_ENV}' with image tag '${TAG}'"
