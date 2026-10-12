@@ -538,3 +538,219 @@ short paragraph as the last message. Task text is fenced as data, not instructio
   `claude -p {{prompt}} --output-format stream-json --verbose --session-id {{run_uuid}} --restricted --permission-mode acceptEdits --permission-prompts none --allowedTools Read,Grep,Glob,Edit,MultiEdit,Write`.
 - A `fake` profile (`scripts/fake-agent.sh`) edits a file and prints realistic stream-json, for tests.
 - Service files: a LaunchAgent plist (macOS) and a systemd user unit (Linux), not installed by default.
+
+---
+
+## 23. Phase 3 build contract (real agents)
+
+Phase 3 makes Claude Code a real, supervised worker:
+- **Permission bridge:** anything risky the agent wants to do is asked of a person in the dashboard.
+- **Conversation:** people can send follow-ups, and the agent can ask a question and wait (`needs_input`).
+- **Usage:** every turn's tokens are metered into `ai_usage`.
+- **Start approval:** runs that need a manager's approval to start, including every run of an `approval: unsupported` profile such as Cursor.
+- **Task tools:** the agent can read its task and comment on it, through a run-scoped token.
+
+Verified against Claude Code 2.1.280 on 2026-10-12 (protocol probe, §23.0).
+
+### 23.0 Verified Claude Code facts
+- **The runner is the permission host.** Claude is started with these flags:
+  ```
+  claude -p --input-format stream-json --output-format stream-json --verbose
+    --permission-prompts host --permission-prompt-tool stdio
+  ```
+  - The runner sends the prompt on stdin as `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null,"session_id":""}`.
+  - When the agent needs a permission, Claude writes:
+    ```
+    {"type":"control_request","request_id":"…","request":{"subtype":"can_use_tool","tool_name","display_name",
+    "input",…,"description","permission_suggestions","blocked_path","tool_use_id"}}
+    ```
+  - The runner answers on stdin:
+    ```
+    {"type":"control_response","response":{"subtype":"success","request_id":"…","response":{"behavior":"allow",
+    "updatedInput":<input>}}}
+    ```
+    or with `{"behavior":"deny","message":"…"}`.
+  - A denied agent is told the message and carries on.
+  - Each `result` message ends a turn. Another `user` message on stdin starts the next turn in the same session; closing stdin ends the process.
+  - Without `--permission-prompt-tool stdio`, nothing is asked and anything that would prompt is denied.
+- **Read-only commands don't ask.** `echo`, `ls` and similar never prompt. Changes outside the session's working folder are refused outright.
+- **No `AskUserQuestion` tool in `-p` mode.** The agent asks by ending its reply with a line `NEEDS_INPUT: <question>`, which the default template now tells it to do.
+- **`--restricted` does not remove MCP servers.** Without `--strict-mcp-config`, the machine owner's own claude.ai connectors were loaded into the agent's session. Every Claude profile must pass `--strict-mcp-config`; the run's own MCP server comes in through `--mcp-config`.
+- **Rate limits:** stream-json carries `rate_limit_event` messages with `rate_limit_info: { status, resetsAt, rateLimitType, utilization }`.
+- **Usage:**
+  - `result` carries `usage { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens }`, `total_cost_usd`, `num_turns` and `duration_ms`.
+  - `system`/`init` carries `model`.
+
+### 23.1 Statuses and schema (plugin migration 2, idempotent)
+- **New status `pending_approval`:**
+  - It comes before `queued` and is not claimable.
+  - It is open: it counts for the one-run-per-task index and holds the folder lock.
+  - The migration rebuilds the status CHECK and the `ar_runs_one_open_per_task` index to include it.
+  - The runner may now report `waiting_permission` and `needs_input`. Allowed moves:
+    - running → waiting_permission / needs_input
+    - waiting_permission → running / needs_input / waiting_permission
+    - needs_input → running / waiting_permission / needs_input
+    - plus every final status
+  - `cancelling` stays sticky.
+- **`ar_runs` gains:**
+  - `approved_by`, `approved_at`;
+  - `question TEXT`: the open `needs_input` question, cleared when the run reports `running`;
+  - `tokens_in`, `tokens_out`, `cache_read`, `cache_write` (BIGINT, default 0), `cost_estimate NUMERIC(12,4)` (default 0), `turns INT` (default 0);
+  - `run_token_hash CHAR(64) UNIQUE` (nullable).
+- **`ar_run_requests` gains:**
+  - `request_id VARCHAR(255)`, with `UNIQUE (run_uuid, request_id)`;
+  - `input JSONB` (redacted, at most 8 KB), `description TEXT`, `blocked_path TEXT`;
+  - `rule_key VARCHAR(255)` and `remember BOOLEAN NOT NULL DEFAULT false`.
+- **`ar_run_turns`:**
+  - `seq` is assigned by the server: next per run, under the run row lock.
+  - New columns: `status VARCHAR(20) NOT NULL DEFAULT 'delivered' CHECK (status IN ('queued','delivered'))`, `runner_turn INT`, `cost_estimate NUMERIC(12,4)`, `num_turns INT`, `duration_ms BIGINT`, `needs_input BOOLEAN NOT NULL DEFAULT false`.
+  - Unique partial index on `(run_uuid, runner_turn)` where `role = 'assistant'`.
+  - User rows are follow-ups and answers. Assistant rows are one per agent `result`.
+- **Settings:** `approval_policy` gains `permission_timeout_minutes` (1–1440, default 30) and `input_timeout_minutes` (1–1440, default 60).
+- **Sweep additions:**
+  - pending requests past `expires_at` become `expired`;
+  - `pending_approval` runs older than 72 h become `cancelled` (`approval_timeout`).
+
+### 23.2 Runner API additions
+All under `/api/v2/ai-runner/public/runner`, using the runner token. The run must be claimed by this runner and open, else 404 (or 409 for a finished run).
+
+| Method & path | Body → response |
+|---|---|
+| `POST /runs/:uuid/permissions` | `{ request_id, tool, input: {}, tool_use_id?, description?, blocked_path?, rule_key? }` → 201 `{ request: { uuid, status, reason } }`. Idempotent on `request_id` (200 with the stored row). If this run already has an **allowed + remember** request with the same `rule_key`, it comes back `allowed` at once (`reason` "Allowed earlier in this run"). `expires_at = now + permission_timeout`. |
+| `POST /runs/:uuid/permissions/:req_uuid/wait` | `{ wait_s ≤ 25 }` → `{ status: pending\|allowed\|denied\|expired, reason, decided_by_name, cancel }`. A long poll that returns early on a decision or when the run is `cancelling` (`cancel: true`). |
+| `POST /runs/:uuid/turns` | `{ turn ≥ 1, text, model?, usage: { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens }, cost_estimate?, num_turns?, duration_ms?, needs_input? }` → `{ stored }`. Idempotent on `turn`. It stores the assistant turn (text redacted, at most 8 KB), adds the usage to the run's totals (`turns + 1`), and writes **one `ai_usage` row**: `feature 'agent_run'`, `scope` = profile, `run_uuid`, `user_uuid` = requester, `provider` = the profile key cut to 20 characters, model, tokens, `ok = true`. |
+| `POST /runs/:uuid/turns/next` | `{ wait_s ≤ 25 }` → `{ turns: [{ uuid, text, author_name }], cancel }`. A long poll for queued user turns; the ones returned are marked `delivered`. |
+
+**Status reports** accept the new statuses, plus `question` (with `needs_input`).
+
+**Heartbeat:** `capabilities.profiles[].rate_limit` is an optional `{ status, resets_at, type, utilization }`, stored and shown.
+
+**Claim payload** gains:
+- `run_token`: `oprt_` + 48 hex, stored hashed, valid while the run is open;
+- `policy: { permission_timeout_s, input_timeout_s }`.
+
+**Run-token API** (`/api/v2/ai-runner/public/run`, `Authorization: Bearer oprt_…`; the run must be open; plugin off → 404):
+- `GET /task`: the task (title, description, checklist, status, priority, url) and its 20 latest comments (author name, text, at).
+- `POST /comments` `{ text ≤ 4000 }`: adds a kanban comment on the task as the requester, prefixed `[AI run] `.
+
+### 23.3 User API additions (`/api/v2/ai-runner`, session JWT)
+**Deciders:**
+- **Permission requests:** decided by whoever the workspace `approval_policy.deciders` names:
+  - `requester`: the person who started the run;
+  - `managers`: `ai_runs_approvals.manage` or `ai_runs.manage`, or an owner or admin of the run's project;
+  - `requester_or_managers`: either.
+- **Start approvals:** always decided by managers.
+
+| Method & path | Notes |
+|---|---|
+| `GET /runs/:uuid` | Adds `requests` (newest first, at most 200), `turns` (in order, at most 200), usage totals, `question`, `can_decide` (for permission requests), `can_approve` (for `pending_approval`) and `can_message` (requester or `ai_runs.manage`, while the run is open). |
+| `GET /runs` | Rows add `tokens_in`, `tokens_out`, `cost_estimate`, `turns`, `pending_requests`. |
+| `GET /waiting` | What waits on the caller: `{ requests: [pending request + run/task info], approvals: [pending_approval runs] }`, both limited to what the caller may decide. |
+| `POST /runs/:uuid/requests/:req_uuid/decide` | `{ decision: "allow"\|"deny", reason?, remember? }`. Returns 403 if not a decider, 409 if no longer pending. Sets `decided_by`, `decided_at`, `reason`. |
+| `POST /runs/:uuid/turns` | `{ text ≤ 8000 }`. Allowed for the requester or `ai_runs.manage` while the run is open (not `pending_approval`/`queued`), else 409. Creates a queued user turn. |
+| `POST /runs/:uuid/approve` · `POST /runs/:uuid/reject` `{ reason? }` | Managers only, `pending_approval` runs only. Approve → `queued`. Reject → `cancelled` (`error_category 'rejected'`) and releases the lock. |
+| Start / retry | The run is created as `pending_approval` when the profile's `approval` is `unsupported`, or when `require_start_approval` is on and the requester is not a manager. Preview returns `needs_approval`. |
+| `GET/PUT /settings` | `approval_policy.permission_timeout_minutes`, `approval_policy.input_timeout_minutes`. |
+
+### 23.4 PromptPilot runner (Phase 3)
+**Profile `io`:**
+- `"args"` (default) is the Phase 2 behaviour: the prompt goes in argv.
+- `"stream-json"`: the prompt goes on stdin, `{{prompt}}` is not allowed in the command, and the runner is the permission host.
+
+**Each permission request:**
+1. Check the fixed safety list first. These are denied without asking anyone, with the message "Blocked by the runner's safety rules: …":
+   - `git push`, `git merge`, `git rebase`, `git reset --hard`;
+   - `git checkout`/`git switch` to anything except the run's branch;
+   - `sudo`;
+   - `rm -r…` of `/` or `~`;
+   - `curl|wget … | sh`;
+   - `.ssh`, `id_rsa`, `.aws/`, `.env` files;
+   - any `file_path`/`blocked_path` outside the repo folder.
+2. `POST /permissions`, then report `waiting_permission`.
+3. Long-poll `/wait` until it is decided, expired or the run is cancelled.
+4. Answer Claude. On expiry, deny with "Nobody answered in time".
+5. Report `running`.
+
+Any other `control_request` subtype gets `{"subtype":"error","request_id":…,"error":"not supported"}`.
+
+**`rule_key`:** for Bash, the first two words of the command; otherwise the tool name.
+
+**After each `result`:**
+1. `POST /turns` with the result text and its usage.
+2. If the text has a line `NEEDS_INPUT: …`:
+   - report `needs_input` with the question;
+   - long-poll `/turns/next` until the input timeout;
+   - send the answer as the next user message, and report `running`;
+   - on timeout, end as `failed` (`needs_input_timeout`).
+3. Otherwise check `/turns/next` once with `wait_s 0`:
+   - queued follow-ups are sent as the next user message;
+   - with none, close stdin and finish as in Phase 2.
+
+**Placeholders:**
+- `{{mcp_config}}`: the runner writes `<tmp>/mcp.json` (mode 0600, deleted at the end) with `{"mcpServers":{"opsapi_run":{"command":<promptpilot path>,"args":["run-mcp"],"env":{"OPSAPI_URL":…,"OPSAPI_RUN_TOKEN":…}}}}`.
+- `{{model}}`: when the run has no model, the runner drops the `--model {{model}}` pair.
+
+**`promptpilot run-mcp`:** a stdio MCP server using JSON-RPC 2.0, one message per line. It handles `initialize` (echoing the client's `protocolVersion`), `tools/list` and `tools/call`, with the tools `get_task` and `add_comment`, which call the run-token API.
+
+**`promptpilot fake-agent`:** a Go test agent that speaks the full stdio protocol, controlled by `FAKE_AGENT_SCRIPT` (steps separated by `;`):
+- `perm:<tool>:<command>`: ask; when allowed, it runs the step by writing a file;
+- `edit`: writes `AI_RUN_NOTES.md`;
+- `ask:<question>`: ends the turn with `NEEDS_INPUT:`;
+- `sleep:<s>`.
+
+Each turn emits assistant messages with `usage` and a `result` with usage and cost. It exits when stdin closes.
+
+**Rate limit:** the runner keeps the latest `rate_limit_info` per profile and sends it in the heartbeat. A result that fails on a rate limit ends the run as `failed` (`rate_limited`).
+
+**Profiles in `runner.example.json`:**
+- **Claude (bridge):**
+  ```
+  claude -p --input-format stream-json --output-format stream-json --verbose --session-id {{run_uuid}}
+    --model {{model}} --restricted --strict-mcp-config --mcp-config {{mcp_config}}
+    --tools Read,Grep,Glob,Edit,MultiEdit,Write,Bash
+    --allowedTools Read,Grep,Glob,mcp__opsapi_run__get_task,mcp__opsapi_run__add_comment
+    --permission-mode acceptEdits --permission-prompts host --permission-prompt-tool stdio
+  ```
+  `approval: "bridge"`, `io: "stream-json"`. File edits inside the folder are allowed by `acceptEdits`, since the agent is on its own branch. Bash and anything else is asked.
+- **Claude (no bridge):** the Phase 2 profile, plus `--strict-mcp-config`.
+- **Cursor:** `cursor-agent -p {{prompt}} --output-format stream-json --model {{model}}`, `approval: "unsupported"`, without `--force`.
+- **Fake:** `promptpilot fake-agent` with `io: "stream-json"`.
+
+### 23.5 Dashboard
+- **Run page:**
+  - "Needs your decision" for pending requests: the tool, what it wants (the command or file), the path, Allow / Allow for this run / Deny with an optional reason. Others see "Waiting for a decision".
+  - The history of requests.
+  - The conversation: agent turns with their tokens, and people's messages.
+  - A message box, for the requester or a manager while the run is open.
+  - The `needs_input` question, highlighted.
+  - Usage totals.
+  - A `pending_approval` banner with Approve / Reject.
+- **AI Runs:**
+  - A "Waiting on you" panel (requests and approvals, with quick actions, refreshed every 10 s);
+  - tokens and turns columns;
+  - the new statuses.
+- **Settings:** permission timeout and input timeout.
+- **Runners:** each profile's rate-limit usage.
+- **Start dialog:** the note "A manager must approve this run before it starts" when `needs_approval`.
+
+### 23.6 Acceptance
+- **Plugin sandbox:**
+  - permission request → allow / deny / remember / expire;
+  - decider rules for all three policies;
+  - turns, follow-ups and `needs_input`;
+  - usage totals and `ai_usage` rows;
+  - `pending_approval` approve / reject and its RBAC;
+  - the run-token API (scope, expiry at run end, other runs refused);
+  - migration 2 run twice;
+  - isolation between workspaces.
+- **Real runner + `promptpilot fake-agent`:**
+  - a permission that is allowed, then one that is denied;
+  - a safety-list command denied without asking;
+  - `NEEDS_INPUT` answered from OpsAPI;
+  - a follow-up;
+  - usage rows.
+- **Go tests** for the stdio host, the safety list, `run-mcp` and `fake-agent`.
+- **Cypress:**
+  - the mocked spec decides a request, sends a message and approves a pending run;
+  - the real-runner spec runs the same through the UI with `fake-agent`;
+  - with `CYPRESS_AIR_CLAUDE=1`, a real Claude run whose permission is approved in the dashboard.
