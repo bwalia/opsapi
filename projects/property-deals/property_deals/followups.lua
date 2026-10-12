@@ -3,8 +3,9 @@
 -- personal message (email, WhatsApp or SMS). The draft is an approval: nothing reaches the lead until a
 -- person approves it (executor: send_lead_followup). Leads who opted out are never drafted to.
 --   * on demand: POST /leads/{id}/follow-up { channel?, signal_uuid?, note? }
---   * automatic: when the Companies House watch finds news for a lead with an owner (setting
---     followup_auto_on_news, default on, needs an AI provider), at most one open follow-up per lead.
+--   * automatic: when the Companies House watch finds news for a lead with an owner (settings
+--     followup_auto_on_news and ai_auto_runs, default on, needs an AI provider), at most one open follow-up
+--     per lead.
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
@@ -46,33 +47,36 @@ function F.start(ns, lead_uuid, opts)
         return nil, "That news item isn't on this lead", 422
     end
     local Tasks = require("property_deals.tasks")
-    local existing = open_followup(ns, lead.uuid)
-    local task_uuid
-    if existing then
-        if existing.pd_status == "agent_running" or existing.pd_status == "awaiting_approval" then
-            return nil, "A follow-up for this lead is already being drafted or waiting for approval", 409
+    -- One open follow-up per lead: the check and the create hold a lock on the lead, so a double click (or
+    -- the news watch racing a click) gets the same task, and then one run.
+    local task_uuid = U.tx(function()
+        db.query("SELECT pg_advisory_xact_lock(hashtext(?))", "property_deals_followup:" .. lead.uuid)
+        local existing = open_followup(ns, lead.uuid)
+        if existing then
+            if existing.pd_status == "agent_running" or existing.pd_status == "awaiting_approval" then
+                return nil
+            end
+            db.query([[UPDATE property_deals_task_details SET metadata = metadata || ?::jsonb, updated_at = NOW()
+                WHERE namespace_id = ? AND task_uuid = ?]], require("cjson").encode({ channel = channel,
+                signal_uuid = opts.signal_uuid, note = opts.note }), ns, existing.task_uuid)
+            return existing.task_uuid
         end
-        task_uuid = existing.task_uuid
-        db.query([[UPDATE property_deals_task_details SET metadata = metadata || ?::jsonb, updated_at = NOW()
-            WHERE namespace_id = ? AND task_uuid = ?]], require("cjson").encode({ channel = channel,
-            signal_uuid = opts.signal_uuid, note = opts.note }), ns, task_uuid)
-    else
         local owner = not null(lead.owner_user_uuid) and lead.owner_user_uuid or opts.actor
             or require("property_deals.engine").managers(ns)[1]
         local name = ((null(lead.first_name) and "" or lead.first_name) .. " " .. (null(lead.last_name) and "" or lead.last_name))
             :gsub("^%s+", ""):gsub("%s+$", "")
         if name == "" then name = not null(lead.company_name) and lead.company_name or "lead" end
-        local task = U.tx(function()
-            require("property_deals.workspace").ensure(ns, owner, opts.settings)
-            return Tasks.create(ns, {
-                title = "Follow up " .. name .. " (" .. channel .. ")", lead_uuid = lead.uuid, owner_user_uuid = owner,
-                priority = "medium", agent_eligible = true, agent_key = "lead_followup",
-                -- Vulnerable people: a manager reads every word first.
-                approval_rule = lead.vulnerability_flag == true and "manager" or "any_operator",
-                metadata = { kind = "lead_followup", channel = channel, signal_uuid = opts.signal_uuid, note = opts.note },
-            }, opts.actor or owner)
-        end)
-        task_uuid = task.task_uuid
+        require("property_deals.workspace").ensure(ns, owner, opts.settings)
+        return Tasks.create(ns, {
+            title = "Follow up " .. name .. " (" .. channel .. ")", lead_uuid = lead.uuid, owner_user_uuid = owner,
+            priority = "medium", agent_eligible = true, agent_key = "lead_followup",
+            -- Vulnerable people: a manager reads every word first.
+            approval_rule = lead.vulnerability_flag == true and "manager" or "any_operator",
+            metadata = { kind = "lead_followup", channel = channel, signal_uuid = opts.signal_uuid, note = opts.note },
+        }, opts.actor or owner).task_uuid
+    end)
+    if not task_uuid then
+        return nil, "A follow-up for this lead is already being drafted or waiting for approval", 409
     end
     local run, err, status = require("property_deals.ai.runner").start(ns, task_uuid,
         { trigger = opts.trigger or "manual", actor = opts.actor, sync = opts.sync })
@@ -83,7 +87,7 @@ end
 --- Leads with fresh news -> a follow-up draft each (no open follow-up, not opted out, has an owner).
 function F.auto(ns, lead_uuids, settings)
     settings = settings or require("helper.plugin-sdk").settings("property_deals", ns) or {}
-    if settings.followup_auto_on_news == false then return 0 end
+    if settings.followup_auto_on_news == false or settings.ai_auto_runs == false then return 0 end
     -- No model, no drafts: don't leave empty follow-up tasks behind.
     if #require("property_deals.ai.config").route(ns, "draft").chain == 0 then return 0 end
     local started = 0

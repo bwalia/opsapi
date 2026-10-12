@@ -46,7 +46,8 @@ commit. No deal pack goes to a buyer without proof of funds on file.]] },
 - Vulnerable sellers (bereavement, illness, debt, age, distress): be patient, involve family if they wish,
   a manager approves every message and offer.
 - AML: ID + proof of address + source of funds before exchange. A named person signs off each check.
-- We never use public AI services with customer data: our AI runs on our own servers.]] },
+- Customer data goes only to the AI models this workspace has set up; self-hosted ones come first, and
+  work marked local-only never leaves our own servers.]] },
     { key = "escalation", title = "When a human must take over", body = [[
 Hand to a person (never let the AI decide): offers and prices, anything legal, complaints, vulnerable
 people, a seller who is upset, anything that commits money, and anything the playbook doesn't cover.]] },

@@ -5,13 +5,16 @@
   * approved: email through the workspace SMTP (with an opt-out line), chase logged, news marked used, task done
   * SMS goes through the workspace's own Android SMS Gateway; WhatsApp becomes a click-to-chat link (no paid API)
   * a private person needs a lawful basis before anything is sent; a company contact (B2B) doesn't
-  * an opt-out cancels waiting drafts and blocks new ones; vulnerable leads need a manager's approval
+  * an opt-out cancels waiting drafts and blocks new ones; vulnerable leads need a manager's approval (a setting
+    can't lower that)
+  * the default model is the self-hosted one; a double click starts one follow-up
   * other workspaces can't touch any of it
 """
 import email
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 
@@ -91,6 +94,8 @@ expect("SMTP → sink", call("PUT", API + "/api/v2/namespace/mail-settings", "ow
        {"host": "pd-mock", "port": 2525, "security": "none", "from_email": "deals@followup.test"}), 200)
 data(call("POST", API + "/api/v2/namespace/ai-providers", "owner_s", S, {"name": "Local", "provider_type": "openai_compatible",
      "base_url": M + "/v1", "default_model": "qwen-local", "is_local": True}), 201, "local model")
+data(call("POST", API + "/api/v2/namespace/ai-providers", "owner_s", S, {"name": "A cloud", "provider_type": "openai_compatible",
+     "base_url": M + "/v1", "default_model": "cloud-ok"}), 201, "a cloud model (first by name)")
 
 # --- 1. News starts a draft by itself -------------------------------------------------------------------------------
 L = new_lead({"first_name": "Sarah", "last_name": "Lane", "email": "sarah@lane.test", "company_name": "Acme Homes Ltd"})
@@ -104,6 +109,7 @@ T = task[0]
 runs = data(call("GET", P + f"/agent-runs?task_uuid={T}", "operator_s", S), 200, "runs")
 r = wait_run(runs[0]["uuid"]) if runs else {}
 check("the draft run succeeded", r.get("status") == "succeeded" and r.get("trigger") == "news", r)
+check("with no route set, the self-hosted model goes first", r.get("model") == "qwen-local", r.get("model"))
 pend = pending_for(T)
 check("one approval waiting", len(pend) == 1 and pend[0]["action"] == "send_lead_followup", pend)
 A = pend[0]
@@ -184,14 +190,34 @@ check("no new follow-up after an opt-out (409)", res[0] == 409, res)
 P4 = new_lead({"first_name": "Vera", "last_name": "Care", "email": "vera@care.test", "company_name": "Care Lets Ltd"})
 data(call("PUT", P + f"/leads/{P4}/details", "operator_s", S, {"vulnerability_flag": True,
      "vulnerability_note": "Recently bereaved"}), 200, "flag vulnerable")
+data(call("PUT", P + "/ai/agents/lead_followup", "manager_s", S, {"approval_rule": "any_operator"}), 200,
+     "follow-up setting: any operator")
 f = data(call("POST", P + f"/leads/{P4}/follow-up", "operator_s", S, {}), 202, "follow-up for Vera")
 wait_run(f["run_uuid"])
 a4 = pending_for(f["task_uuid"])[0]
-check("manager rule", a4["rule"] == "manager", a4["rule"])
+check("manager rule (a setting can't lower it)", a4["rule"] == "manager", a4["rule"])
+data(call("PUT", P + "/ai/agents/lead_followup", "manager_s", S, {"approval_rule": None}), 200, "setting cleared")
 res = call("POST", P + f"/approvals/{a4['uuid']}/decide", "operator_s", S, {"decision": "approve"})
 check("an operator can't approve it (403)", res[0] == 403, res)
 
-# --- 5. Isolation -------------------------------------------------------------------------------------------------------
+# --- 5. A double click starts one follow-up ------------------------------------------------------------------------------
+P5 = new_lead({"first_name": "Duo", "last_name": "Click", "email": "duo@click.test", "company_name": "Duo Lets Ltd"})
+clicks = []
+threads = [threading.Thread(target=lambda: clicks.append(call("POST", P + f"/leads/{P5}/follow-up", "operator_s", S, {})))
+           for _ in range(2)]
+for th in threads:
+    th.start()
+for th in threads:
+    th.join()
+tasks5 = sql(f"SELECT task_uuid FROM property_deals_task_details WHERE lead_uuid = '{P5}' AND agent_key = 'lead_followup'")
+check("double click: one follow-up task, one draft; the other click gets 409",
+      sorted(c[0] for c in clicks) == [202, 409] and len(tasks5) == 1
+      and sql(f"SELECT COUNT(*) FROM property_deals_agent_runs WHERE task_uuid = '{tasks5[0]}'") == ["1"], clicks)
+for c in clicks:
+    if c[0] == 202:
+        wait_run(c[1]["data"]["run_uuid"])
+
+# --- 6. Isolation -------------------------------------------------------------------------------------------------------
 B = workspace("owner_b", "Other Follow Co", "other-follow")
 expect("enable the plugin (B)", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_b", B, {"enabled": True}), 200)
 res = call("POST", P + f"/leads/{L}/follow-up", "owner_b", B, {})
