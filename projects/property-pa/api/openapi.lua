@@ -101,8 +101,19 @@ return function(app)
         permission = "property_pa_records.read", path = id, query = { limit = INT("max 300") }, response = ARR(TimelineItem) })
     doc("GET /people", { summary = "Find people by name, email, phone or property address",
         permission = "property_pa_records.read", query = { q = S("At least 2 characters") }, response = ARR(OBJ({})) })
-    doc("GET /people/:id", { summary = "A person: roles, relationship, opportunities", permission = "property_pa_records.read",
-        path = { id = S("Contact uuid") }, response = OBJ({}), errors = E404 })
+    local Bases = { "consent", "contract", "legitimate_interests", "legal_obligation" }
+    doc("GET /people/:id", { summary = "A person: roles, relationship, opportunities, consent",
+        permission = "property_pa_records.read", path = { id = S("Contact uuid") },
+        response = OBJ({ uuid = S(), first_name = S(), last_name = S(), email = S(), phone = S(), mobile = S(),
+            person_roles = ARR(S()), relationship = OBJ({}), opportunities = ARR(OBJ({})),
+            consent_basis = ENUM(Bases), opted_out_at = DT("Asked not to be contacted: the PA proposes no contact") }),
+        errors = E404 })
+    doc("PUT /people/:id/consent", { summary = "Record a consent basis or an opt-out",
+        description = "opted_out = true records an opt-out (the PA then refuses next actions for them and Today says "
+            .. "don't contact); false lifts it (only a person can: integrations never do).",
+        permission = "property_pa_records.update", path = { id = S("Contact uuid") },
+        body = OBJ({ consent_basis = ENUM(Bases), opted_out = BOOL() }),
+        response = OBJ({ person_uuid = S(), consent_basis = ENUM(Bases), opted_out_at = DT() }), errors = E404 })
     doc("GET /people/:id/timeline", { summary = "A person's timeline", permission = "property_pa_records.read",
         path = { id = S("Contact uuid") }, response = ARR(TimelineItem) })
     doc("POST /interactions", { summary = "Log a call, email, note or voice note", permission = "property_pa_records.create",
@@ -251,6 +262,19 @@ return function(app)
         permission = "property_pa_knowledge.manage", status = 202,
         response = OBJ({ queued = BOOL(), last_run_at = DT(), last_result = GhlResult }),
         errors = { ["409"] = "GHL not set up" } })
+    doc("POST /public/ghl/:workspace/contacts", { summary = "GoHighLevel webhook: create or update a person",
+        description = "No login. :workspace is the workspace slug (or uuid); the caller sends the workspace's "
+            .. "ghl_webhook_secret as X-Webhook-Secret (or Authorization: Bearer). Refused while the secret is unset or "
+            .. "the PA is off there. Accepts a workflow webhook (contact_id, first_name, ...) or an app's "
+            .. "ContactCreate / ContactUpdate (id, firstName, ...), flat or under `contact`. Deduplicated on the GHL id, "
+            .. "then email, then phone (E.164; UK numbers without +44 are read as UK). dnd = true records an opt-out; "
+            .. "consent_basis is kept when valid. 120 calls a minute per IP.",
+        path = { workspace = S("Workspace slug or uuid") },
+        body = OBJ({ contact_id = S("Or id / contactId"), first_name = S(), last_name = S(), email = S(), phone = S(),
+            dnd = BOOL(), consent_basis = ENUM(Bases) }),
+        status = 200, response = OBJ({ result = ENUM({ "created", "updated", "unchanged" }) }),
+        errors = { ["401"] = "Missing or wrong secret (or none set)", ["404"] = "Unknown workspace, or the PA is off there",
+            ["422"] = "No contact id", ["429"] = "Too many calls" } })
     doc("POST /runs/sweep", { summary = "Poll PA runs without a webhook; fail ones past the timeout",
         permission = "property_pa_knowledge.manage", response = OBJ({ polled = INT(), finished = INT(), timed_out = INT() }) })
     doc("GET /status", { summary = "Go-live checklist", permission = "property_pa_records.read",

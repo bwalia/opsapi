@@ -68,6 +68,7 @@ end
 -- ------------------------------------------------------------------ GoHighLevel
 I.GHL_URL = os.getenv("GHL_API_URL") or "https://services.leadconnectorhq.com"
 I.GHL_PAGES = 20 -- pages of 100 per run; a bigger location carries on from its saved cursor on the next run
+I.WEBHOOK_PER_MINUTE = 120 -- GHL webhook calls per caller IP
 
 local function ghl_get(token, path)
     local http = require("resty.http").new()
@@ -100,10 +101,20 @@ function I.e164(phone)
     return p:match("^%+[1-9]%d%d%d%d%d%d%d+$") and #p <= 16 and p or nil
 end
 
---- Create or update the CRM person behind one GHL contact. c = { id, first_name, last_name, email, phone }.
--- Matched on the GHL id, then email, then phone (the last 10 digits, so 07700 900111 = +447700900111).
+--- Create or update the CRM person behind one GHL contact. c = { id, first_name, last_name, email, phone, dnd?,
+-- consent_basis? }. Matched on the GHL id, then email, then phone (the last 10 digits, so 07700 900111 =
+-- +447700900111). GHL's DND flag records an opt-out (never cleared from here); a consent basis is kept when valid.
 -- @return "created" | "updated" | "unchanged", contact uuid
 function I.ghl_upsert(ns, c, owner_uuid)
+    local result, uuid = I.ghl_person(ns, c, owner_uuid)
+    if uuid and (c.dnd == true or c.consent_basis) then
+        require("property_pa.consent").set(ns, uuid, { consent_basis = c.consent_basis,
+            opted_out = c.dnd == true or nil, source = "ghl" })
+    end
+    return result, uuid
+end
+
+function I.ghl_person(ns, c, owner_uuid)
     local F = require("property_pa.facts")
     local gid = tostring(c.id)
     local email = s(c.email) and c.email:lower() or nil
@@ -185,7 +196,7 @@ function I.ghl_sync(ns, settings, owner_uuid, max_pages)
         for _, c in ipairs(list) do
             if s(c.id) then
                 local result = I.ghl_upsert(ns, { id = c.id, first_name = s(c.firstName) or s(c.contactName),
-                    last_name = c.lastName, email = c.email, phone = c.phone }, owner_uuid)
+                    last_name = c.lastName, email = c.email, phone = c.phone, dnd = c.dnd }, owner_uuid)
                 out[result] = out[result] + 1
             end
         end
@@ -197,6 +208,18 @@ function I.ghl_sync(ns, settings, owner_uuid, max_pages)
         WHERE namespace_id = ? AND source = 'ghl']], after or db.NULL, cjson.encode(err and { error = err } or out), ns)
     if err then return nil, err end
     return out
+end
+
+--- A GHL webhook body as a contact for I.ghl_upsert: a workflow's webhook (snake_case, contact_id) or an app's
+-- ContactCreate / ContactUpdate event (camelCase, id), flat or under `contact`. @return contact | nil
+function I.ghl_webhook_contact(body)
+    local c = type(body.contact) == "table" and body.contact or body
+    local id = s(c.contact_id) or s(c.contactId) or s(c.id)
+    if not id or #id > 255 then return nil end
+    local function cap(v, n) return v and v:sub(1, n) end
+    return { id = id, first_name = cap(s(c.first_name) or s(c.firstName) or s(c.full_name) or s(c.name), 100),
+        last_name = cap(s(c.last_name) or s(c.lastName), 100), email = cap(s(c.email), 255), phone = cap(s(c.phone), 40),
+        dnd = c.dnd == true or c.dnd == "true" or c.opted_out == true, consent_basis = s(c.consent_basis) }
 end
 
 --- Ask for a pull now (the hourly pull, early): the job runs it within a few seconds. @return number of runs queued

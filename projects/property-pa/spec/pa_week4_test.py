@@ -11,6 +11,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -158,6 +160,77 @@ check("a second pull changes nothing", g and g["created"] == 0 and g["updated"] 
 settings = call("GET", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S)
 check("the GHL token is never returned", "ghl-token" not in json.dumps(settings[1]), settings[0])
 
+# --- GoHighLevel webhook, consent ------------------------------------------------------------------------------------------
+HOOK = PA + "/public/ghl/pa-work/contacts"
+
+
+def hook(body, secret=None):
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers["X-Webhook-Secret"] = secret
+    req = urllib.request.Request(HOOK, data=json.dumps(body).encode(), method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            return e.code, json.loads(raw)
+        except ValueError:
+            return e.code, raw.decode(errors="replace")
+
+
+OLU = {"contact_id": "ghl-w-1", "first_name": "Olu", "last_name": "Ade", "email": "olu@example.invalid",
+       "phone": "07700 900555"}
+res = hook(OLU, "anything")
+check("GHL webhook refused while the workspace has no webhook secret (401)", res[0] == 401, res)
+data(call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"settings": {
+     "ghl_webhook_secret": "hook-s3cret"}}), 200, "set the GHL webhook secret")
+check("a wrong secret is refused (401), with nothing about why", hook(OLU, "wrong")[0] == 401)
+check("no secret at all is refused (401)", hook(OLU)[0] == 401)
+res = call("POST", PA + "/public/ghl/no-such-workspace/contacts", "owner_s", body=OLU)
+check("an unknown workspace is 404", res[0] == 404, res)
+res = hook(OLU, "hook-s3cret")
+check("a signed webhook creates the person", res[0] == 200 and res[1]["data"]["result"] == "created", res)
+check("their phone is stored in E.164", sql(f"SELECT phone FROM crm_contacts WHERE namespace_id = {NSID} "
+      f"AND email = 'olu@example.invalid'") == ["+447700900555"])
+res = hook({"type": "ContactUpdate", "id": "ghl-w-1", "firstName": "Olu", "phone": "+44 7700 900555"}, "hook-s3cret")
+check("an app's ContactUpdate for the same GHL id changes nothing", res[0] == 200
+      and res[1]["data"]["result"] == "unchanged", res)
+res = hook({"contact_id": "ghl-w-2", "first_name": "Olu", "phone": "+447700900555"}, "hook-s3cret")
+check("another GHL id with the same phone is the same person (dedupe on E.164 phone)",
+      res[0] == 200 and res[1]["data"]["result"] == "unchanged" and sql(f"SELECT COUNT(*) FROM crm_contacts WHERE "
+      f"namespace_id = {NSID} AND phone = '+447700900555'") == ["1"], res)
+with ThreadPoolExecutor(4) as ex:
+    codes = list(ex.map(lambda _: hook({"contact_id": "ghl-w-3", "first_name": "Zed", "phone": "07700 900666"},
+                                       "hook-s3cret")[0], range(4)))
+check("the same new contact sent four times at once is one person", codes == [200] * 4
+      and sql(f"SELECT COUNT(*) FROM crm_contacts WHERE namespace_id = {NSID} AND first_name = 'Zed'") == ["1"], codes)
+MICH = fx["michael"]["person_uuid"]
+res = hook({"contact_id": "ghl-c-1", "first_name": "Michael", "dnd": True, "consent_basis": "legitimate_interests"},
+           "hook-s3cret")
+check("GHL's do-not-disturb arrives", res[0] == 200, res)
+pp = data(call("GET", PA + f"/people/{MICH}", SOPHIE, S), 200, "Michael's consent")
+check("Michael is opted out, with the consent basis from GHL", pp.get("opted_out_at") and
+      pp["consent_basis"] == "legitimate_interests", pp)
+card = next(c for c in data(call("GET", PA + "/today", SOPHIE, S), 200, "Today")["cards"]
+            if c["opportunity_uuid"] == MICHAEL)
+check("Today never recommends contacting someone who opted out", card["action"].startswith("Don't contact"), card)
+res = call("POST", PA + "/captures", "agent", S, {"interaction": {"channel": "note", "direction": "internal",
+           "opportunity_uuid": MICHAEL, "raw_text": "Call Michael on Friday."}, "proposals": [
+           {"target_table": "next_action", "new_value": {"title": "Call Michael", "due_at": "2030-01-03T10:00:00Z",
+            "opportunity_uuid": MICHAEL, "reason": "Follow up"}, "source_quote": "Call Michael on Friday"}]})
+check("the PA can't propose contacting him (422, says why)", res[0] == 422
+      and "asked not to be contacted" in json.dumps(res[1]), res)
+hook({"contact_id": "ghl-c-1", "first_name": "Michael", "dnd": False}, "hook-s3cret")
+check("GHL can't lift an opt-out", data(call("GET", PA + f"/people/{MICH}", SOPHIE, S), 200, "still out")
+      .get("opted_out_at"))
+res = call("PUT", PA + f"/people/{MICH}/consent", "agent", S, {"opted_out": False})
+check("the agent can't change consent (403)", res[0] == 403, res)
+c = data(call("PUT", PA + f"/people/{MICH}/consent", SOPHIE, S, {"opted_out": False}), 200, "Sophie lifts it")
+check("a person can lift it; the basis stays", c.get("opted_out_at") is None
+      and c["consent_basis"] == "legitimate_interests", c)
+
 # --- Deciding twice at the same moment ------------------------------------------------------------------------------------
 JAMES = fx["james"]["opportunity_uuid"]
 st = data(call("POST", PA + "/captures/start", SOPHIE, S, {"text": "James wants a second viewing on Saturday.",
@@ -238,6 +311,7 @@ expect_off = call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s
 check("switch the PA plugin off", expect_off[0] == 200, expect_off)
 res = call("GET", PA + "/today", SOPHIE, S)
 check("P12: PA routes are off (404)", res[0] == 404, res)
+check("and the GHL webhook too (404)", hook(OLU, "hook-s3cret")[0] == 404)
 contacts = call("GET", API + "/api/v2/crm/contacts?search=Hughes", "owner_s", S)
 check("P12: the CRM contacts screen still works with the PA off", contacts[0] == 200 and "Hughes" in json.dumps(contacts[1]),
       contacts[0])
@@ -246,5 +320,8 @@ call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabl
 opp = data(call("GET", PA + f"/opportunities/{RICK}", SOPHIE, S), 200, "back on")
 check("P12: switching back on loses nothing", opp["temperature"] == "hot" and any(a["title"] == "Call Rick"
       for a in opp["next_actions"]), opp)
+
+codes = [hook(OLU, "wrong")[0] for _ in range(125)]
+check("the GHL webhook is rate limited per caller (429 after 120 a minute)", 429 in codes and codes[0] == 401, codes[-3:])
 
 sys.exit(finish())

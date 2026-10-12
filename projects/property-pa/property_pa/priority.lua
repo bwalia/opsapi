@@ -61,10 +61,11 @@ local function scored(where)
                    na.due_at < NOW() AS na_overdue, na.due_at < date_trunc('day', NOW()) + INTERVAL '1 day' AS na_today,
                    f.uuid AS offer_uuid, f.amount AS offer_amount,
                    EXTRACT(EPOCH FROM (NOW() - o.last_meaningful_contact_at)) / 86400 AS quiet_days,
-                   w.n AS waiting
+                   w.n AS waiting, k.opted_out_at
             FROM pa_opportunities o
             LEFT JOIN crm_contacts c ON c.uuid = o.person_uuid
             LEFT JOIN property_deals_properties p ON p.uuid = o.property_uuid
+            LEFT JOIN pa_consent k ON k.namespace_id = o.namespace_id AND k.person_uuid = o.person_uuid
             LEFT JOIN LATERAL (SELECT uuid, title, at FROM pa_events WHERE namespace_id = o.namespace_id
                 AND opportunity_uuid = o.uuid AND kind = 'promise' AND NOT done AND at < NOW() + INTERVAL '1 day'
                 ORDER BY at LIMIT 1) pr ON TRUE
@@ -141,6 +142,10 @@ function R.card(o)
     elseif top == "changes_waiting" then
         action, minutes = action or "Confirm the changes from your notes", minutes or R.MINUTES.review
         objective = objective or "Keep the record right"
+    end
+    -- They asked not to be contacted: the PA never recommends reaching out.
+    if not null(o.opted_out_at) then
+        action, objective, minutes = "Don't contact " .. who .. ": they opted out", "Respect their opt-out", R.MINUTES.review
     end
     return { score = score, signals = setmetatable(signals, cjson.array_mt), action = action or ("Check in with " .. who),
         objective = objective or "Keep it moving", minutes = minutes or R.MINUTES.call,

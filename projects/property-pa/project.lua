@@ -83,6 +83,9 @@ return {
         ghl_location_id = { type = "string", label = "GoHighLevel location id", default = "",
             description = "Contacts are pulled from this location every hour (read only)." },
         ghl_token = { type = "string", label = "GoHighLevel private integration token", secret = true },
+        ghl_webhook_secret = { type = "string", label = "GoHighLevel webhook secret", secret = true,
+            description = "Sent as X-Webhook-Secret by the GHL webhook to "
+                .. "/api/v2/property-pa/public/ghl/<workspace slug>/contacts. The webhook is refused while unset." },
         retention_text_days = { type = "integer", label = "Keep note, transcript and email text for (days)",
             default = 365, min = 30, max = 3650,
             description = "After this the words of PA notes, voice transcripts and imported emails are removed; the "

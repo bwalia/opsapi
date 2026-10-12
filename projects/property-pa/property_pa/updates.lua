@@ -29,9 +29,13 @@ P.SELECT = [[
 function P.propose(ns, items, meta, settings)
     meta = meta or {}
     local errors = {}
+    local Consent = require("property_pa.consent")
     for i, it in ipairs(items) do
         local ok, err = F.validate(it)
         if not ok then errors[tostring(i)] = err end
+        -- The PA never proposes contacting someone who opted out.
+        local no = ok and it.target_table == "next_action" and Consent.refusal(ns, it.new_value.opportunity_uuid)
+        if no then errors[tostring(i)] = no .. ": no next action" end
         if it.confidence ~= nil and (tonumber(it.confidence) == nil or tonumber(it.confidence) < 0
             or tonumber(it.confidence) > 1) then
             errors[tostring(i)] = "confidence must be between 0 and 1"
@@ -103,6 +107,8 @@ local function create(ns, p, value, user, settings)
         fact("pa_offers", r.uuid)
         return { table = "pa_offers", uuid = r.uuid }
     elseif p.target_table == "next_action" then
+        local no = require("property_pa.consent").refusal(ns, value.opportunity_uuid)
+        if no then U.fail(409, no .. " since this was proposed") end
         local task = require("property_pa.actions").create(ns, value, user, settings, p.source_interaction_uuid)
         fact("next_action", task.task_uuid)
         return { table = "next_action", uuid = task.task_uuid }

@@ -34,14 +34,7 @@ local function hmac_hex(secret, msg)
     return hex(h:final())
 end
 
--- constant-time compare
-local function same(a, b)
-    if type(a) ~= "string" or type(b) ~= "string" or #a ~= #b then return false end
-    local diff = 0
-    local bit = require("bit")
-    for i = 1, #a do diff = bit.bor(diff, bit.bxor(a:byte(i), b:byte(i))) end
-    return diff == 0
-end
+local function same(a, b) return require("lib.stripe")._secure_compare(a, b) end -- constant time
 
 return function(app)
     app:post("/ask", sdk.handler({ permission = "property_pa_records.read" }, U.guard_create(function(self)

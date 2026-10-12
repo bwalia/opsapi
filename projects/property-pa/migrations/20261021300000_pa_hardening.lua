@@ -2,6 +2,7 @@
 --   * indexes for what the PA looks up per request, per run and per webhook
 --   * pa_external_refs: each inbound email / GoHighLevel contact is imported once (a unique claim, not a lookup)
 --   * pa_sync_state: where a GoHighLevel pull got to, so a big location carries on next run
+--   * pa_consent: consent basis and opt-out per person (PRD §6), outside the core contacts table
 return function(_, db)
     -- Today / Prepare / Manager Today read next actions, waiting changes and runs per opportunity; the JobShout
     -- webhook finds its run by JobShout's id before it knows the workspace. The task and run tables are Property
@@ -55,4 +56,21 @@ return function(_, db)
             PRIMARY KEY (namespace_id, source)
         )
     ]])
+
+    db.query([[
+        CREATE TABLE IF NOT EXISTS pa_consent (
+            id BIGSERIAL PRIMARY KEY,
+            namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+            person_uuid TEXT NOT NULL REFERENCES crm_contacts(uuid) ON DELETE CASCADE,
+            consent_basis VARCHAR(30) CHECK (consent_basis IN ('consent', 'contract', 'legitimate_interests',
+                'legal_obligation')),
+            opted_out_at TIMESTAMPTZ,
+            source VARCHAR(20) NOT NULL DEFAULT 'human',  -- human | ghl
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (namespace_id, person_uuid)
+        )
+    ]])
+    db.query("DROP TRIGGER IF EXISTS pa_consent_same_ns ON pa_consent")
+    db.query([[CREATE TRIGGER pa_consent_same_ns BEFORE INSERT OR UPDATE ON pa_consent
+        FOR EACH ROW EXECUTE FUNCTION property_pa_same_namespace('person_uuid', 'crm_contacts')]])
 end
