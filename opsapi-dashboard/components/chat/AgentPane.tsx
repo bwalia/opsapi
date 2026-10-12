@@ -412,7 +412,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
                       tasks={taskList.tasks}
                       today={taskList.today}
                       renderStartWithAI={(task) => (
-                        <StartWithAIButton compact taskUuid={task.uuid} projectUuid={task.project_uuid}
+                        <StartWithAIButton compact taskUuid={task.uuid}
                           taskLabel={`${task.task_number != null ? `#${task.task_number} ` : ''}${task.title}`} />
                       )}
                     />

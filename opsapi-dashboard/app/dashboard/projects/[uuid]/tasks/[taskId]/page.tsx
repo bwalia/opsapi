@@ -197,7 +197,7 @@ export default function TaskDetailPage() {
         <span className="text-secondary-300">/</span>
         <span className="font-mono text-secondary-500">#{task.task_number}</span>
         <div className="ml-auto relative flex items-center gap-2">
-          <StartWithAIButton taskUuid={task.uuid} projectUuid={projectUuid} taskLabel={`#${task.task_number} ${task.title}`} />
+          <StartWithAIButton taskUuid={task.uuid} taskLabel={`#${task.task_number} ${task.title}`} />
           {canEdit && (
             <button onClick={() => setMenuOpen((o) => !o)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-secondary-500 hover:bg-secondary-100" aria-label="Task actions">
               <MoreHorizontal className="w-5 h-5" />

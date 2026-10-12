@@ -1,6 +1,6 @@
 /**
  * AI Runs (OpsAPI plugin projects/ai-runner) — typed client for the dashboard pages.
- * Contract: docs/AI_RUNNER.md §22.3, §23.3 and §24 (user API, session JWT). Requests go through apiClient
+ * Contract: docs/AI_RUNNER.md §22.3, §23.3, §24 and §25 (user API, session JWT). Requests go through apiClient
  * (auth + workspace headers). Writes carry `_replay: true` so they never sit in the offline
  * outbox: a run started or a token minted by a background replay later is worse than an error now.
  */
@@ -44,6 +44,16 @@ export interface RunnerRepo {
   branch?: string;
   dirty?: boolean;
 }
+/**
+ * Who may start runs on a runner (§25.1). owner: its owner and AI-run managers; everyone: anyone who may start runs;
+ * listed: owner, managers, plus these users and these kanban projects (uuids).
+ */
+export type RunnerAccessMode = 'owner' | 'everyone' | 'listed';
+export interface RunnerAccess {
+  mode: RunnerAccessMode;
+  users?: string[];
+  projects?: string[];
+}
 export interface Runner {
   uuid: string;
   name: string;
@@ -56,6 +66,8 @@ export interface Runner {
   repos?: RunnerRepo[] | null;
   last_heartbeat_at?: string | null;
   created_at?: string;
+  /** Only shown to ai_runners.manage. */
+  access?: RunnerAccess | null;
 }
 export interface RunnerSession {
   key: string;
@@ -138,6 +150,8 @@ export interface RunRequest {
   blocked_path?: string | null;
   rule_key?: string | null;
   remember?: boolean;
+  /** false: "Allow for this run" is not offered (a chained or redirected command, §25.2). */
+  rememberable?: boolean;
   status: RequestStatus;
   reason?: string | null;
   decided_by?: string | null;
@@ -286,6 +300,8 @@ export interface StartInput {
 
 export interface ApprovalPolicy {
   deciders: 'requester' | 'managers' | 'requester_or_managers';
+  /** Owners and admins of the task's project count as managers too (§25.1). */
+  project_admins_decide: boolean;
   require_start_approval: boolean;
   permission_timeout_minutes: number;
   input_timeout_minutes: number;
@@ -369,7 +385,12 @@ export function aiError(e: unknown): AiError {
     422: 'Some details are not valid. Check them and try again.',
     429: 'Too many requests. Wait a moment and try again.',
   };
-  return { status, code, conflict: body.conflict, message: errorMessage(body) || fallback[status] || 'The request failed.' };
+  const said = errorMessage(body);
+  // §25.1: the runner's access list doesn't include the caller (start, preview, retry).
+  if (status === 403 && /use this runner/i.test(said || '')) {
+    return { status, code, message: "You can't use this runner. Choose another one, or ask an AI-run manager to give you access to it (Runners → Access)." };
+  }
+  return { status, code, conflict: body.conflict, message: said || fallback[status] || 'The request failed.' };
 }
 export const aiErrorText = (e: unknown) => aiError(e).message;
 
@@ -419,6 +440,7 @@ export const aiRunner = {
   pauseRunner: (uuid: string) => send<Runner>('post', `/runners/${id(uuid)}/pause`),
   resumeRunner: (uuid: string) => send<Runner>('post', `/runners/${id(uuid)}/resume`),
   revokeRunner: (uuid: string) => send<unknown>('delete', `/runners/${id(uuid)}`),
+  setRunnerAccess: (uuid: string, access: RunnerAccess) => send<Runner>('put', `/runners/${id(uuid)}/access`, access),
   runnerSessions: async (uuid: string) => list<RunnerSession>((await get<RunnerSession[]>(`/runners/${id(uuid)}/sessions`)).data),
   /** Phase 4: every session of every runner (Machines page). */
   sessions: async (f: SessionFilters = {}): Promise<Page<MachineSession>> =>
