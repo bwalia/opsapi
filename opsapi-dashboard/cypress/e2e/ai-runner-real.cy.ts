@@ -4,11 +4,15 @@
  * AI Runs with the REAL PromptPilot runner on this machine, driven only through the dashboard: save the workspace
  * settings, register a runner (its token goes to the kit's runner.token, where a waiting `promptpilot runner`
  * picks it up), Start with AI on a task with the fake agent → Succeeded with the branch pushed to origin and the
- * folder back on main, cancel a running run → the folder handed back clean, retry it → Succeeded, and (with
- * CYPRESS_AIR_CLAUDE=1) a real Claude Code run that edits README.md.
+ * folder back on main, cancel a running run → the folder handed back clean, retry it → Succeeded; Phase 3: an agent
+ * asks for a permission and a manager allows it on the run page, another is denied from "Waiting on you"; and (with
+ * CYPRESS_AIR_CLAUDE=1) real Claude Code runs: one that edits README.md, one whose shell command is approved in the
+ * dashboard.
  *
  * Env as ai-runner.cy.ts (API_URL, AIR_TOKEN, AIR_USER, AIR_NAMESPACE), plus:
- *   CYPRESS_AIR_KIT     a folder with runner.json (profiles `fake` and `claude`), repos/demo-site (a git repo on main
+ *   CYPRESS_AIR_KIT     a folder with runner.json (profiles `fake`, `fake-bridge` (promptpilot fake-agent asking for
+ *                       `npm test`), `fake-deny` (asking for `make deploy`) and `claude` (the bridge profile)),
+ *                       repos/demo-site (a git repo on main
  *                       whose origin is origin/demo-site.git), and a runner started as
  *                       `until [ -s runner.token ]; do sleep 1; done; promptpilot runner -config runner.json`
  *   CYPRESS_AIR_CLAUDE  1 = also run Claude Code for real (uses this machine's Claude login)
@@ -24,10 +28,16 @@ const kit = Cypress.env('AIR_KIT') as string;
 const repo = `${kit}/repos/demo-site`;
 const origin = `${kit}/origin/demo-site.git`;
 const runnerName = `real-runner-${stamp}`;
-const tasks: Record<'ok' | 'cancel' | 'claude', { uuid: string; title: string }> = {
+type TaskKey = 'ok' | 'cancel' | 'perm' | 'deny' | 'claude' | 'claudeBash';
+const tasks: Record<TaskKey, { uuid: string; title: string; description?: string }> = {
   ok: { uuid: '', title: `Write release notes ${stamp}` },
   cancel: { uuid: '', title: `Slow refactor ${stamp}` },
-  claude: { uuid: '', title: `Add a Getting started section ${stamp}` },
+  perm: { uuid: '', title: `Run the tests ${stamp}` },
+  deny: { uuid: '', title: `Deploy it ${stamp}` },
+  claude: { uuid: '', title: `Add a Getting started section ${stamp}`,
+    description: 'In README.md, add a short "## Getting started" section (two or three lines) after the intro. Change nothing else.' },
+  claudeBash: { uuid: '', title: `Compute the answer ${stamp}`,
+    description: 'Use the Bash tool to run exactly `python3 -c "print(6*7)"`, then create docs/answer.txt containing only its output. Change nothing else.' },
 };
 
 let ns: Ns;
@@ -69,7 +79,7 @@ function waitOnline(tries = 30): Cypress.Chainable {
 }
 
 /** Task page → Start with AI → preview → Start; lands on the run page and records its uuid. */
-function startWithAI(key: keyof typeof tasks, profile: 'fake' | 'claude') {
+function startWithAI(key: TaskKey, profile: 'fake' | 'fake-bridge' | 'fake-deny' | 'claude') {
   visit(`/dashboard/projects/${projectUuid}/tasks/${tasks[key].uuid}`);
   cy.contains('h1', tasks[key].title, { timeout: 30000 });
   cy.contains('button', 'Start with AI').click();
@@ -95,6 +105,20 @@ function folderHandedBack() {
 /** A field on the run page (labels are upper-cased by CSS). */
 const fact = (label: string) => cy.contains('dt', new RegExp(`^${label}$`, 'i')).next();
 
+/** Allows whatever the agent still asks (as a manager, through the API) until the run ends. */
+function allowUntilDone(runUuid: string, deadline = Date.now() + 600000): Cypress.Chainable {
+  return asUser('GET', `/api/v2/ai-runner/runs/${runUuid}`).then((res) => {
+    const run = res.body.data as { status: string; requests?: { uuid: string; status: string }[] };
+    if (['succeeded', 'failed', 'cancelled', 'lost'].includes(run.status)) return;
+    if (Date.now() > deadline) throw new Error(`run still ${run.status}`);
+    (run.requests || []).filter((q) => q.status === 'pending').forEach((q) => {
+      asUser('POST', `/api/v2/ai-runner/runs/${runUuid}/requests/${q.uuid}/decide`, { decision: 'allow' });
+    });
+    cy.wait(3000);
+    return allowUntilDone(runUuid, deadline);
+  });
+}
+
 /** The run page's Branch value, without the "(from main)" suffix. */
 function branchOnPage() {
   return cy.contains('dt', /^Branch$/i).next().invoke('text').then((t) => t.split(' ')[0].trim());
@@ -111,12 +135,10 @@ describe('AI Runs with the real PromptPilot runner', () => {
       return asUser('GET', `/api/v2/kanban/projects/${projectUuid}/boards`);
     }).then((res) => {
       const board = res.body.data[0].uuid;
-      (Object.keys(tasks) as (keyof typeof tasks)[]).forEach((k) => {
+      (Object.keys(tasks) as TaskKey[]).forEach((k) => {
         asUser('POST', `/api/v2/kanban/boards/${board}/tasks`, {
           title: tasks[k].title,
-          description: k === 'claude'
-            ? 'In README.md, add a short "## Getting started" section (two or three lines) after the intro. Change nothing else.'
-            : 'Add a line to the notes.',
+          description: tasks[k].description || 'Add a line to the notes.',
           assignee_uuids: JSON.stringify([user.uuid]),
         }, true).then((r) => { tasks[k].uuid = r.body.data.uuid; });
       });
@@ -187,6 +209,33 @@ describe('AI Runs with the real PromptPilot runner', () => {
     folderHandedBack();
   });
 
+  it('the agent asks to run a command; a manager allows it on the run page and the run carries on', () => {
+    startWithAI('perm', 'fake-bridge');
+    cy.contains('Needs your decision', { timeout: 60000 });
+    cy.contains('code, pre, span', 'npm test');
+    cy.screenshot('real-permission-request', { capture: 'viewport' });
+    cy.contains('button', /^Allow$/).click();
+    cy.contains('Succeeded', { timeout: 120000 });
+    cy.contains('dt', /^Commit$/i).next().invoke('text').then((sha) => {
+      git(`show --name-only --format= ${sha.trim()}`).should('contain', 'fake-perm-bash-npm-test.txt');
+    });
+    branchOnPage().then((branch) => git(`ls-remote --heads '${origin}'`).should('contain', `refs/heads/${branch}`));
+    folderHandedBack();
+  });
+
+  it('denies a request from "Waiting on you"; the agent is told no and the step never runs', () => {
+    startWithAI('deny', 'fake-deny');
+    visit('/dashboard/ai-runner/runs');
+    cy.contains('Waiting on you', { timeout: 60000 });
+    cy.get(`[aria-label^="Deny Bash for"][aria-label*="${tasks.deny.title}"]`, { timeout: 60000 }).click();
+    visit(`/dashboard/ai-runner/runs/${runs.deny}`);
+    cy.contains('Succeeded', { timeout: 120000 });
+    cy.contains('dt', /^Commit$/i).next().invoke('text').then((sha) => {
+      git(`show --name-only --format= ${sha.trim()}`).should('not.contain', 'fake-perm-bash-make-deploy.txt');
+    });
+    folderHandedBack();
+  });
+
   it('runs Claude Code for real: README.md edited on a pushed branch', function () {
     if (!Cypress.env('AIR_CLAUDE')) this.skip();
     startWithAI('claude', 'claude');
@@ -198,6 +247,22 @@ describe('AI Runs with the real PromptPilot runner', () => {
     branchOnPage().then((branch) => git(`ls-remote --heads '${origin}'`).should('contain', `refs/heads/${branch}`));
     folderHandedBack();
     cy.screenshot('real-claude-run', { capture: 'viewport' });
+  });
+
+  it('runs Claude Code for real: its shell command is approved in the dashboard', function () {
+    if (!Cypress.env('AIR_CLAUDE')) this.skip();
+    startWithAI('claudeBash', 'claude');
+    cy.contains('Needs your decision', { timeout: 300000 });
+    cy.screenshot('real-claude-permission', { capture: 'viewport' });
+    cy.contains('button', 'Allow for this run').click();
+    cy.then(() => allowUntilDone(runs.claudeBash));
+    cy.contains('Succeeded', { timeout: 60000 });
+    cy.contains('dt', /^Commit$/i).next().invoke('text').then((sha) => {
+      git(`show ${sha.trim()}:docs/answer.txt`).should('match', /^42\s*$/);
+    });
+    branchOnPage().then((branch) => git(`ls-remote --heads '${origin}'`).should('contain', `refs/heads/${branch}`));
+    folderHandedBack();
+    cy.screenshot('real-claude-bash-approved', { capture: 'viewport' });
   });
 
   it('lists every run on AI Runs and shows the machine sessions', () => {

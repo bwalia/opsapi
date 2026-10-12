@@ -755,3 +755,27 @@ Each turn emits assistant messages with `usage` and a `result` with usage and co
   - the mocked spec decides a request, sends a message and approves a pending run;
   - the real-runner spec runs the same through the UI with `fake-agent`;
   - with `CYPRESS_AIR_CLAUDE=1`, a real Claude run whose permission is approved in the dashboard.
+
+### 23.7 As built (differences from the contract above)
+**Server**
+- **Approvers can see runs:** holders of `ai_runs_approvals.manage` see every run, so they can open the runs they decide.
+- **Decider checks:** these are made in code on decide, approve, reject and `/waiting`, because a decider may be just the requester.
+- **`waiting_permission`** is only ever reported by the runner; the server never sets it.
+- **Queue timeout:** an approved run's 24 h queue timeout counts from its approval.
+- **Large inputs:** a permission input over 8 KB is stored as `{"truncated":true}`. The readable summary (command or file) is kept.
+- **Task shape:** `GET /public/run/task` returns the task flat, with its `comments` inside.
+- **Turn order:** turns are listed in the order they happened. A message sent while the agent is mid-turn comes before the agent's reply to it.
+- **`usage` object:** the run detail and run rows carry `usage { tokens_in, tokens_out, cache_read, cache_write, cost_estimate, turns }`. On the detail, `turns` is the conversation list.
+
+**Runner**
+- **Cost:** each turn posts its own share of the cost. Claude's `total_cost_usd` is a running total over the session (probed: 0.0088 then 0.0152), while `usage`, `num_turns` and `duration_ms` are per turn.
+- **Follow-ups:** several queued messages are sent as one user message, separated by blank lines.
+- **Expiry backstop:** the runner treats a permission request as expired after the permission timeout plus 2 minutes, even if the server never expires it.
+- **Deny wording:** a denial reads "Denied by <name>: <reason>". When the runner can't ask, or the run is stopping, it always denies and never allows.
+- **Safety list** is a little broader than §23.4:
+  - It also blocks the other private keys (`id_dsa`, `id_ecdsa`, `id_ed25519`) and `.env.*` files.
+  - `git checkout -- <file>` is allowed.
+  - Paths are checked with symlinks resolved.
+  - Matching is on the command text, so it errs towards blocking.
+- **Agent environment:** Claude Code session variables are stripped (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, the messaging socket and token, …), so a runner started from inside a Claude Code terminal doesn't leak them. `CLAUDE_CODE_OAUTH_TOKEN` is kept.
+- **Args-mode turns:** agents in `args` mode (Claude without the bridge, Cursor) also post their turns, so their usage is metered too.
