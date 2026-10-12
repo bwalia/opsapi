@@ -10,6 +10,7 @@
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,19 @@ from pa_common import ASHLEY, PA, PD, SOPHIE, data, mock, pa_answer, setup  # no
 from pdtest import API, USERS, call, check, finish, sql  # noqa: E402
 
 S, fx = setup("PA Work", "pa-work", jobshout=True)
+
+
+def ghl_result(after):
+    """The GHL pull the ghl_sync job finished after `after` (it runs within ~10 s of being asked)."""
+    for _ in range(90):
+        row = sql(f"SELECT last_result FROM pa_sync_state WHERE namespace_id = {NSID} AND source = 'ghl' "
+                  f"AND last_run_at > '{after}' AND last_result ->> 'created' IS NOT NULL")
+        if row:
+            return json.loads(row[0])
+        time.sleep(1)
+    return None
+
+
 SARAH, MICHAEL, RICK = (fx[k]["opportunity_uuid"] for k in ("sarah", "michael", "rick"))
 NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
 
@@ -97,6 +111,26 @@ check("on Sarah's timeline as an inbound email from the integration", em and em[
       and em[0]["source"] == "integration" and "Tom and I have talked" in em[0]["detail"], em)
 again = data(call("POST", PA + "/integrations/mail/import", SOPHIE, S), 200, "import again")
 check("each message is imported once", again["imported"] == 0, again)
+# Two imports at once (the 5-minute job and someone pressing "import now"): still once.
+mock("POST", "/_mail/inbox", {"from": "Michael Grant <michael.grant@example.invalid>", "subject": "Comparables",
+                              "body": "Thanks for the comparables."})
+data(call("POST", PD + f"/mail-connectors/{m365['uuid']}/sync", ASHLEY, S), 200, "sync Outlook again")
+with ThreadPoolExecutor(4) as ex:
+    runs = list(ex.map(lambda _: call("POST", PA + "/integrations/mail/import", SOPHIE, S), range(4)))
+n = sql(f"SELECT COUNT(*) FROM crm_activities WHERE namespace_id = {NSID} AND opportunity_uuid = '{MICHAEL}' "
+        f"AND channel = 'email'")
+check("four imports at once file Michael's email once", all(r[0] == 200 for r in runs) and n == ["1"],
+      [n] + [r[1].get("data") for r in runs])
+# An email for an opportunity nobody owns is marked as seen, so it can't hold up newer mail.
+gary = sql(f"SELECT uuid FROM pa_opportunities WHERE namespace_id = {NSID} AND title LIKE 'Gary Lowe%'")[0]
+sql(f"UPDATE pa_opportunities SET owner_user_uuid = NULL WHERE uuid = '{gary}'")
+mock("POST", "/_mail/inbox", {"from": "Gary Lowe <gary.lowe@example.invalid>", "subject": "Still testing the market",
+                              "body": "No rush."})
+data(call("POST", PD + f"/mail-connectors/{m365['uuid']}/sync", ASHLEY, S), 200, "sync Outlook (Gary)")
+imp = data(call("POST", PA + "/integrations/mail/import", SOPHIE, S), 200, "import Gary's email")
+check("no owner: skipped and marked", imp["skipped"] == 1 and imp["imported"] == 0, imp)
+imp = data(call("POST", PA + "/integrations/mail/import", SOPHIE, S), 200, "import after that")
+check("the marked email doesn't come back into the window", imp["considered"] == 0, imp)
 opp = data(call("GET", PA + f"/opportunities/{SARAH}", SOPHIE, S), 200, "Sarah after the email")
 check("the instruction inside the email changed nothing", float(opp["expectation_price"]) == 235000, opp["expectation_price"])
 
@@ -107,14 +141,20 @@ res = call("POST", PA + "/integrations/ghl/sync", SOPHIE, S)
 check("agents can't run the GHL sync (403)", res[0] == 403, res)
 data(call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"settings": {"ghl_location_id": "loc-1",
      "ghl_token": "ghl-token"}}), 200, "GHL settings")
-g = data(call("POST", PA + "/integrations/ghl/sync", ASHLEY, S), 200, "pull GHL contacts")
-check("GHL: Nadia created, Michael matched by email and his phone updated", g["created"] == 1 and g["updated"] == 1, g)
+t0 = sql("SELECT NOW()")[0]
+g = data(call("POST", PA + "/integrations/ghl/sync", ASHLEY, S), 202, "ask for a GHL pull (it runs in the background)")
+check("queued for the ghl_sync job", g["queued"] is True, g)
+g = ghl_result(t0)
+check("GHL: Nadia created, Michael matched by email and his phone updated", g and g["created"] == 1
+      and g["updated"] == 1 and g["complete"] is True, g)
 mich = sql(f"SELECT uuid FROM crm_contacts WHERE namespace_id = {NSID} AND LOWER(email) = 'michael.grant@example.invalid'")[0]
 hist = data(call("GET", PA + f"/history/crm_contacts/{mich}?field=phone", SOPHIE, S), 200, "Michael's phone history")
 check("the change is recorded as from the integration", hist and hist[0]["source"] == "integration"
       and hist[0]["source_ref"] == "ghl:ghl-c-1" and hist[0]["value"] == "+447700900111", hist)
-g = data(call("POST", PA + "/integrations/ghl/sync", ASHLEY, S), 200, "pull again")
-check("a second pull changes nothing", g["created"] == 0 and g["updated"] == 0 and g["unchanged"] == 2, g)
+t0 = sql("SELECT NOW()")[0]
+data(call("POST", PA + "/integrations/ghl/sync", ASHLEY, S), 202, "pull again")
+g = ghl_result(t0)
+check("a second pull changes nothing", g and g["created"] == 0 and g["updated"] == 0 and g["unchanged"] == 2, g)
 settings = call("GET", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S)
 check("the GHL token is never returned", "ghl-token" not in json.dumps(settings[1]), settings[0])
 

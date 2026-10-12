@@ -3,7 +3,7 @@
 --                                       risks, overdue actions, top opportunities (managers)
 --   GET  /metrics                       is the PA working? ?days=30 (managers)
 --   POST /integrations/mail/import      inbound email (Outlook / Gmail / IMAP connectors) onto timelines
---   POST /integrations/ghl/sync         pull GoHighLevel contacts now (managers; also hourly)
+--   POST /integrations/ghl/sync         202: pull GoHighLevel contacts now, in the background (managers; also hourly)
 --   POST /runs/sweep                    poll PA runs whose webhook hasn't come, fail ones stuck past the timeout
 --                                       (managers; the pa_runs job does this every 2 minutes)
 --   GET  /status                        what is set up and what isn't, for going live with a real agent
@@ -12,6 +12,7 @@ for _, p in ipairs({ root, root and (root:match("^(.*)/[^/]+$") .. "/property-de
     if p and not package.path:find(p .. "/?.lua", 1, true) then package.path = p .. "/?.lua;" .. package.path end
 end
 
+local cjson = require("cjson")
 local sdk = require("helper.plugin-sdk")
 local U = require("property_deals.util")
 local M = require("property_pa.manager")
@@ -42,10 +43,17 @@ return function(app)
         return sdk.ok(I.mail_import(sdk.namespace_id(self), 14))
     end)))
 
+    -- The pull runs in the ghl_sync job (up to 20 pages of 20 s each would hold the request); this asks for it now.
     app:post("/integrations/ghl/sync", sdk.handler({ permission = "property_pa_knowledge.manage" }, U.guard(function(self)
-        local out, err = I.ghl_sync(sdk.namespace_id(self), sdk.settings(self), sdk.user(self).uuid)
-        if not out then return sdk.error(err and err:find("^Set the") and 409 or 502, err) end
-        return sdk.ok(out)
+        local st = sdk.settings(self)
+        if not set(st.ghl_location_id) or not set(st.ghl_token) then
+            return sdk.error(409, "Set the GoHighLevel location id and token in the Property PA settings")
+        end
+        local ns = sdk.namespace_id(self)
+        local queued = I.ghl_request(ns)
+        local last = U.one("SELECT last_run_at, last_result FROM pa_sync_state WHERE namespace_id = ? AND source = 'ghl'", ns)
+        return { status = 202, json = { success = true, data = { queued = queued > 0,
+            last_run_at = last and last.last_run_at or cjson.null, last_result = last and U.json(last.last_result) or cjson.null } } }
     end)))
 
     app:post("/runs/sweep", sdk.handler({ permission = "property_pa_knowledge.manage" }, U.guard(function(self)

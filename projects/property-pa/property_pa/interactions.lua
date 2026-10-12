@@ -28,7 +28,8 @@ end
 
 --- d = { channel, direction, subject?, raw_text?, transcript?, summary?, person_uuid?, opportunity_uuid?, lead_uuid?,
 -- property_uuid?, at?, meaningful?, source?, audio_document_uuid? } @return row
-function I.log(ns, d, user_uuid)
+-- in_tx = the caller already opened a transaction (the writes join it).
+function I.log(ns, d, user_uuid, in_tx)
     local opp
     if d.opportunity_uuid then
         opp = U.one("SELECT uuid, person_uuid FROM pa_opportunities WHERE namespace_id = ? AND uuid = ?::uuid", ns,
@@ -41,7 +42,8 @@ function I.log(ns, d, user_uuid)
     local subject = d.subject or (d.channel .. ": " .. (text:gsub("%s+", " "):sub(1, 80)))
     local uuid = require("helper.global").generateUUID()
     local meaningful = d.meaningful ~= false
-    U.tx(function()
+    local tx = in_tx and function(fn) return fn() end or U.tx
+    tx(function()
         db.insert("crm_activities", {
             uuid = uuid, namespace_id = ns, activity_type = d.channel, subject = subject:sub(1, 255),
             description = d.summary or db.NULL, contact_id = cid or db.NULL, owner_user_uuid = user_uuid,

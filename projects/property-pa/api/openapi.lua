@@ -240,10 +240,17 @@ return function(app)
                 opportunities_gone_quiet = INT() }), handoffs = OBJ({ total = INT(), waiting = INT(),
                 median_seconds_to_reply = INT() }) })), errors = { ["403"] = "For managers" } })
     doc("POST /integrations/mail/import", { summary = "Inbound email (Outlook / Gmail / IMAP) onto timelines, once each",
-        permission = "property_pa_records.create", response = OBJ({ imported = INT(), considered = INT() }) })
-    doc("POST /integrations/ghl/sync", { summary = "Pull GoHighLevel contacts (read only; also hourly)",
-        permission = "property_pa_knowledge.manage", response = OBJ({ created = INT(), updated = INT(), unchanged = INT(),
-            pages = INT() }), errors = { ["409"] = "GHL not set up", ["502"] = "GHL unreachable or refused" } })
+        permission = "property_pa_records.create", response = OBJ({ imported = INT(),
+            skipped = INT("Marked as seen without importing: the opportunity has no owner"), considered = INT() }) })
+    local GhlResult = OBJ({ created = INT(), updated = INT(), unchanged = INT(), pages = INT(),
+        complete = BOOL("false = a big location; the next run carries on where this one stopped"),
+        error = S("Why the last pull stopped") })
+    doc("POST /integrations/ghl/sync", { summary = "Pull GoHighLevel contacts now (read only; in the background)",
+        description = "202: the ghl_sync job runs the pull within seconds (it also runs every 15 minutes: an hourly "
+            .. "pull, carried on across runs for big locations). last_result is the previous pull's summary.",
+        permission = "property_pa_knowledge.manage", status = 202,
+        response = OBJ({ queued = BOOL(), last_run_at = DT(), last_result = GhlResult }),
+        errors = { ["409"] = "GHL not set up" } })
     doc("POST /runs/sweep", { summary = "Poll PA runs without a webhook; fail ones past the timeout",
         permission = "property_pa_knowledge.manage", response = OBJ({ polled = INT(), finished = INT(), timed_out = INT() }) })
     doc("GET /status", { summary = "Go-live checklist", permission = "property_pa_records.read",
