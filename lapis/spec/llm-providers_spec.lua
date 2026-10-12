@@ -23,21 +23,17 @@ local function check(name, ok, detail)
     end
 end
 
-ngx = { log = function() end, ERR = 3, time = os.time, now = os.time, update_time = function() end } -- luacheck: ignore 111
+ngx = { log = function() end, ERR = 3, time = os.time, now = os.time, update_time = function() end, -- luacheck: ignore 111
+    get_phase = function() return "content" end }
 
-local captured, responses = nil, {}
-package.loaded["resty.http"] = {
-    new = function()
-        return {
-            set_timeout = function() end,
-            request_uri = function(_, url, req)
-                captured = { url = url, headers = req.headers, body = cjson.decode(req.body) }
-                local r = table.remove(responses, 1)
-                return { status = r.status or 200, body = cjson.encode(r.body) }
-            end,
-        }
-    end,
-}
+-- responses: { status, body (encoded as JSON) | raw (sent as is) }. calls: every request body, when a table.
+local captured, responses, calls = nil, {}, nil
+package.loaded["resty.http"] = require("spec.fixtures.fake-http")(function(url, req)
+    captured = { url = url, headers = req.headers, body = cjson.decode(req.body) }
+    if calls then calls[#calls + 1] = captured.body end
+    local r = table.remove(responses, 1)
+    return { status = r.status or 200, body = r.raw or cjson.encode(r.body) }
+end)
 package.loaded["resty.jwt"] = { sign = function() return "eyJ.minted.sig" end }
 
 local real_getenv = os.getenv
@@ -97,17 +93,7 @@ check("reply tool_use -> tool_calls with table arguments",
     msg.tool_calls[1].id == "toolu_9" and msg.tool_calls[1]["function"].arguments.path == "/x")
 
 print("claude: caching, sampling, thinking:")
-local calls = {}
-local real_new = package.loaded["resty.http"].new
-package.loaded["resty.http"].new = function()
-    local c = real_new()
-    local inner = c.request_uri
-    c.request_uri = function(self, url, req)
-        calls[#calls + 1] = cjson.decode(req.body)
-        return inner(self, url, req)
-    end
-    return c
-end
+calls = {}
 Llm = load_llm({ AI_PROVIDER = "anthropic", AI_API_KEY = "k" })
 local TWO_PART = { { role = "system", content = "Stable page guide" }, { role = "system", content = "User: Ada, 2026-10-06" },
     { role = "user", content = "hi" } }
@@ -142,7 +128,7 @@ calls = {}
 responses = { { body = { content = {}, usage = { input_tokens = 9, output_tokens = 1 } } } }
 Llm.chat({ { role = "user", content = "ping" } }, nil, { max_tokens = 1 })
 check("the 1-token health probe stays tiny", calls[1].max_tokens == 1)
-package.loaded["resty.http"].new = real_new
+calls = nil
 
 print("openai (and compatible):")
 Llm = load_llm({ AI_PROVIDER = "openai", AI_API_KEY = "sk-test", AI_MODEL = "gpt-x", AI_BASE_URL = "https://router.example/v1/" })
@@ -177,21 +163,14 @@ check("think off, reply capped", b.think == false and b.options.num_predict == 2
 check("tool calls get ids", msg.tool_calls[1].id == "call_1" and msg.tool_calls[1]["function"].arguments.question == "Which day?")
 check("streams (keeps a proxy from cutting a long silent request)", b.stream == true)
 -- A real streamed answer: NDJSON lines, content in pieces, counts on the final line.
-local mock_new = package.loaded["resty.http"].new
-package.loaded["resty.http"].new = function()
-    return { set_timeout = function() end, request_uri = function(_, url, req)
-        captured = { url = url, headers = req.headers, body = cjson.decode(req.body) }
-        return { status = 200, body = table.concat({
-            cjson.encode({ message = { role = "assistant", content = "Call " }, done = false }),
-            cjson.encode({ message = { role = "assistant", content = "Sarah now." }, done = false }),
-            cjson.encode({ message = { role = "assistant", content = "" }, done = true, prompt_eval_count = 40, eval_count = 7 }),
-        }, "\n") }
-    end }
-end
+responses = { { raw = table.concat({
+    cjson.encode({ message = { role = "assistant", content = "Call " }, done = false }),
+    cjson.encode({ message = { role = "assistant", content = "Sarah now." }, done = false }),
+    cjson.encode({ message = { role = "assistant", content = "" }, done = true, prompt_eval_count = 40, eval_count = 7 }),
+}, "\n") } }
 msg = Llm.chat(CONVO, TOOLS, {})
 check("streamed pieces are joined", msg and msg.content == "Call Sarah now.", msg and msg.content)
 check("token counts from the final line", msg and msg.usage.input == 40 and msg.usage.output == 7)
-package.loaded["resty.http"].new = mock_new
 
 print("unknown provider falls back to ollama:")
 Llm = load_llm({ AI_PROVIDER = "nonsense" })

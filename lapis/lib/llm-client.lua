@@ -334,7 +334,7 @@ function LLMClient.generate_embedding(opts)
                 ["Content-Type"] = "application/json",
                 ["Authorization"] = "Bearer " .. api_key,
             },
-            ssl_verify = false,
+            ssl_verify = Llm.tls_verify(),
         })
 
         if not res then return nil, "Voyage request failed: " .. tostring(req_err) end
@@ -360,7 +360,7 @@ function LLMClient.generate_embedding(opts)
                 ["Content-Type"] = "application/json",
                 ["Authorization"] = "Bearer " .. api_key,
             },
-            ssl_verify = false,
+            ssl_verify = Llm.tls_verify(),
         })
 
         if not res then return nil, "OpenAI embedding failed: " .. tostring(req_err) end
@@ -381,7 +381,7 @@ function LLMClient.generate_embedding(opts)
             }),
             -- The workstation gateway needs its JWT here too (as for chat).
             headers = { ["Content-Type"] = "application/json", ["x-api-key"] = Llm.ollama_auth() },
-            ssl_verify = false,
+            ssl_verify = Llm.tls_verify(),
         })
 
         if not res then return nil, "Ollama embedding failed: " .. tostring(req_err) end
