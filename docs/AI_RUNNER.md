@@ -988,3 +988,14 @@ A fresh review of the whole feature (plugin, runner, dashboard, MCP) confirmed t
   - `task_uuid` (and other ids) must be uuids;
   - `pr_url` must be `https://`;
   - the HTTP transport accepts only its own Host, and an Origin from `MCP_ALLOWED_ORIGINS` when one is sent.
+
+### 25.8 As built
+- **Listed projects:** for preview, start and retry, `listed` access means the task's project is in `projects[]`. For `GET /runners`, which has no task, it means the caller is a member of a listed project.
+- **What `projects.manage` still gives:** it no longer counts as a project admin for AI runs. It only lets you see runs.
+- **Redacted commands:** a command containing a redacted secret is never rememberable, since two different secrets would redact to the same key.
+- **Never-remember characters:** the set also includes a bare `$` and `(`. So `python3 -c "print(6*7)"` can only be allowed once.
+- **Rule keys for other tools** are the tool plus its whole input as sorted-key JSON, not its summary.
+- **Rejecting your own pending run** is allowed, because it is the same as cancelling it. Only approving it is blocked.
+- **Past 500 requests in a run:** the reply is `{ request: { uuid: null, status: "denied" } }`, and nothing is stored.
+- **Past 20,000 events in a run:** further events are dropped, after one "Log truncated" event with seq 2147483647.
+- **MCP HTTP:** allowed hosts come from `MCP_HOST` (default: localhost and the listen address). A request carrying an Origin needs that Origin in `MCP_ALLOWED_ORIGINS`.
