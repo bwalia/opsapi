@@ -12,7 +12,8 @@ import { Spinner } from '@/components/property-deals/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useNamespaceStore } from '@/store/namespace.store';
 import {
-  aiRunner, aiError, type AiError, type RateLimit, type Run, type RunRequest, type RunStatus, type RunnerStatus,
+  aiRunner, aiError, type AiError, type RateLimit, type Run, type RunRequest, type RunStatus, type RunnerProfile,
+  type RunnerStatus,
 } from '@/services/ai-runner.service';
 
 export const BASE = '/dashboard/ai-runner';
@@ -192,15 +193,19 @@ export function ago(v?: string | null): string {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+/** 75 → "1m 15s", 3900 → "1h 5m". */
+export function elapsed(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+}
 /** Elapsed time of a run: started → finished, or → now while it runs. */
 export function duration(run: Pick<Run, 'started_at' | 'finished_at'>): string {
   const a = toDate(run.started_at);
   if (!a) return '—';
   const b = toDate(run.finished_at) || new Date();
-  const s = Math.max(0, Math.round((b.getTime() - a.getTime()) / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+  return elapsed((b.getTime() - a.getTime()) / 1000);
 }
 
 /** The fields a run view needs, from whichever shape the API sent (see Run in the service). */
@@ -239,6 +244,31 @@ export function rateLimitText(rl?: RateLimit | null): string | null {
     ? `${name} reached`
     : typeof u === 'number' ? `${Math.round(u <= 1 ? u * 100 : u)}% of the ${name} used` : `${name}: ${rl.status}`;
   return toDate(rl.resets_at) ? `${used}, resets ${when(rl.resets_at)}` : used;
+}
+
+/** A runner's agent profiles: name, health (§24.3: a logged-out or locked agent takes no work) and plan usage. */
+export function ProfileList({ profiles }: { profiles?: RunnerProfile[] | null }) {
+  if (!profiles?.length) return <span className="text-secondary-400">—</span>;
+  return (
+    <ul className="space-y-1">
+      {profiles.map((p) => {
+        const limit = rateLimitText(p.rate_limit);
+        return (
+          <li key={p.key}>
+            {p.label || p.key}{' '}
+            {p.available === false ? (
+              <span className="text-xs font-medium text-error-600">
+                Unavailable{p.unavailable_reason ? ` — ${p.unavailable_reason}` : ''}
+              </span>
+            ) : (
+              <span className="text-xs text-success-700">Available</span>
+            )}
+            {limit && <span className="block text-xs text-secondary-500">{limit}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** The command, file or other input a permission request is about, for display. */

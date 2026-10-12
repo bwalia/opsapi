@@ -1,6 +1,6 @@
 /**
  * AI Runs (OpsAPI plugin projects/ai-runner) — typed client for the dashboard pages.
- * Contract: docs/AI_RUNNER.md §22.3 and §23.3 (user API, session JWT). Requests go through apiClient
+ * Contract: docs/AI_RUNNER.md §22.3, §23.3 and §24 (user API, session JWT). Requests go through apiClient
  * (auth + workspace headers). Writes carry `_replay: true` so they never sit in the offline
  * outbox: a run started or a token minted by a background replay later is worse than an error now.
  */
@@ -34,6 +34,9 @@ export interface RunnerProfile {
   approval?: 'none' | 'bridge' | 'unsupported';
   models?: string[];
   rate_limit?: RateLimit | null;
+  /** Phase 4 health check on the machine: false = takes no work (logged out, locked). Missing = available. */
+  available?: boolean;
+  unavailable_reason?: string | null;
 }
 export interface RunnerRepo {
   path: string;
@@ -207,10 +210,52 @@ export interface RunDetail {
   can_message: boolean;
 }
 
+/** GET /sessions (§24.4): one session a runner reported, across the workspace's runners. */
+export interface MachineSession {
+  key?: string;
+  runner?: { uuid: string; name?: string; status?: string } | null;
+  tool?: string | null;
+  status?: string | null;
+  cwd?: string | null;
+  branch?: string | null;
+  managed?: boolean;
+  run?: { uuid: string; task_title?: string | null; task_number?: number | null } | null;
+  prompt_preview?: string | null;
+  updated_at?: string | null;
+  seen_at?: string | null;
+}
+export interface SessionFilters {
+  runner_uuid?: string;
+  busy?: boolean;
+  page?: number;
+  per_page?: number;
+}
+
+/** An open run on a task whose title is close to this one (§24.2). */
+export interface SimilarRun {
+  run_uuid: string;
+  task_uuid?: string;
+  task_number?: number | null;
+  task_title?: string | null;
+  status?: string;
+  requested_by_name?: string | null;
+  similarity?: number;
+}
+/** Open-run caps and today's agent tokens; a max/limit of 0 means none. */
+export interface Limits {
+  user_open: number;
+  user_max: number;
+  workspace_open: number;
+  workspace_max: number;
+  tokens_today: number;
+  daily_token_limit: number;
+}
 export interface Conflicts {
   open_run?: (Partial<Run> & { uuid?: string }) | null;
   folder_lock?: { run_uuid?: string; since?: string; holder?: string; message?: string } | null;
   busy_session?: Partial<RunnerSession> & { message?: string } | null;
+  /** Not a block: starting anyway needs confirm_similar. */
+  similar?: SimilarRun[] | null;
 }
 export interface Preview {
   prompt: string;
@@ -226,6 +271,7 @@ export interface Preview {
   work_branch?: string | null;
   /** The run would wait for a manager's approval before it starts. */
   needs_approval?: boolean;
+  limits?: Limits | null;
 }
 export interface StartInput {
   runner_uuid: string;
@@ -234,6 +280,8 @@ export interface StartInput {
   repo_path: string;
   prompt?: string;
   output_mode?: OutputMode;
+  /** The user saw the similar open runs and starts anyway. */
+  confirm_similar?: boolean;
 }
 
 export interface ApprovalPolicy {
@@ -242,6 +290,15 @@ export interface ApprovalPolicy {
   permission_timeout_minutes: number;
   input_timeout_minutes: number;
 }
+/** Limits and safeguards (§24.1); 0 = no cap / no limit. */
+export interface Guards {
+  /** 0.1–1.0 */
+  similar_threshold: number;
+  max_open_runs_per_user: number;
+  max_open_runs_per_workspace: number;
+  daily_token_limit: number;
+  retention_days: number;
+}
 export interface Settings {
   output_mode: OutputMode;
   pr_draft: boolean;
@@ -249,6 +306,19 @@ export interface Settings {
   max_run_minutes: number;
   task_automation: { in_progress_on_start: boolean; review_on_success: boolean };
   approval_policy: ApprovalPolicy;
+  guards: Guards;
+}
+
+/** GET /overview (§24.5): numbers for managers. */
+export interface Overview {
+  runs_by_status: Record<string, number>;
+  queue_depth: number;
+  runners: { online: number; offline: number; paused: number };
+  tokens_today: number;
+  cost_today: number;
+  runs_7d: { succeeded: number; failed: number; cancelled: number; lost: number };
+  /** null when nothing was decided in the last 7 days. */
+  avg_permission_wait_s_7d: number | null;
 }
 export interface ProjectSettings {
   default_repo_paths: Record<string, string>;
@@ -324,6 +394,18 @@ async function send<T>(method: 'post' | 'put' | 'delete', path: string, body?: u
 const list = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const num = (v: unknown) => Number(v) || 0;
 
+function paged<T>(res: Envelope<T[]>, f: { page?: number; per_page?: number }): Page<T> {
+  const items = list<T>(res.data);
+  const total = Number(res.meta?.total ?? items.length);
+  const perPage = Number(res.meta?.per_page ?? f.per_page ?? (items.length || 1));
+  return {
+    items,
+    page: Number(res.meta?.page ?? f.page ?? 1),
+    total,
+    totalPages: Number(res.meta?.total_pages ?? Math.max(1, Math.ceil(total / perPage))),
+  };
+}
+
 // Idempotency-Key per start attempt: retrying the same request after it got no answer reuses the
 // key (the server replays its first answer); any answer from the server ends the attempt.
 const pendingStarts = new Map<string, { body: string; key: string }>();
@@ -338,6 +420,10 @@ export const aiRunner = {
   resumeRunner: (uuid: string) => send<Runner>('post', `/runners/${id(uuid)}/resume`),
   revokeRunner: (uuid: string) => send<unknown>('delete', `/runners/${id(uuid)}`),
   runnerSessions: async (uuid: string) => list<RunnerSession>((await get<RunnerSession[]>(`/runners/${id(uuid)}/sessions`)).data),
+  /** Phase 4: every session of every runner (Machines page). */
+  sessions: async (f: SessionFilters = {}): Promise<Page<MachineSession>> =>
+    paged<MachineSession>(await get<MachineSession[]>(`/sessions${buildQueryString({ ...f, busy: f.busy ? 1 : undefined })}`), f),
+  overview: async () => (await get<Overview>('/overview')).data,
 
   // Start a run on a task
   preview: (taskUuid: string, input: Partial<Pick<StartInput, 'runner_uuid' | 'profile' | 'repo_path'>> = {}) =>
@@ -359,18 +445,8 @@ export const aiRunner = {
   taskRuns: async (taskUuid: string) => list<Run>((await get<Run[]>(`/tasks/${id(taskUuid)}/runs`)).data),
 
   // Runs
-  listRuns: async (f: RunFilters = {}): Promise<Page<Run>> => {
-    const res = await get<Run[]>(`/runs${buildQueryString({ ...f, mine: f.mine ? 1 : undefined })}`);
-    const items = list<Run>(res.data);
-    const total = Number(res.meta?.total ?? items.length);
-    const perPage = Number(res.meta?.per_page ?? f.per_page ?? (items.length || 1));
-    return {
-      items,
-      page: Number(res.meta?.page ?? f.page ?? 1),
-      total,
-      totalPages: Number(res.meta?.total_pages ?? Math.max(1, Math.ceil(total / perPage))),
-    };
-  },
+  listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>
+    paged<Run>(await get<Run[]>(`/runs${buildQueryString({ ...f, mine: f.mine ? 1 : undefined })}`), f),
   /**
    * GET /runs/:uuid — accepts `{ run, events, … }` or the run with those fields inline. Usage totals are the
    * run's own columns, or a `usage` object.
