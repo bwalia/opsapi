@@ -171,46 +171,181 @@ function KanbanTaskQueries.getByBoard(board_id, params)
     }
 end
 
---- Get tasks assigned to a user
+--------------------------------------------------------------------------------
+-- My tasks (GET /api/v2/kanban/my-tasks and the assistant's list_my_tasks)
+--------------------------------------------------------------------------------
+
+KanbanTaskQueries.MY_TASK_DUE = { "today", "overdue", "today_and_overdue", "week", "upcoming", "none" }
+KanbanTaskQueries.MY_TASK_PRIORITIES = { "critical", "high", "medium", "low", "none" }
+-- completed / cancelled are never "my tasks" (closed work), so they can't be asked for.
+KanbanTaskQueries.MY_TASK_STATUSES = { "open", "in_progress", "blocked", "review" }
+
+local function set_of(list)
+    local s = {}
+    for _, v in ipairs(list) do s[v] = true end
+    return s
+end
+local DUE_SET = set_of(KanbanTaskQueries.MY_TASK_DUE)
+local PRIORITY_SET = set_of(KanbanTaskQueries.MY_TASK_PRIORITIES)
+local STATUS_SET = set_of(KanbanTaskQueries.MY_TASK_STATUSES)
+
+-- "2026-02-29" -> nil (not a real day). Years before 1970 are refused too:
+-- Postgres has no year 0, and nobody's "today" is that far back.
+local function valid_date(s)
+    if type(s) ~= "string" then return nil end
+    local y, m, d = s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if not y or y < 1970 or m < 1 or m > 12 or d < 1 then return nil end
+    local leap = y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0)
+    local days = ({ 31, leap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 })[m]
+    return d <= days and s or nil
+end
+
+-- "high, critical" (or { "high", "critical" } from a repeated key / a model)
+-- -> { "high", "critical" }; nil when absent; false when a value isn't allowed.
+local function list_of(value, allowed)
+    if value == nil or value == "" then return nil end
+    if type(value) == "table" then
+        for _, v in ipairs(value) do
+            if type(v) ~= "string" then return false end
+        end
+        value = table.concat(value, ",")
+    end
+    if type(value) ~= "string" then return false end
+    local out, seen = {}, {}
+    for part in value:gmatch("[^,]+") do
+        part = part:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if part ~= "" then
+            if not allowed[part] then return false end
+            if not seen[part] then
+                seen[part] = true
+                out[#out + 1] = part
+            end
+        end
+    end
+    return #out > 0 and out or nil
+end
+
+local function text_of(value, max)
+    if value == nil then return nil end
+    if type(value) ~= "string" then return false end
+    value = value:gsub("^%s+", ""):gsub("%s+$", "")
+    if value == "" then return nil end
+    return value:sub(1, max)
+end
+
+-- LIKE wildcards in user text match literally.
+local function like_escape(s)
+    return (s:gsub("[\\%%_]", "\\%0"))
+end
+
+--- Validate + normalise the my-tasks filters (pure: no database).
+-- @param raw table { due, date, priority, status, project_uuid, project_name, search }
+-- @return table|nil filters { due, date, priorities, statuses, project_uuid, project_name, search }
+-- @return string|nil error (a 400 message)
+function KanbanTaskQueries.parseMyTaskFilters(raw)
+    raw = raw or {}
+    local f = {}
+
+    if raw.due ~= nil and raw.due ~= "" then
+        if not DUE_SET[raw.due] then
+            return nil, "due must be one of: " .. table.concat(KanbanTaskQueries.MY_TASK_DUE, ", ")
+        end
+        f.due = raw.due
+    end
+
+    if raw.date ~= nil and raw.date ~= "" then
+        f.date = valid_date(raw.date)
+        if not f.date then return nil, "date must be a real day as YYYY-MM-DD" end
+    else
+        f.date = os.date("!%Y-%m-%d")
+    end
+
+    local priorities = list_of(raw.priority, PRIORITY_SET)
+    if priorities == false then
+        return nil, "priority must be a comma list of: " .. table.concat(KanbanTaskQueries.MY_TASK_PRIORITIES, ", ")
+    end
+    f.priorities = priorities
+
+    local statuses = list_of(raw.status, STATUS_SET)
+    if statuses == false then
+        return nil, "status must be a comma list of: " .. table.concat(KanbanTaskQueries.MY_TASK_STATUSES, ", ")
+    end
+    f.statuses = statuses
+
+    for _, key in ipairs({ "project_uuid", "project_name", "search" }) do
+        local v = text_of(raw[key], key == "project_uuid" and 64 or 200)
+        if v == false then return nil, key .. " must be text" end
+        f[key] = v
+    end
+    return f
+end
+
+--- Get tasks assigned to a user (open work only), most urgent first.
 -- @param user_uuid string User UUID
 -- @param namespace_id number Namespace ID
--- @param params table Filter parameters
--- @return table { data, total }
+-- @param params table { page, perPage, epic_id, filters = parseMyTaskFilters() result }
+-- @return table { data, total, date }
 function KanbanTaskQueries.getByAssignee(user_uuid, namespace_id, params)
     params = params or {}
+    local f = params.filters or {}
     local page = params.page or 1
     local perPage = params.perPage or 20
     local offset = (page - 1) * perPage
+    local today = f.date or os.date("!%Y-%m-%d")
 
-    -- Optional epic filter. Interpolated (not a bound param) because the
-    -- ORDER BY below is followed by positional LIMIT/OFFSET placeholders;
-    -- the value is forced through tonumber() by the caller contract.
-    local epic_filter = ""
-    local epic_id = tonumber(params.epic_id)
-    if epic_id then
-        epic_filter = string.format(" AND t.epic_id = %d", epic_id)
+    -- Every value is a bound parameter; the SQL text is fixed fragments only.
+    local where = {
+        "p.namespace_id = ?",
+        "t.archived_at IS NULL",
+        "t.status NOT IN ('completed', 'cancelled')",
+        [[EXISTS (SELECT 1 FROM kanban_task_assignees ta
+                  WHERE ta.task_id = t.id AND ta.user_uuid = ? AND ta.deleted_at IS NULL)]],
+    }
+    local values = { namespace_id, user_uuid }
+    local function add(cond, ...)
+        where[#where + 1] = cond
+        for i = 1, select("#", ...) do values[#values + 1] = select(i, ...) end
     end
+
+    local epic_id = tonumber(params.epic_id)
+    if epic_id then add("t.epic_id = ?", epic_id) end
+
+    if f.due == "today" then add("t.due_date = ?::date", today)
+    elseif f.due == "overdue" then add("t.due_date < ?::date", today)
+    elseif f.due == "today_and_overdue" then add("t.due_date <= ?::date", today)
+    elseif f.due == "week" then add("t.due_date BETWEEN ?::date AND ?::date + 6", today, today)
+    elseif f.due == "upcoming" then add("t.due_date >= ?::date", today)
+    elseif f.due == "none" then add("t.due_date IS NULL")
+    end
+    if f.priorities then add("COALESCE(t.priority, 'none') IN ?", db.list(f.priorities)) end
+    if f.statuses then add("t.status IN ?", db.list(f.statuses)) end
+    if f.project_uuid then add("p.uuid = ?", f.project_uuid) end
+    if f.project_name then add("p.name ILIKE ?", "%" .. like_escape(f.project_name) .. "%") end
+    if f.search then add("t.title ILIKE ?", "%" .. like_escape(f.search) .. "%") end
+
+    local from = [[
+        FROM kanban_tasks t
+        INNER JOIN kanban_boards b ON b.id = t.board_id
+        INNER JOIN kanban_projects p ON p.id = b.project_id
+    ]]
+    local where_sql = " WHERE " .. table.concat(where, " AND ")
 
     local sql = [[
         SELECT t.*,
                c.name as column_name,
                b.name as board_name,
+               b.uuid as board_uuid,
                p.name as project_name,
                p.uuid as project_uuid,
                e.uuid as epic_uuid,
                e.name as epic_name,
-               e.color as epic_color
-        FROM kanban_tasks t
-        INNER JOIN kanban_task_assignees ta ON ta.task_id = t.id
-        INNER JOIN kanban_boards b ON b.id = t.board_id
-        INNER JOIN kanban_projects p ON p.id = b.project_id
+               e.color as epic_color,
+               (t.due_date IS NOT NULL AND t.due_date < ?::date) as overdue
+    ]] .. from .. [[
         LEFT JOIN kanban_columns c ON c.id = t.column_id
         LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL AND e.namespace_id = p.namespace_id
-        WHERE ta.user_uuid = ?
-          AND p.namespace_id = ?
-          AND t.archived_at IS NULL
-          AND t.status NOT IN ('completed', 'cancelled')
-    ]] .. epic_filter .. [[
+    ]] .. where_sql .. [[
         ORDER BY
             CASE t.priority
                 WHEN 'critical' THEN 1
@@ -219,29 +354,29 @@ function KanbanTaskQueries.getByAssignee(user_uuid, namespace_id, params)
                 WHEN 'low' THEN 4
                 ELSE 5
             END,
-            t.due_date ASC NULLS LAST
+            t.due_date ASC NULLS LAST,
+            t.created_at ASC,
+            t.id ASC
         LIMIT ? OFFSET ?
     ]]
 
-    local tasks = db.query(sql, user_uuid, namespace_id, perPage, offset)
+    local select_values = { today }
+    for _, v in ipairs(values) do select_values[#select_values + 1] = v end
+    select_values[#select_values + 1] = perPage
+    select_values[#select_values + 1] = offset
 
-    local count_sql = [[
-        SELECT COUNT(*) as total
-        FROM kanban_tasks t
-        INNER JOIN kanban_task_assignees ta ON ta.task_id = t.id
-        INNER JOIN kanban_boards b ON b.id = t.board_id
-        INNER JOIN kanban_projects p ON p.id = b.project_id
-        WHERE ta.user_uuid = ?
-          AND p.namespace_id = ?
-          AND t.archived_at IS NULL
-          AND t.status NOT IN ('completed', 'cancelled')
-    ]] .. epic_filter
-    local count_result = db.query(count_sql, user_uuid, namespace_id)
+    local tasks = db.query(sql, unpack(select_values))
+    for _, task in ipairs(tasks) do
+        task.url = "/dashboard/projects/" .. tostring(task.project_uuid) .. "/tasks/" .. tostring(task.uuid)
+    end
+
+    local count_result = db.query("SELECT COUNT(*) as total " .. from .. where_sql, unpack(values))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     return {
         data = tasks,
-        total = tonumber(total)
+        total = tonumber(total),
+        date = today,
     }
 end
 

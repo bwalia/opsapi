@@ -618,25 +618,52 @@ register({
 
 register({
     name = "list_my_tasks",
-    description = "List open tasks assigned to the user (with their project). Use to find a task "
-        .. "to log time against.",
+    description = "List the user's open tasks (assigned to them), most urgent first: priority critical → "
+        .. "none, then due date. Call it for \"what are my tasks today / this week / what's overdue?\" and to "
+        .. "find a task to log time against. For \"today\" use due=today_and_overdue (overdue work is still "
+        .. "on today's list). Present them grouped by priority as #task_number title — project — due "
+        .. "(say Overdue when overdue is true), linking each title to its `url` ([title](url)); the app "
+        .. "also shows them as cards. Never invent tasks or links.",
     perms = { { "projects", "read" } },
     parameters = {
         type = "object",
-        properties = { limit = { type = "integer" } },
+        properties = {
+            due = {
+                type = "string",
+                enum = { "today", "overdue", "today_and_overdue", "week", "upcoming", "none" },
+                description = "today | overdue | today_and_overdue (today's list) | week (today + 6 days) | "
+                    .. "upcoming | none (no due date). Omit for all open tasks.",
+            },
+            priority = { type = "string", description = "Comma list of critical, high, medium, low, none." },
+            project = { type = "string", description = "Project name (or uuid) to limit the list to." },
+            date = { type = "string", description = "The user's today as YYYY-MM-DD (default: today's date)." },
+            limit = { type = "integer", description = "Max tasks (default 20, max 50)." },
+        },
     },
     handler = function(ctx, a)
-        local r = q("KanbanTaskQueries").getByAssignee(ctx.user_uuid, ctx.namespace_id, {
-            page = 1, perPage = math.min(tonumber(a.limit) or 10, 25),
+        local Tasks = q("KanbanTaskQueries")
+        local project = type(a.project) == "string" and a.project or nil
+        local by_uuid = project and project:match("^%x+%-%x+%-%x+%-%x+%-%x+$") ~= nil
+        local filters, ferr = Tasks.parseMyTaskFilters({
+            due = a.due, date = a.date, priority = a.priority,
+            project_uuid = by_uuid and project or nil,
+            project_name = (not by_uuid) and project or nil,
+        })
+        if not filters then return nil, ferr end
+        local limit = tonumber(a.limit)
+        limit = (limit and limit == limit) and math.max(1, math.min(math.floor(limit), 50)) or 20
+        local r = Tasks.getByAssignee(ctx.user_uuid, ctx.namespace_id, {
+            page = 1, perPage = limit, filters = filters,
         })
         local rows = {}
-        for _, t in ipairs(take(items_of(r), 25)) do
+        for _, t in ipairs(take(items_of(r), limit)) do
             rows[#rows + 1] = {
-                uuid = t.uuid, title = t.title, status = t.status, priority = t.priority,
-                project = t.project_name, column = t.column_name, due_date = t.due_date,
+                uuid = t.uuid, task_number = t.task_number, title = t.title, priority = t.priority,
+                status = t.status, due_date = t.due_date, overdue = t.overdue == true,
+                project = t.project_name, project_uuid = t.project_uuid, column = t.column_name, url = t.url,
             }
         end
-        return { tasks = rows }
+        return { tasks = rows, total = r.total, date = r.date }
     end,
 })
 
