@@ -3,7 +3,10 @@
 Run by run.sh (AR_API, AR_JWT_SECRET, AR_PSQL). Standard library only. Covers docs/AI_RUNNER.md §22: runner
 registration, heartbeat, preview, start, claim (priority order, concurrency cap, long-poll), the status flow,
 events (idempotent, redacted), cancel, the lease sweep, conflicts (open run, folder lock, busy session), RBAC,
-idempotent start, retry, pause / rotate / revoke, plugin off, and cross-workspace isolation.
+idempotent start, retry, pause / rotate / revoke, plugin off, and cross-workspace isolation. Then §23.6 (Phase 3):
+permission requests (allow / deny / remember / expire, long polls), the three decider policies, turns, follow-ups
+and needs_input, usage totals and ai_usage rows, pending_approval approve / reject and its RBAC, the run-token API
+(scope, expiry at run end), and isolation between the workspaces.
 """
 import base64
 import hashlib
@@ -13,6 +16,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -127,6 +131,19 @@ class Runner:
     def events(self, run, events):
         return call("POST", P + f"/public/runner/runs/{run}/events", body={"events": events}, token=self.token)
 
+    def perm(self, run, body):
+        return call("POST", P + f"/public/runner/runs/{run}/permissions", body=body, token=self.token)
+
+    def wait(self, run, req, wait=0):
+        return call("POST", P + f"/public/runner/runs/{run}/permissions/{req}/wait", body={"wait_s": wait},
+                    token=self.token)
+
+    def turn(self, run, body):
+        return call("POST", P + f"/public/runner/runs/{run}/turns", body=body, token=self.token)
+
+    def next(self, run, wait=0):
+        return call("POST", P + f"/public/runner/runs/{run}/turns/next", body={"wait_s": wait}, token=self.token)
+
 
 PROFILES = [{"key": "claude", "label": "Claude Code", "approval": "none", "models": ["opus", "sonnet"]},
             {"key": "fake", "label": "Fake agent", "approval": "none", "models": []}]
@@ -143,6 +160,19 @@ def heartbeat_body(inventory=None, max_concurrency=2):
 def run_sweep():
     expect("platform admin runs the lease sweep now",
            call("POST", API + "/api/v2/plugins/ai_runner/jobs/lease_sweep/run", "platform"), 200)
+
+
+def in_background(fn):
+    """Run fn in a thread; @return (thread, box) — box gets 'res' and 'secs' when it ends."""
+    box = {}
+
+    def go():
+        t = time.time()
+        box["res"] = fn()
+        box["secs"] = time.time() - t
+    th = threading.Thread(target=go)
+    th.start()
+    return th, box
 
 
 def wait_for(name, fn, timeout=40):
@@ -574,6 +604,463 @@ check("runner of a workspace with the plugin off: 404", res[0] == 404 and "PLUGI
       res[:2])
 expect("... and its claim", run_b.claim(), 404)
 expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 404)
+
+
+# =====================================================================================================================
+# Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
+# =====================================================================================================================
+check("migration 2 is tracked once", one("SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'")
+      == "2")
+check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
+    "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
+      and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
+                                 or ""))
+
+# An approver: ai_runs_approvals.manage only (+ ai_runs.read for the pages), not a project member.
+USERS["appr"] = ("b8888888-0000-4000-8000-000000000008", "appr.a@ar.invalid")
+sql("INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) "
+    "SELECT 'b8888888-0000-4000-8000-000000000008', 'AR', 'Approver', 'appr.a@ar.invalid', 'appr.a', 'x', true, "
+    "now(), now() WHERE NOT EXISTS (SELECT 1 FROM users WHERE uuid = 'b8888888-0000-4000-8000-000000000008')")
+body = expect("create role ai_appr", call("POST", API + "/api/v2/namespace/roles", "owner_a", A,
+                                          {"role_name": "ai_appr_" + TAG, "display_name": "ai_appr_" + TAG,
+                                           "permissions": {"ai_runs": ["read"], "ai_runs_approvals": ["manage"]}}), 201)
+expect("add appr to A", call("POST", API + "/api/v2/namespace/members", "owner_a", A,
+                             {"email": USERS["appr"][1], "role_ids": [body.get("role", body)["id"]]}), 201)
+
+reg3 = expect("manager registers a Phase 3 runner", call("POST", P + "/runners", "mgr", A, {"name": "p3-" + TAG}), 201)
+RUNNER3 = reg3["runner"]["uuid"]
+r3 = Runner(reg3["token"])
+RATE = {"status": "allowed", "resets_at": 1760000000, "type": "five_hour", "utilization": 0.42}
+P3_PROFILES = [{"key": "claude", "label": "Claude Code", "approval": "bridge", "models": ["opus"], "rate_limit": RATE},
+               {"key": "cursor", "label": "Cursor", "approval": "unsupported", "models": []}]
+
+
+def hb3():
+    """Heartbeat the Phase 3 runner (also renews its runs' leases)."""
+    return expect("p3 runner heartbeats", r3.hb(
+        version="1.0.0-test", host="mac-p3", os="darwin", load={"running": 0},
+        capabilities={"max_concurrency": 8, "profiles": P3_PROFILES}, inventory=[],
+        repos=[{"path": f"/p3/{n}", "branch": "main", "dirty": False}
+               for n in ("one", "two", "three", "four", "five", "six")]), 200)
+
+
+hb3()
+rd = expect("p3 runner detail", call("GET", P + f"/runners/{RUNNER3}", "mgr", A), 200)
+check("heartbeat stores each profile's rate limit", rd["capabilities"]["profiles"][0].get("rate_limit") == RATE
+      and "rate_limit" not in rd["capabilities"]["profiles"][1]
+      and rd["capabilities"]["profiles"][1]["approval"] == "unsupported", rd["capabilities"])
+
+# --- Settings: the two timeouts --------------------------------------------------------------------------------------
+s = expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+check("approval policy defaults: 30 min permission, 60 min input",
+      s["approval_policy"].get("permission_timeout_minutes") == 30
+      and s["approval_policy"].get("input_timeout_minutes") == 60, s)
+for bad in ({"permission_timeout_minutes": 0}, {"input_timeout_minutes": 1441}, {"permission_timeout_minutes": "x"}):
+    expect(f"bad timeout {bad} (422)", call("PUT", P + "/settings", "mgr", A, {"approval_policy": bad}), 422)
+s = expect("permission timeout 45 min", call("PUT", P + "/settings", "mgr", A,
+                                             {"approval_policy": {"permission_timeout_minutes": 45}}), 200)
+check("timeout saved, the rest of the policy kept", s["approval_policy"] == {
+    "deciders": "managers", "require_start_approval": False, "permission_timeout_minutes": 45,
+    "input_timeout_minutes": 60}, s)
+
+
+def start3(user, t, repo, **kw):
+    return call("POST", P + f"/tasks/{t['uuid']}/runs", user, A,
+                dict({"runner_uuid": RUNNER3, "profile": "claude", "repo_path": repo}, **kw))
+
+
+def preview3(user, t, profile):
+    return expect(f"{user} previews {t['title']} with {profile}", call(
+        "POST", P + f"/tasks/{t['uuid']}/runs/preview", user, A, {"runner_uuid": RUNNER3, "profile": profile}), 200)
+
+
+def decide(user, run, req, decision, ns=None, **kw):
+    return call("POST", P + f"/runs/{run['uuid']}/requests/{req['uuid']}/decide", user, ns or A,
+                dict({"decision": decision}, **kw))
+
+
+def detail(user, run):
+    return expect(f"{user} opens the run", call("GET", P + f"/runs/{run['uuid']}", user, A), 200)
+
+
+def waiting(user, ns=None):
+    return expect(f"{user}: waiting on me", call("GET", P + "/waiting", user, ns or A), 200)
+
+
+Q1, Q2, Q3 = task("Bridge permissions", "high", "dev"), task("Cursor needs approval", "medium", "dev"), \
+    task("Rejected run", "medium", "dev")
+Q4, Q5 = task("Unapproved for days", "low", "dev"), task("Manager's run", "low", "dev")
+
+# --- Start, claim: the run token and the policy -------------------------------------------------------------------
+check("a bridged profile needs no approval", preview3("dev", Q1, "claude").get("needs_approval") is False)
+Q1R = expect("assignee starts Q1 on the bridged profile", start3("dev", Q1, "/p3/one", model="opus"), 201)
+check("Q1 queued", Q1R.get("status") == "queued" and Q1R.get("approved_by") is None, Q1R)
+cl = expect("p3 runner claims Q1", r3.claim(), 200).get("run", {})
+RT1 = cl.get("run_token") or ""
+check("claim carries a run token (oprt_ + 48 hex) and the policy", cl.get("uuid") == Q1R["uuid"] and len(RT1) == 53
+      and RT1.startswith("oprt_") and all(c in "0123456789abcdef" for c in RT1[5:])
+      and cl.get("policy") == {"permission_timeout_s": 2700, "input_timeout_s": 3600},
+      {k: v for k, v in cl.items() if k not in ("run_token", "prompt")})
+check("only the run token's hash is stored", one(f"SELECT run_token_hash FROM ar_runs WHERE uuid = '{Q1R['uuid']}'")
+      == hashlib.sha256(RT1.encode()).hexdigest())
+expect("Q1 starting", r3.status(Q1R["uuid"], "starting"), 200)
+res = r3.status(Q1R["uuid"], "needs_input", question="?")
+check("starting -> needs_input is refused (409)", res[0] == 409, res[:2])
+expect("Q1 running", r3.status(Q1R["uuid"], "running", pid=7), 200)
+d = detail("dev", Q1R)
+check("run views never carry the run token or its hash", RT1 not in json.dumps(d) and "run_token" not in json.dumps(d))
+
+# --- Permission requests: ask, wait, allow (remember), deny, expire ----------------------------------------------------
+ASK1 = {"request_id": "req-1", "tool": "Bash", "tool_use_id": "toolu_1", "description": "Run the tests",
+        "rule_key": "npm test", "input": {"command": "npm test -- --token Bearer s3cr3tT0k", "description": "x"}}
+q1 = expect("runner asks: Bash npm test", r3.perm(Q1R["uuid"], ASK1), 201).get("request", {})
+check("a new request is pending", q1.get("status") == "pending" and q1.get("reason") is None and q1.get("uuid"), q1)
+again = r3.perm(Q1R["uuid"], ASK1)
+check("same request_id: 200 with the stored request", again[0] == 200
+      and again[1]["data"]["request"]["uuid"] == q1["uuid"], again[:2])
+expect("request without request_id (422)", r3.perm(Q1R["uuid"], {"tool": "Bash", "input": {}}), 422)
+expect("input must be an object (422)", r3.perm(Q1R["uuid"], {"request_id": "x", "tool": "Bash", "input": ["ls"]}),
+       422)
+big = expect("a huge input", r3.perm(Q1R["uuid"], {"request_id": "req-big", "tool": "Write", "rule_key": "Write big",
+                                                   "input": {"file_path": "/p3/one/big.txt", "content": "y" * 20000}}),
+             201).get("request", {})
+check("huge input stored capped, summary kept", one(f"SELECT input::text || '|' || input_summary FROM ar_run_requests "
+                                                    f"WHERE uuid = '{big.get('uuid')}'")
+      == '{"truncated": true}|/p3/one/big.txt')
+check("expires after the workspace's permission timeout (45 min)", one(
+    f"SELECT EXTRACT(EPOCH FROM expires_at - created_at)::int FROM ar_run_requests WHERE uuid = '{q1['uuid']}'")
+      in ("2700", "2699", "2701"))
+expect("Q1 waiting_permission", r3.status(Q1R["uuid"], "waiting_permission"), 200)
+t0 = time.time()
+w = expect("runner waits 1 s while nobody decided", r3.wait(Q1R["uuid"], q1["uuid"], 1), 200)
+check("still pending after the wait", w == {"status": "pending", "reason": None, "decided_by_name": None,
+                                            "cancel": False} and 0.5 <= time.time() - t0 < 5, w)
+
+d = detail("dev", Q1R)
+mine = [x for x in d.get("requests", []) if x["uuid"] == q1["uuid"]]
+check("detail: the request with its summary, input redacted", mine and mine[0]["input_summary"].startswith("npm test")
+      and mine[0]["tool"] == "Bash" and mine[0]["rule_key"] == "npm test" and mine[0]["description"] == "Run the tests"
+      and mine[0]["input"]["description"] == "x" and "s3cr3t" not in json.dumps(d)
+      and [x["request_id"] for x in d["requests"]] == ["req-big", "req-1"], d.get("requests"))
+check("policy managers: the requester can't decide, can message", d["can_decide"] is False
+      and d["can_message"] is True and d["can_approve"] is False and d["status"] == "waiting_permission", d)
+expect("requester can't decide under 'managers' (403)", decide("dev", Q1R, q1, "allow"), 403)
+check("nothing waits on the requester", not [x for x in waiting("dev")["requests"] if x["uuid"] == q1["uuid"]])
+wa = [x for x in waiting("appr")["requests"] if x["uuid"] == q1["uuid"]]
+check("the approver's waiting list has it, with run and task", wa and wa[0]["task"] == {
+    "uuid": Q1["uuid"], "title": "Bridge permissions", "task_number": Q1["task_number"], "project_uuid": PROJ}
+      and wa[0]["run_uuid"] == Q1R["uuid"] and wa[0]["run"]["task_title"] == "Bridge permissions"
+      and wa[0]["run"]["uuid"] == Q1R["uuid"] and wa[0]["run"]["requested_by_name"] == "AR Test"
+      and wa[0]["run"]["status"] == "waiting_permission", wa)
+check("... and the project admin's", [x for x in waiting("padmin")["requests"] if x["uuid"] == q1["uuid"]])
+check("approver can open the run and decide", detail("appr", Q1R)["can_decide"] is True)
+
+th, box = in_background(lambda: r3.wait(Q1R["uuid"], q1["uuid"], 15))
+time.sleep(1.5)
+dd = expect("approver allows it for this run", decide("appr", Q1R, q1, "allow", remember=True, reason="ok"), 200)
+th.join(30)
+check("decision stored", dd.get("status") == "allowed" and dd["remember"] is True
+      and dd["decided_by"] == USERS["appr"][0] and dd["decided_by_name"] == "AR Approver", dd)
+w = box.get("res", (0, None))
+check("the long poll returns as soon as it is decided", w[0] == 200 and w[1]["data"] == {
+    "status": "allowed", "reason": "ok", "decided_by_name": "AR Approver", "cancel": False}
+      and box.get("secs", 99) < 6, (w[:2], box.get("secs")))
+expect("deciding twice (409)", decide("mgr", Q1R, q1, "deny"), 409)
+q2 = expect("same rule_key again", r3.perm(Q1R["uuid"], {"request_id": "req-2", "tool": "Bash", "rule_key": "npm test",
+                                                         "input": {"command": "npm test -- auth"}}), 201)["request"]
+check("allowed at once: remembered for this run", q2["status"] == "allowed"
+      and q2["reason"] == "Allowed earlier in this run", q2)
+w = expect("its wait answers at once", r3.wait(Q1R["uuid"], q2["uuid"], 10), 200)
+check("... allowed by the approver", w["status"] == "allowed" and w["decided_by_name"] == "AR Approver", w)
+
+q3 = expect("runner asks: Write a CI file", r3.perm(Q1R["uuid"], {
+    "request_id": "req-3", "tool": "Write", "rule_key": "Write", "blocked_path": "/p3/one/.github",
+    "input": {"file_path": "/p3/one/.github/workflows/ci.yml", "content": "on: push"}}), 201)["request"]
+expect("project admin denies", decide("padmin", Q1R, q3, "deny", reason="Not the CI files"), 200)
+w = expect("wait sees the denial", r3.wait(Q1R["uuid"], q3["uuid"], 5), 200)
+check("denied with the reason and the decider", w == {"status": "denied", "reason": "Not the CI files",
+                                                      "decided_by_name": "AR Test", "cancel": False}, w)
+
+q4 = expect("runner asks: rm -rf build", r3.perm(Q1R["uuid"], {"request_id": "req-4", "tool": "Bash", "rule_key": "rm",
+                                                              "input": {"command": "rm -rf build"}}), 201)["request"]
+sql(f"UPDATE ar_run_requests SET expires_at = NOW() - interval '1 second' WHERE uuid = '{q4['uuid']}'")
+t0 = time.time()
+w = expect("wait on an expired request", r3.wait(Q1R["uuid"], q4["uuid"], 10), 200)
+check("expired at once: nobody answered in time", w["status"] == "expired" and w["reason"] == "Nobody answered in time"
+      and time.time() - t0 < 5, w)
+expect("a decision after the expiry (409)", decide("mgr", Q1R, q4, "allow"), 409)
+sql(f"UPDATE ar_run_requests SET expires_at = NOW() - interval '1 second' WHERE uuid = '{big['uuid']}'")
+hb3()
+run_sweep()
+check("the sweep expires unanswered requests", wait_for("sweep expires req-big", lambda: one(
+    f"SELECT status FROM ar_run_requests WHERE uuid = '{big['uuid']}'") == "expired"))
+
+# --- Decider policies -----------------------------------------------------------------------------------------------
+expect("policy: the requester decides", call("PUT", P + "/settings", "mgr", A,
+                                             {"approval_policy": {"deciders": "requester"}}), 200)
+q5 = expect("runner asks: git status", r3.perm(Q1R["uuid"], {"request_id": "req-5", "tool": "Bash", "rule_key": "git st",
+                                                            "input": {"command": "git status"}}), 201)["request"]
+check("requester may decide now, the manager may not", detail("dev", Q1R)["can_decide"] is True
+      and detail("mgr", Q1R)["can_decide"] is False)
+check("waiting: the requester has it, the manager not", [x for x in waiting("dev")["requests"]
+                                                         if x["uuid"] == q5["uuid"]]
+      and not [x for x in waiting("mgr")["requests"] if x["uuid"] == q5["uuid"]])
+expect("manager can't decide under 'requester' (403)", decide("mgr", Q1R, q5, "allow"), 403)
+expect("requester decides", decide("dev", Q1R, q5, "allow"), 200)
+expect("policy: requester or managers", call("PUT", P + "/settings", "mgr", A,
+                                             {"approval_policy": {"deciders": "requester_or_managers"}}), 200)
+q6 = expect("runner asks: make", r3.perm(Q1R["uuid"], {"request_id": "req-6", "tool": "Bash", "rule_key": "make",
+                                                      "input": {"command": "make"}}), 201)["request"]
+q7 = expect("runner asks: make test", r3.perm(Q1R["uuid"], {"request_id": "req-7", "tool": "Bash", "rule_key": "mt",
+                                                           "input": {"command": "make test"}}), 201)["request"]
+expect("someone who is neither can't (403)", decide("dev2", Q1R, q6, "allow"), 403)
+expect("requester denies q6", decide("dev", Q1R, q6, "deny"), 200)
+expect("manager allows q7", decide("mgr", Q1R, q7, "allow"), 200)
+expect("policy back to managers", call("PUT", P + "/settings", "mgr", A, {"approval_policy": {"deciders": "managers"}}),
+       200)
+expect("bad decision (422)", decide("mgr", Q1R, q7, "maybe"), 422)
+st = expect("Q1 running again", r3.status(Q1R["uuid"], "running"), 200)
+check("running", st == {"status": "running", "cancel": False}, st)
+
+# --- Turns, follow-ups, needs_input ------------------------------------------------------------------------------------
+TURN1 = {"turn": 1, "text": "Ran the tests. Leaked oprt_" + "a" * 48 + " by mistake.", "model": "opus",
+         "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 10, "cache_write_tokens": 5},
+         "cost_estimate": 0.0123, "num_turns": 3, "duration_ms": 4200}
+check("turn 1 stored", expect("runner posts turn 1", r3.turn(Q1R["uuid"], TURN1), 200).get("stored") == 1)
+check("turns are idempotent on turn", expect("turn 1 again", r3.turn(Q1R["uuid"], TURN1), 200).get("stored") == 0)
+expect("negative tokens (422)", r3.turn(Q1R["uuid"], {"turn": 9, "usage": {"input_tokens": -1}}), 422)
+expect("turn 0 (422)", r3.turn(Q1R["uuid"], {"turn": 0}), 422)
+expect("runner posts turn 2 (needs input)", r3.turn(Q1R["uuid"], {
+    "turn": 2, "text": "Which database?\nNEEDS_INPUT: Postgres or MySQL?", "needs_input": True,
+    "usage": {"input_tokens": 200, "output_tokens": 70}, "cost_estimate": 0.02}), 200)
+expect("Q1 needs_input with the question", r3.status(Q1R["uuid"], "needs_input", question="Postgres or MySQL?"), 200)
+d = detail("dev", Q1R)
+check("the open question is on the run", d["status"] == "needs_input" and d["question"] == "Postgres or MySQL?", d)
+t0 = time.time()
+nx = expect("turns/next with nothing queued (1 s)", r3.next(Q1R["uuid"], 1), 200)
+check("no turns after the wait", nx == {"turns": [], "cancel": False} and time.time() - t0 >= 0.5, nx)
+expect("dev2 can't message a run they can't see (404)", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "dev2", A,
+                                                              {"text": "hi"}), 404)
+expect("the project admin isn't the requester or a manager (403)", call(
+    "POST", P + f"/runs/{Q1R['uuid']}/turns", "padmin", A, {"text": "hi"}), 403)
+expect("an empty message (422)", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "dev", A, {"text": ""}), 422)
+expect("a message over 8000 characters (422)", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "dev", A,
+                                                     {"text": "x" * 8001}), 422)
+th, box = in_background(lambda: r3.next(Q1R["uuid"], 15))
+time.sleep(1.5)
+ut = expect("requester answers", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "dev", A,
+                                      {"text": "Postgres, please. Bearer abcdef12345"}), 201)
+th.join(30)
+check("user turn queued, redacted, with its author", ut.get("role") == "user" and ut["status"] == "queued"
+      and ut["author_user_uuid"] == USERS["dev"][0] and ut["author_name"] == "AR Test"
+      and "abcdef" not in ut["text"], ut)
+w = box.get("res", (0, None))
+check("turns/next returns the answer as soon as it is sent", w[0] == 200 and w[1]["data"]["cancel"] is False
+      and [(t["uuid"], t["author_name"]) for t in w[1]["data"]["turns"]] == [(ut["uuid"], "AR Test")]
+      and "Bearer [REDACTED]" in w[1]["data"]["turns"][0]["text"] and box.get("secs", 99) < 6, (w[:2], box.get("secs")))
+f1 = expect("manager sends a follow-up", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "mgr", A,
+                                              {"text": "Also add a migration."}), 201)
+nx = expect("turns/next (no wait)", r3.next(Q1R["uuid"], 0), 200)
+check("the follow-up is handed over once", [t["text"] for t in nx["turns"]] == ["Also add a migration."]
+      and expect("turns/next again", r3.next(Q1R["uuid"], 0), 200)["turns"] == [], nx)
+check("both marked delivered", one(f"SELECT string_agg(status, ',') FROM ar_run_turns WHERE run_uuid = "
+                                   f"'{Q1R['uuid']}' AND role = 'user'") == "delivered,delivered")
+expect("Q1 running (question answered)", r3.status(Q1R["uuid"], "running"), 200)
+expect("runner posts turn 3", r3.turn(Q1R["uuid"], {
+    "turn": 3, "text": "Done.", "usage": {"input_tokens": 300, "output_tokens": 80, "cache_read_tokens": 1000},
+    "cost_estimate": 0.03, "duration_ms": 900}), 200)
+d = detail("dev", Q1R)
+check("question cleared once running", d["question"] is None, d.get("question"))
+check("usage totals", d["usage"] == {"tokens_in": 600, "tokens_out": 200, "cache_read": 1010, "cache_write": 5,
+                                     "cost_estimate": 0.0623, "turns": 3} and d["tokens_in"] == 600, d.get("usage"))
+check("conversation in order with authors and usage", [(t["role"], t["runner_turn"]) for t in d["turns"]]
+      == [("assistant", 1), ("assistant", 2), ("user", None), ("user", None), ("assistant", 3)]
+      and [t["seq"] for t in d["turns"]] == [1, 2, 3, 4, 5] and d["turns"][0]["tokens_in"] == 100
+      and d["turns"][0]["model"] == "opus" and d["turns"][1]["needs_input"] is True
+      and d["turns"][4]["model"] == "opus" and "oprt_[REDACTED]" in d["turns"][0]["text"]
+      and "a" * 48 not in json.dumps(d["turns"]), d.get("turns"))
+check("ai_usage: one row per turn, metered to the requester", one(
+    f"SELECT COUNT(*) || '|' || SUM(input_tokens) || '|' || SUM(output_tokens) || '|' || SUM(cached_input_tokens) "
+    f"|| '|' || MIN(feature) || '|' || MIN(scope) || '|' || MIN(provider) || '|' || MIN(model) || '|' || MIN(user_uuid) "
+    f"|| '|' || bool_and(ok) || '|' || (MIN(namespace_id) = (SELECT id FROM namespaces WHERE uuid = '{A}')) "
+    f"FROM ai_usage WHERE run_uuid = '{Q1R['uuid']}'")
+      == f"3|600|200|1010|agent_run|claude|claude|opus|{USERS['dev'][0]}|true|true")
+q8 = expect("one more question pending", r3.perm(Q1R["uuid"], {"request_id": "req-8", "tool": "Bash", "rule_key": "ls",
+                                                                "input": {"command": "ls -la /"}}), 201)["request"]
+row = [r for r in expect("list Q1's runs", call("GET", P + f"/runs?task_uuid={Q1['uuid']}", "dev", A), 200)]
+check("list rows: tokens, cost, turns, pending requests", row and row[0]["tokens_in"] == 600
+      and row[0]["tokens_out"] == 200 and abs(row[0]["cost_estimate"] - 0.0623) < 1e-9 and row[0]["turns"] == 3
+      and row[0]["pending_requests"] == 1 and row[0]["usage"] == d["usage"], row)
+
+# --- Run-token API -------------------------------------------------------------------------------------------------------
+tk = expect("the agent reads its task", call("GET", P + "/public/run/task", token=RT1), 200)
+check("task with url, status, priority and comments", tk.get("uuid") == Q1["uuid"] and tk["title"] == "Bridge permissions"
+      and tk["url"].endswith(f"/tasks/{Q1['uuid']}") and tk["priority"] == "high" and tk["checklist"] == "(none)"
+      and any(c["text"].startswith("AI run started by AR Test on p3-") for c in tk["comments"]), tk)
+cm = expect("the agent comments on its task", call("POST", P + "/public/run/comments", body={
+    "text": "Tests pass. Bearer zzz999yyy"}, token=RT1), 201)
+check("comment is the requester's, prefixed and redacted", one(
+    f"SELECT c.content || '|' || c.user_uuid FROM kanban_task_comments c JOIN kanban_tasks t ON t.id = c.task_id "
+    f"WHERE t.uuid = '{Q1['uuid']}' AND c.uuid = '{cm.get('uuid')}'")
+      == f"[AI run] Tests pass. Bearer [REDACTED]|{USERS['dev'][0]}", cm)
+tk = expect("the task again", call("GET", P + "/public/run/task", token=RT1), 200)
+check("latest comment last, with its author", tk["comments"][-1]["text"].startswith("[AI run] Tests pass")
+      and tk["comments"][-1]["author_name"] == "AR Test", tk["comments"])
+expect("an empty comment (422)", call("POST", P + "/public/run/comments", body={"text": " "}, token=RT1), 422)
+expect("a comment over 4000 characters (422)", call("POST", P + "/public/run/comments", body={"text": "x" * 4001},
+                                                    token=RT1), 422)
+expect("no token (401)", call("GET", P + "/public/run/task"), 401)
+expect("a made-up run token (401)", call("GET", P + "/public/run/task", token="oprt_" + "0" * 48), 401)
+expect("a runner token is not a run token (401)", call("GET", P + "/public/run/task", token=r3.token), 401)
+expect("a run token is not a runner token (401)", call("POST", P + "/public/runner/heartbeat", body={}, token=RT1), 401)
+
+# --- Start approval: pending_approval, approve, reject, RBAC --------------------------------------------------------------
+hb3()
+check("an unsupported profile needs approval", preview3("dev", Q2, "cursor").get("needs_approval") is True)
+check("... even for a manager", preview3("mgr", Q2, "cursor").get("needs_approval") is True)
+Q2R = expect("assignee starts Q2 on Cursor", start3("dev", Q2, "/p3/two", profile="cursor"), 201)
+check("pending_approval", Q2R.get("status") == "pending_approval", Q2R)
+check("task comment says it waits for approval", one(
+    f"SELECT COUNT(*) FROM kanban_task_comments c JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = "
+    f"'{Q2['uuid']}' AND c.content LIKE 'AI run requested by AR Test on p3-%a manager must approve it%'") == "1")
+res = r3.claim(wait=0)
+check("pending_approval is not claimable (204)", res[0] == 204, res[:2])
+res = start3("dev", Q2, "/p3/three")
+check("it counts as the task's open run (409)", res[0] == 409 and res[1]["conflict"]["type"] == "open_run", res[:2])
+res = start3("dev", Q3, "/p3/two")
+check("it holds the folder lock (409)", res[0] == 409 and res[1]["conflict"]["type"] == "folder_lock", res[:2])
+expect("no messages before it runs (409)", call("POST", P + f"/runs/{Q2R['uuid']}/turns", "dev", A, {"text": "go"}), 409)
+d = detail("dev", Q2R)
+check("requester: can't approve, can't message", d["can_approve"] is False and d["can_message"] is False, d)
+check("manager can approve", detail("mgr", Q2R)["can_approve"] is True)
+check("the approver's waiting list has it, shaped like a list row", [
+    r for r in waiting("appr")["approvals"] if r["uuid"] == Q2R["uuid"] and r["task_title"] == "Cursor needs approval"
+    and r["profile"] == "cursor" and r["usage"]["turns"] == 0 and "prompt" not in r and r["prompt_preview"]])
+check("not the requester's", not waiting("dev")["approvals"])
+expect("requester can't approve (403)", call("POST", P + f"/runs/{Q2R['uuid']}/approve", "dev", A, {}), 403)
+expect("another member can't (403)", call("POST", P + f"/runs/{Q2R['uuid']}/approve", "dev2", A, {}), 403)
+ap = expect("approver approves", call("POST", P + f"/runs/{Q2R['uuid']}/approve", "appr", A, {}), 200)
+check("approved -> queued, approver recorded", ap.get("status") == "queued" and ap["approved_by"] == USERS["appr"][0]
+      and ap["approved_at"], ap)
+expect("approving twice (409)", call("POST", P + f"/runs/{Q2R['uuid']}/approve", "mgr", A, {}), 409)
+c2 = expect("now the runner claims it", r3.claim(), 200).get("run", {})
+check("Q2 claimed", c2.get("uuid") == Q2R["uuid"] and c2["profile"] == "cursor", c2)
+expect("Q2 running", r3.status(Q2R["uuid"], "running"), 200)
+expect("Q2 succeeded", r3.status(Q2R["uuid"], "succeeded"), 200)
+
+Q3R = expect("assignee starts Q3 on Cursor", start3("dev", Q3, "/p3/three", profile="cursor"), 201)
+expect("rejecting needs a manager (403)", call("POST", P + f"/runs/{Q3R['uuid']}/reject", "dev2", A, {}), 403)
+rj = expect("project admin rejects", call("POST", P + f"/runs/{Q3R['uuid']}/reject", "padmin", A,
+                                          {"reason": "Use Claude for this"}), 200)
+check("rejected -> cancelled, reason kept, lock released", rj.get("status") == "cancelled"
+      and rj["error_category"] == "rejected" and rj["error"] == "Use Claude for this"
+      and one(f"SELECT COUNT(*) FROM ar_locks WHERE run_uuid = '{Q3R['uuid']}'") == "0", rj)
+expect("rejecting twice (409)", call("POST", P + f"/runs/{Q3R['uuid']}/reject", "mgr", A, {}), 409)
+Q3b = expect("assignee asks again", start3("dev", Q3, "/p3/three", profile="cursor"), 201)
+cx = expect("requester cancels the pending run", call("POST", P + f"/runs/{Q3b['uuid']}/cancel", "dev", A), 200)
+check("pending_approval -> cancelled at once, lock released", cx.get("status") == "cancelled"
+      and one(f"SELECT COUNT(*) FROM ar_locks WHERE run_uuid = '{Q3b['uuid']}'") == "0", cx)
+
+expect("require start approval", call("PUT", P + "/settings", "mgr", A,
+                                      {"approval_policy": {"require_start_approval": True}}), 200)
+check("then an assignee's run needs approval", preview3("dev", Q4, "claude").get("needs_approval") is True)
+check("a manager's doesn't", preview3("mgr", Q5, "claude").get("needs_approval") is False)
+Q4R = expect("assignee starts Q4", start3("dev", Q4, "/p3/four"), 201)
+Q5R = expect("manager starts Q5", start3("mgr", Q5, "/p3/five"), 201)
+check("assignee's run pending, manager's queued", Q4R.get("status") == "pending_approval"
+      and Q5R.get("status") == "queued", (Q4R.get("status"), Q5R.get("status")))
+expect("require start approval off", call("PUT", P + "/settings", "mgr", A,
+                                          {"approval_policy": {"require_start_approval": False}}), 200)
+sql(f"UPDATE ar_runs SET created_at = NOW() - interval '73 hours' WHERE uuid = '{Q4R['uuid']}'")
+hb3()
+run_sweep()
+gone = wait_for("sweep cancels the 73 h old pending run", lambda: one(
+    f"SELECT status FROM ar_runs WHERE uuid = '{Q4R['uuid']}'") == "cancelled")
+check("pending_approval > 72 h -> cancelled (approval_timeout), lock released", gone and one(
+    f"SELECT error_category FROM ar_runs WHERE uuid = '{Q4R['uuid']}'") == "approval_timeout"
+      and one(f"SELECT COUNT(*) FROM ar_locks WHERE run_uuid = '{Q4R['uuid']}'") == "0")
+
+# --- The run token is scoped to its run; cancelling is sticky and ends the long polls -----------------------------------
+c5 = expect("runner claims Q5", r3.claim(), 200).get("run", {})
+RT5 = c5.get("run_token") or ""
+check("Q5 claimed with its own token", c5.get("uuid") == Q5R["uuid"] and RT5.startswith("oprt_") and RT5 != RT1)
+check("each token reaches only its own run's task", expect("Q5's token", call(
+    "GET", P + "/public/run/task", token=RT5), 200).get("uuid") == Q5["uuid"] and expect("Q1's token", call(
+    "GET", P + "/public/run/task", token=RT1), 200).get("uuid") == Q1["uuid"])
+expect("Q5 running", r3.status(Q5R["uuid"], "running"), 200)
+q9 = expect("Q5 asks", r3.perm(Q5R["uuid"], {"request_id": "req-1", "tool": "Bash", "rule_key": "npm test",
+                                            "input": {"command": "npm test"}}), 201)["request"]
+check("remember is per run: same rule_key in another run is asked", q9["status"] == "pending", q9)
+expect("manager cancels Q5", call("POST", P + f"/runs/{Q5R['uuid']}/cancel", "mgr", A), 200)
+st = expect("runner reports waiting_permission", r3.status(Q5R["uuid"], "waiting_permission"), 200)
+check("cancelling is sticky", st == {"status": "cancelling", "cancel": True}, st)
+t0 = time.time()
+w = expect("permission wait while cancelling", r3.wait(Q5R["uuid"], q9["uuid"], 10), 200)
+check("returns at once with cancel", w["cancel"] is True and w["status"] == "pending" and time.time() - t0 < 5, w)
+nx = expect("turns/next while cancelling", r3.next(Q5R["uuid"], 10), 200)
+check("returns at once with cancel", nx == {"turns": [], "cancel": True}, nx)
+expect("Q5 cancelled", r3.status(Q5R["uuid"], "cancelled"), 200)
+expect("its token stops at the run's end (401)", call("GET", P + "/public/run/task", token=RT5), 401)
+expect("permissions on an ended run (409)", r3.perm(Q5R["uuid"], {"request_id": "late", "tool": "Bash", "input": {}}),
+       409)
+expect("turns on an ended run (409)", r3.turn(Q5R["uuid"], {"turn": 1}), 409)
+expect("waiting on a request of an ended run (409)", r3.wait(Q5R["uuid"], q9["uuid"], 0), 409)
+expect("deciding a request of an ended run (409)", decide("mgr", Q5R, q9, "allow"), 409)
+check("ended runs' requests leave the waiting list", not [x for x in waiting("mgr")["requests"]
+                                                          if x["uuid"] == q9["uuid"]])
+
+# --- Isolation between the workspaces --------------------------------------------------------------------------------------
+hb3()
+expect("owner B turns AI Runs back on", call("PUT", API + "/api/v2/namespace/plugins/ai_runner", "owner_b", B,
+                                             {"enabled": True}), 200)
+expect("runner B heartbeats", run_b.hb(**heartbeat_body()), 200)
+tb2 = expect("B task 2", call("POST", API + f"/api/v2/kanban/boards/{boardb}/tasks", "owner_b", B,
+                              {"title": "B second", "priority": "critical"}), 201)
+pvb = expect("B previews with the built-in template", call("POST", P + f"/tasks/{tb2['uuid']}/runs/preview", "owner_b",
+                                                           B, {"runner_uuid": regb["runner"]["uuid"]}), 200)
+check("the built-in template tells the agent how to ask", "end your reply with a line `NEEDS_INPUT: <your question>`"
+      in pvb.get("prompt", ""), pvb.get("prompt"))
+RB2 = expect("B starts a run", call("POST", P + f"/tasks/{tb2['uuid']}/runs", "owner_b", B,
+                                    {"runner_uuid": regb["runner"]["uuid"], "profile": "claude",
+                                     "repo_path": "/repos/gamma"}), 201)
+cb2 = expect("runner B claims it", run_b.claim(), 200).get("run", {})
+RTB = cb2.get("run_token") or ""
+check("B's run claimed with a token", cb2.get("uuid") == RB2["uuid"] and RTB.startswith("oprt_"), cb2.get("uuid"))
+expect("B running", run_b.status(RB2["uuid"], "running"), 200)
+qb = expect("runner B asks", run_b.perm(RB2["uuid"], {"request_id": "b-1", "tool": "Bash",
+                                                     "input": {"command": "ls"}}), 201)["request"]
+expect("runner B can't ask on A's run (404)", run_b.perm(Q1R["uuid"], {"request_id": "x", "tool": "Bash", "input": {}}),
+       404)
+expect("runner B can't wait on A's request (404)", run_b.wait(Q1R["uuid"], q8["uuid"], 0), 404)
+expect("runner B can't post A's turns (404)", run_b.turn(Q1R["uuid"], {"turn": 99}), 404)
+expect("runner B can't take A's messages (404)", run_b.next(Q1R["uuid"], 0), 404)
+expect("runner A can't ask on B's run (404)", r3.perm(RB2["uuid"], {"request_id": "x", "tool": "Bash", "input": {}}),
+       404)
+expect("runner A can't wait on B's request via its own run (404)", r3.wait(Q1R["uuid"], qb["uuid"], 0), 404)
+expect("B's owner can't decide A's request from B (404)", decide("owner_b", Q1R, q8, "allow", ns=B), 404)
+expect("... nor in A (403, not a member)", decide("owner_b", Q1R, q8, "allow"), 403)
+expect("A's manager can't decide B's request from A (404)", decide("mgr", RB2, qb, "allow"), 404)
+expect("B's owner can't message A's run (404)", call("POST", P + f"/runs/{Q1R['uuid']}/turns", "owner_b", B,
+                                                      {"text": "hi"}), 404)
+expect("B's owner can't approve in A (404)", call("POST", P + f"/runs/{Q1R['uuid']}/approve", "owner_b", B, {}), 404)
+wb = waiting("owner_b", B)
+check("B's waiting list: only B's request", [x["uuid"] for x in wb["requests"]] == [qb["uuid"]]
+      and wb["approvals"] == [], wb)
+check("A's waiting lists don't show B's request", not [x for x in waiting("mgr")["requests"] if x["uuid"] == qb["uuid"]])
+check("B's run token reaches B's task only", expect("B's token", call("GET", P + "/public/run/task", token=RTB),
+                                                    200).get("uuid") == tb2["uuid"])
+expect("owner B turns AI Runs off again", call("PUT", API + "/api/v2/namespace/plugins/ai_runner", "owner_b", B,
+                                               {"enabled": False}), 200)
+res = call("GET", P + "/public/run/task", token=RTB)
+check("plugin off: the run token gets 404", res[0] == 404 and "PLUGIN_DISABLED" in json.dumps(res[1]), res[:2])
+expect("... and its comments", call("POST", P + "/public/run/comments", body={"text": "x"}, token=RTB), 404)
+
+# --- Q1 ends: its token stops, its open request can't be decided ------------------------------------------------------------
+expect("Q1 succeeded", r3.status(Q1R["uuid"], "succeeded", summary="Done"), 200)
+expect("Q1's token stops at the run's end (401)", call("GET", P + "/public/run/task", token=RT1), 401)
+expect("Q1's pending request can't be decided any more (409)", decide("mgr", Q1R, q8, "allow"), 409)
+d = detail("dev", Q1R)
+check("an ended run: no messages", d["can_message"] is False, d)
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")
