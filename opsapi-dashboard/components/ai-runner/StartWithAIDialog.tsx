@@ -7,6 +7,8 @@
  * unavailable profiles stop the start, with a reason.
  * StartWithAIButton shows itself only when the plugin is on here and the user holds ai_runs.create;
  * the server still decides (assignee, ai_runs.manage or project owner/admin).
+ * §25.1: the runner list is only the runners this user may use, and a runner they can't use (its access changed
+ * since) answers 403 "You can't use this runner", shown as such. Only ai_runs.manage may edit the prompt.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,7 +18,6 @@ import { AlertTriangle, Bot, CopyCheck, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { kanbanService } from '@/services/kanban.service';
 import {
   aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun,
 } from '@/services/ai-runner.service';
@@ -24,7 +25,6 @@ import { BASE, ago, compact, outputModeLabel, runStatusLabel, useAiRunnerOn, whe
 
 interface TaskRef {
   taskUuid: string;
-  projectUuid?: string;
   /** "#12 Fix the login" — names the task in the dialog and in the button's label. */
   taskLabel: string;
 }
@@ -101,11 +101,10 @@ function startConflictText(conflict: unknown): string | null {
   }
 }
 
-export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLabel }: TaskRef & { open: boolean; onClose: () => void }) {
+export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRef & { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const { hasPermission } = usePermissions();
   const isManager = hasPermission('ai_runs', 'manage');
-  const [projectRole, setProjectRole] = useState<string>();
 
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<'preview' | 'start' | null>(null);
@@ -116,8 +115,8 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
   const [model, setModel] = useState('');
   const [repo, setRepo] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
-  // The server decides (it also enforces it on start); the project role is only a fallback for older servers.
-  const canEditPrompt = preview?.can_edit_prompt ?? (isManager || projectRole === 'owner' || projectRole === 'admin');
+  // The server decides (it also enforces it on start); ai_runs.manage is the fallback for older servers.
+  const canEditPrompt = preview?.can_edit_prompt ?? isManager;
   const [previewFor, setPreviewFor] = useState('');
   const [prompt, setPrompt] = useState('');
   const [confirmSimilar, setConfirmSimilar] = useState(false);
@@ -154,9 +153,6 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
     setPreviewFor('');
     setModel('');
     setLoading(true);
-    if (!isManager && projectUuid) {
-      kanbanService.getProject(projectUuid).then((p) => { if (id === live.current) setProjectRole(p.current_user_role); }, () => {});
-    }
     (async () => {
       try {
         const first = await aiRunner.preview(taskUuid);

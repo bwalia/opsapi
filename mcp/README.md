@@ -42,6 +42,9 @@ Two ways to run it, same tools:
 - several matches or none → the tool fails, names the candidates, and **creates
   nothing**, so the agent can ask you or retry with the id.
 
+`task_uuid` must be a uuid and `pr_url` an `https://` link; anything else is
+refused before OpsAPI is called.
+
 Tools return a short text answer plus `structuredContent` (JSON) for clients
 that use it. Task links are dashboard paths (`/dashboard/projects/…/tasks/…`),
 or full URLs when `OPSAPI_DASHBOARD_URL` is set.
@@ -125,7 +128,8 @@ setups) and `opsapi-mcp-http`.
 OPSAPI_URL=https://int-opsapi.workstation.co.uk npm run start:http
 # or
 docker build -t opsapi-mcp ./mcp
-docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk opsapi-mcp
+docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk \
+  -e MCP_HOST=mcp.example.com opsapi-mcp
 ```
 
 | env | default | notes |
@@ -134,6 +138,8 @@ docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk opsap
 | `PORT` | `8787` | |
 | `HOST` | `127.0.0.1` (`0.0.0.0` in the image) | |
 | `OPSAPI_DASHBOARD_URL` | — | full task links |
+| `MCP_HOST` | `localhost`, `127.0.0.1`, `[::1]` and `HOST` | comma list of host names clients use, e.g. `mcp.example.com` (ports ignored). **Set it** when the service sits behind a domain or listens on `0.0.0.0` (the image): other `Host` headers get `403` |
+| `MCP_ALLOWED_ORIGINS` | — (none) | comma list of browser origins, e.g. `https://app.example.com`. A request that sends an `Origin` not listed gets `403`; agents send none |
 
 Endpoints:
 
@@ -142,8 +148,10 @@ Endpoints:
   (numeric id or uuid) is passed through. `GET`/`DELETE /mcp` answer 405.
 - `GET /healthz` — liveness, no auth.
 
-Behaviour: no or malformed key → `401` JSON-RPC error and nothing is sent to
-OpsAPI; bodies over 1 MB → `413`; the request must arrive within 30 s and each
+Behaviour: a `Host` not in `MCP_HOST`, or an `Origin` not in
+`MCP_ALLOWED_ORIGINS`, → `403` before anything else (a web page can't reach the
+service through DNS rebinding or from the user's browser); no or malformed key
+→ `401` JSON-RPC error and nothing is sent to OpsAPI; bodies over 1 MB → `413`; the request must arrive within 30 s and each
 OpsAPI call times out after 20 s. Logs are JSON lines (method, path, status,
 duration) and never include headers. SIGTERM/SIGINT stop accepting, finish
 in-flight requests (up to 10 s), then exit. No CORS headers: desktop/CLI agents

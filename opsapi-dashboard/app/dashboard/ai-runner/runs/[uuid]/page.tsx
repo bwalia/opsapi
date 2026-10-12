@@ -6,6 +6,8 @@
  * Phase 3 (§23.5): the start approval banner, permission requests to decide and their history, the
  * conversation with the agent (its question, follow-ups) and usage totals. The server says who may act
  * (can_approve / can_decide / can_message) and checks it again on every call.
+ * §25: nobody approves their own run; "Allow for this run" is exact and not offered when the server says the
+ * request isn't rememberable; requests too large to review are denied automatically.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -63,8 +65,11 @@ async function act(fn: () => Promise<unknown>, ok: string, setBusy: (b: string |
   }
 }
 
-/** pending_approval: a manager approves (→ queued) or rejects (→ cancelled) the run before any runner sees it. */
-function ApprovalBanner({ uuid, canApprove, onDone }: { uuid: string; canApprove: boolean; onDone: () => void }) {
+/**
+ * pending_approval: a manager approves (→ queued) or rejects (→ cancelled) the run before any runner sees it.
+ * Never the person who asked for it (`mine`), even when they are a manager.
+ */
+function ApprovalBanner({ uuid, canApprove, mine, onDone }: { uuid: string; canApprove: boolean; mine: boolean; onDone: () => void }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   return (
@@ -72,7 +77,7 @@ function ApprovalBanner({ uuid, canApprove, onDone }: { uuid: string; canApprove
       <h2 id="air-approval-title" className="flex items-center gap-2 font-semibold text-warning-800">
         <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden /> This run needs a manager&apos;s approval before it starts
       </h2>
-      {canApprove ? (
+      {canApprove && !mine ? (
         <>
           <div className="max-w-xl">
             <Input id="air-reject-reason" label="Reason, if you reject it (optional)" value={reason} maxLength={500}
@@ -91,14 +96,19 @@ function ApprovalBanner({ uuid, canApprove, onDone }: { uuid: string; canApprove
         </>
       ) : (
         <p className="text-sm text-warning-800">
-          A manager has to approve it. Until then no runner picks it up; after 3 days without a decision it is cancelled.
+          {mine ? 'Another manager must approve it, since you asked for it.' : 'A manager has to approve it.'}
+          {' '}Until then no runner picks it up; after 3 days without a decision it is cancelled.
         </p>
       )}
     </section>
   );
 }
 
-/** One pending permission request with Allow / Allow for this run / Deny (+ an optional reason). */
+const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+/** What "Allow for this run" allows again: exactly this (§25.2). */
+const rememberWhat = (tool: string) => tool === 'Bash' ? 'this exact command' : EDIT_TOOLS.includes(tool) ? 'edits to this file' : 'this exact request';
+
+/** One pending permission request with Allow / Allow for this run (unless the server says no) / Deny (+ an optional reason). */
 function DecisionCard({ runUuid, r, onDone }: { runUuid: string; r: RunRequest; onDone: () => void }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -111,6 +121,7 @@ function DecisionCard({ runUuid, r, onDone }: { runUuid: string; r: RunRequest; 
     setBusy, kind,
   ).then((ok) => ok && onDone());
   const hint = `air-remember-${r.uuid}`;
+  const rememberable = r.rememberable !== false;
   return (
     <div role="group" aria-label={`${r.tool} request`} className="space-y-3 rounded-lg border border-secondary-200 bg-surface p-3">
       <RequestWants r={r} />
@@ -121,13 +132,19 @@ function DecisionCard({ runUuid, r, onDone }: { runUuid: string; r: RunRequest; 
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" isLoading={busy === 'allow'} disabled={!!busy} onClick={() => decide('allow')}>Allow</Button>
-        <Button size="sm" variant="outline" isLoading={busy === 'remember'} disabled={!!busy} onClick={() => decide('remember')} aria-describedby={hint}>
-          Allow for this run
-        </Button>
+        {rememberable && (
+          <Button size="sm" variant="outline" isLoading={busy === 'remember'} disabled={!!busy} onClick={() => decide('remember')} aria-describedby={hint}>
+            Allow for this run
+          </Button>
+        )}
         <Button size="sm" variant="danger" isLoading={busy === 'deny'} disabled={!!busy} onClick={() => decide('deny')}>Deny</Button>
       </div>
       <p id={hint} className="text-xs text-secondary-500">
-        Allow for this run also allows later {r.rule_key ? <code className="font-mono">{r.rule_key}</code> : r.tool} requests in this run without asking.
+        {rememberable
+          ? `Allow for this run also allows ${rememberWhat(r.tool)} again later in this run, without asking.`
+          : r.tool === 'Bash'
+            ? 'This command chains, substitutes or redirects other commands, so it can only be allowed once.'
+            : 'This can only be allowed once.'}
       </p>
     </div>
   );
@@ -181,16 +198,24 @@ function RequestHistory({ requests }: { requests: RunRequest[] }) {
           {
             key: 'decision', header: 'Decision', render: (r) => {
               const st = REQUEST_STATUS[r.status] || { label: r.status, variant: 'secondary' as const };
+              const auto = r.status === 'denied' && !r.decided_by;
               return (
                 <span className="block">
                   <Badge size="sm" variant={st.variant}>{st.label}</Badge>
                   {r.remember && r.status === 'allowed' && <span className="ml-1 text-xs text-secondary-500">for this run</span>}
-                  {r.reason && <span className="mt-0.5 block text-xs text-secondary-600">{r.reason}</span>}
+                  {r.reason && <span className={`mt-0.5 block text-xs ${auto ? 'font-medium text-error-700' : 'text-secondary-600'}`}>{r.reason}</span>}
+                  {/* §25.4: too big to show a decider in full, so nobody was asked. */}
+                  {auto && /too large to review/i.test(r.reason || '') && (
+                    <span className="block text-xs text-secondary-600">Too big to show in full, so it was denied without asking anyone.</span>
+                  )}
                 </span>
               );
             },
           },
-          { key: 'by', header: 'Decided by', render: (r) => r.decided_by_name || (r.status === 'expired' ? 'Nobody answered' : '—') },
+          {
+            key: 'by', header: 'Decided by', render: (r) => r.decided_by_name
+              || (r.status === 'expired' ? 'Nobody answered' : r.status === 'denied' && !r.decided_by ? 'Denied automatically' : '—'),
+          },
           { key: 'at', header: 'When', render: (r) => when(r.decided_at || r.created_at) },
         ]}
       />
@@ -315,7 +340,8 @@ function RunDetail({ uuid }: { uuid: string }) {
   if (!run) return <div className="mt-6"><ErrorNote error={detail.error} product={PRODUCT} /></div>;
 
   const v = runView(run);
-  const mayAct = hasPermission('ai_runs', 'manage') || (!!me && v.requesterUuid === me);
+  const mine = !!me && v.requesterUuid === me;
+  const mayAct = hasPermission('ai_runs', 'manage') || mine;
   const canCancel = mayAct && !terminal && run.status !== 'cancelling';
   const canRetry = mayAct && terminal && run.status !== 'succeeded';
 
@@ -382,7 +408,7 @@ function RunDetail({ uuid }: { uuid: string }) {
       </div>
 
       {detail.error && <ErrorNote error={detail.error} product={PRODUCT} />}
-      {run.status === 'pending_approval' && <ApprovalBanner uuid={uuid} canApprove={!!detail.data?.can_approve} onDone={detail.refresh} />}
+      {run.status === 'pending_approval' && <ApprovalBanner uuid={uuid} canApprove={!!detail.data?.can_approve} mine={mine} onDone={detail.refresh} />}
       {pending.length > 0 && !terminal && (
         <PendingRequests runUuid={uuid} requests={pending} canDecide={!!detail.data?.can_decide} onDone={detail.refresh} />
       )}

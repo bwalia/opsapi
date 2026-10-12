@@ -60,6 +60,10 @@ const STATUSES = [...OPEN_STATUSES, "completed", "cancelled"] as const;
 const DUE = ["today", "overdue", "today_and_overdue", "week", "upcoming", "none"] as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ymd = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "use YYYY-MM-DD");
+// Ids typed by the agent go into URL paths: only a uuid gets through, never "../", "?" or "#".
+// (Project, board, column and people given by name are matched against OpsAPI's own lists.)
+const uuid = () => z.string().trim().regex(UUID_RE, "must be a uuid");
+const httpsUrl = () => z.string().url().regex(/^https:\/\//i, "must be an https:// URL");
 
 type Result = {
   content: { type: "text"; text: string }[];
@@ -278,7 +282,7 @@ export function createServer(api: OpsApi): McpServer {
       description:
         "Fetch one kanban task by its uuid — title, status, priority, description, project/board/column, dashboard link, and its metadata (including any pr_url already attached).",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid (from list_my_tasks)."),
+        task_uuid: uuid().describe("The task's uuid (from list_my_tasks)."),
       },
     },
     safe(async ({ task_uuid }) => {
@@ -423,7 +427,7 @@ export function createServer(api: OpsApi): McpServer {
         "Metadata is MERGED into what the task already has (other keys are kept); set a key to null to remove it. " +
         "Requires an editor role on the project.",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
+        task_uuid: uuid().describe("The task's uuid."),
         status: z.enum(STATUSES).optional(),
         priority: z.enum(PRIORITIES).optional(),
         title: z.string().min(1).optional(),
@@ -453,7 +457,7 @@ export function createServer(api: OpsApi): McpServer {
       description:
         "Move a task to a column of its own board, by column name or numeric id (see list_boards). Moving into a 'done' column may complete the task.",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
+        task_uuid: uuid().describe("The task's uuid."),
         column: z.union([z.string(), z.number()]).describe("Target column name or numeric id."),
         position: z.number().int().min(0).optional().describe("Position in the column (0 = top, the default)."),
       },
@@ -522,7 +526,7 @@ export function createServer(api: OpsApi): McpServer {
       description:
         "Record time the employee spent on a task (a timesheet entry). Attributed to the employee who owns the API key.",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
+        task_uuid: uuid().describe("The task's uuid."),
         minutes: z.number().int().min(1).max(1440).describe("Minutes spent (1–1440)."),
         description: z.string().optional().describe("What was done (optional)."),
         billable: z.boolean().optional().describe("Whether the time is billable (default true)."),
@@ -547,8 +551,8 @@ export function createServer(api: OpsApi): McpServer {
       description:
         "Attach (or update) the pull-request URL on a task, stored in the task's metadata.pr_url. Preserves any other metadata.",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
-        pr_url: z.string().url().describe("The pull-request URL."),
+        task_uuid: uuid().describe("The task's uuid."),
+        pr_url: httpsUrl().describe("The pull-request URL."),
       },
     },
     safe(async ({ task_uuid, pr_url }) => {
@@ -565,8 +569,8 @@ export function createServer(api: OpsApi): McpServer {
       description:
         "Finish a task in one step: optionally log the time spent, attach the PR link, and set the task's status to completed. This is the natural 'I'm done with this task' action.",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
-        pr_url: z.string().url().optional().describe("The pull-request URL that closed the task (optional)."),
+        task_uuid: uuid().describe("The task's uuid."),
+        pr_url: httpsUrl().optional().describe("The pull-request URL that closed the task (optional)."),
         minutes: z
           .number()
           .int()
@@ -611,7 +615,7 @@ export function createServer(api: OpsApi): McpServer {
       title: "Comment on a task",
       description: "Add a comment to a task (e.g. a status update or a note for the manager).",
       inputSchema: {
-        task_uuid: z.string().describe("The task's uuid."),
+        task_uuid: uuid().describe("The task's uuid."),
         content: z.string().min(1).describe("The comment text."),
       },
     },

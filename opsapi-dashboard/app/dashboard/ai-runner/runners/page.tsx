@@ -2,18 +2,21 @@
 
 /**
  * Runners (ai_runners.manage): the machines that run AI tasks for this workspace through PromptPilot.
- * Register (token shown once + setup), rotate the token, pause / resume, revoke, and each machine's sessions.
+ * Register (token shown once + setup), rotate the token, pause / resume, revoke, each machine's sessions, and
+ * who may start runs on it (Access, §25.1).
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Copy, KeyRound, ListTree, Pause, Play, Plus, Server, Trash2 } from 'lucide-react';
+import { Copy, KeyRound, ListTree, Pause, Play, Plus, Server, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, ConfirmDialog, Input, Modal, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import { AiRunnerPage, BASE, PRODUCT, ProfileList, RunnerStatusBadge, ago, useAiData } from '@/components/ai-runner/ui';
 import apiClient from '@/lib/api-client';
-import { aiRunner, aiErrorText, type Runner } from '@/services/ai-runner.service';
+import { kanbanService } from '@/services/kanban.service';
+import namespaceService from '@/services/namespace.service';
+import { aiRunner, aiErrorText, type Runner, type RunnerAccess, type RunnerAccessMode } from '@/services/ai-runner.service';
 
 export default function RunnersPage() {
   return (
@@ -62,8 +65,11 @@ function runnerJson(name: string): string {
       approval: 'none',
       models: [],
       command: ['claude', '-p', '{{prompt}}', '--output-format', 'stream-json', '--verbose', '--session-id', '{{run_uuid}}',
-        '--restricted', '--permission-mode', 'acceptEdits', '--permission-prompts', 'none',
-        '--allowedTools', 'Read,Grep,Glob,Edit,MultiEdit,Write'],
+        '--restricted', '--strict-mcp-config', '--permission-mode', 'acceptEdits', '--permission-prompts', 'none',
+        '--allowedTools', 'Read,Grep,Glob,Edit,MultiEdit,Write',
+        // Secrets on the machine stay out of the agent's reach (§25.6).
+        '--disallowedTools', 'Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/id_*),Read(~/.ssh/**),Read(~/.aws/**),'
+          + 'Read(~/.config/gh/**),Read(~/.netrc),Read(~/.npmrc),Read(~/.kube/**)'],
       env: {},
       // Checked at start and every 5 minutes: a logged-out agent is reported unavailable and takes no work.
       health: { command: ['claude', 'auth', 'status', '--json'], every_s: 300 },
@@ -136,6 +142,128 @@ function SessionsModal({ runner, onClose }: { runner: Runner | null; onClose: ()
   );
 }
 
+// An empty Lua table arrives as {} rather than [].
+const ids = (v: unknown) => (Array.isArray(v) ? (v as string[]) : []);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+const ACCESS_MODES: { value: RunnerAccessMode; label: string; hint: string }[] = [
+  { value: 'owner', label: 'Only its owner and AI-run managers', hint: 'The person who registered it, and people who manage AI runs or runners.' },
+  { value: 'everyone', label: 'Everyone who can start runs', hint: 'Anyone in the workspace allowed to start a run on a task.' },
+  { value: 'listed', label: 'Selected people and projects', hint: 'Its owner and AI-run managers, the people you pick, and runs on tasks in the projects you pick.' },
+];
+
+/** The Access column: who may start runs on this machine. */
+function accessText(a?: RunnerAccess | null): string {
+  if (!a?.mode) return '—';
+  if (a.mode === 'everyone') return 'Everyone';
+  if (a.mode === 'listed') {
+    return `Selected: ${plural(ids(a.users).length, 'person', 'people')}, ${plural(ids(a.projects).length, 'project', 'projects')}`;
+  }
+  return 'Owner and managers';
+}
+
+type Choice = { value: string; label: string; hint?: string };
+
+/** Checkboxes with a filter. Picked uuids the list doesn't show (no access, or gone) stay listed so they can be removed. */
+function CheckList({ legend, items, picked, onChange, loading, error }: {
+  legend: string; items: Choice[]; picked: string[]; onChange: (v: string[]) => void; loading: boolean; error?: string;
+}) {
+  const [q, setQ] = useState('');
+  const known = new Set(items.map((i) => i.value));
+  const all = [...items, ...picked.filter((v) => !known.has(v)).map((v) => ({ value: v, label: 'Not in the list', hint: v }))];
+  const shown = all.filter((i) => !q || `${i.label} ${i.hint || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <fieldset className="min-w-0 space-y-2">
+      <legend className="text-sm font-medium text-secondary-800">
+        {legend} <span className="font-normal text-secondary-500">({picked.length} selected)</span>
+      </legend>
+      <Input aria-label={`Filter ${legend.toLowerCase()}`} placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-secondary-200 p-2">
+        {error && <p className="text-sm text-error-600">{error}</p>}
+        {!error && loading && !all.length && <p className="text-sm text-secondary-500">Loading…</p>}
+        {!loading && !shown.length && <p className="text-sm text-secondary-500">None found.</p>}
+        {shown.map((i) => (
+          <label key={i.value} className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5" checked={picked.includes(i.value)}
+              onChange={(e) => onChange(e.target.checked ? [...picked, i.value] : picked.filter((v) => v !== i.value))} />
+            <span className="min-w-0">
+              {i.label}
+              {i.hint && <span className="block break-all text-xs text-secondary-500">{i.hint}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Who may start runs on a runner (PUT /runners/:uuid/access). */
+function AccessModal({ runner, onClose, onSaved }: { runner: Runner; onClose: () => void; onSaved: () => void }) {
+  const [mode, setMode] = useState<RunnerAccessMode>(runner.access?.mode || 'owner');
+  const [users, setUsers] = useState(ids(runner.access?.users));
+  const [projects, setProjects] = useState(ids(runner.access?.projects));
+  const [busy, setBusy] = useState(false);
+  // ponytail: the first 200 members and projects; add server-side search if workspaces outgrow that.
+  const members = useAiData(async () => (await namespaceService.getMembers({ perPage: 200, status: 'active' })).data || [], [runner.uuid]);
+  const kanban = useAiData(async () => (await kanbanService.getProjects({ perPage: 200 })).data || [], [runner.uuid]);
+  const people: Choice[] = (members.data || []).flatMap((m) => m.user ? [{
+    value: m.user.uuid,
+    label: m.user.full_name || [m.user.first_name, m.user.last_name].filter(Boolean).join(' ') || m.user.email,
+    hint: m.user.email,
+  }] : []);
+  const projectChoices: Choice[] = (kanban.data || []).map((p) => ({ value: p.uuid, label: p.name }));
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await aiRunner.setRunnerAccess(runner.uuid, mode === 'listed' ? { mode, users, projects } : { mode });
+      toast.success(`Access to ${runner.name} saved`);
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error(aiErrorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal isOpen onClose={onClose} size="2xl" title={`Access to ${runner.name}`}
+      description="Who can start runs on this machine. New runners start as owner-only: only the person who registered the runner and AI-run managers can use them until you change it here.">
+      <form onSubmit={save} className="space-y-4">
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-secondary-800">Who can start runs on this machine</legend>
+          {ACCESS_MODES.map((m) => (
+            <label key={m.value} className="flex items-start gap-2 text-sm">
+              <input type="radio" name="air-access-mode" className="mt-1" value={m.value} checked={mode === m.value} onChange={() => setMode(m.value)} />
+              <span>
+                <span className="font-medium text-secondary-900">{m.label}</span>
+                <span className="block text-xs text-secondary-500">{m.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {mode === 'listed' && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <CheckList legend="People" items={people} picked={users} onChange={setUsers} loading={members.loading}
+              error={members.error && "Can't load the workspace's members."} />
+            <CheckList legend="Projects" items={projectChoices} picked={projects} onChange={setProjects} loading={kanban.loading}
+              error={kanban.error && "Can't load the projects."} />
+          </div>
+        )}
+        <p className="text-xs text-secondary-500">
+          AI-run managers can always use every runner. Someone without access doesn&apos;t see this runner when starting a run.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" isLoading={busy}>Save access</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function Runners() {
   const runners = useAiData(() => aiRunner.listRunners(), [], 15_000);
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -144,6 +272,7 @@ function Runners() {
   const [token, setToken] = useState<{ name: string; token: string; rotated: boolean } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'rotate' | 'revoke'; runner: Runner } | null>(null);
   const [sessionsOf, setSessionsOf] = useState<Runner | null>(null);
+  const [accessOf, setAccessOf] = useState<Runner | null>(null);
 
   async function act(key: string, fn: () => Promise<unknown>, ok: string) {
     setBusy(key);
@@ -199,10 +328,12 @@ function Runners() {
     { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => ago(r.last_heartbeat_at) },
     { key: 'profiles', header: 'Profiles', render: (r: Runner) => <ProfileList profiles={r.capabilities?.profiles} /> },
     { key: 'repos', header: 'Repos', render: (r: Runner) => (r.repos || []).length },
+    { key: 'access', header: 'Access', render: (r: Runner) => accessText(r.access) },
     {
       key: 'actions', header: 'Actions', render: (r: Runner) => r.status === 'revoked' ? null : (
         <div className="flex flex-wrap gap-1">
           <Button size="sm" variant="ghost" onClick={() => setSessionsOf(r)} leftIcon={<ListTree className="h-4 w-4" aria-hidden />} aria-label={`Sessions on ${r.name}`}>Sessions</Button>
+          <Button size="sm" variant="ghost" onClick={() => setAccessOf(r)} leftIcon={<Users className="h-4 w-4" aria-hidden />} aria-label={`Access to ${r.name}`}>Access</Button>
           {r.status === 'paused' ? (
             <Button size="sm" variant="ghost" isLoading={busy === `resume:${r.uuid}`} onClick={() => act(`resume:${r.uuid}`, () => aiRunner.resumeRunner(r.uuid), 'Runner resumed')}
               leftIcon={<Play className="h-4 w-4" aria-hidden />} aria-label={`Resume ${r.name}`}>Resume</Button>
@@ -248,6 +379,7 @@ function Runners() {
 
       <TokenModal shown={token} onClose={() => setToken(null)} />
       <SessionsModal runner={sessionsOf} onClose={() => setSessionsOf(null)} />
+      {accessOf && <AccessModal runner={accessOf} onClose={() => setAccessOf(null)} onSaved={runners.refresh} />}
 
       <ConfirmDialog
         isOpen={!!confirm}

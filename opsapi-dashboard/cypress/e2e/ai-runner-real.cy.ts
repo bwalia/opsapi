@@ -147,12 +147,17 @@ describe('AI Runs with the real PromptPilot runner', () => {
 
   beforeEach(() => cy.viewport(1280, 900));
 
-  it('saves the workspace settings: push a branch', () => {
+  it('saves the workspace settings: push a branch; the requester decides their own requests', () => {
     visit('/dashboard/ai-runner/settings');
     cy.get('#air-s-output', { timeout: 30000 }).select('branch');
+    // Under "managers" a requester never decides their own run's requests (§25.1); this spec's user is both.
+    cy.get('#air-s-deciders').select('requester_or_managers');
     cy.contains('button', 'Save settings').click();
     cy.contains('Settings saved');
-    asUser('GET', '/api/v2/ai-runner/settings').its('body.data.output_mode').should('eq', 'branch');
+    asUser('GET', '/api/v2/ai-runner/settings').its('body.data').should((d) => {
+      expect(d.output_mode).to.eq('branch');
+      expect(d.approval_policy.deciders).to.eq('requester_or_managers');
+    });
   });
 
   it('registers a runner; the real runner picks up the token and comes online', () => {
@@ -256,7 +261,8 @@ describe('AI Runs with the real PromptPilot runner', () => {
     startWithAI('claudeBash', 'claude');
     cy.contains('Needs your decision', { timeout: 300000 });
     cy.screenshot('real-claude-permission', { capture: 'viewport' });
-    cy.contains('button', 'Allow for this run').click();
+    // `python3 -c "print(6*7)"` has parentheses, so it is never remembered (§25.2): only Allow is offered.
+    cy.contains('button', /^Allow$/).click();
     cy.then(() => allowUntilDone(runs.claudeBash));
     cy.contains('Succeeded', { timeout: 60000 });
     cy.contains('dt', /^Commit$/i).next().invoke('text').then((sha) => {

@@ -6,7 +6,9 @@
  * own key. This process holds no OpsAPI key; it forwards the client's
  * `Authorization: Bearer opsk_…` (and optional `X-Namespace-Id`) to OpsAPI.
  *
- * Env: OPSAPI_URL (required), PORT (8787), HOST (127.0.0.1), OPSAPI_DASHBOARD_URL.
+ * Env: OPSAPI_URL (required), PORT (8787), HOST (127.0.0.1), OPSAPI_DASHBOARD_URL,
+ * MCP_HOST (host names clients use; default: localhost and the listen address),
+ * MCP_ALLOWED_ORIGINS (browser origins allowed; default none).
  */
 
 import http from "node:http";
@@ -24,7 +26,22 @@ export interface HttpConfig {
   dashboardUrl?: string;
   /** Structured log sink; defaults to one JSON line per entry on stdout. */
   log?: (entry: Record<string, unknown>) => void;
+  /** Host header names /mcp answers (ports ignored). Default: localhost, 127.0.0.1, [::1]. */
+  allowedHosts?: string[];
+  /** Origins /mcp accepts when a request sends one. Default: none, so any request with an Origin is refused. */
+  allowedOrigins?: string[];
 }
+
+export const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+
+/** "MCP.example.com:8787" → "mcp.example.com", "[::1]:80" → "[::1]"; undefined when it isn't a plain host. */
+export function hostName(h?: string): string | undefined {
+  return /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:\d{1,5})?$/i.exec(h?.trim() ?? "")?.[1].toLowerCase();
+}
+const origin = (o: string) => o.trim().toLowerCase().replace(/\/+$/, "");
+
+/** "a, b" → ["a", "b"]. */
+const list = (v?: string) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
 const rpcError = (code: number, message: string) => ({ jsonrpc: "2.0", error: { code, message }, id: null });
 
@@ -51,6 +68,17 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 
 export function createHttpServer(cfg: HttpConfig): http.Server {
   const log = cfg.log ?? ((e) => console.log(JSON.stringify({ time: new Date().toISOString(), ...e })));
+  const hosts = new Set((cfg.allowedHosts ?? LOOPBACK_HOSTS).map(hostName).filter(Boolean));
+  const origins = new Set((cfg.allowedOrigins ?? []).map(origin));
+
+  // DNS rebinding / cross-site guard: a web page can make a browser send requests here under its own host name
+  // or with its own Origin. Only our host names and the listed origins get through.
+  function refused(req: http.IncomingMessage): string | undefined {
+    if (!hosts.has(hostName(req.headers.host))) return "Forbidden: unknown Host (set MCP_HOST to the host name clients use).";
+    const o = req.headers.origin;
+    if (o !== undefined && !origins.has(origin(o))) return "Forbidden: Origin not allowed (see MCP_ALLOWED_ORIGINS).";
+    return undefined;
+  }
 
   async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse) {
     // Auth first: no key, no work, and nothing sent upstream.
@@ -101,6 +129,8 @@ export function createHttpServer(cfg: HttpConfig): http.Server {
 
     if (path === "/healthz") return send(res, 200, { status: "ok", version: VERSION });
     if (path !== "/mcp") return send(res, 404, { error: "Not found" });
+    const why = refused(req);
+    if (why) return send(res, 403, rpcError(-32000, why));
     handleMcp(req, res).catch((e) => {
       log({ level: "error", msg: "mcp request failed", error: e instanceof Error ? e.message : String(e) });
       if (!res.headersSent) send(res, 500, rpcError(-32603, "Internal server error"));
@@ -121,9 +151,19 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || "127.0.0.1";
-  const server = createHttpServer({ opsapiUrl, dashboardUrl: process.env.OPSAPI_DASHBOARD_URL });
+  // Behind a domain (or listening on 0.0.0.0), MCP_HOST names it; otherwise only localhost and the listen address.
+  const wildcard = ["0.0.0.0", "::"].includes(host);
+  const configured = list(process.env.MCP_HOST);
+  const allowedHosts = configured.length
+    ? configured
+    : [...LOOPBACK_HOSTS, ...(wildcard ? [] : [host.includes(":") ? `[${host}]` : host])];
+  const allowedOrigins = list(process.env.MCP_ALLOWED_ORIGINS);
+  const server = createHttpServer({ opsapiUrl, dashboardUrl: process.env.OPSAPI_DASHBOARD_URL, allowedHosts, allowedOrigins });
   server.listen(port, host, () =>
-    console.log(JSON.stringify({ time: new Date().toISOString(), level: "info", msg: "listening", host, port, version: VERSION }))
+    console.log(JSON.stringify({
+      time: new Date().toISOString(), level: "info", msg: "listening", host, port, version: VERSION, allowedHosts, allowedOrigins,
+      ...(wildcard && !configured.length && { warning: "listening on all interfaces: set MCP_HOST, or only localhost is answered" }),
+    }))
   );
 
   const shutdown = (signal: string) => {

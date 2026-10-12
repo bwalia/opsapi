@@ -59,6 +59,8 @@ claude mcp add --transport http opsapi https://mcp.example.com/mcp \
 ```
 
 Replace the address with the one you were given. Nothing to install.
+(Whoever runs the service sets `MCP_HOST` to that address's host name; see
+[README.md](README.md#run-it-streamable-http).)
 
 ### Option 2 — Run it on your own computer
 

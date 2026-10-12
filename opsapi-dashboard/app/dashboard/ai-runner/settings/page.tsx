@@ -29,7 +29,9 @@ const DEFAULTS: Settings = {
   pr_base: 'main',
   max_run_minutes: 60,
   task_automation: { in_progress_on_start: false, review_on_success: false },
-  approval_policy: { deciders: 'managers', require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60 },
+  approval_policy: {
+    deciders: 'managers', project_admins_decide: false, require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60,
+  },
   guards: {
     similar_threshold: 0.45, max_open_runs_per_user: 3, max_open_runs_per_workspace: 10, daily_token_limit: 0, retention_days: 365,
   },
@@ -113,15 +115,20 @@ function RunSettings() {
           <h3 className="text-sm font-semibold text-secondary-800">Approval policy</h3>
           <p className="text-xs text-secondary-500">
             An agent asks before risky steps, such as running a command. Profiles that can&apos;t ask (Cursor) always need a manager&apos;s approval to start.
+            Managers are people with manage on AI runs or AI run approvals. Nobody approves the start of a run they asked for themselves.
           </p>
           <div className="max-w-sm">
             <Select id="air-s-deciders" label="Who decides permission requests" value={s.approval_policy.deciders}
+              helperText={s.approval_policy.deciders === 'managers' ? "A manager who started a run doesn't decide its requests: another manager does." : undefined}
               onChange={(e) => set({ approval_policy: { ...s.approval_policy, deciders: e.target.value as Settings['approval_policy']['deciders'] } })}>
               <option value="managers">Managers</option>
               <option value="requester">The person who started the run</option>
               <option value="requester_or_managers">The requester or a manager</option>
             </Select>
           </div>
+          <Toggle label="Project owners and admins can also decide" checked={s.approval_policy.project_admins_decide}
+            hint="Owners and admins of a task's project count as managers for runs on that project's tasks: they approve starts and, when managers decide, answer permission requests. Off: only AI-run managers do."
+            onChange={(v) => set({ approval_policy: { ...s.approval_policy, project_admins_decide: v } })} />
           <Toggle label="Runs started by an assignee need a manager's approval first" checked={s.approval_policy.require_start_approval}
             onChange={(v) => set({ approval_policy: { ...s.approval_policy, require_start_approval: v } })} />
           <div className="grid gap-4 sm:grid-cols-2">
