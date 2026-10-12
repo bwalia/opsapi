@@ -38,6 +38,13 @@ function I.log(ns, d, user_uuid, in_tx)
     end
     local person = d.person_uuid or (opp and opp.person_uuid ~= db.NULL and opp.person_uuid) or nil
     local cid = contact_id(ns, person)
+    -- Every other id a caller gives must be this workspace's too (they are stored as plain columns, no trigger).
+    for col, tbl in pairs({ property_uuid = "property_deals_properties", lead_uuid = "crm_leads",
+                            audio_document_uuid = "property_deals_documents" }) do
+        if d[col] and not U.one("SELECT 1 FROM " .. tbl .. " WHERE namespace_id = ? AND uuid = ?", ns, d[col]) then
+            U.fail(422, "Validation failed", { [col] = "not found in this workspace" })
+        end
+    end
     local text = d.summary or d.transcript or d.raw_text or ""
     local subject = d.subject or (d.channel .. ": " .. (text:gsub("%s+", " "):sub(1, 80)))
     local uuid = require("helper.global").generateUUID()

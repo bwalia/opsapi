@@ -263,6 +263,8 @@ return function(app)
         permission = "property_pa_records.read", body = OBJ({ text = S(), claims = ARR(OBJ({ text = S(),
             refs = ARR(S("table:uuid or table:uuid:field")) })) }, { "text" }), response = Verdict })
     doc("GET /audit", { summary = "AI change history: source, model, prompt version, run, approver (P10)",
+        description = "Managers (property_pa_knowledge.manage) see the whole workspace; everyone else sees changes on "
+            .. "opportunities they own and changes they confirmed.",
         permission = "property_pa_records.read", paginated = true,
         query = { target_table = S(), target_uuid = S(), since = DT() }, response = ARR(Change) })
     doc("POST /handoffs", { summary = "Ask a manager (context, question, recommendation)",

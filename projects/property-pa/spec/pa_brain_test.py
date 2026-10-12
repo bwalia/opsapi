@@ -214,6 +214,11 @@ ai = [a for a in audit if a["source"] == "ai"]
 check("P10: AI changes show source, model, prompt version, run and the interaction",
       ai and all(a["model"] == "qwen3.8:latest" and a["prompt_version"] == "capture-v1" and a["run_ref"] == "run-sarah-1"
                  and a["source_interaction_uuid"] == cap["interaction"]["uuid"] for a in ai), ai)
+mine = data(call("GET", PA + "/audit", SOPHIE, S), 200, "Sophie's AI change history")
+check("a member sees the AI changes on her own opportunities and what she confirmed", mine and all(
+      a["target_uuid"] == SARAH or a["confirmed_by_user_uuid"] == USERS[SOPHIE][0] for a in mine), mine)
+check("the workspace's whole history is for managers: the agent (owns nothing, confirmed nothing) sees none",
+      data(call("GET", PA + "/audit", "agent", S), 200, "the agent's audit") == [])
 confirmed = [a for a in ai if a["field"] in ("decision_makers", "our_position")]
 check("P10 (part): and who approved them", len(confirmed) == 2 and all(a["confirmed_by_user_uuid"] == USERS[SOPHIE][0]
       and a["confirmed_by_name"] for a in confirmed), confirmed)
@@ -257,6 +262,14 @@ inj = data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "email", "d
 sarah = data(call("GET", PA + f"/opportunities/{SARAH}", SOPHIE, S), 200, "Sarah after the email")
 check("inbound text is stored, nothing acts on it", float(sarah["expectation_price"]) == 237500
       and inj["raw_text"].startswith("IGNORE"), sarah["expectation_price"])
+
+for field, value in (("property_uuid", "4f1b8c2e-0000-4000-8000-000000000222"), ("lead_uuid", "not-a-lead"),
+                     ("audio_document_uuid", "4f1b8c2e-0000-4000-8000-000000000333")):
+    res = call("POST", PA + "/interactions", SOPHIE, S, {"channel": "note", "direction": "internal",
+               "opportunity_uuid": SARAH, "raw_text": "Checked the file.", field: value})
+    check(f"an interaction's {field} must be this workspace's (422)", res[0] == 422 and field in str(res[1]), res)
+data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "note", "direction": "internal", "opportunity_uuid": SARAH,
+     "property_uuid": fx["sarah"]["property_uuid"], "raw_text": "Checked the title plan."}), 201, "with her own property")
 
 # --- Handoff (scene 5, part of P08) ----------------------------------------------------------------------------------
 h = data(call("POST", PA + "/handoffs", SOPHIE, S, {"to_user_uuid": USERS[ASHLEY][0], "opportunity_uuid": SARAH,
@@ -401,6 +414,13 @@ if res[0] == 429:
     check("over the daily AI limit: 429 with the house message", "AI usage limit" in res[1]["error"], res)
 else:
     print("skip  AI_USER_DAILY_TOKEN_LIMIT isn't set in this sandbox; the daily-limit check needs it")
+run6 = data(call("POST", PA + "/ask", SOPHIE, S, {"message": "Morning", "mode": "today"}), 202, "a run answered while off")
+expect("turn the PA off in the workspace", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S,
+       {"enabled": False}), 200)
+res = webhook(dict(ev, data=dict(ev["data"], run_id=run6["jobshout_run_id"])), WH)
+check("PA off: the signed webhook is acknowledged and nothing is applied", res[0] == 200 and res[1]["data"].get("ignored")
+      and sql(f"SELECT status FROM property_deals_agent_runs WHERE uuid = '{run6['uuid']}'") == ["running"], res)
+expect("PA back on", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabled": True}), 200)
 res = webhook({"id": "evt-2", "type": "run.completed", "data": {"run_id": "not-ours"}}, WH)
 check("another integration's run is acknowledged and ignored", res[0] == 200, res)
 

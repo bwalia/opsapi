@@ -102,6 +102,10 @@ return function(app)
         local secret = sdk.settings("property_pa", ns).jobshout_webhook_secret
         if type(secret) ~= "string" or secret == "" then return sdk.error(401, "Webhook secret not set") end
         if not same("sha256=" .. hmac_hex(secret, ts .. "." .. raw), sig) then return sdk.error(401, "Bad signature") end
+        -- Turned off in that workspace: acknowledged (so JobShout stops retrying), nothing applied.
+        if not require("helper.plugin-workspaces").isEnabled("property_pa", ns) then
+            return sdk.ok({ ignored = "Property PA is off in this workspace" })
+        end
         local full = U.one(B.SELECT .. " WHERE namespace_id = ? AND provider = ? AND jobshout_run_id = ?", ns, B.PROVIDER, run_id)
         local done = B.finish(ns, full, ev.data)
         return sdk.ok({ run = done.uuid, status = done.status })
