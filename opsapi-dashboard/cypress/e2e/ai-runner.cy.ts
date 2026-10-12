@@ -84,6 +84,9 @@ function asRunner(path: string | (() => string), body: Body | (() => Body)) {
 }
 
 /** A heartbeat; `inventory` (the sessions on the machine) is built when it runs and replaces the last one. */
+/** The AI Runs row of this spec's main run (other tasks' titles contain taskTitle too, e.g. the "(copy)"). */
+const runRow = () => cy.get(`a[href="/dashboard/ai-runner/runs/${runUuid}"]`, { timeout: 20000 }).closest('tr');
+
 function heartbeat(inventory: () => Body[] = () => []) {
   return asRunner('/heartbeat', () => ({
     version: 'e2e', host: 'e2e-host', os: 'linux',
@@ -131,6 +134,8 @@ describe('AI Runs', () => {
   });
 
   beforeEach(() => cy.viewport(1280, 900));
+  // The spec plays the runner: keep its runs' leases alive between tests (no heartbeat for 60 s = the run is lost).
+  beforeEach(() => cy.then(() => (runnerToken ? heartbeat() : undefined)));
 
   it('registers a runner and shows its token once', () => {
     runnerName = `e2e-runner-${stamp}-${Cypress.currentRetry}`;
@@ -189,7 +194,7 @@ describe('AI Runs', () => {
   it('shows the run on AI Runs', () => {
     visit('/dashboard/ai-runner/runs');
     cy.contains('h1', 'AI Runs', { timeout: 20000 });
-    cy.contains('tr', taskTitle, { timeout: 20000 }).within(() => {
+    runRow().within(() => {
       cy.contains('Queued');
       cy.contains(runnerName);
       cy.contains(repo);
@@ -325,7 +330,7 @@ describe('AI Runs', () => {
     cy.contains('h2', 'Waiting on you', { timeout: 20000 }).closest('section').within(() => {
       cy.contains('li', 'npm test').should('contain', taskTitle).and('contain', 'Bash');
     });
-    cy.contains('tr', taskTitle).should('contain', 'Waiting for permission');
+    runRow().should('contain', 'Waiting for permission');
 
     // …and decided on the run page.
     visit(`/dashboard/ai-runner/runs/${runUuid}`);
@@ -382,7 +387,7 @@ describe('AI Runs', () => {
     cy.screenshot('ai-runner-conversation', { capture: 'viewport' });
 
     visit('/dashboard/ai-runner/runs');
-    cy.contains('tr', taskTitle, { timeout: 20000 }).should('contain', '1.5K tokens').and('contain', '1 turn');
+    runRow().should('contain', '1.5K tokens').and('contain', '1 turn');
   });
 
   it('cancels the run', () => {
