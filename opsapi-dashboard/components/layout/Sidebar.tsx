@@ -23,6 +23,7 @@ import {
   LogOut,
   X,
   ChevronLeft,
+  ChevronRight,
   Loader2,
   AlertCircle,
   RefreshCw,
@@ -30,7 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth.store";
-import { useMenu, type MenuItemWithIcon } from "@/hooks";
+import { useMenu, groupMenu, type MenuItemWithIcon, type MenuSection } from "@/hooks";
 import { LogoMark, useBrand } from "@/components/brand/Logo";
 
 interface SidebarProps {
@@ -83,6 +84,97 @@ const NavItemLink = memo(function NavItemLink({
         </>
       )}
     </Link>
+  );
+});
+
+// Which groups this browser keeps open (the group holding the current page opens by itself).
+const OPEN_GROUPS_KEY = "sidebar-open-groups";
+
+function readOpenGroups(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// A collapsible group of menu items. In the icon rail it is one icon that
+// expands the sidebar with the group open.
+const NavGroup = memo(function NavGroup({
+  section,
+  pathname,
+  isOpen,
+  isCollapsed,
+  onToggle,
+  onExpandSidebar,
+  onItemClick,
+}: {
+  section: MenuSection;
+  pathname: string;
+  isOpen: boolean;
+  isCollapsed: boolean;
+  onToggle: (key: string) => void;
+  onExpandSidebar: (key: string) => void;
+  onItemClick: () => void;
+}) {
+  const { group, items } = section;
+  const Icon = group.IconComponent;
+  const hasActive = items.some((it) => it.path === pathname);
+  const panelId = `nav-group-${group.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
+  if (isCollapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => onExpandSidebar(group.key)}
+        title={group.name}
+        aria-label={`${group.name} (open the menu)`}
+        className={cn(
+          "flex w-full items-center justify-center rounded-lg px-2 py-2.5 transition-all duration-200",
+          hasActive
+            ? "bg-primary-500/10 text-primary-500"
+            : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
+        )}
+      >
+        <Icon className="w-5 h-5 shrink-0" />
+      </button>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToggle(group.key)}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-secondary-700 transition-colors hover:bg-secondary-100 hover:text-secondary-900"
+      >
+        <Icon className="w-5 h-5 shrink-0 text-secondary-500" />
+        <span className="flex-1 truncate text-left">{group.name}</span>
+        {hasActive && !isOpen && (
+          <span className="h-1.5 w-1.5 rounded-full bg-primary-500" aria-label="current page is in here" />
+        )}
+        <ChevronRight
+          className={cn("w-4 h-4 shrink-0 text-secondary-400 transition-transform duration-200", isOpen && "rotate-90")}
+          aria-hidden="true"
+        />
+      </button>
+      {isOpen && (
+        <div id={panelId} role="group" aria-label={group.name} className="mt-0.5 space-y-0.5 pl-4">
+          {items.map((item) => (
+            <NavItemLink
+              key={item.key}
+              item={item}
+              isActive={pathname === item.path}
+              isCollapsed={false}
+              onClick={onItemClick}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -163,6 +255,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
   const {
     mainMenu,
     secondaryMenu,
+    groups,
     isLoading,
     isHydrated,
     error,
@@ -174,10 +267,62 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
   // full global search).
   const [menuFilter, setMenuFilter] = useState("");
   const q = menuFilter.trim().toLowerCase();
+  // Typing a group's name ("finance") lists everything in it.
+  const groupNames = useMemo(() => new Map(groups.map((g) => [g.key, g.name.toLowerCase()])), [groups]);
   const filteredMain = useMemo(
-    () => (q ? mainMenu.filter((it) => it.name.toLowerCase().includes(q)) : mainMenu),
-    [mainMenu, q]
+    () => (q
+      ? mainMenu.filter((it) => it.name.toLowerCase().includes(q)
+        || (!!it.group && (groupNames.get(it.group) ?? "").includes(q)))
+      : mainMenu),
+    [mainMenu, q, groupNames]
   );
+  const { top, sections } = useMemo(() => groupMenu(filteredMain, groups), [filteredMain, groups]);
+
+  // The group holding the current page: the menu item with the longest matching path.
+  const activeGroup = useMemo(() => {
+    let best: MenuItemWithIcon | undefined;
+    for (const it of mainMenu) {
+      if ((pathname === it.path || pathname.startsWith(`${it.path}/`)) && (!best || it.path.length > best.path.length)) {
+        best = it;
+      }
+    }
+    return best?.group ?? null;
+  }, [mainMenu, pathname]);
+
+  // Groups this browser keeps open, plus the current page's group, unless it was closed on this page.
+  const [openGroups, setOpenGroups] = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : readOpenGroups(),
+  );
+  const [closedHere, setClosedHere] = useState<string | null>(null);
+  const isGroupOpen = useCallback(
+    (key: string) =>
+      !!q || openGroups.includes(key) || (key === activeGroup && closedHere !== `${key} ${pathname}`),
+    [q, openGroups, activeGroup, closedHere, pathname],
+  );
+
+  const saveOpenGroups = useCallback((next: string[]) => {
+    setOpenGroups(next);
+    try {
+      localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      // storage unavailable (private mode): the choice lasts for this page only
+    }
+  }, []);
+
+  const toggleGroup = useCallback((key: string) => {
+    if (isGroupOpen(key)) {
+      saveOpenGroups(openGroups.filter((k) => k !== key));
+      if (key === activeGroup) setClosedHere(`${key} ${pathname}`);
+    } else {
+      saveOpenGroups([...openGroups, key]);
+      setClosedHere(null);
+    }
+  }, [isGroupOpen, saveOpenGroups, openGroups, activeGroup, pathname]);
+
+  const expandToGroup = useCallback((key: string) => {
+    if (!openGroups.includes(key)) saveOpenGroups([...openGroups, key]);
+    onToggleCollapse();
+  }, [openGroups, saveOpenGroups, onToggleCollapse]);
   const filteredSecondary = useMemo(
     () => (q ? secondaryMenu.filter((it) => it.name.toLowerCase().includes(q)) : secondaryMenu),
     [secondaryMenu, q]
@@ -312,10 +457,10 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
               />
             )}
 
-            {/* Menu Items */}
+            {/* Menu Items: ungrouped ones first, then the collapsible groups */}
             {!showLoading &&
               !error &&
-              filteredMain.map((item) => (
+              top.map((item) => (
                 <NavItemLink
                   key={item.key}
                   item={item}
@@ -324,6 +469,31 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
                   onClick={handleNavClick}
                 />
               ))}
+            {!showLoading &&
+              !error &&
+              sections.map((section) =>
+                // A group with one item (for this role) is just that item: no click to open it.
+                section.items.length === 1 ? (
+                  <NavItemLink
+                    key={section.items[0].key}
+                    item={section.items[0]}
+                    isActive={pathname === section.items[0].path}
+                    isCollapsed={isCollapsed}
+                    onClick={handleNavClick}
+                  />
+                ) : (
+                  <NavGroup
+                    key={section.group.key}
+                    section={section}
+                    pathname={pathname}
+                    isOpen={isGroupOpen(section.group.key)}
+                    isCollapsed={isCollapsed}
+                    onToggle={toggleGroup}
+                    onExpandSidebar={expandToGroup}
+                    onItemClick={handleNavClick}
+                  />
+                ),
+              )}
 
             {/* No filter matches */}
             {!showLoading && !error && q && filteredMain.length === 0 && filteredSecondary.length === 0 && (

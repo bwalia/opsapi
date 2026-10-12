@@ -307,6 +307,10 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 |----------|-------------|
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials |
 | `GOOGLE_REDIRECT_URI` | Google OAuth callback (auto-set by `start.sh`) |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple key (ES256 client_secret) |
+| `APPLE_CLIENT_ID` | Apple Services ID (web audience + token `client_id`) |
+| `APPLE_BUNDLE_ID` | iOS bundle ID (native identity-token audience) |
+| `APPLE_REDIRECT_URI` | Apple web callback (`/auth/apple/callback`) |
 | `KEYCLOAK_*` | Keycloak SSO configuration |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe payments |
 | `CORS_ALLOWED_DOMAINS` | Comma-separated domains (allows subdomains + any port) |
