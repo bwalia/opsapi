@@ -35,6 +35,20 @@
     If the main provider is down (timeout, 5xx, rate limit, bad key, unknown
     model), calls go straight to the fallback for the next 60s instead of each
     waiting out the failure. The health check keeps probing the main provider.
+    A workspace's own provider (lib/ai-providers: cfg.workspace_provider) never
+    falls back to the platform's model — its data only goes where the workspace
+    said — and has its own breaker, so one workspace's bad key can't trip another's.
+
+    Time: opts.timeout_ms is the TOTAL budget of one Llm.chat — a streamed
+    answer and the fallback included (a socket timeout alone restarts on every
+    streamed chunk). With a fallback, the main provider gets 2/3 of it. Default:
+    AI_REQUEST_TIMEOUT_MS (2 min) while serving a request, someone is waiting;
+    AI_TIMEOUT_MS (5 min) in background work (timers, jobs), since self-hosted
+    models on shared hardware can queue.
+
+    TLS certificates are verified (lua_ssl_trusted_certificate in nginx.conf);
+    AI_TLS_VERIFY=false turns that off for local development against a
+    self-signed endpoint. Plain http:// URLs are unaffected.
 
     The callers speak ONE message format; each adapter converts it:
       { role = "system" | "user" | "assistant" | "tool", content = "...",
@@ -42,7 +56,7 @@
         tool_calls = { { id, ["function"] = { name, arguments = {table} } } },          -- assistant
         tool_call_id, tool_name }                                                      -- tool result
     Llm.chat(messages, tools, opts) -> assistant message (+ .usage, .model, .fallback) | nil, err, http_status
-      opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms,
+      opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms (total),
             usage = { feature, user_uuid, namespace_id, scope, run_uuid, system },
             no_fallback (the health check measures the main provider itself)
 
@@ -54,7 +68,6 @@
                                  across every AI feature (unset = no limit).
 ]]
 
-local http = require("resty.http")
 local jwt = require("resty.jwt")
 
 -- Private cjson instance: the shared one is set to encode {} as [] by other
@@ -143,9 +156,14 @@ local function args_table(a)
     return {}
 end
 
--- How long to wait for one model answer. Self-hosted models on shared hardware can queue for minutes,
--- so the default is 5 minutes (AI_TIMEOUT_MS overrides).
-local DEFAULT_TIMEOUT_MS = tonumber(env("AI_TIMEOUT_MS") or "") or 300000
+-- Total time for one Llm.chat (see the header): background work, and calls made while serving a request.
+Llm.TIMEOUT_MS = tonumber(env("AI_TIMEOUT_MS") or "") or 300000
+local REQUEST_TIMEOUT_MS = tonumber(env("AI_REQUEST_TIMEOUT_MS") or "") or 120000
+
+--- Verify model servers' TLS certificates? (AI_TLS_VERIFY=false: local development only.)
+function Llm.tls_verify()
+    return os.getenv("AI_TLS_VERIFY") ~= "false"
+end
 
 --- Ollama with stream = true answers as NDJSON lines; merge them into one non-streamed answer.
 -- Streaming keeps bytes flowing while the model writes, so a proxy in front of the model never
@@ -172,30 +190,66 @@ local function merge_ndjson(text)
     return out
 end
 
-local function post(cfg, url, headers, body, timeout_ms)
+--- OpenAI-compatible SSE ("data: {chunk}" lines, then "data: [DONE]"): merged into one non-streamed
+-- Chat Completions answer (content, tool calls by index, usage from the last chunk).
+local function merge_sse(text)
+    local content, calls, usage, streamed = {}, {}, nil, false
+    for line in tostring(text or ""):gmatch("[^\r\n]+") do
+        local payload = line:match("^data:%s*(.-)%s*$")
+        local chunk = payload and payload ~= "[DONE]" and cjson.decode(payload)
+        if type(chunk) == "table" then
+            streamed = true
+            if chunk.error then return { error = chunk.error } end
+            if type(chunk.usage) == "table" then usage = chunk.usage end
+            local choice = type(chunk.choices) == "table" and chunk.choices[1]
+            local d = type(choice) == "table" and type(choice.delta) == "table" and choice.delta or {}
+            if type(d.content) == "string" then content[#content + 1] = d.content end
+            for _, tc in ipairs(type(d.tool_calls) == "table" and d.tool_calls or {}) do
+                local i = tonumber(tc.index) and tonumber(tc.index) + 1 or (tc.id and #calls + 1) or math.max(#calls, 1)
+                calls[i] = calls[i] or { type = "function", ["function"] = { name = "", arguments = "" } }
+                local fn = type(tc["function"]) == "table" and tc["function"] or {}
+                if type(tc.id) == "string" then calls[i].id = tc.id end
+                if type(fn.name) == "string" then calls[i]["function"].name = calls[i]["function"].name .. fn.name end
+                if type(fn.arguments) == "string" then
+                    calls[i]["function"].arguments = calls[i]["function"].arguments .. fn.arguments
+                end
+            end
+        end
+    end
+    if not streamed then return cjson.decode(text or "") end -- a server that ignored stream and sent one object
+    return { usage = usage, choices = { { message = { role = "assistant", content = table.concat(content),
+        tool_calls = #calls > 0 and calls or nil } } } }
+end
+
+-- deadline: ngx.now() by which the whole answer must be in (Llm.chat). merge: how a streamed body
+-- (body.stream) is put back together.
+local function post(cfg, url, headers, body, deadline, merge)
     local encoded, enc_err = cjson.encode(body)
     if not encoded then return nil, "Could not encode the model request: " .. tostring(enc_err) end
-    local httpc = http.new()
-    httpc:set_timeout(timeout_ms or DEFAULT_TIMEOUT_MS)
+    local Webhooks = require("lib.outbound-webhooks")
+    local target, terr
+    if cfg.user_url then
+        -- A workspace's URL: SSRF-checked now and connected to the checked address (lib/ai-providers).
+        target, terr = require("lib.ai-providers").target(url)
+        if not target then return nil, terr end
+    else
+        target, terr = Webhooks.parseUrl(url, { allow_private = true, allow_http = true }) -- operator config
+        if not target then return nil, "Model URL " .. tostring(terr) end
+    end
     headers["Content-Type"] = "application/json"
-    local res, err = httpc:request_uri(url, { method = "POST", body = encoded, headers = headers,
-        -- ponytail: TLS verify off to match the rest of the AI clients; turn on
-        -- with a trusted CA bundle (lua_ssl_trusted_certificate is set in prod).
-        ssl_verify = false })
+    local res, err = Webhooks.fetch(target, { method = "POST", body = encoded, headers = headers,
+        ssl_verify = Llm.tls_verify() }, { deadline = deadline })
     if not res then return nil, "Model request failed: " .. tostring(err) end
     local data
-    if body.stream == true and res.status < 400 then
-        data = merge_ndjson(res.body)
-        if type(data) == "table" and data.error then
-            return nil, cfg.provider .. ": " .. tostring(data.error):sub(1, 400), 502
-        end
-    else data = cjson.decode(res.body or "") end
-    if res.status >= 400 then
+    if body.stream == true and res.status < 400 then data = merge(res.body) else data = cjson.decode(res.body or "") end
+    local status = res.status
+    if status < 400 and type(data) == "table" and data.error then status = 502 end -- failed mid-stream
+    if status >= 400 then
         local e = type(data) == "table" and data.error
         local msg = type(e) == "table" and (e.message or cjson.encode(e)) or e or res.body
-        ngx.log(ngx.ERR, "[llm] ", cfg.provider, " HTTP ", res.status, " (", #encoded, " bytes): ",
+        ngx.log(ngx.ERR, "[llm] ", cfg.provider, " HTTP ", status, " (", #encoded, " bytes): ",
             tostring(msg):sub(1, 400))
-        return nil, cfg.provider .. " HTTP " .. res.status .. ": " .. tostring(msg):sub(1, 400), res.status
+        return nil, cfg.provider .. " HTTP " .. status .. ": " .. tostring(msg):sub(1, 400), status
     end
     if type(data) ~= "table" then return nil, cfg.provider .. ": unexpected response" end
     return data
@@ -254,7 +308,7 @@ local function ollama_chat(cfg, messages, tools, opts)
     }
     if tools and #tools > 0 then body.tools = tools end
     local data, err, status = post(cfg, cfg.url .. "/api/chat", { ["x-api-key"] = Llm.ollama_auth(cfg.key) },
-        body, opts.timeout_ms)
+        body, opts.deadline, merge_ndjson)
     if not data then return nil, err, status end
     local msg = data.message
     if type(msg) ~= "table" then return nil, "ollama: no message in response" end
@@ -307,6 +361,8 @@ local function openai_chat(cfg, messages, tools, opts)
     local body = { model = cfg.model, messages = wire, temperature = opts.temperature or 0.2,
         max_tokens = opts.max_tokens or 2048, response_format = opts.json and { type = "json_object" } or nil }
     if tools and #tools > 0 then body.tools = tools end
+    -- Workspace local servers (cfg.stream): streamed like Ollama's native API, for the same proxies.
+    if cfg.stream then body.stream, body.stream_options = true, { include_usage = true } end
     local headers = { ["Authorization"] = cfg.key and ("Bearer " .. cfg.key) or nil }
     -- A workspace provider (lib/ai-providers.lua) may bring its own URL and
     -- auth header, e.g. Azure OpenAI: .../deployments/<name>/chat/completions?api-version=…
@@ -314,12 +370,17 @@ local function openai_chat(cfg, messages, tools, opts)
     for k, v in pairs(cfg.headers or {}) do headers[k] = v or nil end
     if cfg.headers and cfg.headers["api-key"] then headers["Authorization"] = nil end
     local url = cfg.chat_url or (cfg.url .. "/chat/completions")
-    local data, err, status = post(cfg, url, headers, body, opts.timeout_ms)
+    local data, err, status = post(cfg, url, headers, body, opts.deadline, merge_sse)
+    -- A compatible server that rejects streaming (or stream_options): once more, not streamed.
+    if not data and status == 400 and body.stream and err:find("stream", 1, true) then
+        body.stream, body.stream_options = nil, nil
+        data, err, status = post(cfg, url, headers, body, opts.deadline, merge_sse)
+    end
     -- Newer OpenAI models reject max_tokens / a custom temperature: retry once
     -- with what they accept.
     if not data and status == 400 and (err:find("max_tokens", 1, true) or err:find("temperature", 1, true)) then
         body.max_completion_tokens, body.max_tokens, body.temperature = body.max_tokens, nil, nil
-        data, err, status = post(cfg, url, headers, body, opts.timeout_ms)
+        data, err, status = post(cfg, url, headers, body, opts.deadline, merge_sse)
     end
     if not data then return nil, err, status end
     local msg = type(data.choices) == "table" and data.choices[1] and data.choices[1].message
@@ -417,10 +478,10 @@ local function anthropic_chat(cfg, messages, tools, opts)
         end
     end
     local headers = { ["x-api-key"] = cfg.key, ["anthropic-version"] = "2023-06-01" }
-    local data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.timeout_ms)
+    local data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.deadline)
     if not data and status == 400 and body.temperature and err:find("temperature", 1, true) then
         NO_SAMPLING[cfg.model], body.temperature = true, nil
-        data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.timeout_ms)
+        data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.deadline)
     end
     if not data then return nil, err, status end
     local texts, calls = {}, {}
@@ -485,7 +546,8 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Fallback circuit breaker: a main provider that is down is skipped for a
--- minute, shared by every worker (ngx.shared.cache).
+-- minute, shared by every worker (ngx.shared.cache). A workspace provider's
+-- key is its own (its URL and key are the workspace's).
 -- ---------------------------------------------------------------------------
 
 local BREAKER_SECONDS = 60
@@ -493,6 +555,7 @@ local BREAKER_SECONDS = 60
 local function breaker(cfg)
     local cache = ngx.shared and ngx.shared.cache
     return cache, "ai:down:" .. cfg.provider .. ":" .. cfg.model
+        .. (cfg.workspace_provider and (":" .. cfg.workspace_provider) or "")
 end
 
 -- Failures that mean the provider itself is unusable right now (not this one
@@ -501,10 +564,13 @@ local function provider_down(status)
     return status == nil or status >= 500 or status == 429 or status == 401 or status == 403 or status == 404
 end
 
-local function attempt(cfg, messages, tools, opts, u, user, ns)
+-- deadline: ngx.now() by which this attempt must be done (adapters read opts.deadline).
+local function attempt(cfg, messages, tools, opts, u, user, ns, deadline)
     ngx.update_time()
     local started = ngx.now()
-    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools, opts)
+    if deadline <= started then return nil, "Model request failed: timeout (no time left)" end
+    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools,
+        setmetatable({ deadline = deadline }, { __index = opts }))
     ngx.update_time()
     record(cfg, u, user, ns, msg, err, math.floor((ngx.now() - started) * 1000))
     if msg then msg.model = cfg.model end
@@ -520,17 +586,23 @@ function Llm.chat(messages, tools, opts)
         record(cfg, u, user, ns, nil, "daily limit reached", 0)
         return nil, Llm.LIMIT_MESSAGE, 429
     end
-    local fb = not opts.no_fallback and Llm.fallback or nil
+    -- A workspace's own provider never falls back to the platform's model (see the header).
+    local fb = not opts.no_fallback and not cfg.workspace_provider and Llm.fallback or nil
     if fb and same(fb, cfg) then fb = nil end
     local cache, key = breaker(cfg)
+    ngx.update_time()
+    local budget = (opts.timeout_ms or (ngx.get_phase() == "timer" and Llm.TIMEOUT_MS or REQUEST_TIMEOUT_MS)) / 1000
+    local deadline = ngx.now() + budget
 
     if fb and cache and cache:get(key) then
-        local msg, err, status = attempt(fb, messages, tools, opts, u, user, ns)
+        local msg, err, status = attempt(fb, messages, tools, opts, u, user, ns, deadline)
         if msg then msg.fallback = true end
         return msg, err, status
     end
 
-    local msg, err, status = attempt(cfg, messages, tools, opts, u, user, ns)
+    -- With a fallback, keep a third of the budget for it.
+    local msg, err, status = attempt(cfg, messages, tools, opts, u, user, ns,
+        fb and (deadline - budget / 3) or deadline)
     if msg then
         if cache and opts.no_fallback then cache:delete(key) end -- the health check saw it recover
         return msg
@@ -540,7 +612,7 @@ function Llm.chat(messages, tools, opts)
     if cache and provider_down(status) then cache:set(key, true, BREAKER_SECONDS) end
     ngx.log(ngx.WARN, "[llm] ", cfg.provider, " ", cfg.model, " failed (", tostring(err):sub(1, 200),
         "); falling back to ", fb.provider, " ", fb.model)
-    local fmsg, ferr = attempt(fb, messages, tools, opts, u, user, ns)
+    local fmsg, ferr = attempt(fb, messages, tools, opts, u, user, ns, deadline)
     if fmsg then
         fmsg.fallback = true
         return fmsg

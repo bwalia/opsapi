@@ -19,22 +19,17 @@ local function check(name, ok, detail)
     end
 end
 
-ngx = { log = function() end, ERR = 3, time = os.time, now = os.time, update_time = function() end, ctx = {} } -- luacheck: ignore 111
+ngx = { log = function() end, ERR = 3, time = os.time, now = os.time, update_time = function() end, ctx = {}, -- luacheck: ignore 111
+    get_phase = function() return "content" end }
+local FakeHttp = require("spec.fixtures.fake-http")
 
 local http_calls, used_today, insert_fails = 0, 0, false
 local rows = {}
-package.loaded["resty.http"] = {
-    new = function()
-        return {
-            set_timeout = function() end,
-            request_uri = function()
-                http_calls = http_calls + 1
-                return { status = 200, body = cjson.encode({
-                    message = { role = "assistant", content = "hi" }, prompt_eval_count = 120, eval_count = 7 }) }
-            end,
-        }
-    end,
-}
+package.loaded["resty.http"] = FakeHttp(function()
+    http_calls = http_calls + 1
+    return { status = 200, body = cjson.encode({
+        message = { role = "assistant", content = "hi" }, prompt_eval_count = 120, eval_count = 7 }) }
+end)
 package.loaded["resty.jwt"] = { sign = function() return "eyJ.minted.sig" end }
 package.loaded["lapis.db"] = {
     insert = function(tbl, row)
@@ -87,9 +82,7 @@ msg = Llm.chat(HELLO, nil, {})
 check("a failed usage write never fails the AI call", msg and msg.content == "hi")
 insert_fails = false
 
-package.loaded["resty.http"].new = function()
-    return { set_timeout = function() end, request_uri = function() return nil, "timeout" end }
-end
+package.loaded["resty.http"].new = FakeHttp(function() return nil, "timeout" end).new
 local before = #rows
 local _, err = Llm.chat(HELLO, nil, {})
 check("failed calls are recorded too (ok = false + error)", #rows == before + 1 and rows[#rows].ok == false
@@ -97,12 +90,10 @@ check("failed calls are recorded too (ok = false + error)", #rows == before + 1 
 
 print("daily limit:")
 Llm = load_llm({ OLLAMA_URL = "http://ollama", AI_USER_DAILY_TOKEN_LIMIT = "1000" })
-package.loaded["resty.http"].new = function()
-    return { set_timeout = function() end, request_uri = function()
-        http_calls = http_calls + 1
-        return { status = 200, body = cjson.encode({ message = { content = "hi" } }) }
-    end }
-end
+package.loaded["resty.http"].new = FakeHttp(function()
+    http_calls = http_calls + 1
+    return { status = 200, body = cjson.encode({ message = { content = "hi" } }) }
+end).new
 ngx.ctx = { user = { uuid = "user-1" }, namespace_id = 7 }
 used_today, http_calls = 999, 0
 check("under the limit: the call goes through", Llm.chat(HELLO, nil, {}) ~= nil and http_calls == 1)

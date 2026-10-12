@@ -104,9 +104,11 @@ end
 -- Bounds the tool-call loop so a confused model can't spin forever. Each
 -- iteration is one model round-trip (~seconds on the local model).
 local MAX_ITERATIONS = 8
--- One model answer may take a while on a shared self-hosted model: lib/agent/llm's default
--- (AI_TIMEOUT_MS, 5 minutes). nil = that default.
-local REQUEST_TIMEOUT_MS = nil
+-- One run (a user's request: every model call and tool in it) gets this long in total, well under
+-- routes/chat-agent's stale-run cutoff (30 min), so a run still working is never shown as
+-- interrupted (which would let a second one start). Each model call gets lib/agent/llm's
+-- background budget (AI_TIMEOUT_MS, 5 min) or what's left of the run, whichever is less.
+Agent.RUN_SECONDS = 15 * 60
 -- Same call failing this many times in one turn = stop and say so.
 local MAX_REPEATED_FAILURES = 2
 
@@ -147,10 +149,18 @@ function Agent.run(opts)
     local actions = {}
     local nudged = false
     local failures = {} -- "name args" -> times it failed this turn
+    ngx.update_time()
+    local deadline = ngx.now() + Agent.RUN_SECONDS
 
     for _ = 1, MAX_ITERATIONS do
+        ngx.update_time()
+        local left_ms = math.floor((deadline - ngx.now()) * 1000)
+        if left_ms <= 0 then
+            return { reply = "I couldn't complete that in time. Could you break it into a smaller request?",
+                actions = actions }
+        end
         local msg, err = Llm.chat(messages, opts.tools, {
-            temperature = 0.2, max_tokens = 2048, timeout_ms = REQUEST_TIMEOUT_MS, usage = opts.usage,
+            temperature = 0.2, max_tokens = 2048, timeout_ms = math.min(Llm.TIMEOUT_MS, left_ms), usage = opts.usage,
             cfg = opts.cfg,  -- the workspace's own choice of model for the assistant, when it set one
         })
         if not msg then

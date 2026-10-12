@@ -14,7 +14,8 @@
     private, link-local — e.g. cloud metadata 169.254.169.254 — CGNAT or
     reserved ranges), and the connection goes to the checked IP (SNI/Host
     keep the name), so DNS can't be swapped between check and connect.
-    OPSAPI_WEBHOOKS_ALLOW_PRIVATE=true lifts this for local development only.
+    OPSAPI_WEBHOOKS_ALLOW_PRIVATE=true lifts this for local development only
+    (link-local addresses, i.e. cloud metadata, stay refused).
 
     Request:  POST <url>, JSON body
       { "id": "<event uuid>", "type": "invoice.updated", "created_at": "...Z",
@@ -151,34 +152,46 @@ function Webhooks.newSecret()
     return "whsec_" .. hex(bytes)
 end
 
---- An HTTP request to a URL a user configured, without letting it reach
--- internal services: the host is resolved once, every address must be
--- public, and the connection goes to the address that was checked (no DNS
--- rebinding). A drop-in for resty.http's request_uri.
--- @param params table  { method, headers, body, query, ssl_verify }
--- @param opts table    { allow_http, allow_private, timeout_ms }
--- @return { status, headers, body } or nil, error
-function Webhooks.request(url, params, opts)
-    params, opts = params or {}, opts or {}
+--- Vet a user-configured URL and resolve it once: every address must be
+-- public (unless private is allowed), and link-local addresses (cloud
+-- metadata, 169.254.169.254) are refused even then.
+-- @param opts table  { allow_http, allow_private }
+-- @return { scheme, host, port, path, ip } (connect to `ip`, keep `host` for Host/SNI) or nil, error
+function Webhooks.target(url, opts)
+    opts = opts or {}
     local target, why = Webhooks.parseUrl(url, opts)
     if not target then return nil, "URL " .. why end
-
     local ips, err = resolve(target.host)
     if not ips then return nil, err end
-    if not (allow_private() or opts.allow_private) then
-        for _, ip in ipairs(ips) do
-            if not Webhooks.isPublicIPv4(ip) then
-                return nil, target.host .. " resolves to a private address (" .. ip .. "); refusing to connect"
-            end
+    local private_ok = allow_private() or opts.allow_private
+    for _, ip in ipairs(ips) do
+        if ip:match("^169%.254%.") or not (private_ok or Webhooks.isPublicIPv4(ip)) then
+            return nil, target.host .. " resolves to a private address (" .. ip .. "); refusing to connect"
         end
     end
+    target.ip = ips[1]
+    return target
+end
 
-    local timeout = opts.timeout_ms or READ_MS
+--- Send one request to a target (Webhooks.target, or parseUrl for operator
+-- config: no `ip` = connect by name). opts.timeout_ms bounds each socket
+-- operation; opts.deadline (ngx.now() seconds) bounds the whole request, a
+-- streamed body included.
+-- @return { status, headers, body } or nil, error
+function Webhooks.fetch(target, params, opts)
+    params, opts = params or {}, opts or {}
+    local function left()
+        if not opts.deadline then return opts.timeout_ms or READ_MS end
+        ngx.update_time()
+        return math.floor((opts.deadline - ngx.now()) * 1000)
+    end
+    local timeout = left()
+    if timeout <= 0 then return nil, "request failed: timeout" end
     local httpc = require("resty.http").new()
     httpc:set_timeouts(math.min(timeout, CONNECT_MS), timeout, timeout)
     local ok, cerr = httpc:connect({
         scheme = target.scheme,
-        host = ips[1],
+        host = target.ip or target.host,
         port = target.port,
         ssl_server_name = target.host,
         ssl_verify = target.scheme == "https" and params.ssl_verify ~= false,
@@ -198,13 +211,36 @@ function Webhooks.request(url, params, opts)
         httpc:close()
         return nil, "request failed: " .. tostring(rerr)
     end
-    local body, berr = res:read_body()
-    if body == nil and berr then
-        httpc:close()
-        return nil, "could not read the response: " .. tostring(berr)
-    end
+    local parts = {}
+    repeat
+        local wait = left()
+        if wait <= 0 then
+            httpc:close()
+            return nil, "could not read the response: timeout"
+        end
+        httpc:set_timeout(wait)
+        local chunk, berr = res.body_reader(65536)
+        if berr then
+            httpc:close()
+            return nil, "could not read the response: " .. tostring(berr)
+        end
+        parts[#parts + 1] = chunk
+    until not chunk
     httpc:set_keepalive(10000, 16)
-    return { status = res.status, headers = res.headers, body = body }
+    return { status = res.status, headers = res.headers, body = table.concat(parts) }
+end
+
+--- An HTTP request to a URL a user configured, without letting it reach
+-- internal services: the host is resolved once, every address must be
+-- public, and the connection goes to the address that was checked (no DNS
+-- rebinding). A drop-in for resty.http's request_uri.
+-- @param params table  { method, headers, body, query, ssl_verify }
+-- @param opts table    { allow_http, allow_private, timeout_ms, deadline }
+-- @return { status, headers, body } or nil, error
+function Webhooks.request(url, params, opts)
+    local target, err = Webhooks.target(url, opts)
+    if not target then return nil, err end
+    return Webhooks.fetch(target, params, opts)
 end
 
 --- POST a body to a user-configured URL (SSRF-guarded, see request).

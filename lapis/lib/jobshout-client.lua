@@ -19,7 +19,6 @@
     Each returns data or nil, err, http_status.
 ]]
 
-local http = require("resty.http")
 local cjson = require("cjson.safe")
 
 local JobShout = {}
@@ -32,23 +31,25 @@ local function base(row)
     return (row.base_url or ""):gsub("/+$", "")
 end
 
+-- Errors are short reasons (lib/ai-providers Providers.reason), never JobShout's own text: callers show
+-- them to the workspace, and the URL is the workspace's. The details go to the log.
 local function request(row, method, path, body, token)
     local Providers = require("lib.ai-providers")
-    local ok, err = Providers.url_ok(base(row))
-    if not ok then return nil, err end
-    local httpc = http.new()
-    httpc:set_timeout(20000)
     local headers = { ["Content-Type"] = "application/json", ["Accept"] = "application/json" }
     if token then headers["Authorization"] = "Bearer " .. token end
-    local res, rerr = httpc:request_uri(base(row) .. path, {
+    -- SSRF-guarded and connected to the checked address (no DNS rebinding).
+    local res, rerr = Providers.request(base(row) .. path, {
         method = method, headers = headers, body = body and cjson.encode(body) or nil,
         ssl_verify = os.getenv("JOBSHOUT_TLS_VERIFY") ~= "false",
-    })
-    if not res then return nil, "JobShout unreachable: " .. tostring(rerr) end
+    }, 20000)
+    if not res then
+        ngx.log(ngx.WARN, "[jobshout] ", method, " ", path, ": ", tostring(rerr))
+        return nil, "JobShout: " .. Providers.reason(rerr)
+    end
     local data = cjson.decode(res.body or "")
     if res.status >= 300 then
-        local msg = type(data) == "table" and data.error or res.body
-        return nil, "JobShout HTTP " .. res.status .. ": " .. tostring(msg):sub(1, 200), res.status
+        ngx.log(ngx.WARN, "[jobshout] ", method, " ", path, " HTTP ", res.status, ": ", tostring(res.body):sub(1, 300))
+        return nil, "JobShout: " .. Providers.reason(nil, res.status), res.status
     end
     return data == nil and {} or data, nil, res.status
 end

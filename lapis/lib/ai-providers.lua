@@ -17,13 +17,24 @@
       jobshout           —                              required (JobShout server; username + password, or a jsk_ API key)
       platform           the deployment's own model     — (AI_PROVIDER / OLLAMA_URL env: the self-hosted model the
                                                           chat assistant uses). Opt-in per workspace; only offered
-                                                          when that model is self-hosted (Ollama), for GDPR.
+                                                          when that model is self-hosted (Ollama), for GDPR. Only
+                                                          models in AI_PLATFORM_MODELS (comma-separated; default:
+                                                          the platform's own model) can be chosen.
 
     Secrets are sealed with AES-256-GCM (helper/secret-box.lua) and never
     returned: a browser sees `has_secret` and `secret_hint` ("…a1b2").
 
-    URLs must resolve to public addresses unless OPSAPI_AI_ALLOW_PRIVATE=true
-    (set it where local LLMs run on the private network, e.g. Ollama on the LAN).
+    URLs must resolve to public addresses. A model server on the private
+    network (e.g. Ollama on the LAN) is allowed by listing it in
+    OPSAPI_AI_PRIVATE_HOSTS (host or host:port, comma-separated).
+    OPSAPI_AI_ALLOW_PRIVATE=true allows every private address: local
+    development only (it is logged as a warning). Link-local addresses (cloud
+    metadata) are always refused, and calls connect to the address that was
+    checked, so DNS can't be swapped in between (Providers.target).
+
+    Failures are reported as a short reason (Providers.reason: "Authentication
+    failed (401) …", "Timed out", …), never the provider's own words: a URL's
+    response must not be echoed back to the workspace. Details go to the log.
 
     Providers.chat(ns, chain, messages, tools, opts) tries each { provider_uuid,
     model } in order (the workspace's fallback order) and returns the first
@@ -47,8 +58,9 @@ Providers.TYPES = {
     gemini = { adapter = "openai", url = "https://generativelanguage.googleapis.com/v1beta/openai", key = true },
     mistral = { adapter = "openai", url = "https://api.mistral.ai/v1", key = true },
     azure_openai = { adapter = "openai", key = true, needs_url = true },
-    openai_compatible = { adapter = "openai", needs_url = true },
-    ollama = { adapter = "openai", url = "http://localhost:11434/v1", is_local = true },
+    -- stream: local servers answer slowly; streaming keeps bytes flowing past proxies that cut silent connections.
+    openai_compatible = { adapter = "openai", needs_url = true, stream = true },
+    ollama = { adapter = "openai", url = "http://localhost:11434/v1", is_local = true, stream = true },
     jobshout = { needs_url = true, user = true },
     platform = { platform = true, is_local = true },
 }
@@ -70,25 +82,82 @@ local function blank(v) return null(v) or v == "" end
 local function allow_private()
     return os.getenv("OPSAPI_AI_ALLOW_PRIVATE") == "true"
 end
+if allow_private() then
+    ngx.log(ngx.WARN, "[ai-providers] OPSAPI_AI_ALLOW_PRIVATE=true: workspaces can point AI providers at ANY private ",
+        "address (databases, cluster APIs). Development only: list model servers in OPSAPI_AI_PRIVATE_HOSTS instead.")
+end
 
---- Can the server call this URL? (SSRF guard, checked on save and on every call.)
-function Providers.url_ok(url)
-    if type(url) ~= "string" then return nil, "base_url is required" end
-    local scheme, host = url:match("^(https?)://([^/:?#]+)")
-    if not scheme then return nil, "base_url must start with http:// or https://" end
+-- A private address this URL may reach: OPSAPI_AI_PRIVATE_HOSTS entries are host or host:port.
+local function private_ok(t)
     if allow_private() then return true end
-    if scheme ~= "https" then return nil, "base_url must use https (or set OPSAPI_AI_ALLOW_PRIVATE for a local server)" end
-    if host == "localhost" or host:match("%.local$") or host:match("%.internal$") or host:match("%.svc$")
-        or not host:find(".", 1, true) then
-        return nil, "base_url must be a public server (or set OPSAPI_AI_ALLOW_PRIVATE for a local one)"
+    for entry in (os.getenv("OPSAPI_AI_PRIVATE_HOSTS") or ""):lower():gmatch("[^,%s]+") do
+        if entry == t.host or entry == t.host .. ":" .. t.port then return true end
     end
+    return false
+end
+
+--- Vet a workspace's URL and resolve it once (SSRF guard, on save and on every call).
+-- @return { scheme, host, port, path, ip } (connect to ip; host stays the Host/SNI) | nil, reason
+function Providers.target(url)
+    if type(url) ~= "string" or url == "" then return nil, "base_url is required" end
     local Webhooks = require("lib.outbound-webhooks")
-    local ips, err = Webhooks.resolve(host)
-    if not ips then return nil, "base_url: " .. tostring(err) end
-    for _, ip in ipairs(ips) do
-        if not Webhooks.isPublicIPv4(ip) then return nil, "base_url must not resolve to a private address" end
-    end
+    local parsed = Webhooks.parseUrl(url, { allow_private = true, allow_http = true })
+    if not parsed then return nil, "base_url must be a URL starting with http:// or https://" end
+    local private = private_ok(parsed)
+    local t, err = Webhooks.target(url, { allow_private = private, allow_http = private })
+    if t then return t end
+    if err:find("private address", 1, true) then err = "base_url must not resolve to a private address" end
+    err = err:gsub("^URL ", "base_url ")
+    if not err:find("^base_url") then return nil, "base_url: " .. err end
+    if not private then err = err .. " (a local model server can be listed in OPSAPI_AI_PRIVATE_HOSTS)" end
+    return nil, err
+end
+
+--- Can the server call this URL? (Providers.target, for callers that only need yes/no.)
+function Providers.url_ok(url)
+    local t, err = Providers.target(url)
+    if not t then return nil, err end
     return true
+end
+
+--- request_uri for a workspace's URL: same guard, connected to the checked address.
+-- @return { status, headers, body } | nil, err (a base_url rule, or a network error to classify)
+function Providers.request(url, params, timeout_ms)
+    local t, err = Providers.target(url)
+    if not t then return nil, err end
+    return require("lib.outbound-webhooks").fetch(t, params, { timeout_ms = timeout_ms })
+end
+
+--- A failed call as a workspace may see it. Never the server's own words: they can echo whatever a URL
+-- returned, so the details stay in the log.
+function Providers.reason(err, status)
+    err, status = tostring(err or ""), tonumber(status)
+    if err:find("^base_url") then return err end -- our own URL rule
+    if err == require("lib.agent.llm").LIMIT_MESSAGE then return err end
+    if status == 401 or status == 403 then return "Authentication failed (" .. status .. ") — check the API key" end
+    if status == 404 then return "Not found (404) — check the model name and URL" end
+    if status == 429 then return "Rate limited (429) — try again shortly" end
+    if status and status >= 500 then return "The server had an error (HTTP " .. status .. ")" end
+    if status then return "The request was refused (HTTP " .. status .. ")" end
+    if err:find("timeout", 1, true) then return "Timed out" end
+    if err:find("connect", 1, true) or err:find("request failed", 1, true) then return "Couldn't connect" end
+    return "Unexpected answer from the server"
+end
+
+--- Models a workspace may run on the platform's shared model server: AI_PLATFORM_MODELS
+-- (comma-separated), default the platform's own model. Anything else could load arbitrary large models.
+function Providers.platform_models()
+    local list = {}
+    for m in (os.getenv("AI_PLATFORM_MODELS") or ""):gmatch("[^,%s]+") do list[#list + 1] = m end
+    if #list == 0 then list[1] = require("lib.agent.llm").default.model end
+    return list
+end
+
+local function platform_model_ok(model)
+    for _, m in ipairs(Providers.platform_models()) do
+        if m == model then return true end
+    end
+    return false
 end
 
 local function decode(v)
@@ -140,6 +209,15 @@ function Providers.save(ns, actor, b, existing)
         if b.base_url ~= nil and b.base_url ~= "" and b.base_url ~= cjson.null then
             errors.base_url = "the platform model has no URL to set"
         end
+        local asked = {}
+        for _, m in ipairs(type(b.models) == "table" and b.models or {}) do asked[#asked + 1] = m end
+        if type(b.default_model) == "string" and b.default_model ~= "" then asked[#asked + 1] = b.default_model end
+        for _, m in ipairs(asked) do
+            if not platform_model_ok(m) then
+                errors.default_model = "the platform model server offers only: "
+                    .. table.concat(Providers.platform_models(), ", ")
+            end
+        end
     end
     if not existing or b.name ~= nil then
         if type(b.name) ~= "string" or b.name == "" or #b.name > 120 then errors.name = "required, up to 120 characters"
@@ -174,7 +252,14 @@ function Providers.save(ns, actor, b, existing)
     if b.secret ~= nil then
         if b.secret == "" or b.secret == cjson.null then row.secret_sealed, row.secret_hint = db.NULL, db.NULL
         elseif type(b.secret) ~= "string" then errors.secret = "string"
-        else row.secret_sealed, row.secret_hint = Box.seal(b.secret, PURPOSE), Box.hint(b.secret) end
+        else
+            local ok, sealed = pcall(Box.seal, b.secret, PURPOSE)
+            if ok then row.secret_sealed, row.secret_hint = sealed, Box.hint(b.secret)
+            else
+                ngx.log(ngx.ERR, "[ai-providers] can't seal a secret: ", tostring(sealed))
+                errors.secret = "can't be stored on this server right now (encryption isn't configured)"
+            end
+        end
     end
     if b.is_local ~= nil then row.is_local = b.is_local == true
     elseif not existing and spec then row.is_local = spec.is_local == true end
@@ -206,26 +291,30 @@ function Providers.secret(row)
     return plain
 end
 
---- Llm.chat config for a provider row (nil, err for jobshout or a bad URL).
+--- Llm.chat config for a provider row (nil, err for jobshout or a missing key/model). It carries
+-- workspace_provider (the row's uuid): lib/agent/llm then never falls back to the platform's model and
+-- keeps its circuit breaker per provider; user_url: the URL is SSRF-checked and pinned on every call.
 function Providers.cfg(row, model)
     local spec = Providers.TYPES[row.provider_type]
     if spec and spec.platform then
         local cfg, err = Providers.platform_cfg()
         if not cfg then return nil, err end
         if not blank(model) then cfg.model = model elseif not blank(row.default_model) then cfg.model = row.default_model end
+        if not platform_model_ok(cfg.model) then return nil, "the platform model server doesn't offer " .. cfg.model end
+        cfg.workspace_provider = row.uuid
         return cfg
     end
     if not spec or not spec.adapter then return nil, row.provider_type .. " is not a model provider" end
     local url = (not blank(row.base_url) and row.base_url or spec.url or ""):gsub("/+$", "")
-    local ok, err = Providers.url_ok(url)
-    if not ok then return nil, err end
     local opts = decode(row.options)
     model = not blank(model) and model or (not blank(row.default_model) and row.default_model) or nil
     local key = Providers.secret(row)
     if not key and not blank(row.secret_sealed) then
-        return nil, row.name .. ": the stored key can't be decrypted (tampered, or the deployment key changed); save it again"
+        return nil, row.name .. ": the stored key can't be opened (tampered, or the deployment key changed); "
+            .. "save it again"
     end
-    local cfg = { provider = spec.adapter, label = row.name, model = model, key = key, url = url }
+    local cfg = { provider = spec.adapter, label = row.name, model = model, key = key, url = url,
+        workspace_provider = row.uuid, user_url = true, stream = spec.stream }
     if row.provider_type == "azure_openai" then
         local deployment = not blank(opts.deployment) and opts.deployment or model
         cfg.chat_url = url .. "/openai/deployments/" .. ngx.escape_uri(deployment)
@@ -266,7 +355,7 @@ function Providers.chat(ns, chain, messages, tools, opts)
             else
                 ngx.update_time()
                 local started = ngx.now()
-                local msg, err = Llm.chat(messages, tools, {
+                local msg, err, status = Llm.chat(messages, tools, {
                     cfg = cfg, no_fallback = true, json = opts.json, max_tokens = opts.max_tokens,
                     temperature = opts.temperature, timeout_ms = opts.timeout_ms,
                     usage = { feature = opts.feature or "workspace_ai", namespace_id = ns,
@@ -280,7 +369,10 @@ function Providers.chat(ns, chain, messages, tools, opts)
                         attempts = attempts }
                     return msg, info
                 end
-                attempts[#attempts + 1] = { provider_uuid = row.uuid, model = cfg.model, error = tostring(err):sub(1, 300) }
+                ngx.log(ngx.WARN, "[ai-providers] ", row.uuid, " ", tostring(cfg.model), ": ",
+                    tostring(err):sub(1, 300))
+                attempts[#attempts + 1] = { provider_uuid = row.uuid, model = cfg.model, status = status,
+                    error = Providers.reason(err, status) }
             end
         end
     end
@@ -299,10 +391,11 @@ function Providers.test(ns, row)
             { id = row.id })
         return res, err
     end
-    local msg, info = Providers.chat(ns, { { provider_uuid = row.uuid } },
+    local msg, info, attempts = Providers.chat(ns, { { provider_uuid = row.uuid } },
         { { role = "user", content = "Reply with the single word: ok" } }, nil,
         { feature = "provider_test", max_tokens = 16, timeout_ms = 30000 })
-    local err = not msg and info or nil
+    local last = not msg and attempts and attempts[#attempts]
+    local err = not msg and (last and (last.error or last.skipped) or info) or nil
     db.update("namespace_ai_providers", { last_tested_at = db.raw("NOW()"), last_error = err or db.NULL }, { id = row.id })
     if not msg then return nil, err end
     return { ok = true, model = info.model, latency_ms = info.latency_ms, reply = (msg.content or ""):sub(1, 80) }
