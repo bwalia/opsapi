@@ -17,13 +17,20 @@
     (default speaches-ai/Kokoro-82M-v1.0-ONNX), VOICE_TTS_VOICE (default bf_emma,
     a British voice), VOICE_LANGUAGE (default en). VOICE_URL is operator config,
     so it may be a private (LAN) address.
+
+    Workspace members only (X-Namespace-Id), and rate-limited per user: one voice
+    server is shared by everyone. Audio is streamed on from nginx's buffer, not
+    copied into Lua memory.
 ]]
 
 local cjson = require("cjson.safe")
 local AuthMiddleware = require("middleware.auth")
+local NamespaceMiddleware = require("middleware.namespace")
+local RateLimit = require("middleware.rate-limit")
 
 local MAX_AUDIO = 10 * 1024 * 1024
 local MAX_TEXT = 2000
+local PER_MINUTE = { transcribe = 20, speak = 30 } -- requests per user
 local AUDIO_TYPES = { ["audio/webm"] = "webm", ["audio/ogg"] = "ogg", ["audio/wav"] = "wav", ["audio/x-wav"] = "wav",
     ["audio/mp4"] = "mp4", ["audio/mpeg"] = "mp3", ["audio/aac"] = "aac" }
 
@@ -56,31 +63,52 @@ local function http(url, opts)
         ssl_verify = url:match("^https://") ~= nil })
 end
 
-local function read_body()
+-- The request body without copying it: in memory, or nginx's temp file read in chunks.
+-- @return string | chunk iterator, size in bytes | nil
+local function body_source()
     ngx.req.read_body()
     local data = ngx.req.get_body_data()
-    if data then return data end
-    local file = ngx.req.get_body_file()
-    if not file then return nil end
-    local f = io.open(file, "rb")
+    if data then return data, #data end
+    local path = ngx.req.get_body_file()
+    local f = path and io.open(path, "rb")
     if not f then return nil end
-    data = f:read("*a")
-    f:close()
-    return data
+    local size = f:seek("end")
+    f:seek("set")
+    return function()
+        local chunk = f:read(65536)
+        if not chunk then f:close() end
+        return chunk
+    end, size
 end
 
 local function fail(status, message)
     return { status = status, json = { success = false, error = message } }
 end
 
+-- Signed in, a member of the workspace, and (for the voice server's work) under the per-user limit.
+local function guard(name, handler)
+    return AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        local limit = PER_MINUTE[name]
+        if limit then
+            local allowed, _, retry = RateLimit.check("voice:" .. name .. ":" .. tostring(self.current_user.uuid),
+                limit, 60)
+            if not allowed then
+                ngx.header["Retry-After"] = tostring(retry)
+                return fail(429, "Too many voice requests. Please wait a moment and try again.")
+            end
+        end
+        return handler(self)
+    end))
+end
+
 return function(app)
-    app:get("/api/v2/voice/status", AuthMiddleware.requireAuth(function()
+    app:get("/api/v2/voice/status", guard("status", function()
         local on = base() ~= nil
         return { status = 200, json = { success = true, data = { stt = on, tts = on,
             voice = on and env("VOICE_TTS_VOICE", "bf_emma") or nil } } }
     end))
 
-    app:post("/api/v2/voice/transcribe", AuthMiddleware.requireAuth(function()
+    app:post("/api/v2/voice/transcribe", guard("transcribe", function()
         local url = base()
         if not url then return fail(501, "Speech-to-text isn't set up on this server (VOICE_URL)") end
         local ctype = tostring(ngx.var.content_type or ""):lower():match("^([%w/%-]+)") or ""
@@ -88,24 +116,39 @@ return function(app)
         if not ext then return fail(415, "Send audio (webm, ogg, wav, mp4, mp3 or aac)") end
         local len = tonumber(ngx.var.content_length or 0) or 0
         if len > MAX_AUDIO then return fail(413, "Audio is too long (max 10 MB)") end
-        local audio = read_body()
-        if not audio or #audio == 0 then return fail(400, "No audio received") end
-        if #audio > MAX_AUDIO then return fail(413, "Audio is too long (max 10 MB)") end
+        local audio, size = body_source()
+        if not audio or size == 0 then return fail(400, "No audio received") end
+        if size > MAX_AUDIO then return fail(413, "Audio is too long (max 10 MB)") end
 
         local boundary = "----opsapi" .. ngx.md5(tostring(ngx.now()) .. tostring(math.random()))
         local function field(name, value)
             return "--" .. boundary .. "\r\nContent-Disposition: form-data; name=\"" .. name .. "\"\r\n\r\n" .. value .. "\r\n"
         end
-        local body = table.concat({
+        local head = table.concat({
             field("model", env("VOICE_STT_MODEL", "Systran/faster-whisper-small")),
             field("language", env("VOICE_LANGUAGE", "en")),
             field("response_format", "json"),
             "--" .. boundary .. "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech." .. ext
-                .. "\"\r\nContent-Type: " .. ctype .. "\r\n\r\n", audio, "\r\n",
-            "--" .. boundary .. "--\r\n",
+                .. "\"\r\nContent-Type: " .. ctype .. "\r\n\r\n",
         })
+        local tail = "\r\n--" .. boundary .. "--\r\n"
+        -- The multipart body is sent in pieces: the audio is never copied into one big string.
+        local body = { head, audio, tail }
+        if type(audio) == "function" then
+            local queue = body
+            body = function()
+                while queue[1] do
+                    local part = queue[1]
+                    if type(part) == "string" then return table.remove(queue, 1) end
+                    local chunk = part()
+                    if chunk then return chunk end
+                    table.remove(queue, 1)
+                end
+            end
+        end
         local res, err = http(url .. "/v1/audio/transcriptions", { timeout = 120000, body = body,
-            headers = headers({ ["Content-Type"] = "multipart/form-data; boundary=" .. boundary }) })
+            headers = headers({ ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
+                ["Content-Length"] = #head + size + #tail }) })
         if not res then
             ngx.log(ngx.ERR, "[voice] transcribe: ", tostring(err))
             return fail(502, "The speech-to-text server didn't answer")
@@ -119,7 +162,7 @@ return function(app)
         return { status = 200, json = { success = true, data = { text = text } } }
     end))
 
-    app:post("/api/v2/voice/speak", AuthMiddleware.requireAuth(function()
+    app:post("/api/v2/voice/speak", guard("speak", function()
         local url = base()
         if not url then return fail(501, "Text-to-speech isn't set up on this server (VOICE_URL)") end
         ngx.req.read_body()
