@@ -13,7 +13,7 @@ import { Badge, Button, Card, Input, Modal, Select, Textarea } from '@/component
 import { pdService, pdErrorText, type BuyerProfile, type CompanyCheck } from '@/services/property-deals.service';
 import { crmService } from '@/services/crm.service';
 import { PdPage, ErrorNote, Spinner, Empty, gbp, dateText, label } from '@/components/property-deals/ui';
-import { usePdData, usePdMe } from '@/components/property-deals/usePd';
+import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import MatchRow from '@/components/property-deals/MatchRow';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +31,8 @@ export default function BuyersPage() {
 function Buyers() {
   const { can } = usePdMe();
   const [q, setQ] = useState('');
-  const list = usePdData(async () => (await pdService.buyerDirectory({ q })).data, [q]);
+  const qd = useDebounced(q);
+  const list = usePdData(async () => (await pdService.buyerDirectory({ q: qd })).data, [qd]);
   const [sel, setSel] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const current = (list.data || []).find((b) => b.uuid === sel) || list.data?.[0];
@@ -119,7 +120,11 @@ function Detail({ b, onChanged }: { b: BuyerProfile & { name?: string; email?: s
       <Card padding="none" data-tour="buyer-matches">
         <div className="flex items-center justify-between border-b border-secondary-200 p-4">
           <h3 className="font-semibold text-secondary-900">Matching homes</h3>
-          <Button size="sm" variant="ghost" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={async () => { await pdService.recomputeMatches({ buyer_profile_uuid: b.uuid }); matches.refresh(); }}>Re-score</Button>
+          {can('buyers', 'update') && (
+            <Button size="sm" variant="ghost" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={async () => {
+              try { await pdService.recomputeMatches({ buyer_profile_uuid: b.uuid }); matches.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
+            }}>Re-score</Button>
+          )}
         </div>
         {!matches.data?.length ? <div className="p-6"><Empty title="No matches yet" /></div> : (
           <ul className="divide-y divide-secondary-100">{matches.data.map((m) => <MatchRow key={m.uuid} m={m} canSend={can('buyers', 'update')} onChanged={matches.refresh} showProperty />)}</ul>
