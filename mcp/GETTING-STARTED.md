@@ -18,9 +18,11 @@ Total time: about 5 minutes.
 
 ## Part A — Get your personal API key
 
-If your dashboard offers a self-service **"My API key"** page, use it: create a
-key with **Kanban** (Read, Create, Update) and **Projects** (Read), copy it, and
-go to Part B.
+The quickest way is the self-service page: open your avatar menu → **My API keys**
+(`/dashboard/settings/api-keys`), press **Create key**, keep the **AI agent (MCP)** preset
+(it is limited to what your own role allows), copy the key — it is shown only once — and go
+to Part B. The same page shows your workspace's numeric id for `OPSAPI_NAMESPACE` and
+ready-to-paste setup for Claude Code and Cursor.
 
 Otherwise a workspace **owner** makes it for you in the **dashboard**:
 

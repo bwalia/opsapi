@@ -55,6 +55,17 @@ local KanbanWS = require "lib.kanban-ws"
 local Global = require "helper.global"
 local db = require("lapis.db")
 
+-- Task metadata arrives as an object (JSON body) or as a JSON string (form-encoded body).
+-- Returns the JSON text to store, or nil + message when it isn't a JSON object.
+local function metadata_json(v)
+    if type(v) == "table" then return cJson.encode(v) end
+    if type(v) == "string" then
+        local ok, decoded = pcall(cJson.decode, v)
+        if ok and type(decoded) == "table" and decoded[1] == nil then return v end
+    end
+    return nil, "metadata must be a JSON object"
+end
+
 return function(app)
     ----------------- Helper Functions --------------------
 
@@ -328,6 +339,12 @@ return function(app)
         end
 
         local data = parse_json_body()
+        local metadata_json_or_empty = "{}"
+        if data.metadata ~= nil and data.metadata ~= "" then
+            local m, merr = metadata_json(data.metadata)
+            if not m then return api_response(400, nil, merr) end
+            metadata_json_or_empty = m
+        end
 
         -- type(...) ~= "string" also rejects a repeated form key (title=a&title=b),
         -- which arrives as a table and would 500 when handed to the DB.
@@ -393,7 +410,7 @@ return function(app)
             reporter_user_uuid = user.uuid,
             cover_image_url = data.cover_image_url,
             cover_color = data.cover_color,
-            metadata = data.metadata and cJson.encode(data.metadata) or "{}"
+            metadata = metadata_json_or_empty
         })
 
         if not task then
@@ -411,14 +428,22 @@ return function(app)
         end
         if type(assignee_list) == "table" and #assignee_list > 0 then
             local namespace_id = get_namespace_id()
+            local not_assigned = {}
             for _, assignee_uuid in ipairs(assignee_list) do
                 if type(assignee_uuid) == "string" and assignee_uuid ~= "" then
-                    pcall(KanbanTaskQueries.assignUser, task.id, assignee_uuid, user.uuid, namespace_id)
+                    local ok_a, res_a = pcall(KanbanTaskQueries.assignUser, task.id, assignee_uuid, user.uuid,
+                        namespace_id)
+                    if not ok_a or not res_a then
+                        not_assigned[#not_assigned + 1] = assignee_uuid
+                        if not ok_a then ngx.log(ngx.WARN, "[Kanban] assign on create: ", tostring(res_a)) end
+                    end
                 end
             end
             -- Return the task WITH its assignees so the board card + detail show
             -- them immediately (show() attaches assignees/labels/etc.).
             task = KanbanTaskQueries.show(task.uuid) or task
+            -- Say who could not be assigned (not a member of this workspace/project) instead of dropping them.
+            if #not_assigned > 0 then task.not_assigned = not_assigned end
         end
 
         -- Log activity
@@ -483,7 +508,9 @@ return function(app)
         for _, field in ipairs(allowed_fields) do
             if data[field] ~= nil then
                 if field == "metadata" then
-                    update_params[field] = type(data[field]) == "table" and cJson.encode(data[field]) or data[field]
+                    local m, merr = metadata_json(data[field])
+                    if not m then return api_response(400, nil, merr) end
+                    update_params[field] = m
                 else
                     update_params[field] = data[field]
                 end
