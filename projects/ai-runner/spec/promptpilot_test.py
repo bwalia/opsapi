@@ -17,6 +17,8 @@ API, SECRET = os.environ["AR_API"], os.environ["AR_JWT_SECRET"]
 BIN, PPDIR = os.environ["PROMPTPILOT_BIN"], os.environ["PROMPTPILOT_DIR"]
 P = API + "/api/v2/ai-runner"
 OWNER = ("a1111111-0000-4000-8000-000000000001", "owner.a@ar.invalid")
+# A second AI-run manager: nobody decides their own run's requests or approves their own run (§25.1).
+MANAGER = ("e5555555-0000-4000-8000-000000000005", "mgr.a@ar.invalid")
 failures = 0
 
 
@@ -29,8 +31,8 @@ def jwt(user):
     return (h + b"." + p + b"." + sig).decode()
 
 
-def call(method, url, ns=None, body=None):
-    h = {"Content-Type": "application/json", "Authorization": "Bearer " + jwt(OWNER)}
+def call(method, url, ns=None, body=None, user=OWNER):
+    h = {"Content-Type": "application/json", "Authorization": "Bearer " + jwt(user)}
     if ns:
         h["X-Namespace-Id"] = ns
     req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method,
@@ -81,6 +83,10 @@ NS = str((data(res).get("namespace") or data(res)).get("uuid"))
 check("workspace created", res[0] == 201, res)
 check("ai_runner switched on", call("PUT", API + "/api/v2/namespace/plugins/ai_runner", NS, {"enabled": True})[0] == 200)
 check("output mode: push the branch", call("PUT", P + "/settings", NS, {"output_mode": "branch"})[0] == 200)
+role = data(call("POST", API + "/api/v2/namespace/roles", NS, {"role_name": "ai_mgr", "display_name": "AI manager",
+                                                             "permissions": {"ai_runs": ["manage"]}}))
+check("a second AI-run manager joins", call("POST", API + "/api/v2/namespace/members", NS, {
+    "email": MANAGER[1], "role_ids": [(role.get("role") or role)["id"]]})[0] == 201)
 proj = data(call("POST", API + "/api/v2/kanban/projects", NS, {"name": "Runner repo"}))
 board = data(call("GET", API + f"/api/v2/kanban/projects/{proj['uuid']}/boards", NS))
 board = board[0] if isinstance(board, list) else (board.get("boards") or board.get("data"))[0]
@@ -237,13 +243,17 @@ try:
         check("4a: run waits for permission", detail(run["uuid"]).get("status") == "waiting_permission")
         check("4a: request names the tool and command", q1 and q1.get("tool") == "Bash"
               and "npm test" in json.dumps(q1.get("input")), q1)
-        check("4a: allowed", call("POST", P + f"/runs/{run['uuid']}/requests/{q1['uuid']}/decide", NS,
-                                  {"decision": "allow"})[0] == 200)
+        check("4a: the server's rule key is the whole command (§25.2)", q1 and q1.get("rule_key") == "npm test"
+              and q1.get("rememberable") is True, q1)
+        check("4a: the requester doesn't decide their own run's request (403)", call(
+            "POST", P + f"/runs/{run['uuid']}/requests/{q1['uuid']}/decide", NS, {"decision": "allow"})[0] == 403)
+        check("4a: allowed by another manager", call("POST", P + f"/runs/{run['uuid']}/requests/{q1['uuid']}/decide",
+                                                     NS, {"decision": "allow"}, user=MANAGER)[0] == 200)
         q2 = wait_for("second request", lambda: next((q for q in detail(run["uuid"]).get("requests") or []
                                                        if q.get("status") == "pending" and q["uuid"] != q1["uuid"]),
                                                       None), timeout=60)
         check("4a: denied", call("POST", P + f"/runs/{run['uuid']}/requests/{q2['uuid']}/decide", NS,
-                                 {"decision": "deny", "reason": "Not from an AI run"})[0] == 200)
+                                 {"decision": "deny", "reason": "Not from an AI run"}, user=MANAGER)[0] == 200)
         end = finished(run["uuid"])
         check("4a: run succeeded", end.get("status") == "succeeded", end)
         br = end.get("work_branch") or ""
@@ -311,7 +321,10 @@ try:
         check("4f: created as pending_approval", run.get("status") == "pending_approval", run)
         time.sleep(3)
         check("4f: no runner takes it before approval", detail(run["uuid"]).get("status") == "pending_approval")
-        check("4f: approved", call("POST", P + f"/runs/{run['uuid']}/approve", NS, {})[0] == 200)
+        check("4f: nobody approves their own run (403)", call("POST", P + f"/runs/{run['uuid']}/approve", NS,
+                                                              {})[0] == 403)
+        check("4f: approved by another manager", call("POST", P + f"/runs/{run['uuid']}/approve", NS, {},
+                                                      user=MANAGER)[0] == 200)
         end = finished(run["uuid"])
         check("4f: then it runs and succeeds", end.get("status") == "succeeded" and end.get("approved_by"), end)
     else:
