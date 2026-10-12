@@ -132,7 +132,8 @@ function U.clean(s, max)
 end
 
 -- Obvious credentials, so a log line or summary never stores (or shows) one: OpsAPI keys, runner and run tokens,
--- bearer tokens, provider keys (sk-..., long only so "task-12" stays), GitHub, Slack and AWS keys, private keys.
+-- bearer tokens, provider keys (sk-..., long only so "task-12" stays), GitHub, GitLab, Slack, Stripe, npm and AWS
+-- keys, JWTs, private keys, passwords in URLs (§25.6). A third value is the shortest match that counts as a key.
 local SECRETS = {
     { "%-%-%-%-%-BEGIN [%u ]*PRIVATE KEY%-%-%-%-%-.-%-%-%-%-%-END [%u ]*PRIVATE KEY%-%-%-%-%-",
       "[REDACTED PRIVATE KEY]" },
@@ -142,24 +143,82 @@ local SECRETS = {
     { "[Bb][Ee][Aa][Rr][Ee][Rr]%s+[%w%-%._~%+/]+=*", "Bearer [REDACTED]" },
     { "github_pat_[%w_]+", "github_pat_[REDACTED]" },
     { "%f[%w]gh[pousr]_[%w]+", "gh_[REDACTED]" },
+    { "%f[%w]glpat%-[%w%-_]+", "glpat-[REDACTED]" },
     { "%f[%w]xox[abprs]%-[%w%-]+", "xox-[REDACTED]" },
     { "%f[%w]AKIA[%u%d]+", "AKIA[REDACTED]" },
+    { "%f[%w]sk_live_[%w]+", "sk_live_[REDACTED]" },
+    { "%f[%w]sk_test_[%w]+", "sk_test_[REDACTED]" },
+    { "%f[%w]rk_live_[%w]+", "rk_live_[REDACTED]" },
+    { "%f[%w]whsec_[%w]+", "whsec_[REDACTED]" },
+    { "%f[%w]npm_[%w]+", "npm_[REDACTED]", 30 },
+    { "%f[%w]sk%-[%w%-_]+", "sk-[REDACTED]", 20 },
+    { "%f[%w]eyJ[%w%-_]+%.[%w%-_]+%.[%w%-_]*", "[REDACTED JWT]" },
+    { "://[^/%s:@]*:[^/%s@]+@", "://[REDACTED]@" },
 }
+
+-- KEY=value assignments whose name says it holds a secret.
+local function secret_name(k)
+    k = k:upper():gsub("%-", "_")
+    for _, w in ipairs({ "SECRET", "PASSWORD", "TOKEN", "API_KEY" }) do
+        if k:find(w, 1, true) then return true end
+    end
+end
 
 function U.redact(s)
     if type(s) ~= "string" then return s end
-    for _, p in ipairs(SECRETS) do s = s:gsub(p[1], p[2]) end
-    return (s:gsub("%f[%w]sk%-[%w%-_]+", function(m) if #m >= 20 then return "sk-[REDACTED]" end end))
+    for _, p in ipairs(SECRETS) do
+        if p[3] then
+            s = s:gsub(p[1], function(m) if #m >= p[3] then return p[2] end end)
+        else
+            s = s:gsub(p[1], p[2])
+        end
+    end
+    s = s:gsub("([%w_%.%-]+)=([\"'])(.-)%2", function(k, q)
+        if secret_name(k) then return k .. "=" .. q .. "[REDACTED]" .. q end
+    end)
+    return (s:gsub("([%w_%.%-]+)=([^%s\"']+)", function(k)
+        if secret_name(k) then return k .. "=[REDACTED]" end
+    end))
 end
 
---- Redact every string inside a decoded JSON value (keys kept), at most `depth` levels deep.
+--- Redact every string inside a decoded JSON value (keys kept). Tables deeper than `depth` levels become
+-- "[too deep]", so nothing below the limit is kept unredacted.
 function U.redact_value(v, depth)
-    depth = depth or 6
+    depth = depth or 32
     if type(v) == "string" then return U.redact(U.clean(v)) end
-    if type(v) ~= "table" or depth <= 0 then return v end
+    if type(v) ~= "table" then return v end
+    if depth <= 0 then return "[too deep]" end
     local out = {}
     for k, x in pairs(v) do out[k] = U.redact_value(x, depth - 1) end
     return setmetatable(out, getmetatable(v))
+end
+
+--- JSON with object keys sorted, so the same value always reads the same (rule keys, request summaries).
+function U.canonical(v, depth)
+    depth = depth or 0
+    if type(v) ~= "table" or depth > 64 then
+        local ok, s = pcall(cjson.encode, v)
+        return ok and s or "null"
+    end
+    local keys, out = {}, {}
+    for k in pairs(v) do keys[#keys + 1] = k end
+    if #keys > 0 and #keys == #v then
+        for i = 1, #v do out[i] = U.canonical(v[i], depth + 1) end
+        return "[" .. table.concat(out, ",") .. "]"
+    end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    for i, k in ipairs(keys) do out[i] = cjson.encode(tostring(k)) .. ":" .. U.canonical(v[k], depth + 1) end
+    return "{" .. table.concat(out, ",") .. "}"
+end
+
+--- Characters (not bytes) in a UTF-8 string.
+function U.chars(s)
+    return #s - select(2, s:gsub("[\128-\191]", ""))
+end
+
+--- A git branch name we pass on: letters, digits, . _ / -, never starting with "-" (git would read an option, §25.7).
+function U.is_branch(v)
+    return type(v) == "string" and v:match("^[%w%._/%-]+$") ~= nil and v:sub(1, 1) ~= "-"
 end
 
 --- A folder path as reported: absolute, no trailing slash. nil when it isn't one.
