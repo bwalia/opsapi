@@ -2198,6 +2198,17 @@ export interface MenuItem {
   badge_key?: string | null;
   always_show: boolean;
   is_admin_only: boolean;
+  /** Sidebar group key (MenuGroup.key); none = shown at the top, outside any group */
+  group?: string | null;
+}
+
+/**
+ * A collapsible sidebar group (GET /api/v2/user/menu `groups`, in display order)
+ */
+export interface MenuGroup {
+  key: string;
+  name: string;
+  icon: string;
 }
 
 /**
@@ -2218,6 +2229,7 @@ export interface MenuResponse {
   menu: MenuItem[];
   main_menu: MenuItem[];
   secondary_menu: MenuItem[];
+  groups?: MenuGroup[];
   namespace: MenuNamespaceContext;
   permissions: NamespacePermissions;
   is_admin: boolean;
