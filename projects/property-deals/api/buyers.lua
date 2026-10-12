@@ -1,11 +1,15 @@
 -- Buyer profiles on an existing CRM contact or company:
 -- /api/v2/property-deals/buyer-profiles (list/show/create/update/delete).
 -- Exactly one of contact_uuid / account_uuid; both must be in this workspace.
+local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
+if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
+
 local sdk = require("helper.plugin-sdk")
 local db = require("lapis.db")
+local U = require("property_deals.util")
 
 return function(app)
-    -- Buyers page list with who each buyer is (api-requests/web-buyer-directory.md).
+    -- Buyers page list with who each buyer is (api-requests/web-buyer-directory.md). ?page=&per_page= (max 500).
     -- Registered before sdk.crud so /:id doesn't capture it.
     app:get("/buyer-profiles/directory", sdk.handler({ permission = "property_deals_buyers.read" }, function(self)
         local where, args = { "b.namespace_id = ?" }, { sdk.namespace_id(self) }
@@ -18,14 +22,17 @@ return function(app)
             where[#where + 1] = "b.pof_status = ?"
             args[#args + 1] = self.params.pof_status
         end
+        local page, per_page, offset = U.page(self.params, 500, 500)
+        args[#args + 1], args[#args + 2] = per_page, offset
         local rows = db.query([[
             SELECT b.*, TRIM(COALESCE(c.first_name || ' ' || COALESCE(c.last_name, ''), a.name)) AS name,
                    COALESCE(NULLIF(c.email, ''), NULLIF(a.email, '')) AS email
             FROM property_deals_buyer_profiles b
             LEFT JOIN crm_contacts c ON c.uuid = b.contact_uuid LEFT JOIN crm_accounts a ON a.uuid = b.account_uuid
-            WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY b.updated_at DESC LIMIT 500", unpack(args))
+            WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY b.updated_at DESC, b.id DESC LIMIT ? OFFSET ?",
+            unpack(args))
         for _, r in ipairs(rows) do r.id, r.namespace_id = nil, nil end
-        return sdk.ok(sdk.array(rows))
+        return sdk.ok(sdk.array(rows), { page = page, per_page = per_page })
     end))
 
     sdk.crud(app, "/buyer-profiles", {

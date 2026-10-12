@@ -7,6 +7,8 @@
 --     become new leads, so the team can reach them while they are buying.
 --   * Posts and pages a person captured (pasted or shared from the phone). Social networks are never fetched
 --     or scraped by us: their terms forbid it.
+-- A failed Companies House call counts as an error and lands in the connector's last_error; on its rate limit
+-- (429) the run stops and the rest waits for the next one. Each run also stops at its time budget.
 local cjson = require("cjson")
 local db = require("lapis.db")
 local U = require("property_deals.util")
@@ -68,6 +70,34 @@ local function since_for(lead)
     return math.max(floor, tonumber(lead.checked_epoch) - 2 * 86400)
 end
 
+local function out_of_time(deadline)
+    ngx.update_time()
+    return ngx.now() >= deadline
+end
+
+--- A Companies House GET that raises { status, message } on failure; a 404 is "nothing there" (nil).
+local function ch_get(ns, path)
+    local data, err, status = C.companies_house(ns, path)
+    if data then return data end
+    if status == 404 then return nil end
+    error({ ch_error = true, status = status, message = err }, 0)
+end
+
+local function ch_failed(what, e)
+    ngx.log(ngx.WARN, "[property_deals] companies house ", what, ": ", type(e) == "table" and tostring(e.message)
+        or tostring(e))
+    return type(e) == "table" and e.status == 429
+end
+
+--- The connector's last_error says what went wrong this run (and is cleared by a clean one).
+local function note(ns, errors, rate_limited)
+    db.query([[
+        UPDATE property_deals_connectors SET last_run_at = NOW(), last_error = ?, updated_at = NOW()
+        WHERE namespace_id = ? AND kind = 'companies_house' AND enabled
+    ]], rate_limited and "Companies House rate limit reached; the rest waits for the next run"
+        or errors > 0 and (errors .. " Companies House request(s) failed") or db.NULL, ns)
+end
+
 local function epoch(date)
     local y, m, d = tostring(date or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
     return y and os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }) or nil
@@ -75,8 +105,7 @@ end
 
 local function watch_company(ns, lead, since)
     local added = 0
-    local hist = C.companies_house(ns, "/company/" .. ngx.escape_uri(lead.company_number)
-        .. "/filing-history?items_per_page=15")
+    local hist = ch_get(ns, "/company/" .. ngx.escape_uri(lead.company_number) .. "/filing-history?items_per_page=15")
     for _, f in ipairs(hist and type(hist.items) == "table" and hist.items or {}) do
         local t = epoch(f.date)
         if t and t >= since then
@@ -100,12 +129,12 @@ end
 
 local function watch_officer(ns, lead, since)
     local added = 0
-    local appts = C.companies_house(ns, "/officers/" .. ngx.escape_uri(lead.ch_officer_id) .. "/appointments?items_per_page=20")
+    local appts = ch_get(ns, "/officers/" .. ngx.escape_uri(lead.ch_officer_id) .. "/appointments?items_per_page=20")
     for _, a in ipairs(appts and type(appts.items) == "table" and appts.items or {}) do
         local t = epoch(a.appointed_on)
         local to = type(a.appointed_to) == "table" and a.appointed_to or {}
         if t and t >= since and to.company_number then
-            local profile = C.companies_house(ns, "/company/" .. ngx.escape_uri(to.company_number)) or {}
+            local profile = ch_get(ns, "/company/" .. ngx.escape_uri(to.company_number)) or {}
             local created = epoch(profile.date_of_creation)
             local formed = created and math.abs(created - t) <= 14 * 86400
             local name = profile.company_name or to.company_name or to.company_number
@@ -126,8 +155,10 @@ local function watch_officer(ns, lead, since)
 end
 
 --- One pass of the watch. Leads with new news get a follow-up draft (property_deals.followups.auto).
--- @return { leads, signals, errors, followups }
-function S.watch(ns, settings)
+-- opts.budget: seconds to spend (default 600); leads not reached wait for the next run.
+-- @return { leads, signals, errors, followups, rate_limited? }
+function S.watch(ns, settings, opts)
+    local deadline = ngx.now() + ((opts or {}).budget or 600)
     local out = { leads = 0, signals = 0, errors = 0, followups = 0 }
     local fresh = {}
     if not C.of_kind(ns, "companies_house") then return out end
@@ -140,6 +171,7 @@ function S.watch(ns, settings)
         ORDER BY d.ch_checked_at NULLS FIRST LIMIT ?
     ]], ns, WATCH_BATCH)
     for _, lead in ipairs(leads) do
+        if out_of_time(deadline) then break end
         out.leads = out.leads + 1
         local since = since_for(lead)
         local ok, n = pcall(function()
@@ -153,10 +185,13 @@ function S.watch(ns, settings)
             if n > 0 then fresh[#fresh + 1] = lead.lead_uuid end
         else
             out.errors = out.errors + 1
-            ngx.log(ngx.WARN, "[property_deals] companies house watch lead=", lead.lead_uuid, ": ", tostring(n))
+            -- Rate limited: back off; this lead and the rest stay due for the next run.
+            if ch_failed("watch lead=" .. lead.lead_uuid, n) then out.rate_limited = true; break end
         end
-        db.update("property_deals_lead_details", { ch_checked_at = db.raw("NOW()") }, { lead_uuid = lead.lead_uuid })
+        db.update("property_deals_lead_details", { ch_checked_at = db.raw("NOW()") },
+            { namespace_id = ns, lead_uuid = lead.lead_uuid })
     end
+    if out.leads > 0 then note(ns, out.errors, out.rate_limited) end
     if #fresh > 0 then
         local ok, n = pcall(require("property_deals.followups").auto, ns, fresh, settings)
         out.followups = ok and n or 0
@@ -177,9 +212,45 @@ local function split_name(officer)
     return tidy(tostring(officer or "Director")), ""
 end
 
---- @return { areas, companies, leads }
-function S.new_companies(ns, settings)
-    local out = { areas = 0, companies = 0, leads = 0 }
+--- One lead per new company, even when two runs overlap (the check is repeated under a lock).
+local function lead_from_company(ns, co, area, ext)
+    local officers = ch_get(ns, "/company/" .. ngx.escape_uri(co.company_number) .. "/officers?items_per_page=10") or {}
+    local director
+    for _, o in ipairs(type(officers.items) == "table" and officers.items or {}) do
+        if not o.resigned_on and (o.officer_role == "director" or not director) then director = o end
+    end
+    local first, last = split_name(director and director.name)
+    local officer_id = director and type(director.links) == "table" and type(director.links.officer) == "table"
+        and tostring(director.links.officer.appointments or ""):match("^/officers/([^/]+)/") or nil
+    return U.tx(function()
+        db.query("SELECT pg_advisory_xact_lock(hashtext(?))", "property_deals:" .. ns .. ":" .. ext)
+        if U.one("SELECT 1 FROM property_deals_lead_signals WHERE namespace_id = ? AND external_id = ?", ns, ext) then
+            return false
+        end
+        local lead = require("queries.CrmLeadQueries").createLead({
+            namespace_id = ns, first_name = first, last_name = last, company_name = co.company_name,
+            source = "companies_house", channel = "data", status = "new",
+            notes = "New property company formed " .. tostring(co.date_of_creation)
+                .. " (SIC " .. table.concat(type(co.sic_codes) == "table" and co.sic_codes or {}, ", ") .. "), "
+                .. area .. ". Found by the Companies House watch: check before contacting.",
+        })
+        db.insert("property_deals_lead_details", { namespace_id = ns, lead_uuid = lead.uuid,
+            lead_kind = "buyer_investor", company_number = co.company_number,
+            ch_officer_id = officer_id or db.NULL, ch_checked_at = db.raw("NOW()") })
+        S.add(ns, lead.uuid, { kind = "company_formed", source = "companies_house",
+            title = "Set up " .. tostring(co.company_name) .. " on " .. tostring(co.date_of_creation),
+            url = "https://find-and-update.company-information.service.gov.uk/company/" .. co.company_number,
+            occurred_at = co.date_of_creation, external_id = ext,
+            data = { company_number = co.company_number, sic_codes = co.sic_codes, area = area } })
+        return true
+    end)
+end
+
+--- One failing company or area never stops the others; a rate limit (429) stops the run.
+-- opts.budget: seconds to spend (default 600). @return { areas, companies, leads, errors, rate_limited? }
+function S.new_companies(ns, settings, opts)
+    local deadline = ngx.now() + ((opts or {}).budget or 600)
+    local out = { areas = 0, companies = 0, leads = 0, errors = 0 }
     settings = settings or {}
     local areas = tostring(settings.ch_new_company_areas or "")
     if areas:match("^%s*$") or not C.of_kind(ns, "companies_house") then return out end
@@ -187,47 +258,33 @@ function S.new_companies(ns, settings)
     local from = os.date("!%Y-%m-%d", os.time() - 7 * 86400)
     for area in areas:gmatch("[^,]+") do
         area = area:gsub("^%s+", ""):gsub("%s+$", "")
-        if area ~= "" then
+        if area ~= "" and not out.rate_limited and not out_of_time(deadline) then
             out.areas = out.areas + 1
-            local res = C.companies_house(ns, "/advanced-search/companies?" .. require("property_deals.http").query({
+            local ok, res = pcall(ch_get, ns, "/advanced-search/companies?" .. require("property_deals.http").query({
                 incorporated_from = from, sic_codes = sic, location = area, size = 100 }))
+            if not ok then
+                out.errors = out.errors + 1
+                out.rate_limited = ch_failed("new companies in " .. area, res) or nil
+                res = nil
+            end
             local made = 0
             for _, co in ipairs(res and type(res.items) == "table" and res.items or {}) do
-                if made >= NEW_COMPANY_CAP then break end
+                if made >= NEW_COMPANY_CAP or out.rate_limited or out_of_time(deadline) then break end
                 out.companies = out.companies + 1
                 local ext = "ch-new:" .. tostring(co.company_number)
                 if not U.one("SELECT 1 FROM property_deals_lead_signals WHERE namespace_id = ? AND external_id = ?", ns, ext) then
-                    local officers = C.companies_house(ns, "/company/" .. ngx.escape_uri(co.company_number)
-                        .. "/officers?items_per_page=10") or {}
-                    local director
-                    for _, o in ipairs(type(officers.items) == "table" and officers.items or {}) do
-                        if not o.resigned_on and (o.officer_role == "director" or not director) then director = o end
+                    local cok, created = pcall(lead_from_company, ns, co, area, ext)
+                    if not cok then
+                        out.errors = out.errors + 1
+                        out.rate_limited = ch_failed("new company " .. tostring(co.company_number), created) or nil
+                    elseif created then
+                        made, out.leads = made + 1, out.leads + 1
                     end
-                    local first, last = split_name(director and director.name)
-                    local officer_id = director and type(director.links) == "table" and type(director.links.officer) == "table"
-                        and tostring(director.links.officer.appointments or ""):match("^/officers/([^/]+)/") or nil
-                    U.tx(function()
-                        local lead = require("queries.CrmLeadQueries").createLead({
-                            namespace_id = ns, first_name = first, last_name = last, company_name = co.company_name,
-                            source = "companies_house", channel = "data", status = "new",
-                            notes = "New property company formed " .. tostring(co.date_of_creation)
-                                .. " (SIC " .. table.concat(type(co.sic_codes) == "table" and co.sic_codes or {}, ", ") .. "), "
-                                .. area .. ". Found by the Companies House watch: check before contacting.",
-                        })
-                        db.insert("property_deals_lead_details", { namespace_id = ns, lead_uuid = lead.uuid,
-                            lead_kind = "buyer_investor", company_number = co.company_number,
-                            ch_officer_id = officer_id or db.NULL, ch_checked_at = db.raw("NOW()") })
-                        S.add(ns, lead.uuid, { kind = "company_formed", source = "companies_house",
-                            title = "Set up " .. tostring(co.company_name) .. " on " .. tostring(co.date_of_creation),
-                            url = "https://find-and-update.company-information.service.gov.uk/company/" .. co.company_number,
-                            occurred_at = co.date_of_creation, external_id = ext,
-                            data = { company_number = co.company_number, sic_codes = co.sic_codes, area = area } })
-                    end)
-                    made, out.leads = made + 1, out.leads + 1
                 end
             end
         end
     end
+    if out.areas > 0 then note(ns, out.errors, out.rate_limited) end
     return out
 end
 

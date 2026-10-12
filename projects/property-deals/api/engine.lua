@@ -2,7 +2,8 @@
 --   POST /engine/run { "checks": ["sla", "health", "compliance_expiry", "digest", "agents", "mail", "scout", "nightly",
 --                                 "signals"] }
 --   (default: sla + health)
--- The same work the scheduled jobs do (jobs/*.lua); useful after bulk edits and in tests.
+-- The same work the scheduled jobs do (jobs/*.lua); useful after bulk edits and in tests. The checks that
+-- call other services (mail, signals, scout) share a ~25 s budget here; what's left waits for the job.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -21,6 +22,11 @@ return function(app)
             if not CHECKS[c] then return sdk.error(422, "Validation failed", { checks = "unknown check '" .. tostring(c) .. "'" }) end
         end
         local ns, settings = sdk.namespace_id(self), sdk.settings(self)
+        local deadline = ngx.now() + 25
+        local function budget()
+            ngx.update_time()
+            return { budget = math.max(1, deadline - ngx.now()) }
+        end
         local out = {}
         for _, c in ipairs(checks) do
             if c == "sla" then
@@ -37,17 +43,18 @@ return function(app)
             elseif c == "agents" then
                 out.agents = require("property_deals.ai.tick").run(ns, settings)
             elseif c == "mail" then
-                out.mail = require("property_deals.mail").sync_all(ns)
+                out.mail = require("property_deals.mail").sync_all(ns, budget())
             elseif c == "nightly" then
                 out.nightly = require("property_deals.retention").run(ns, settings)
                 out.nightly.suppliers = require("property_deals.reports").update_supplier_stats(ns)
             elseif c == "signals" then
                 local Signals = require("property_deals.signals")
-                out.signals = { watch = Signals.watch(ns, settings), new_companies = Signals.new_companies(ns, settings) }
+                out.signals = { watch = Signals.watch(ns, settings, budget()),
+                    new_companies = Signals.new_companies(ns, settings, budget()) }
             elseif c == "scout" then
                 local Scout = require("property_deals.scout")
                 out.scout = Scout.run(ns, settings)
-                out.scout.synced = Scout.sync(ns)
+                out.scout.synced = Scout.sync(ns, budget())
             end
         end
         return sdk.ok(out)

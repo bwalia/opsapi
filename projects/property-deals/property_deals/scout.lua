@@ -6,6 +6,7 @@
 --   cash_only  marked cash buyers only
 -- Each home + kind + price alerts once (unique index), so re-runs are quiet.
 -- Also syncs connectors that have sync_enabled for the postcodes the workspace cares about.
+-- A saved search that can't run (no usable pin or polygon) is skipped and logged; the others still run.
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
@@ -13,24 +14,25 @@ local S = {}
 
 local function area_sql(s)
     local poly = U.json(s.polygon)
-    if type(poly) == "table" and #poly >= 3 then
-        local coords, minlat, maxlat, minlng, maxlng = {}, 90, -90, 180, -180
-        for _, pt in ipairs(poly) do
-            local lat, lng = tonumber(pt[1]), tonumber(pt[2])
-            if lat and lng then
-                coords[#coords + 1] = string.format("(%f,%f)", lng, lat)
-                minlat, maxlat = math.min(minlat, lat), math.max(maxlat, lat)
-                minlng, maxlng = math.min(minlng, lng), math.max(maxlng, lng)
-            end
+    local coords, minlat, maxlat, minlng, maxlng = {}, 90, -90, 180, -180
+    for _, pt in ipairs(type(poly) == "table" and poly or {}) do
+        local lat = type(pt) == "table" and tonumber(pt[1])
+        local lng = type(pt) == "table" and tonumber(pt[2])
+        if lat and lng then
+            coords[#coords + 1] = string.format("(%f,%f)", lng, lat)
+            minlat, maxlat = math.min(minlat, lat), math.max(maxlat, lat)
+            minlng, maxlng = math.min(minlng, lng), math.max(maxlng, lng)
         end
+    end
+    if #coords >= 3 then
         return string.format("m.lat BETWEEN %f AND %f AND m.lng BETWEEN %f AND %f AND polygon '(%s)' @> point(m.lng, m.lat)",
             minlat, maxlat, minlng, maxlng, table.concat(coords, ","))
     end
     local lat, lng, r = tonumber(s.lat), tonumber(s.lng), tonumber(s.radius_miles) or 25
+    if not lat or not lng then U.fail(422, "This saved search has no usable pin or polygon") end
     local dlat, dlng = r / 69.0, r / math.max(0.01, 69.0 * math.cos(math.rad(lat)))
-    return string.format("m.lat BETWEEN %f AND %f AND m.lng BETWEEN %f AND %f AND "
-        .. "earth_distance(ll_to_earth(m.lat, m.lng), ll_to_earth(%f, %f)) <= %f",
-        lat - dlat, lat + dlat, lng - dlng, lng + dlng, lat, lng, r * 1609.344)
+    return string.format("m.lat BETWEEN %f AND %f AND m.lng BETWEEN %f AND %f AND %s <= %f",
+        lat - dlat, lat + dlat, lng - dlng, lng + dlng, U.miles_sql("m.lat", "m.lng", lat, lng), r)
 end
 
 local function filters_sql(s)
@@ -80,10 +82,15 @@ function S.run_search(ns, s)
 end
 
 function S.run(ns, settings)
-    local total = { searches = 0, alerts = 0 }
+    local total = { searches = 0, alerts = 0, errors = 0 }
     for _, s in ipairs(db.query("SELECT * FROM property_deals_saved_searches WHERE namespace_id = ? AND alerts", ns)) do
-        local r = S.run_search(ns, s)
-        local n = r.new + r.reduced + r.stale + r.cash_only
+        local ok, r = pcall(S.run_search, ns, s)
+        local n = ok and (r.new + r.reduced + r.stale + r.cash_only) or 0
+        if not ok then
+            total.errors = total.errors + 1
+            ngx.log(ngx.WARN, "[property_deals] deal scout: saved search ", s.uuid, " skipped: ",
+                type(r) == "table" and tostring(r.message) or tostring(r))
+        end
         total.searches, total.alerts = total.searches + 1, total.alerts + n
         if n > 0 and s.owner_user_uuid ~= db.NULL then
             local parts = {}
@@ -99,8 +106,10 @@ function S.run(ns, settings)
 end
 
 --- Fetch fresh data for the postcodes the workspace cares about: its active deals'
--- properties and its saved searches' pins (nearest postcode). At most 25 per run.
-function S.sync(ns)
+-- properties and its saved searches' pins (nearest postcode). At most 25 per run, within
+-- opts.budget seconds (default 600).
+function S.sync(ns, opts)
+    local deadline = ngx.now() + ((opts or {}).budget or 600)
     local C = require("property_deals.connectors")
     local conns = db.query([[SELECT * FROM property_deals_connectors WHERE namespace_id = ? AND enabled AND sync_enabled
         AND kind IN ('price_paid', 'epc')]], ns)
@@ -112,12 +121,15 @@ function S.sync(ns)
         WHERE d.namespace_id = ? AND d.status = 'active' AND p.postcode IS NOT NULL
     ]], ns)) do add(r.postcode) end
     for _, s in ipairs(db.query("SELECT lat, lng FROM property_deals_saved_searches WHERE namespace_id = ? AND lat IS NOT NULL", ns)) do
+        if #postcodes >= 25 or ngx.now() >= deadline then break end
         local ok, p = pcall(C.reverse_geocode, ns, s.lat, s.lng)
         if ok then add(p) end
     end
     local stored = 0
     for _, c in ipairs(conns) do
         for _, p in ipairs(postcodes) do
+            ngx.update_time()
+            if ngx.now() >= deadline then break end
             local r = C.run(ns, c, { postcode = p })
             if r then stored = stored + r.stored end
         end

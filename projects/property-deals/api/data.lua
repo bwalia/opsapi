@@ -1,13 +1,14 @@
 -- Map data, connectors, matching and the deal scout (SPEC §3.6, §3.7):
 --   GET/POST /connectors, GET/PUT/DELETE /connectors/:id      data sources (secrets sealed, never returned)
 --   POST /connectors/:id/run { postcode }                      fetch now → { fetched, stored }
---   GET  /market-records ?record_type=&postcode=&per_page=     what connectors / imports brought in
---   POST /market-records/import { record_type, csv, source? }  CSV with a header row (auction lots, agent feeds)
+--   GET  /market-records ?record_type=&postcode=&page=&per_page=   what connectors / imports brought in
+--   POST /market-records/import { record_type, csv, source? }  CSV with a header row (auction lots, agent feeds);
+--                                                              at most 5,000 rows, stored all or nothing
 --   POST /properties/:id/enrich                                EPC register + nearby sold prices for a property
 --   GET  /companies/search?q=                                  Companies House search
 --   POST /buyer-profiles/:id/company-check { company_number? } Companies House profile + officers + flags
 --   /saved-searches (CRUD) + POST /saved-searches/:id/run      the deal scout's pins
---   GET  /scout-alerts ?saved_search_uuid=&unseen=true · POST /scout-alerts/seen { uuids? }
+--   GET  /scout-alerts ?saved_search_uuid=&unseen=true&page=&per_page= · POST /scout-alerts/seen { uuids? }
 --   POST /matches/recompute { property_uuid?, buyer_profile_uuid? }
 --   GET  /properties/:id/matches · GET /buyer-profiles/:id/matches   with the score breakdown
 --   POST /matches/:id/send { subject?, body? }                 deal pack to the buyer — through an approval
@@ -22,27 +23,42 @@ local U = require("property_deals.util")
 local Connectors = require("property_deals.connectors")
 local Market = require("property_deals.market")
 
---- Minimal RFC 4180 CSV: quoted fields, "" escapes, CRLF or LF.
-local function parse_csv(text)
-    local rows, row, field, i, inq = {}, {}, {}, 1, false
-    local n = #text
+local MAX_IMPORT_ROWS = 5000
+
+--- Minimal RFC 4180 CSV: quoted fields, "" escapes, CRLF or LF. Jumps field to field with find (a
+-- 5 MB file in well under a second); stops after max_rows rows.
+local function parse_csv(text, max_rows)
+    local rows, row, i, n = {}, {}, 1, #text
     while i <= n do
-        local c = text:sub(i, i)
-        if inq then
-            if c == '"' then
-                if text:sub(i + 1, i + 1) == '"' then field[#field + 1] = '"'; i = i + 1 else inq = false end
-            else field[#field + 1] = c end
-        elseif c == '"' then inq = true
-        elseif c == "," then row[#row + 1] = table.concat(field); field = {}
-        elseif c == "\n" or c == "\r" then
-            if c == "\r" and text:sub(i + 1, i + 1) == "\n" then i = i + 1 end
-            row[#row + 1] = table.concat(field); field = {}
+        local field
+        if text:sub(i, i) == '"' then
+            local buf = {}
+            i = i + 1
+            while true do
+                local q = text:find('"', i, true)
+                if not q then buf[#buf + 1] = text:sub(i); i = n + 1; break end
+                buf[#buf + 1] = text:sub(i, q - 1)
+                if text:sub(q + 1, q + 1) == '"' then buf[#buf + 1] = '"'; i = q + 2 else i = q + 1; break end
+            end
+            local e = text:find("[,\r\n]", i) or (n + 1)
+            field, i = table.concat(buf) .. text:sub(i, e - 1), e
+        else
+            local e = text:find("[,\r\n]", i) or (n + 1)
+            field, i = text:sub(i, e - 1), e
+        end
+        row[#row + 1] = field
+        if text:sub(i, i) == "," then
+            i = i + 1
+            if i > n then row[#row + 1] = "" end
+        else
+            if text:sub(i, i + 1) == "\r\n" then i = i + 1 end
+            i = i + 1
             if #row > 1 or row[1] ~= "" then rows[#rows + 1] = row end
             row = {}
-        else field[#field + 1] = c end
-        i = i + 1
+            if #rows >= max_rows then return rows end
+        end
     end
-    if #field > 0 or #row > 0 then row[#row + 1] = table.concat(field); rows[#rows + 1] = row end
+    if #row > 0 then rows[#rows + 1] = row end
     return rows
 end
 
@@ -119,10 +135,11 @@ return function(app)
         if self.params.postcode and self.params.postcode ~= "" then
             where[#where + 1] = "UPPER(REPLACE(postcode, ' ', '')) = UPPER(REPLACE(?, ' ', ''))"; args[#args + 1] = self.params.postcode
         end
-        local per_page = math.max(1, math.min(200, tonumber(self.params.per_page) or 50))
-        args[#args + 1] = per_page
+        local page, per_page, offset = U.page(self.params, 50, 200)
+        args[#args + 1], args[#args + 2] = per_page, offset
         return sdk.ok(sdk.array(db.query("SELECT * FROM property_deals_market_records WHERE " .. table.concat(where, " AND ")
-            .. " ORDER BY event_date DESC NULLS LAST, id DESC LIMIT ?", unpack(args))))
+            .. " ORDER BY event_date DESC NULLS LAST, id DESC LIMIT ? OFFSET ?", unpack(args))),
+            { page = page, per_page = per_page })
     end))
 
     app:post("/market-records/import", sdk.handler({ permission = "property_deals_properties.create" }, U.guard(function(self)
@@ -133,7 +150,8 @@ return function(app)
         end
         if type(body.csv) ~= "string" or #body.csv < 3 then return sdk.error(422, "Validation failed", { csv = "CSV text with a header row" }) end
         if #body.csv > 5 * 1024 * 1024 then return sdk.error(413, "CSV over 5 MB; split it") end
-        local rows = parse_csv(body.csv)
+        local rows = parse_csv(body.csv, MAX_IMPORT_ROWS + 2)
+        if #rows > MAX_IMPORT_ROWS + 1 then return sdk.error(413, "Over 5,000 rows; split the CSV") end
         local head = {}
         for i, h in ipairs(rows[1] or {}) do head[i] = h:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("[%s%-]+", "_") end
         local records, skipped = {}, 0
@@ -198,7 +216,8 @@ return function(app)
             name = { type = "string", required = true, max = 120 },
             lat = { type = "number", min = -90, max = 90 }, lng = { type = "number", min = -180, max = 180 },
             radius_miles = { type = "number", min = 1, max = 100, label = "Radius (miles), default 25" },
-            polygon = { type = "json", label = "[[lat,lng], ...] instead of a pin" },
+            -- Checked by the database (3 to 200 [lat, lng] number pairs in range), else 422.
+            polygon = { type = "json", label = "[[lat,lng], ...] (3 to 200 points) instead of a pin" },
             filters = { type = "json", label = "{ min_price, max_price, min_bedrooms, property_types[], record_types[] }" },
             alerts = { type = "boolean" }, stale_after_days = { type = "integer", min = 7, max = 365 },
             owner_user_uuid = { type = "uuid" },
@@ -220,6 +239,8 @@ return function(app)
         local where, args = { "a.namespace_id = ?" }, { ns }
         if U.is_uuid(self.params.saved_search_uuid) then where[#where + 1] = "a.saved_search_uuid = ?"; args[#args + 1] = self.params.saved_search_uuid end
         if self.params.unseen == "true" then where[#where + 1] = "a.seen_at IS NULL" end
+        local page, per_page, offset = U.page(self.params, 200, 200)
+        args[#args + 1], args[#args + 2] = per_page, offset
         return sdk.ok(sdk.array(db.query([[
             SELECT a.uuid, a.saved_search_uuid, s.name AS saved_search_name, a.kind, a.detail, a.price, a.previous_price,
                    a.seen_at, a.created_at, m.uuid AS market_record_uuid, m.record_type, m.address, m.postcode, m.lat, m.lng,
@@ -227,7 +248,8 @@ return function(app)
             FROM property_deals_scout_alerts a
             JOIN property_deals_saved_searches s ON s.uuid = a.saved_search_uuid
             JOIN property_deals_market_records m ON m.uuid = a.market_record_uuid
-            WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY a.created_at DESC LIMIT 200", unpack(args))))
+            WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+            unpack(args))), { page = page, per_page = per_page })
     end))
 
     app:post("/scout-alerts/seen", sdk.handler({ permission = "property_deals_properties.read" }, U.guard(function(self)

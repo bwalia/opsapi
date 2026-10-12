@@ -5,7 +5,8 @@
 --   GET /reports/supplier-speed   per supplier: bookings, hours to confirm / to done, on-time %
 --   GET /reports/party-speed      solicitors, lenders, councils…: hours to reply to chases, days to clear enquiries
 --   GET /reports/ai-usage         spend and runs per day and agent, approval outcomes per agent
---   GET /export/:entity           ?format=csv|json&from=&to=   a workspace's data (managers; at most 50,000 rows)
+--   GET /export/:entity           ?format=csv|json&from=&to=&page=   a workspace's data (managers; 10,000 rows a
+--                                 page, oldest first; X-Next-Page says there is more)
 -- Default window: the last 90 days. Times are UTC.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -24,7 +25,7 @@ local EXPORTS = {
     approvals = "property_deals_approvals", agent_runs = "property_deals_agent_runs", matches = "property_deals_matches",
     market_records = "property_deals_market_records", stage_history = "property_deals_stage_history",
 }
-local MAX_ROWS = 50000
+local MAX_ROWS = 10000 -- one page; built in memory, so keep it bounded
 
 local function csv_cell(v)
     if v == nil or v == db.NULL or v == cjson.null then return "" end
@@ -67,14 +68,18 @@ return function(app)
         if type(from) == "string" and from:match("^%d%d%d%d%-%d%d%-%d%d$") then where[#where + 1] = date_col .. " >= ?::date"; args[#args + 1] = from end
         if type(to) == "string" and to:match("^%d%d%d%d%-%d%d%-%d%d$") then where[#where + 1] = date_col .. " < ?::date"; args[#args + 1] = to end
         -- Never export sealed secrets or raw prompts' hidden fields; the tables here hold none, but be explicit.
+        local page = require("helper.global").pageParam(self.params.page)
         local rows = db.query("SELECT * FROM " .. tbl .. " WHERE " .. table.concat(where, " AND ") .. " ORDER BY id LIMIT "
-            .. (MAX_ROWS + 1), unpack(args))
+            .. (MAX_ROWS + 1) .. " OFFSET " .. ((page - 1) * MAX_ROWS), unpack(args))
         local truncated = #rows > MAX_ROWS
         if truncated then table.remove(rows) end
         for _, r in ipairs(rows) do r.id, r.namespace_id, r.secret_sealed = nil, nil, nil end
         local stamp = os.date("!%Y%m%d")
         ngx.header["Content-Disposition"] = 'attachment; filename="property-deals-' .. self.params.entity .. "-" .. stamp .. "." .. format .. '"'
-        if truncated then ngx.header["X-Truncated"] = tostring(MAX_ROWS) end
+        if truncated then
+            ngx.header["X-Truncated"] = tostring(MAX_ROWS)
+            ngx.header["X-Next-Page"] = tostring(page + 1)
+        end
         if format == "json" then
             return { status = 200, layout = false, content_type = "application/json", cjson.encode(U.array(rows)) }
         end
