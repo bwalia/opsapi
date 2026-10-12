@@ -1,5 +1,5 @@
--- Runs: who may start one, the prompt, conflicts, the run lifecycle (start, claim, status, cancel, retry, sweep).
--- docs/AI_RUNNER.md §9 (conflicts), §12 + §22.1 (RBAC), §22.2-22.4 (contract).
+-- Runs: who may start one, the prompt, conflicts, the run lifecycle (start, approve, claim, status, cancel, retry,
+-- sweep), who decides what. docs/AI_RUNNER.md §9 (conflicts), §12 + §22.1 (RBAC), §22.2-22.4 + §23 (contract).
 local cjson = require("cjson")
 local db = require("lapis.db")
 local sdk = require("helper.plugin-sdk")
@@ -8,13 +8,17 @@ local U = require("ai_runner.util")
 local R = {}
 
 R.HEARTBEAT_S, R.CLAIM_WAIT_S, R.LEASE_S, R.ONLINE_S = 15, 25, 60, 45
-R.QUEUE_HOURS = 24
+R.QUEUE_HOURS, R.APPROVAL_HOURS = 24, 72
 
-local OPEN = { "queued", "claimed", "starting", "running", "waiting_permission", "needs_input", "cancelling" }
+-- pending_approval is open (one run per task, holds the folder lock) but not active: no runner may claim it.
+local OPEN = { "pending_approval", "queued", "claimed", "starting", "running", "waiting_permission", "needs_input",
+    "cancelling" }
 local ACTIVE = { "claimed", "starting", "running", "waiting_permission", "needs_input", "cancelling" }
-R.STATUSES = { "queued", "claimed", "starting", "running", "waiting_permission", "needs_input", "cancelling",
-    "succeeded", "failed", "cancelled", "lost" }
+R.STATUSES = { "pending_approval", "queued", "claimed", "starting", "running", "waiting_permission", "needs_input",
+    "cancelling", "succeeded", "failed", "cancelled", "lost" }
 R.TERMINAL = { succeeded = true, failed = true, cancelled = true, lost = true }
+R.IS_ACTIVE = {}
+for _, s in ipairs(ACTIVE) do R.IS_ACTIVE[s] = true end
 R.OUTPUT_MODES = { "pull_request", "branch", "local" }
 
 local function sql_list(list)
@@ -24,19 +28,21 @@ local function sql_list(list)
 end
 R.OPEN_SQL, R.ACTIVE_SQL = sql_list(OPEN), sql_list(ACTIVE)
 
--- What a runner may report from each status (§22.2). The same status again (higher seq) updates its fields.
--- cancelling -> starting/running keeps cancelling (the runner hadn't seen the cancel yet); a lost run may still
--- report how it ended (the runner was cut off, then replayed its buffered updates).
+-- What a runner may report from each status (§22.2, §23.1). The same status again (higher seq) updates its fields.
+-- cancelling stays cancelling whatever working state comes in (the runner hadn't seen the cancel yet); a lost run
+-- may still report how it ended (the runner was cut off, then replayed its buffered updates).
 local FINAL = { succeeded = true, failed = true, cancelled = true }
+local WORKING = { running = true, waiting_permission = true, needs_input = true }
 local MOVES = {
     claimed = { starting = true, running = true },
     starting = { starting = true, running = true },
-    running = { running = true },
-    waiting_permission = { running = true },
-    needs_input = { running = true },
+    running = WORKING,
+    waiting_permission = WORKING,
+    needs_input = WORKING,
     cancelling = {},
     lost = {},
 }
+local STICKY = { starting = true, running = true, waiting_permission = true, needs_input = true }
 
 -- ---------------------------------------------------------------------------
 -- Tasks and who may act on them
@@ -82,9 +88,11 @@ function R.can_start(self, task)
     return mine or privileged, privileged, mine and me or list[1]
 end
 
---- Every run visible to the caller? (ai_runs.manage, or projects.manage, which makes one admin of every project.)
+--- Every run visible to the caller? (ai_runs.manage; ai_runs_approvals.manage, who decide for any run; or
+-- projects.manage, which makes one admin of every project.)
 function R.sees_all(self)
-    return sdk.can(self, "ai_runs", "manage") or sdk.can(self, "projects", "manage")
+    return sdk.can(self, "ai_runs", "manage") or sdk.can(self, "ai_runs_approvals", "manage")
+        or sdk.can(self, "projects", "manage")
 end
 
 --- SQL condition (+ values) limiting runs `r` to the ones the caller sees: their own (requested, or on a task
@@ -107,9 +115,39 @@ function R.find_visible(self, ns, run_uuid)
     return U.one("SELECT r.* FROM ar_runs r WHERE r.uuid = ? AND r.namespace_id = ? AND " .. cond, unpack(args))
 end
 
---- Cancel / retry: the requester or ai_runs.manage (§22.1).
+--- A run of this workspace, whoever may see it (deciders are checked by the caller).
+function R.find(ns, run_uuid)
+    if not U.is_uuid(run_uuid) then return nil end
+    return U.one("SELECT * FROM ar_runs WHERE uuid = ? AND namespace_id = ?", run_uuid, ns)
+end
+
+--- Cancel / retry / messages: the requester or ai_runs.manage (§22.1, §23.3).
 function R.may_control(self, run)
     return run.requested_by == sdk.user(self).uuid or sdk.can(self, "ai_runs", "manage")
+end
+
+--- A manager of the project's runs (§23.3): ai_runs_approvals.manage, ai_runs.manage, or an owner or admin of the
+-- project. Managers decide start approvals always, permission requests when the policy names them.
+function R.is_manager(self, project_uuid)
+    if sdk.can(self, "ai_runs_approvals", "manage") or sdk.can(self, "ai_runs", "manage") then return true end
+    if not project_uuid then return false end
+    self._ar_admin_of = self._ar_admin_of or {} -- /waiting asks for many runs of a few projects
+    local known = self._ar_admin_of[project_uuid]
+    if known == nil then
+        local p = U.one("SELECT id FROM kanban_projects WHERE uuid = ? AND namespace_id = ?", project_uuid,
+            sdk.namespace_id(self))
+        known = p ~= nil and project_admin(p.id, sdk.user(self).uuid)
+        self._ar_admin_of[project_uuid] = known
+    end
+    return known
+end
+
+--- May the caller decide this run's permission requests? Per the workspace approval_policy.deciders.
+function R.can_decide(self, run, deciders)
+    local requester = run.requested_by == sdk.user(self).uuid
+    if deciders == "requester" then return requester end
+    if deciders == "requester_or_managers" and requester then return true end
+    return R.is_manager(self, run.project_uuid)
 end
 
 -- ---------------------------------------------------------------------------
@@ -119,7 +157,8 @@ end
 R.SETTINGS_DEFAULTS = {
     output_mode = "pull_request", pr_draft = true, pr_base = "main", max_run_minutes = 60,
     task_automation = { in_progress_on_start = false, review_on_success = false },
-    approval_policy = { deciders = "managers", require_start_approval = false },
+    approval_policy = { deciders = "managers", require_start_approval = false, permission_timeout_minutes = 30,
+        input_timeout_minutes = 60 },
 }
 
 function R.settings(ns)
@@ -179,6 +218,7 @@ Rules:
 - Work only in {{repo_path}}, only on the branch {{work_branch}}. Never switch to, commit on or push to main.
 - Never print, commit or log secrets (keys, tokens, passwords, .env files).
 - Do not merge anything.
+- If you cannot continue without an answer from a person, end your reply with a line `NEEDS_INPUT: <your question>`.
 - When you are done, summarise what you changed in one short paragraph as your last message.
 ]]
 
@@ -301,6 +341,10 @@ function R.busy_session(ns, runner_uuid, repo_path)
         ORDER BY updated_at DESC NULLS LAST LIMIT 1]], ns, runner_uuid, repo_path, #repo_path + 1, repo_path .. "/")
 end
 
+local function release_locks(run_uuid)
+    db.query("DELETE FROM ar_locks WHERE run_uuid = ?", run_uuid)
+end
+
 local function conflict(kind, message, details)
     local c = { type = kind }
     for k, v in pairs(details or {}) do c[k] = v end
@@ -344,9 +388,17 @@ function R.notify(run)
     end
 end
 
---- Create a queued run and take its folder lock in one transaction (§9 layers 1-3).
+--- Must a manager approve this run before it is queued (§23.3)? Always for a profile whose permission prompts
+-- can't be bridged (approval "unsupported", e.g. Cursor); with require_start_approval, when the requester isn't one.
+function R.needs_approval(ns, profile, requester_is_manager)
+    if type(profile) == "table" and profile.approval == "unsupported" then return true end
+    return R.settings(ns).approval_policy.require_start_approval == true and not requester_is_manager
+end
+
+--- Create a queued (or pending_approval) run and take its folder lock in one transaction (§9 layers 1-3).
 -- inp: runner_uuid, profile, model, repo_path, prompt, template_uuid, template_version, output_mode,
---      pr_draft, pr_base, base_branch, timeout_s, attempt, retry_of, idempotency_key, assignee_uuid
+--      pr_draft, pr_base, base_branch, timeout_s, attempt, retry_of, idempotency_key, assignee_uuid,
+--      requester_is_manager
 -- @return run row
 function R.create(ns, user_uuid, task, inp)
     local runner = R.runner(ns, inp.runner_uuid)
@@ -375,6 +427,7 @@ function R.create(ns, user_uuid, task, inp)
     end
 
     local prompt = inp.prompt
+    local status = R.needs_approval(ns, profile, inp.requester_is_manager) and "pending_approval" or "queued"
     local ok, res = pcall(U.tx, function()
         local run = db.insert("ar_runs", {
             namespace_id = ns, task_uuid = task.uuid, project_uuid = task.project_uuid,
@@ -388,7 +441,7 @@ function R.create(ns, user_uuid, task, inp)
             output_mode = inp.output_mode, pr_draft = inp.pr_draft, pr_base = inp.pr_base or db.NULL,
             prompt = prompt, template_uuid = inp.template_uuid or db.NULL,
             template_version = inp.template_version or 0, prompt_sha256 = U.sha256(prompt),
-            status = "queued", attempt = inp.attempt or 1, retry_of = inp.retry_of or db.NULL,
+            status = status, attempt = inp.attempt or 1, retry_of = inp.retry_of or db.NULL,
             idempotency_key = inp.idempotency_key or db.NULL, timeout_s = inp.timeout_s or db.NULL,
         }, { returning = "*" })[1]
         db.query([[INSERT INTO ar_locks (lock_key, namespace_id, run_uuid, runner_uuid, scope, repo_path)
@@ -408,17 +461,53 @@ function R.create(ns, user_uuid, task, inp)
     end
 
     -- After the commit: none of these may undo the start.
-    local settings = R.settings(ns)
-    if settings.task_automation.in_progress_on_start == true then
-        R.move_task(task.uuid, "in_progress", "in progress")
-    end
+    if status == "queued" then R.on_queued(res) end
     pcall(function()
         require("queries.KanbanTaskQueries").addComment({ task_id = task.id, user_uuid = user_uuid,
-            content = "AI run started by " .. display_name(user_uuid) .. " on " .. runner.name
-                .. (res.attempt > 1 and (" (attempt " .. res.attempt .. ")") or "") .. "." })
+            content = "AI run " .. (status == "queued" and "started" or "requested") .. " by "
+                .. display_name(user_uuid) .. " on " .. runner.name
+                .. (res.attempt > 1 and (" (attempt " .. res.attempt .. ")") or "")
+                .. (status == "queued" and "." or "; a manager must approve it before it starts.") })
     end)
     R.notify(res)
     return res
+end
+
+--- Task automation when a run enters the queue (at start, or when a manager approves it).
+function R.on_queued(run)
+    if R.settings(run.namespace_id).task_automation.in_progress_on_start == true then
+        R.move_task(run.task_uuid, "in_progress", "in progress")
+    end
+end
+
+local function not_pending(run)
+    local now = U.one("SELECT status FROM ar_runs WHERE id = ?", run.id)
+    U.fail(409, "This run is not waiting for approval (" .. now.status .. ")", { status = now.status })
+end
+
+--- pending_approval -> queued (§23.3: managers only, checked by the route).
+function R.approve(run, user_uuid)
+    local row = U.one([[UPDATE ar_runs SET status = 'queued', approved_by = ?, approved_at = NOW(), updated_at = NOW()
+        WHERE id = ? AND status = 'pending_approval' RETURNING *]], user_uuid, run.id)
+    if not row then not_pending(run) end
+    R.on_queued(row)
+    R.notify(row)
+    return row
+end
+
+--- pending_approval -> cancelled ('rejected'), folder lock released.
+function R.reject(run, user_uuid, reason)
+    local row = U.tx(function()
+        local r = U.one([[UPDATE ar_runs SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
+            cancel_requested_at = NOW(), cancel_requested_by = ?, error_category = 'rejected', error = ?
+            WHERE id = ? AND status = 'pending_approval' RETURNING *]], user_uuid,
+            reason or ("Not approved by " .. display_name(user_uuid)), run.id)
+        if r then release_locks(r.uuid) end
+        return r
+    end)
+    if not row then not_pending(run) end
+    R.notify(row)
+    return row
 end
 
 --- Inputs every start shares (output mode, PR and base branch from project then workspace settings).
@@ -446,13 +535,44 @@ end
 -- Runner side
 -- ---------------------------------------------------------------------------
 
+--- Machine credentials (runner and run tokens) stop at a workspace that is inactive or has the plugin off: 404.
+function R.require_plugin(ns_status, ns)
+    if ns_status ~= "active" or not require("helper.plugin-workspaces").isEnabled("ai_runner", ns) then
+        U.fail(404, "AI Runs is turned off for this workspace", { code = "PLUGIN_DISABLED" })
+    end
+end
+
 --- Hand the pooled DB connection back before sleeping, so waiting runners don't each hold one.
 local function release_connection()
     pcall(require("lapis.nginx.context").run_after_dispatch)
 end
 
+--- Call fn every second until it returns a value or wait_s seconds pass, outside any transaction, handing the DB
+-- connection back while sleeping. @return fn's value, or nil after the wait
+function R.long_poll(wait_s, fn)
+    ngx.update_time()
+    local deadline = ngx.now() + wait_s
+    while true do
+        local v = fn()
+        if v ~= nil then return v end
+        ngx.update_time()
+        local left = deadline - ngx.now()
+        if left <= 0 then return nil end
+        release_connection()
+        ngx.sleep(math.min(1, left))
+    end
+end
+
+--- A runner's wait_s: 0..25 seconds, 25 when not given.
+function R.wait_s(v)
+    v = tonumber(v)
+    return v and v == v and math.max(0, math.min(R.CLAIM_WAIT_S, v)) or R.CLAIM_WAIT_S
+end
+
+-- The run token (§23.2) is minted with the claim: only its hash is stored, the raw token rides on the returned row.
 local function try_claim(runner)
-    return U.tx(function()
+    local raw, hash = U.new_token("oprt_")
+    local run = U.tx(function()
         local me = U.one("SELECT status, capabilities FROM ar_runners WHERE id = ? FOR UPDATE", runner.id)
         if not me or me.status ~= "active" then return nil end
         local cap = math.floor(tonumber((U.json(me.capabilities) or {}).max_concurrency) or 1)
@@ -462,43 +582,42 @@ local function try_claim(runner)
         -- The runner row lock serialises this runner's claims; SKIP LOCKED steps over a run being cancelled.
         return U.one([[
             UPDATE ar_runs r SET status = 'claimed', claimed_at = NOW(), heartbeat_at = NOW(), updated_at = NOW(),
-                lease_until = NOW() + interval ']] .. R.LEASE_S .. [[ seconds'
+                run_token_hash = ?, lease_until = NOW() + interval ']] .. R.LEASE_S .. [[ seconds'
             FROM (SELECT q.id FROM ar_runs q LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
                   WHERE q.namespace_id = ? AND q.runner_uuid = ? AND q.status = 'queued'
                   ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
                                            WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
                   LIMIT 1 FOR UPDATE OF q SKIP LOCKED) pick
             WHERE r.id = pick.id RETURNING r.*
-        ]], runner.namespace_id, runner.uuid)
+        ]], hash, runner.namespace_id, runner.uuid)
     end)
+    if run then run.run_token = raw end
+    return run
 end
 
---- Claim the next queued run for this runner, waiting up to wait_s seconds (re-checking every second, outside
--- any transaction). nil = nothing to do.
+--- Claim the next queued run for this runner, waiting up to wait_s seconds. nil = nothing to do.
 function R.claim(runner, wait_s)
-    ngx.update_time()
-    local deadline = ngx.now() + wait_s
-    while true do
+    return R.long_poll(wait_s, function()
         local st = U.one([[SELECT r.status, EXISTS (SELECT 1 FROM ar_runs q WHERE q.runner_uuid = r.uuid
             AND q.namespace_id = r.namespace_id AND q.status = 'queued') AS waiting FROM ar_runners r WHERE r.id = ?]],
             runner.id)
         if not st or st.status == "revoked" then U.fail(401, "Unauthorized") end
         if st.status == "active" and st.waiting then
             local run = try_claim(runner)
-            if run then
-                R.notify(run)
-                return run
-            end
+            if run then R.notify(run) end
+            return run
         end
-        ngx.update_time()
-        local left = deadline - ngx.now()
-        if left <= 0 then return nil end
-        release_connection()
-        ngx.sleep(math.min(1, left))
-    end
+    end)
 end
 
---- The claim payload (§22.2).
+--- The workspace's permission / input timeouts in seconds.
+function R.policy(ns)
+    local p, d = R.settings(ns).approval_policy, R.SETTINGS_DEFAULTS.approval_policy
+    return { permission_timeout_s = (tonumber(p.permission_timeout_minutes) or d.permission_timeout_minutes) * 60,
+             input_timeout_s = (tonumber(p.input_timeout_minutes) or d.input_timeout_minutes) * 60 }
+end
+
+--- The claim payload (§22.2, §23.2: + run_token, policy).
 function R.payload(run)
     local snap = U.json(run.task_snapshot) or {}
     return {
@@ -510,11 +629,8 @@ function R.payload(run)
         base_branch = run.base_branch or "", work_branch = run.work_branch, output_mode = run.output_mode,
         pr = { draft = run.pr_draft, base = U.null(run.pr_base) }, prompt = run.prompt,
         timeout_s = U.null(run.timeout_s), attempt = run.attempt,
+        run_token = U.null(run.run_token), policy = R.policy(run.namespace_id),
     }
-end
-
-local function release_locks(run_uuid)
-    db.query("DELETE FROM ar_locks WHERE run_uuid = ?", run_uuid)
 end
 
 --- Apply a runner's status report (compare-and-set on status + status_seq).
@@ -528,8 +644,9 @@ function R.report(runner, run_uuid, b)
             return { status = run.status, cancel = run.status == "cancelling", ignored = true }
         end
         local new = b.status
-        local keep = run.status == "cancelling" and (new == "starting" or new == "running")
-        local allowed = run.status ~= "queued" and not (R.TERMINAL[run.status] and run.status ~= "lost")
+        local keep = run.status == "cancelling" and STICKY[new]
+        local allowed = run.status ~= "queued" and run.status ~= "pending_approval"
+            and not (R.TERMINAL[run.status] and run.status ~= "lost")
             and (FINAL[new] or (MOVES[run.status] or {})[new])
         if not keep and not allowed then
             U.fail(409, "A run can't go from " .. run.status .. " to " .. new, { status = run.status })
@@ -543,7 +660,13 @@ function R.report(runner, run_uuid, b)
             "commit_sha", "pr_url", "work_branch", "previous_branch" }) do
             if b[k] ~= nil then set[k] = b[k] end
         end
-        if target == "starting" or target == "running" or target == "cancelling" then
+        -- The open needs_input question; answered (cleared) once the run reports running again.
+        if target == "needs_input" then
+            set.question = b.question or db.NULL
+        elseif target == "running" then
+            set.question = db.NULL
+        end
+        if not done then
             set.started_at = db.raw("COALESCE(started_at, NOW())")
         end
         if done then set.finished_at = db.raw("COALESCE(finished_at, NOW())") end
@@ -568,15 +691,70 @@ function R.report(runner, run_uuid, b)
 end
 
 -- ---------------------------------------------------------------------------
+-- Permission requests and turns (§23)
+-- ---------------------------------------------------------------------------
+
+--- "First Last", else the email (SQL, for the users row aliased `a`).
+function R.name_sql(a)
+    return "COALESCE(NULLIF(TRIM(COALESCE(" .. a .. ".first_name, '') || ' ' || COALESCE(" .. a .. ".last_name, '')), ''), "
+        .. a .. ".email)"
+end
+
+R.REQUEST_SQL = [[SELECT q.*, ]] .. R.name_sql("du") .. [[ AS decided_by_name
+    FROM ar_run_requests q LEFT JOIN users du ON du.uuid = q.decided_by]]
+local REQUEST_FIELDS = { "uuid", "run_uuid", "kind", "request_id", "tool", "input_summary", "description",
+    "blocked_path", "rule_key", "tool_use_id", "status", "decided_by", "decided_by_name", "decided_at", "reason",
+    "expires_at", "created_at" }
+
+function R.request_view(q)
+    local v = {}
+    for _, k in ipairs(REQUEST_FIELDS) do v[k] = U.null(q[k]) end
+    v.input = U.json(q.input) or cjson.null
+    v.remember = q.remember == true
+    return v
+end
+
+--- Pending requests past their expiry become expired (all of them, or one by id). @return how many
+function R.expire_requests(id)
+    return db.query([[UPDATE ar_run_requests SET status = 'expired', decided_at = NOW(),
+        reason = COALESCE(reason, 'Nobody answered in time')
+        WHERE status = 'pending' AND expires_at < NOW()]] .. (id and (" AND id = " .. db.escape_literal(id)) or ""))
+        .affected_rows or 0
+end
+
+R.TURN_SQL = [[SELECT t.*, ]] .. R.name_sql("au") .. [[ AS author_name
+    FROM ar_run_turns t LEFT JOIN users au ON au.uuid = t.author_user_uuid]]
+local TURN_FIELDS = { "uuid", "seq", "role", "status", "text", "author_user_uuid", "author_name", "model",
+    "tokens_in", "tokens_out", "cache_read", "cache_write", "cost_estimate", "num_turns", "duration_ms",
+    "runner_turn", "at" }
+
+function R.turn_view(t)
+    local v = {}
+    for _, k in ipairs(TURN_FIELDS) do v[k] = U.null(t[k]) end
+    v.needs_input = t.needs_input == true
+    return v
+end
+
+--- Add a turn to a run. seq is the run's next one, taken under the run's row lock. Call inside U.tx.
+function R.insert_turn(run, row)
+    U.one("SELECT id FROM ar_runs WHERE id = ? FOR UPDATE", run.id)
+    row.run_uuid, row.namespace_id = run.uuid, run.namespace_id
+    row.seq = db.raw("(SELECT COALESCE(MAX(seq), 0) + 1 FROM ar_run_turns WHERE run_uuid = "
+        .. db.escape_literal(run.uuid) .. ")")
+    return db.insert("ar_run_turns", row, { returning = "*" })[1]
+end
+
+-- ---------------------------------------------------------------------------
 -- User side: cancel, retry
 -- ---------------------------------------------------------------------------
 
---- queued -> cancelled now; claimed..running -> cancelling (sent to the runner by its next heartbeat).
+--- pending_approval / queued -> cancelled now; claimed..running -> cancelling (sent to the runner by its next
+-- heartbeat).
 function R.cancel(run, user_uuid)
     local row = U.tx(function()
         local r = db.query("UPDATE ar_runs SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(), "
             .. "lease_until = NULL, cancel_requested_at = NOW(), cancel_requested_by = ? "
-            .. "WHERE id = ? AND status = 'queued' RETURNING *", user_uuid, run.id)[1]
+            .. "WHERE id = ? AND status IN ('pending_approval', 'queued') RETURNING *", user_uuid, run.id)[1]
         if r then
             release_locks(r.uuid)
             return r
@@ -606,12 +784,21 @@ function R.sweep()
         WHERE status IN ]] .. R.ACTIVE_SQL .. [[ AND lease_until < NOW()
         RETURNING uuid, namespace_id, requested_by, task_uuid, status
     ]])
+    -- An approved run's queue time starts at its approval.
     local expired = db.query([[
         UPDATE ar_runs SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
             error_category = 'queue_timeout', error = 'No runner claimed it within ]] .. R.QUEUE_HOURS .. [[ hours'
-        WHERE status = 'queued' AND created_at < NOW() - interval ']] .. R.QUEUE_HOURS .. [[ hours'
+        WHERE status = 'queued'
+          AND COALESCE(approved_at, created_at) < NOW() - interval ']] .. R.QUEUE_HOURS .. [[ hours'
         RETURNING uuid, namespace_id, requested_by, task_uuid, status
     ]])
+    local unapproved = db.query([[
+        UPDATE ar_runs SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
+            error_category = 'approval_timeout', error = 'Nobody approved it within ]] .. R.APPROVAL_HOURS .. [[ hours'
+        WHERE status = 'pending_approval' AND created_at < NOW() - interval ']] .. R.APPROVAL_HOURS .. [[ hours'
+        RETURNING uuid, namespace_id, requested_by, task_uuid, status
+    ]])
+    local requests = R.expire_requests()
     -- Locks whose run ended (or was deleted), and any that expired.
     local released = db.query([[
         DELETE FROM ar_locks l WHERE (l.expires_at IS NOT NULL AND l.expires_at < NOW())
@@ -619,7 +806,8 @@ function R.sweep()
     ]]).affected_rows or 0
     for _, r in ipairs(lost) do R.notify(r) end
     for _, r in ipairs(expired) do R.notify(r) end
-    return { lost = #lost, cancelled = #expired, locks_released = released }
+    for _, r in ipairs(unapproved) do R.notify(r) end
+    return { lost = #lost, cancelled = #expired + #unapproved, locks_released = released, requests_expired = requests }
 end
 
 return R

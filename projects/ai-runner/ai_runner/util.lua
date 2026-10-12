@@ -39,11 +39,12 @@ function U.sha256(s)
     return require("resty.string").to_hex(h:final())
 end
 
---- A new runner token: "oprn_" + 48 hex (24 bytes from the OS CSPRNG). Returns raw, sha256 hex, display hint.
-function U.new_token()
+--- A new token: prefix ("oprn_" runner, "oprt_" run) + 48 hex (24 bytes from the OS CSPRNG).
+-- Returns raw, sha256 hex, display hint.
+function U.new_token(prefix)
     local bytes = require("resty.random").bytes(24, true)
     if not bytes then error("ai_runner: no secure random bytes available") end -- never fall back to math.random
-    local raw = "oprn_" .. require("resty.string").to_hex(bytes)
+    local raw = (prefix or "oprn_") .. require("resty.string").to_hex(bytes)
     return raw, U.sha256(raw), raw:sub(1, 11)
 end
 
@@ -130,13 +131,14 @@ function U.clean(s, max)
     return s
 end
 
--- Obvious credentials, so a log line or summary never stores (or shows) one: OpsAPI keys and runner tokens,
+-- Obvious credentials, so a log line or summary never stores (or shows) one: OpsAPI keys, runner and run tokens,
 -- bearer tokens, provider keys (sk-..., long only so "task-12" stays), GitHub, Slack and AWS keys, private keys.
 local SECRETS = {
     { "%-%-%-%-%-BEGIN [%u ]*PRIVATE KEY%-%-%-%-%-.-%-%-%-%-%-END [%u ]*PRIVATE KEY%-%-%-%-%-",
       "[REDACTED PRIVATE KEY]" },
     { "opsk_[%w]+", "opsk_[REDACTED]" },
     { "oprn_[%w]+", "oprn_[REDACTED]" },
+    { "oprt_[%w]+", "oprt_[REDACTED]" },
     { "[Bb][Ee][Aa][Rr][Ee][Rr]%s+[%w%-%._~%+/]+=*", "Bearer [REDACTED]" },
     { "github_pat_[%w_]+", "github_pat_[REDACTED]" },
     { "%f[%w]gh[pousr]_[%w]+", "gh_[REDACTED]" },
