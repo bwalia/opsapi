@@ -11,7 +11,9 @@ import { Badge, Card } from '@/components/ui';
 import { Spinner } from '@/components/property-deals/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useNamespaceStore } from '@/store/namespace.store';
-import { aiRunner, aiError, type AiError, type Run, type RunStatus, type RunnerStatus } from '@/services/ai-runner.service';
+import {
+  aiRunner, aiError, type AiError, type RateLimit, type Run, type RunRequest, type RunStatus, type RunnerStatus,
+} from '@/services/ai-runner.service';
 
 export const BASE = '/dashboard/ai-runner';
 export const PRODUCT = 'AI Runs';
@@ -125,11 +127,12 @@ export function AiRunnerPage({ module, action, children }: {
 }
 
 const RUN_STATUS: Record<RunStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'error' | 'info' | 'secondary' }> = {
+  pending_approval: { label: 'Needs approval', variant: 'warning' },
   queued: { label: 'Queued', variant: 'default' },
   claimed: { label: 'Claimed', variant: 'info' },
   starting: { label: 'Starting', variant: 'info' },
   running: { label: 'Running', variant: 'info' },
-  waiting_permission: { label: 'Waiting for approval', variant: 'warning' },
+  waiting_permission: { label: 'Waiting for permission', variant: 'warning' },
   needs_input: { label: 'Needs input', variant: 'warning' },
   cancelling: { label: 'Cancelling', variant: 'warning' },
   succeeded: { label: 'Succeeded', variant: 'success' },
@@ -163,16 +166,20 @@ export const OUTPUT_MODES: { value: 'pull_request' | 'branch' | 'local'; label: 
 ];
 export const outputModeLabel = (m?: string | null) => OUTPUT_MODES.find((o) => o.value === m)?.label || m || '—';
 
-/** A timestamp from the API (ISO, or Postgres "YYYY-MM-DD hh:mm:ss" in UTC) as a Date. */
-export function toDate(v?: string | null): Date | null {
+/** A timestamp from the API (ISO, Postgres "YYYY-MM-DD hh:mm:ss" in UTC, or epoch seconds / ms) as a Date. */
+export function toDate(v?: string | number | null): Date | null {
   if (!v) return null;
+  if (typeof v === 'number' || /^\d+$/.test(v)) {
+    const n = Number(v);
+    return new Date(n < 1e12 ? n * 1000 : n);
+  }
   let s = v.includes('T') ? v : v.replace(' ', 'T');
   if (!/([zZ]|[+-]\d\d(:?\d\d)?)$/.test(s)) s += 'Z';
   s = s.replace(/(T[\d:.]+[+-]\d\d)(\d\d)?$/, (_, t: string, m?: string) => `${t}:${m || '00'}`);
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
-export function when(v?: string | null): string {
+export function when(v?: string | number | null): string {
   const d = toDate(v);
   return d ? d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 }
@@ -209,6 +216,61 @@ export function runView(run: Run) {
     runner: run.runner?.name || run.runner_name || '—',
     profile: run.model ? `${run.profile} · ${run.model}` : run.profile,
   };
+}
+
+const compactFmt = new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 });
+/** 1234 → "1.2K". */
+export const compact = (n?: number | null) => compactFmt.format(Number(n) || 0);
+/** Claude's own estimate in US dollars (also on a subscription, where nothing is billed per token). */
+export function cost(n?: number | string | null): string {
+  const v = Number(n) || 0;
+  return `$${v > 0 && v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`;
+}
+
+const LIMIT_NAMES: Record<string, string> = {
+  five_hour: '5-hour', seven_day: '7-day', seven_day_opus: '7-day Opus', seven_day_sonnet: '7-day Sonnet',
+};
+/** "53% of the 7-day limit used, resets 14 Oct, 09:00" from a profile's rate_limit; null when there is none. */
+export function rateLimitText(rl?: RateLimit | null): string | null {
+  if (!rl || (rl.utilization == null && !rl.status)) return null;
+  const name = `${LIMIT_NAMES[rl.type || ''] || rl.type?.replace(/_/g, ' ') || 'usage'} limit`;
+  const u = rl.utilization;
+  const used = rl.status === 'rejected'
+    ? `${name} reached`
+    : typeof u === 'number' ? `${Math.round(u <= 1 ? u * 100 : u)}% of the ${name} used` : `${name}: ${rl.status}`;
+  return toDate(rl.resets_at) ? `${used}, resets ${when(rl.resets_at)}` : used;
+}
+
+/** The command, file or other input a permission request is about, for display. */
+export function requestTarget(r: Pick<RunRequest, 'input' | 'input_summary'>): { label: string; value: string } | null {
+  const i = r.input && typeof r.input === 'object' && !Array.isArray(r.input) ? r.input : null;
+  if (typeof i?.command === 'string') return { label: 'Command', value: i.command };
+  if (typeof i?.file_path === 'string') return { label: 'File', value: i.file_path };
+  if (typeof i?.path === 'string') return { label: 'Path', value: i.path };
+  if (typeof i?.url === 'string') return { label: 'URL', value: i.url };
+  if (typeof r.input === 'string' && r.input) return { label: 'Input', value: r.input };
+  if (r.input_summary) return { label: 'Input', value: r.input_summary };
+  if (i && Object.keys(i).length) return { label: 'Input', value: JSON.stringify(i) };
+  return null;
+}
+
+/** What the agent wants to do: tool, command or file, the path it touches and its own description. */
+export function RequestWants({ r }: { r: RunRequest }) {
+  const t = requestTarget(r);
+  const rows: [string, React.ReactNode][] = [['Tool', <span key="t" className="font-medium">{r.tool}</span>]];
+  if (t) rows.push([t.label, <code key="v" className="block max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-secondary-100 px-2 py-1 font-mono text-xs text-secondary-900">{t.value}</code>]);
+  if (r.blocked_path && r.blocked_path !== t?.value) rows.push(['Path', <code key="p" className="break-all font-mono text-xs">{r.blocked_path}</code>]);
+  if (r.description) rows.push(['Description', r.description]);
+  return (
+    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[7rem_minmax(0,1fr)]">
+      {rows.map(([k, v], i) => (
+        <React.Fragment key={i}>
+          <dt className="text-xs font-medium uppercase tracking-wide text-secondary-500 sm:pt-0.5">{k}</dt>
+          <dd className="min-w-0 text-secondary-900">{v}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
 }
 
 /** A pull request link, or the short commit when there is no PR. */
