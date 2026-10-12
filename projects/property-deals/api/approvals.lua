@@ -1,5 +1,6 @@
 -- Approvals (SPEC §3.5, hard rule 6: nothing leaves the system without a named human's approval).
---   GET  /approvals/inbox           pending approvals I may decide, with the agent run behind each
+--   GET  /approvals/inbox           pending approvals I may decide (?all=true: every pending one), oldest first,
+--                                   with the agent run behind each; ?page=&per_page= (default 50, max 100)
 --   POST /approvals                 ask for approval { subject_type, action, title, payload, rule?, deal_uuid?, task_uuid? }
 --   POST /approvals/:id/decide      { decision: approve|reject, note?, payload? (edited version),
 --                                     payload_version?, payload_sha256? (the version you looked at) }
@@ -24,26 +25,35 @@ return function(app)
     app:get("/approvals/inbox", sdk.handler({ permission = "property_deals_approvals.read" }, function(self)
         local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
         local manager = sdk.can(self, "property_deals_approvals", "manage")
+        local page, per_page, offset = sdk.page({ page = self.params.page, per_page = self.params.per_page or 50 })
+        local CAN = [[((a.rule <> 'manager' OR ?) AND a.requested_by_user_uuid IS DISTINCT FROM ?
+            AND NOT (a.decisions @> ?::jsonb))]]
+        local can = { manager, me, cjson.encode({ { user_uuid = me } }) }
+        local where, args = "a.namespace_id = ? AND a.status = 'pending'", { ns }
+        if self.params.all ~= "true" then
+            where = where .. " AND " .. CAN
+            for _, v in ipairs(can) do args[#args + 1] = v end
+        end
+        local total = U.one("SELECT COUNT(*)::int AS n FROM property_deals_approvals a WHERE " .. where, unpack(args)).n
+        local q = { can[1], can[2], can[3] }
+        for _, v in ipairs(args) do q[#q + 1] = v end
+        q[#q + 1], q[#q + 2] = per_page, offset
         local rows = db.query([[
             SELECT a.*, cd.name AS deal_name, t.title AS task_title,
                    r.agent_key, r.provider, r.model, r.cost_usd, r.tokens_in, r.tokens_out, r.sources AS run_sources,
                    r.steps AS run_steps, r.output AS run_output,
                    (r.provider = 'jobshout' OR a.jobshout_approval_id IS NOT NULL) AS from_jobshout,
-                   (a.rule <> 'manager' OR ?) AND a.requested_by_user_uuid IS DISTINCT FROM ?
-                     AND NOT (a.decisions @> ?::jsonb) AS can_decide
+                   ]] .. CAN .. [[ AS can_decide
             FROM property_deals_approvals a
-            LEFT JOIN property_deals_agent_runs r ON r.uuid = a.agent_run_uuid
-            LEFT JOIN property_deals_deals dl ON dl.uuid = a.deal_uuid
-            LEFT JOIN crm_deals cd ON cd.uuid = dl.crm_deal_uuid
-            LEFT JOIN kanban_tasks t ON t.uuid = a.task_uuid
-            WHERE a.namespace_id = ? AND a.status = 'pending'
-            ORDER BY a.created_at
-        ]], manager, me, cjson.encode({ { user_uuid = me } }), ns)
-        local mine = {}
-        for _, r in ipairs(rows) do
-            if self.params.all == "true" or r.can_decide then mine[#mine + 1] = r end
-        end
-        return sdk.ok(sdk.array(mine), { total = #mine })
+            LEFT JOIN property_deals_agent_runs r ON r.namespace_id = a.namespace_id AND r.uuid = a.agent_run_uuid
+            LEFT JOIN property_deals_deals dl ON dl.namespace_id = a.namespace_id AND dl.uuid = a.deal_uuid
+            LEFT JOIN crm_deals cd ON cd.namespace_id = a.namespace_id AND cd.uuid = dl.crm_deal_uuid
+            LEFT JOIN property_deals_task_details td ON td.namespace_id = a.namespace_id AND td.task_uuid = a.task_uuid
+            LEFT JOIN kanban_tasks t ON t.uuid = td.task_uuid
+            WHERE ]] .. where .. [[ ORDER BY a.created_at, a.id LIMIT ? OFFSET ?
+        ]], unpack(q))
+        return sdk.ok(sdk.array(rows), { total = total, page = page, per_page = per_page,
+            total_pages = math.ceil(total / per_page) })
     end))
 
     app:post("/approvals", sdk.handler({ permission = "property_deals_approvals.create" }, U.guard_create(function(self)

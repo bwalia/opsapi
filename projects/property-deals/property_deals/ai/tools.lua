@@ -120,8 +120,9 @@ T.defs = {
         run = function(ctx, args)
             local service = type(args.service) == "string" and args.service:gsub("[^%w_]", "") or ""
             if service == "" then return { error = "service is required" } end
-            local p = ctx.property_uuid and U.one("SELECT lat, lng FROM property_deals_properties WHERE uuid = ?",
-                ctx.property_uuid)
+            local p = ctx.property_uuid and U.one(
+                "SELECT lat, lng FROM property_deals_properties WHERE namespace_id = ? AND uuid = ?",
+                ctx.ns, ctx.property_uuid)
             return T.nearest(ctx.ns, p and tonumber(p.lat), p and tonumber(p.lng), service, args.limit)
         end,
     },
@@ -146,7 +147,8 @@ T.defs = {
         parameters = { type = "object", properties = {} },
         run = function(ctx)
             if not ctx.property_uuid then return { error = "no property" } end
-            local p = U.one("SELECT lat, lng, property_type FROM property_deals_properties WHERE uuid = ?", ctx.property_uuid)
+            local p = U.one([[SELECT lat, lng, property_type FROM property_deals_properties
+                WHERE namespace_id = ? AND uuid = ?]], ctx.ns, ctx.property_uuid)
             if not p or p.lat == db.NULL then return { error = "property has no location" } end
             local lat, lng = tonumber(p.lat), tonumber(p.lng)
             local summary = require("property_deals.market").comps(ctx.ns, lat, lng)
@@ -235,8 +237,8 @@ T.defs = {
                     AND x.pd_status NOT IN ('done', 'cancelled') ORDER BY x.due_at NULLS LAST LIMIT 15]], ctx.ns, d),
                     { "title", "due_at", "pd_status" }),
                 photos = U.one([[SELECT COUNT(*)::int AS n FROM property_deals_documents WHERE namespace_id = ? AND category = 'photo'
-                    AND (deal_uuid = ? OR property_uuid = (SELECT property_uuid FROM property_deals_deals WHERE uuid = ?))]],
-                    ctx.ns, d, d).n,
+                    AND (deal_uuid = ? OR property_uuid = (SELECT property_uuid FROM property_deals_deals
+                        WHERE namespace_id = ? AND uuid = ?))]], ctx.ns, d, ctx.ns, d).n,
             }
         end,
     },
