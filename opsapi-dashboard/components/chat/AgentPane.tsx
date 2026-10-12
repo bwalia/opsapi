@@ -17,6 +17,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Sparkles, Send, Loader2, Check, AlertCircle, X, Trash2, Mic, Square, Volume2, VolumeX } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,6 +26,19 @@ import { chatService, type AgentTurn, type AgentAction, type AgentScope } from '
 import { onChatEvent } from '@/store/chat-realtime.store';
 import { useVoice, useVoiceLevel, type LevelStore } from '@/hooks/useVoice';
 import AvatarFace, { type FaceMood } from './AvatarFace';
+import { AgentTaskCards, tasksFromActions } from './AgentTaskCards';
+
+/** A same-origin or relative link -> its in-app path (client navigation); anything else -> null. */
+function inAppPath(href?: string): string | null {
+  if (!href) return null;
+  if (typeof window === 'undefined') return href.startsWith('/') && !href.startsWith('//') ? href : null;
+  try {
+    const url = new URL(href, window.location.href);
+    return url.origin === window.location.origin ? url.pathname + url.search + url.hash : null;
+  } catch {
+    return null;
+  }
+}
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
 // styling that sits on the neutral assistant bubble.
@@ -39,11 +53,19 @@ const MarkdownMessage = React.memo(function MarkdownMessage({ text }: { text: st
           ul: ({ children }) => <ul className="ml-4 list-disc space-y-0.5">{children}</ul>,
           ol: ({ children }) => <ol className="ml-4 list-decimal space-y-0.5">{children}</ol>,
           strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-600 underline">
-              {children}
-            </a>
-          ),
+          // In-app pages navigate inside the dashboard; other sites open in a new tab.
+          a: ({ href, children }) => {
+            const path = inAppPath(href);
+            return path ? (
+              <Link href={path} className="text-primary-600 underline">
+                {children}
+              </Link>
+            ) : (
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-600 underline">
+                {children}
+              </a>
+            );
+          },
           code: ({ children }) => (
             <code className="rounded bg-secondary-200 px-1 py-0.5 text-[0.85em]">{children}</code>
           ),
@@ -73,6 +95,7 @@ const WELCOME =
   "Hi! I'm your OpsAPI assistant. Tell me what you need and I'll do it in your workspace — customers, CRM leads & deals, projects & tasks, timesheets, invoices, inviting teammates and more. If a detail is missing, I'll ask.";
 
 const SUGGESTIONS = [
+  'What are my tasks today?',
   'Show my open tasks and log 2 hours on one of them',
   'Create a lead for Jane Smith at Globex, jane@globex.com',
   'Draft an invoice for Acme Corp: 10 hours consulting at £80',
@@ -361,6 +384,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
           turns.map((t, i) => {
             const mine = t.role === 'user';
             const acted = (t.actions || []).filter((a) => a.name !== 'ask_user');
+            const taskList = mine ? null : tasksFromActions(t.actions);
             return (
               <div key={i} className={`mt-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
                 {!mine && (
@@ -382,6 +406,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
                       <MarkdownMessage text={t.content} />
                     )}
                   </div>
+                  {taskList && <AgentTaskCards tasks={taskList.tasks} today={taskList.today} />}
                   {!mine && (
                     <button
                       type="button"

@@ -16,7 +16,6 @@ import type {
   KanbanProjectsResponse,
   KanbanBoardFullResponse,
   KanbanTaskTimeSummary,
-  KanbanMyTasksResponse,
   CreateKanbanProjectDto,
   UpdateKanbanProjectDto,
   CreateKanbanBoardDto,
@@ -63,10 +62,50 @@ interface TaskListParams extends PaginationParams {
   overdue?: boolean;
 }
 
-interface MyTasksParams extends PaginationParams {
-  status?: KanbanTaskStatus;
-  priority?: KanbanTaskPriority;
+/** GET /api/v2/kanban/my-tasks `due`, relative to `date` (the user's local today). */
+export type MyTasksDue = 'today' | 'overdue' | 'today_and_overdue' | 'week' | 'upcoming' | 'none';
+
+export interface MyTasksParams {
+  due?: MyTasksDue;
+  /** YYYY-MM-DD; defaults to the browser's local date. */
+  date?: string;
+  priority?: KanbanTaskPriority | KanbanTaskPriority[];
+  status?: KanbanTaskStatus | KanbanTaskStatus[];
   project_uuid?: string;
+  search?: string;
+  page?: number;
+  /** Max 100. */
+  perPage?: number;
+}
+
+/** One of my open tasks (the API also returns the other task columns). */
+export interface MyTask {
+  id: number;
+  uuid: string;
+  task_number: number;
+  title: string;
+  status: KanbanTaskStatus;
+  priority: KanbanTaskPriority;
+  due_date?: string | null;
+  /** Due before the request's date. */
+  overdue: boolean;
+  project_uuid: string;
+  project_name: string;
+  board_uuid: string;
+  column_name?: string | null;
+  /** The task page: /dashboard/projects/{project_uuid}/tasks/{uuid}. */
+  url: string;
+}
+
+export interface MyTasksResponse {
+  data: MyTask[];
+  meta: { total: number; page: number; per_page: number; total_pages: number; date: string };
+}
+
+/** The browser's local calendar date as YYYY-MM-DD (the user's "today"). */
+export function localDate(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // ============================================
@@ -538,18 +577,19 @@ export const kanbanService = {
   /**
    * Get my assigned tasks across all projects
    */
-  async getMyTasks(params?: MyTasksParams): Promise<KanbanMyTasksResponse> {
+  async getMyTasks(params: MyTasksParams = {}): Promise<MyTasksResponse> {
+    const csv = (v?: string | string[]) => (Array.isArray(v) ? v.join(',') : v);
     const queryString = buildQueryString({
-      page: params?.page,
-      per_page: params?.perPage,
-      limit: params?.perPage,
-      status: params?.status,
-      priority: params?.priority,
-      project_uuid: params?.project_uuid,
+      due: params.due,
+      date: params.date ?? localDate(),
+      priority: csv(params.priority),
+      status: csv(params.status),
+      project_uuid: params.project_uuid,
+      search: params.search,
+      page: params.page,
+      per_page: params.perPage,
     });
-    const response = await apiClient.get<KanbanMyTasksResponse>(
-      `/api/v2/kanban/my-tasks${queryString}`
-    );
+    const response = await apiClient.get<MyTasksResponse>(`/api/v2/kanban/my-tasks${queryString}`);
     return response.data;
   },
 
