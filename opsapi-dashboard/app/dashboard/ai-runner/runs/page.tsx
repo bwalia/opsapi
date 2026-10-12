@@ -165,7 +165,7 @@ function Runs() {
       key: 'where', header: 'Runner / folder', render: (r: Run) => {
         const v = runView(r);
         return (
-          <span className="block max-w-[13rem] text-xs">
+          <span className="block max-w-[11rem] text-xs">
             <span className="block truncate text-sm" title={`${v.runner} · ${v.profile}`}>{v.runner} · {v.profile}</span>
             <span className="block truncate font-mono" title={r.repo_path}>{r.repo_path}</span>
             {r.work_branch && <span className="block truncate font-mono text-secondary-500" title={r.work_branch}>{r.work_branch}</span>}
@@ -173,7 +173,7 @@ function Runs() {
         );
       },
     },
-    { key: 'started', header: 'Started', render: (r: Run) => <span className="whitespace-nowrap">{when(r.started_at || r.created_at)}</span> },
+    { key: 'started', header: 'Started', render: (r: Run) => when(r.started_at || r.created_at) },
     {
       key: 'usage', header: 'Usage', render: (r: Run) => {
         const tokens = (Number(r.tokens_in) || 0) + (Number(r.tokens_out) || 0);

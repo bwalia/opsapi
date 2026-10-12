@@ -379,15 +379,19 @@ export const aiRunner = {
     const d = (await get<Record<string, unknown>>(`/runs/${id(uuid)}`)).data;
     const run = ((d.run as Run) ?? d) as Run;
     const field = (k: string) => d[k] ?? (run as unknown as Record<string, unknown>)[k];
-    const u = { ...run, ...(field('usage') as Partial<Usage> | undefined) };
+    const usage = field('usage') as Partial<Usage> | undefined;
+    const u = { ...run, ...usage };
+    const turns = [...list<RunTurn>(field('turns'))].sort((a, b) => a.seq - b.seq);
+    // Inlined, the turn list takes the name of the run's turn count: then count the agent's turns.
+    const turnCount = usage?.turns ?? (Array.isArray(run.turns) ? turns.filter((t) => t.role === 'assistant').length : run.turns);
     return {
       run: { ...run, task: (d.task as RunTask) ?? run.task, runner: (d.runner as Runner) ?? run.runner },
       events: [...list<RunEvent>(field('events'))].sort((a, b) => a.seq - b.seq),
       requests: list<RunRequest>(field('requests')),
-      turns: [...list<RunTurn>(field('turns'))].sort((a, b) => a.seq - b.seq),
+      turns,
       usage: {
         tokens_in: num(u.tokens_in), tokens_out: num(u.tokens_out), cache_read: num(u.cache_read),
-        cache_write: num(u.cache_write), cost_estimate: num(u.cost_estimate), turns: num(u.turns),
+        cache_write: num(u.cache_write), cost_estimate: num(u.cost_estimate), turns: num(turnCount),
       },
       can_decide: field('can_decide') === true,
       can_approve: field('can_approve') === true,
