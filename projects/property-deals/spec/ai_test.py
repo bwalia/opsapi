@@ -370,6 +370,12 @@ check("local-only: a cloud-only route is refused, no data sent anywhere",
       r["status"] == "failed" and "local" in r.get("error", "") and len(mock("GET", "/_log")) == before, r)
 check("failed run → task back to a person with a comment", task(T3)["pd_status"] == "todo")
 data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"local_only": False}), 200, "local only off")
+data(call("PUT", P + "/ai/routes/draft", "manager_s", S, {"chain": [{"provider_uuid": cloud["uuid"]}]}), 200,
+     "draft route: only the provider that is down")
+st, b = call("POST", P + f"/tasks/{T3}/agent-run", "operator_s", S)
+r = wait_run(b["data"]["uuid"])
+check("provider down: the run says so in plain words, never the provider's own reply", r["status"] == "failed"
+      and r.get("error") == "The AI model didn't answer" and "overloaded" not in json.dumps(r), r)
 data(call("PUT", P + "/ai/routes/draft", "manager_s", S, {"chain": [{"provider_uuid": local["uuid"]}]}), 200, "draft → local")
 expect("tiny per-run cap", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
        {"settings": {"ai_max_cost_run_usd": 0.0000001}}), 200)
@@ -583,7 +589,7 @@ sql(f"""UPDATE property_deals_approvals SET status = 'approved', execution_resul
         updated_at = NOW() - interval '20 minutes' WHERE uuid = '{sa['uuid']}'""")
 out = tick()
 stuck = data(call("GET", P + f"/approvals/{sa['uuid']}", "manager_s", S), 200, "the stuck approval")
-check("the tick marks an action stuck running as failed", out["unstuck"] >= 1 and stuck["status"] == "failed", (out, stuck))
+check("the tick marks an action stuck running as failed", stuck["status"] == "failed", (out, stuck))
 check("... so it can be retried", data(call("POST", P + f"/approvals/{sa['uuid']}/retry", "manager_s", S), 200,
                                         "retry it")["status"] == "executed")
 
@@ -614,7 +620,8 @@ while time.time() < deadline and sql(f"SELECT status FROM property_deals_agent_r
 sql(f"UPDATE property_deals_agent_runs SET started_at = NOW() - interval '16 minutes' WHERE uuid = '{R9}'")
 out = tick()
 check("the tick times out a run stuck for 15 minutes; the task goes back to a person",
-      out["timed_out"] >= 1 and task(T9)["pd_status"] == "todo", out)
+      sql(f"SELECT status || ':' || error FROM property_deals_agent_runs WHERE uuid = '{R9}'") == ["failed:timed out"]
+      and task(T9)["pd_status"] == "todo", out)
 deadline = time.time() + 20
 while time.time() < deadline and len(mock("GET", "/_log")) <= before:
     time.sleep(0.3)

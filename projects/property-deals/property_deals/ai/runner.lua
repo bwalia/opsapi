@@ -67,6 +67,16 @@ local function fail(ns, run, task, message)
     return nil, message
 end
 
+--- Words for a failed model call: our own reason when every provider was skipped (not local, switched
+-- off), else a plain one. The provider's own error text stays in the log.
+local function model_failed(run, err, attempts)
+    ngx.log(ngx.WARN, "[property_deals] agent run ", run.uuid, ": ", tostring(err))
+    for _, at in ipairs(attempts or {}) do
+        if at.error then return "The AI model didn't answer" end
+    end
+    return tostring(err)
+end
+
 --- The reviewer's note on the last rejected draft for this task, if any.
 local function last_reject_note(ns, task_uuid)
     local r = U.one([[
@@ -265,16 +275,17 @@ local function builtin(ns, run, task, agent, cfg)
             finish(run, { steps = cjson.encode(U.array(steps)) })
             return fail(ns, run, task, stop)
         end
-        local msg, i = require("lib.ai-providers").chat(ns, route.chain, messages, tools, opts)
+        local msg, i, attempts = require("lib.ai-providers").chat(ns, route.chain, messages, tools, opts)
         if not msg and tools then
             -- Plain JSON fallback for models without tool calling: the records are already in the prompt.
-            steps[#steps + 1] = { round = round, note = "retrying without tools", error = tostring(i):sub(1, 300) }
+            ngx.log(ngx.NOTICE, "[property_deals] agent run ", run.uuid, " retrying without tools: ", tostring(i))
+            steps[#steps + 1] = { round = round, note = "retrying without tools" }
             tools = nil
-            msg, i = require("lib.ai-providers").chat(ns, route.chain, messages, nil, opts)
+            msg, i, attempts = require("lib.ai-providers").chat(ns, route.chain, messages, nil, opts)
         end
         if not msg then
             finish(run, { steps = cjson.encode(U.array(steps)) })
-            return fail(ns, run, task, i)
+            return fail(ns, run, task, model_failed(run, i, attempts))
         end
         info = i
         if i.attempts and #i.attempts > 0 then fell_back = true end
@@ -368,13 +379,14 @@ local function jobshout(ns, run, task, agent, cfg)
         }, { id = run.id })
         return run_row(ns, run.uuid)
     end
+    ngx.log(ngx.WARN, "[property_deals] agent run ", run.uuid, ": JobShout: ", tostring(err))
     if cfg.fallback_to_builtin then
         db.update("property_deals_agent_runs", { provider = "builtin", fallback_used = true,
-            steps = cjson.encode(U.array({ { note = "JobShout unavailable, used the built-in model", error = tostring(err) } })) },
+            steps = cjson.encode(U.array({ { note = "JobShout unavailable, used the built-in model" } })) },
             { id = run.id })
         return builtin(ns, run_row(ns, run.uuid), task, agent, cfg)
     end
-    return fail(ns, run, task, "JobShout unavailable: " .. tostring(err))
+    return fail(ns, run, task, "JobShout unavailable" .. (row and "" or ": the link is missing or switched off"))
 end
 
 --- Poll one JobShout run: mirror its approvals, finish it when it ends.
@@ -414,7 +426,8 @@ function R.poll_jobshout(ns, run, pending_by_execution)
     local status = tostring(r.status)
     if status == "failed" then
         finish(run, { tokens_out = tonumber(r.total_tokens) or 0, cost_usd = tonumber(r.cost_usd) or 0 })
-        return fail(ns, run, task, "JobShout run failed: " .. tostring(r.error_message ~= cjson.null and r.error_message or "unknown"))
+        ngx.log(ngx.WARN, "[property_deals] agent run ", run.uuid, ": JobShout run failed: ", tostring(r.error_message))
+        return fail(ns, run, task, "The JobShout run failed")
     end
     if status ~= "completed" then return nil end
     local output = r.output ~= cjson.null and r.output or ""
@@ -475,13 +488,13 @@ function R.write_digest(ns, user_uuid, digest)
     local run = db.insert("property_deals_agent_runs", { namespace_id = ns, agent_key = "digest_writer", provider = "builtin",
         prompt_version = agent.version, status = "running", trigger = "auto", started_at = db.raw("NOW()"),
         triggered_by_user_uuid = user_uuid }, { returning = "*" })[1]
-    local msg, info = require("lib.ai-providers").chat(ns, route.chain, {
+    local msg, info, attempts = require("lib.ai-providers").chat(ns, route.chain, {
         { role = "system", content = G.PREAMBLE .. "\n\n" .. agent.instructions },
         { role = "user", content = "Digest:\n" .. G.fence("digest", digest) },
     }, nil, { local_only = route.local_only or cfg.local_only == true, json = true, max_tokens = 600,
         timeout_ms = 60000, feature = "property_deals:digest_writer", run_uuid = run.uuid, user_uuid = user_uuid })
     if not msg then
-        finish(run, { status = "failed", error = tostring(info):sub(1, 500) })
+        finish(run, { status = "failed", error = model_failed(run, info, attempts):sub(1, 500) })
         return nil
     end
     local out = G.json_object(msg.content)
