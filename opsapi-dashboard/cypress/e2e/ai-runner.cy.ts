@@ -1,10 +1,12 @@
 /// <reference types="cypress" />
 
 /**
- * AI Runs (docs/AI_RUNNER.md §22) in the browser: register a runner and see its token once, start a task
+ * AI Runs (docs/AI_RUNNER.md §22, §23) in the browser: register a runner and see its token once, start a task
  * with AI from the task page (with the preview), see the run on AI Runs, its prompt and live log on the
- * detail page, and cancel it. The spec plays the PromptPilot runner itself through the runner API
- * (heartbeat / claim / status / events with the token the page showed), so no machine is needed.
+ * detail page; decide the agent's permission request, send it a message and see its reply with usage;
+ * cancel the run; and approve a run that needs a manager before it starts. The spec plays the PromptPilot
+ * runner itself through the runner API (heartbeat / claim / status / events / permissions / turns with the
+ * token the page showed), so no machine is needed.
  *
  * Needs an API with the ai_runner plugin (projects/ai-runner) and kanban, and the dashboard pointed at it:
  *   CYPRESS_API_URL         the API, e.g. http://127.0.0.1:4010
@@ -34,6 +36,11 @@ let taskUuid = '';
 let runnerToken = '';
 let runnerUuid = '';
 let runUuid = '';
+let reqUuid = '';
+let approvalRunUuid = '';
+// The runner's status reports carry an increasing seq (a report with a seq not above the last is ignored).
+let statusSeq = 0;
+const nextStatus = (status: string, extra: Record<string, unknown> = {}) => () => ({ seq: ++statusSeq, status, ...extra });
 
 function signIn(win: Window) {
   const token = Cypress.env('AIR_TOKEN');
@@ -58,11 +65,14 @@ function asUser(method: string, path: string, body?: Record<string, unknown>, fo
 
 /**
  * A request as the runner (the token the Runners page showed once). Built when it runs, not when Cypress
- * queues it: the token (and a run uuid in the path) are only known once the earlier commands have run.
+ * queues it: the token (and a run uuid in the path, a seq in the body) are only known once the earlier
+ * commands have run.
  */
-function asRunner(path: string | (() => string), body: Record<string, unknown>) {
+type Body = Record<string, unknown>;
+function asRunner(path: string | (() => string), body: Body | (() => Body)) {
   return cy.then(() => cy.request({
-    method: 'POST', url: api(`/api/v2/ai-runner/public/runner${typeof path === 'function' ? path() : path}`), body,
+    method: 'POST', url: api(`/api/v2/ai-runner/public/runner${typeof path === 'function' ? path() : path}`),
+    body: typeof body === 'function' ? body() : body,
     headers: { Authorization: `Bearer ${runnerToken}` }, failOnStatusCode: false,
   }));
 }
@@ -70,7 +80,14 @@ function asRunner(path: string | (() => string), body: Record<string, unknown>) 
 function heartbeat() {
   return asRunner('/heartbeat', {
     version: 'e2e', host: 'e2e-host', os: 'linux',
-    capabilities: { max_concurrency: 1, profiles: [{ key: 'fake', label: 'Fake agent', approval: 'none', models: [] }] },
+    capabilities: {
+      max_concurrency: 1,
+      profiles: [
+        { key: 'fake', label: 'Fake agent', approval: 'bridge', models: [] },
+        // Can't ask for permissions (like Cursor): every run needs a manager's approval to start.
+        { key: 'noask', label: 'No-ask agent', approval: 'unsupported', models: [] },
+      ],
+    },
     load: { running: 0 },
     inventory: [],
     repos: [{ path: repo, remote: 'git@example.com:e2e/repo.git', branch: 'main', dirty: false }],
@@ -173,7 +190,7 @@ describe('AI Runs', () => {
       expect(res.status, 'claim').to.eq(200);
       expect(res.body.data.run.uuid).to.eq(runUuid);
     });
-    asRunner(() => `/runs/${runUuid}/status`, { seq: 1, status: 'running', work_branch: 'ai/e2e' }).its('status').should('eq', 200);
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('running', { work_branch: 'ai/e2e' })).its('status').should('eq', 200);
     asRunner(() => `/runs/${runUuid}/events`, {
       events: [
         { seq: 1, type: 'log', text: 'e2e: reading the task' },
@@ -193,6 +210,83 @@ describe('AI Runs', () => {
     cy.screenshot('ai-runner-run-detail', { capture: 'viewport' });
   });
 
+  it("asks for a permission and hands the user's decision to the runner", () => {
+    // The agent wants to run a command: the runner asks OpsAPI, then reports that it waits.
+    asRunner(() => `/runs/${runUuid}/permissions`, {
+      request_id: `e2e-req-${stamp}`, tool: 'Bash', input: { command: 'npm test' }, rule_key: 'npm test',
+      description: 'Run the test suite',
+    }).then((res) => {
+      expect(res.status, 'permission request').to.be.oneOf([200, 201]);
+      expect(res.body.data.request.status).to.eq('pending');
+      reqUuid = res.body.data.request.uuid;
+    });
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('waiting_permission')).its('status').should('eq', 200);
+
+    // It waits on the user: listed under Waiting on you on AI Runs…
+    visit('/dashboard/ai-runner/runs');
+    cy.contains('h2', 'Waiting on you', { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('li', 'npm test').should('contain', taskTitle).and('contain', 'Bash');
+    });
+    cy.contains('tr', taskTitle).should('contain', 'Waiting for permission');
+
+    // …and decided on the run page.
+    visit(`/dashboard/ai-runner/runs/${runUuid}`);
+    cy.contains('h2', 'Needs your decision', { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('npm test');
+      cy.contains('Run the test suite');
+      cy.contains('button', 'Allow for this run');
+      cy.contains('button', /^Deny$/);
+      cy.screenshot('ai-runner-permission-request', { capture: 'viewport' });
+      cy.contains('button', /^Allow$/).click();
+    });
+    cy.contains('Allowed: the agent carries on');
+    cy.contains('h2', 'Needs your decision').should('not.exist');
+
+    // The runner's wait returns the decision; the agent carries on.
+    asRunner(() => `/runs/${runUuid}/permissions/${reqUuid}/wait`, { wait_s: 0 }).then((res) => {
+      expect(res.status, 'wait').to.eq(200);
+      expect(res.body.data.status).to.eq('allowed');
+      expect(res.body.data.cancel).to.eq(false);
+    });
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('running')).its('status').should('eq', 200);
+    cy.contains('h2', 'Permission requests', { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('tr', 'npm test').should('contain', 'Allowed');
+    });
+  });
+
+  it("sends the agent a message and shows its reply with the run's usage", () => {
+    const message = `e2e follow-up ${stamp}`;
+    const reply = 'e2e: tests pass, README.md updated';
+    visit(`/dashboard/ai-runner/runs/${runUuid}`);
+    cy.contains('h1', taskTitle, { timeout: 20000 });
+    cy.get('#air-message', { timeout: 20000 }).type(message);
+    cy.contains('button', /^Send$/).click();
+    cy.contains('the agent gets it after its current turn');
+    cy.contains('li', message).should('contain', 'Not yet sent to the agent');
+
+    // The runner picks the message up after the agent's turn…
+    asRunner(() => `/runs/${runUuid}/turns/next`, { wait_s: 0 }).then((res) => {
+      expect(res.status, 'turns/next').to.eq(200);
+      expect(res.body.data.turns.map((t: { text: string }) => t.text)).to.include(message);
+    });
+    // …and reports the agent's reply with its usage.
+    asRunner(() => `/runs/${runUuid}/turns`, {
+      turn: 1, text: reply, model: 'fake',
+      usage: { input_tokens: 1200, output_tokens: 345, cache_read_tokens: 5000, cache_write_tokens: 100 },
+      cost_estimate: 0.0123, num_turns: 3, duration_ms: 4200,
+    }).its('status').should('be.oneOf', [200, 201]);
+
+    cy.contains('li', reply, { timeout: 20000 }).should('contain', '1.2K in').and('contain', '345 out');
+    cy.contains('li', message, { timeout: 20000 }).should('not.contain', 'Not yet sent to the agent');
+    cy.contains('dt', /^Tokens in$/).next().should('have.text', '1.2K');
+    cy.contains('dt', /^Tokens out$/).next().should('have.text', '345');
+    cy.contains('dt', /^Turns$/).next().should('have.text', '1');
+    cy.screenshot('ai-runner-conversation', { capture: 'viewport' });
+
+    visit('/dashboard/ai-runner/runs');
+    cy.contains('tr', taskTitle, { timeout: 20000 }).should('contain', '1.5K tokens').and('contain', '1 turn');
+  });
+
   it('cancels the run', () => {
     visit(`/dashboard/ai-runner/runs/${runUuid}`);
     cy.contains('button', 'Cancel run', { timeout: 20000 }).click();
@@ -203,10 +297,48 @@ describe('AI Runs', () => {
     heartbeat().then((d) => {
       expect(d.cancel).to.include(runUuid);
     });
-    asRunner(() => `/runs/${runUuid}/status`, { seq: 2, status: 'cancelled' }).its('status').should('eq', 200);
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('cancelled')).its('status').should('eq', 200);
     cy.contains('Cancelled', { timeout: 20000 });
     cy.contains('button', 'Cancel run').should('not.exist');
     cy.contains('button', 'Retry');
+  });
+
+  it("waits for a manager's approval before a run of a profile that can't ask starts", () => {
+    heartbeat(); // stay online (< 45 s)
+    visit(`/dashboard/projects/${projectUuid}/tasks/${taskUuid}`);
+    cy.contains('h1', taskTitle, { timeout: 20000 });
+    cy.contains('button', 'Start with AI').click();
+    cy.get('[role="dialog"]').within(() => {
+      cy.get('#air-runner', { timeout: 20000 }).select(runnerUuid);
+      cy.get('#air-profile').select('noask');
+      cy.get('#air-repo').clear().type(repo);
+      cy.contains('button', 'Preview').click();
+      cy.contains('A manager must approve this run before it starts.', { timeout: 20000 });
+      cy.contains('button', /^Start$/).should('not.be.disabled').click();
+    });
+
+    // It lands on its run page, waiting for approval; no runner can claim it yet.
+    cy.location('pathname', { timeout: 20000 }).should('match', /^\/dashboard\/ai-runner\/runs\/[0-9a-f-]{36}$/).then((p) => {
+      approvalRunUuid = p.split('/').pop() as string;
+      expect(approvalRunUuid).not.to.eq(runUuid);
+    });
+    cy.contains("This run needs a manager's approval before it starts", { timeout: 20000 });
+    cy.contains('Needs approval');
+    asRunner('/claim', { wait_s: 0 }).its('status').should('eq', 204);
+
+    // The owner is a manager: approve it from Waiting on you.
+    visit('/dashboard/ai-runner/runs');
+    cy.contains('h2', 'Waiting on you', { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('li', taskTitle).should('contain', 'Start approval').within(() => {
+        cy.contains('button', 'Approve').click();
+      });
+    });
+    cy.contains('Approved: the run is queued');
+    cy.then(() => cy.get(`a[href="/dashboard/ai-runner/runs/${approvalRunUuid}"]`, { timeout: 20000 }))
+      .closest('tr').should('contain', 'Queued');
+
+    // Clean up: nothing will claim it.
+    cy.then(() => asUser('POST', `/api/v2/ai-runner/runs/${approvalRunUuid}/cancel`)).its('status').should('eq', 200);
   });
 });
 
