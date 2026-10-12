@@ -218,7 +218,7 @@ function Conversation({ runUuid, turns, question, needsInput, canMessage, onSent
   return (
     <section aria-labelledby="air-conv-title" className="space-y-3">
       <h2 id="air-conv-title" className="flex items-center gap-2 text-sm font-semibold text-secondary-800">
-        <MessageSquare className="h-4 w-4" aria-hidden /> Conversation <span className="font-normal text-secondary-500">({turns.length} {turns.length === 1 ? 'turn' : 'turns'})</span>
+        <MessageSquare className="h-4 w-4" aria-hidden /> Conversation <span className="font-normal text-secondary-500">({turns.length} {turns.length === 1 ? 'message' : 'messages'})</span>
       </h2>
       {question && (
         <div role="alert" className="rounded-lg border-2 border-warning-400 bg-warning-500/10 p-3">
