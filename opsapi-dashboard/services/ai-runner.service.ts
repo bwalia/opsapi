@@ -123,6 +123,11 @@ export interface Preview {
   default_repo_path?: string | null;
   output_mode: OutputMode;
   conflicts?: Conflicts;
+  /** Server's decision: may this user edit the prompt before starting? */
+  can_edit_prompt?: boolean;
+  runner_uuid?: string | null;
+  repo_path?: string | null;
+  work_branch?: string | null;
 }
 export interface StartInput {
   runner_uuid: string;

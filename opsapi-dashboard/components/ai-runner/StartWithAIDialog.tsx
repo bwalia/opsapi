@@ -58,7 +58,6 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
   const { hasPermission } = usePermissions();
   const isManager = hasPermission('ai_runs', 'manage');
   const [projectRole, setProjectRole] = useState<string>();
-  const canEditPrompt = isManager || projectRole === 'owner' || projectRole === 'admin';
 
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<'preview' | 'start' | null>(null);
@@ -69,6 +68,8 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
   const [model, setModel] = useState('');
   const [repo, setRepo] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
+  // The server decides (it also enforces it on start); the project role is only a fallback for older servers.
+  const canEditPrompt = preview?.can_edit_prompt ?? (isManager || projectRole === 'owner' || projectRole === 'admin');
   const [previewFor, setPreviewFor] = useState('');
   const [prompt, setPrompt] = useState('');
   const live = useRef(0);
