@@ -13,7 +13,7 @@
       POST              /import
       GET               /orders                GET/PUT /orders/:uuid
       GET/POST          /quotes                GET/PUT /quotes/:uuid
-      GET               /chats                 GET /chats/:uuid
+      GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
       POST              /reconcile
