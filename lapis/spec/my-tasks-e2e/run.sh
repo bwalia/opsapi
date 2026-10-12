@@ -8,6 +8,7 @@
 #
 #   lapis/spec/my-tasks-e2e/run.sh            # this checkout (uncommitted changes too)
 #   KEEP=1 lapis/spec/my-tasks-e2e/run.sh     # leave the stack up afterwards
+#   WITH_MCP=1 lapis/spec/my-tasks-e2e/run.sh # also drive the real MCP server (needs node + a built mcp/)
 #
 # No real credentials. Needs the lapis-lapis and pgvector/pgvector:pg15 images, and python3.
 set -euo pipefail
@@ -48,6 +49,12 @@ until curl -fs "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do sleep 1; done
 rc=0
 API="http://127.0.0.1:$PORT" PG_CONTAINER=$P-pg API_CONTAINER=$P-api JWT_SECRET_FILE="$W/jwt_secret" \
   python3 -I "$HERE/check.py" || rc=1
+# WITH_MCP=1: also drive the real MCP server (mcp/, built: cd mcp && npm ci && npm run build) against this API.
+if [ -n "${WITH_MCP:-}" ]; then
+  echo "== the real MCP server against this API (stdio and HTTP)"
+  API="http://127.0.0.1:$PORT" PG_CONTAINER=$P-pg JWT_SECRET_FILE="$W/jwt_secret" KEY_DIR="$W" \
+    MCP_DIR="$ROOT/mcp" python3 -I "$HERE/mcp_check.py" || rc=1
+fi
 echo "== errors logged by the API during the run"
 docker exec $P-api sh -c 'grep -E "\[error\]" /var/log/nginx/error.log \
   | sed -E "s/^[0-9/]+ [0-9:]+ \[error\] [0-9]+#[0-9]+: (\*[0-9]+ )?//; s/, client: .*//" | cut -c1-220 \

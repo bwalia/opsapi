@@ -80,9 +80,12 @@ check("a module the owner lost is dropped",
     same(ApiKey.effective_scopes({ crm = { "read" }, cms = { "read" } }, { cms = { "read" } }), { cms = { "read" } }))
 check("an owner with no permissions leaves nothing",
     next(ApiKey.effective_scopes(ApiKey.AGENT_PRESET, {})) == nil)
-check("kanban (a URL prefix) is covered by the projects module its routes check",
+check("kanban keeps the preset's actions for anyone with projects access (each route decides per project)",
     same(ApiKey.effective_scopes(ApiKey.AGENT_PRESET, { projects = { "read" } }),
-        { kanban = { "read" }, projects = { "read" } }))
+        { kanban = { "read", "create", "update" }, projects = { "read" } }))
+check("... but never manage on kanban without projects.manage",
+    same(ApiKey.effective_scopes({ kanban = { "manage" } }, { projects = { "read" } }),
+        { kanban = { "create", "delete", "read", "update" } }))
 check("... and a projects manager keeps the full preset",
     same(ApiKey.effective_scopes(ApiKey.AGENT_PRESET, { projects = { "manage" } }), ApiKey.AGENT_PRESET))
 check("projects does NOT alias back to kanban",
@@ -113,6 +116,25 @@ check("JSON null refused", ApiKey.check_self_scopes(cjson.null, perms) == nil)
 local dedup = ApiKey.check_self_scopes({ projects = { "read", "read" } }, perms)
 check("duplicate actions collapse", dedup and #dedup.projects == 1)
 
+print("\npermits_uri by HTTP method (self-service keys keep to the actions chosen):")
+local ro = { self_service = true, scopes = { kanban = { "read" }, projects = { "read" } } }
+check("read-only key: GET allowed", ApiKey.permits_uri(ro, "/api/v2/kanban/my-tasks", "GET"))
+for _, m in ipairs({ "POST", "PUT", "PATCH", "DELETE" }) do
+    check("read-only key: " .. m .. " refused", not ApiKey.permits_uri(ro, "/api/v2/kanban/boards/b/tasks", m))
+end
+local agent = { self_service = true, scopes = { kanban = { "read", "create", "update" } } }
+check("agent preset: POST and PUT allowed", ApiKey.permits_uri(agent, "/api/v2/kanban/boards/b/tasks", "POST")
+    and ApiKey.permits_uri(agent, "/api/v2/kanban/tasks/t", "PUT"))
+check("agent preset: DELETE refused", not ApiKey.permits_uri(agent, "/api/v2/kanban/tasks/t", "DELETE"))
+check("an unknown method is refused for a self-service key",
+    not ApiKey.permits_uri(agent, "/api/v2/kanban/tasks/t", "TRACE"))
+check("manage allows every method", ApiKey.permits_uri({ self_service = true, scopes = { crm = { "manage" } } },
+    "/api/v2/crm/x", "DELETE"))
+check("admin-minted keys are not method-checked (unchanged)",
+    ApiKey.permits_uri({ scopes = { kanban = { "read" } } }, "/api/v2/kanban/boards/b/tasks", "POST"))
+check("the AI agent preset carries create (create_task, log_time, comments are POSTs)",
+    same(ApiKey.AGENT_PRESET, { kanban = { "read", "create", "update" }, projects = { "read" } }))
+
 print("\nself_expiry_days (required, default 90, max 365):")
 check("default 90", ApiKey.self_expiry_days(nil) == 90)
 check("1 and 365 allowed", ApiKey.self_expiry_days(1) == 1 and ApiKey.self_expiry_days(365) == 365)
@@ -142,10 +164,12 @@ check("admin-minted key keeps its scopes as granted", p and same(p.scopes,
     { kanban = { "read", "update" }, projects = { "read" } }), p and canon(p.scopes))
 check("... and still acts as its bound user", p and p.uuid == "u-1" and p.user_bound == true)
 
-key_row({ created_via = "self" })
+key_row({ created_via = "self",
+    scopes = cjson.encode({ kanban = { "read", "update" }, projects = { "read", "update" }, crm = { "read" } }) })
 p = ApiKey.authenticate(raw)
-check("self-service key is narrowed to the owner's role", p and same(p.scopes,
-    { kanban = { "read" }, projects = { "read" } }), p and canon(p.scopes))
+check("self-service key is narrowed to the owner's role (projects.update and crm dropped; kanban per project)",
+    p and same(p.scopes, { kanban = { "read", "update" }, projects = { "read" } }), p and canon(p.scopes))
+check("... and is marked self-service", p and p.self_service == true)
 
 member_perms = {}
 p = ApiKey.authenticate(raw)

@@ -43,10 +43,26 @@ end
 -- here, centrally and fail-closed: a key may only reach /api/v2/<module>/...
 -- for a module it is actually scoped for. Anything else is refused before the
 -- handler runs, including any route added later.
+-- A self-service key is also held to the actions its owner chose, by HTTP method: a read-only
+-- key can't write anywhere, even where a route only checks project membership (kanban).
+local METHOD_ACTION = { GET = "read", HEAD = "read", OPTIONS = "read", POST = "create", PUT = "update",
+    PATCH = "update", DELETE = "delete" }
+
+local function allows(principal, actions, method)
+    if not principal.self_service then return true end
+    local want = METHOD_ACTION[string.upper(method or "GET")]
+    if not want or type(actions) ~= "table" then return false end
+    for _, a in ipairs(actions) do
+        if a == want or a == "manage" then return true end
+    end
+    return false
+end
+
 -- @param principal table from ApiKey.authenticate
 -- @param uri string ngx.var.uri
+-- @param method string|nil request method (self-service keys: checked against their actions)
 -- @return boolean
-function ApiKey.permits_uri(principal, uri)
+function ApiKey.permits_uri(principal, uri, method)
     if type(uri) ~= "string" then return false end
     -- The module is the first segment, with or without more path: a key
     -- scoped to customers may list/create (/api/v2/customers) as well as
@@ -54,7 +70,7 @@ function ApiKey.permits_uri(principal, uri)
     local module_name = uri:match("^/api/v2/([^/]+)")
     if not module_name then return false end
     local scopes = principal and principal.scopes or {}
-    if scopes[module_name] ~= nil then return true end
+    if scopes[module_name] ~= nil then return allows(principal or {}, scopes[module_name], method) end
     -- A plugin's routes live under its api_prefix (/api/v2/helpdesk/...) while
     -- its RBAC modules are named per resource (helpdesk_tickets): a key scoped
     -- for one of the plugin's modules may reach the plugin's prefix. The
@@ -65,7 +81,9 @@ function ApiKey.permits_uri(principal, uri)
         local prefix = plugin.api_prefix
         if uri:sub(1, #prefix + 1) == prefix .. "/" then
             for _, m in ipairs(plugin.modules) do
-                if scopes[m.machine_name] ~= nil then return true end
+                if scopes[m.machine_name] ~= nil and allows(principal or {}, scopes[m.machine_name], method) then
+                    return true
+                end
             end
             return false
         end
@@ -85,8 +103,9 @@ ApiKey.SELF_DEFAULT_DAYS = 90
 ApiKey.SELF_MAX_DAYS = 365
 ApiKey.SELF_MAX_ACTIVE = 10          -- live self-service keys per user per workspace
 ApiKey.SELF_CREATES_PER_HOUR = 10
--- What an AI agent / MCP server needs: read and update my tasks.
-ApiKey.AGENT_PRESET = { kanban = { "read", "update" }, projects = { "read" } }
+-- What an AI agent / MCP server needs: read, create and update tasks (create also covers time
+-- entries and comments, which are POSTs).
+ApiKey.AGENT_PRESET = { kanban = { "read", "create", "update" }, projects = { "read" } }
 
 -- Modules that manage keys, members or roles: never on a personal key.
 local SELF_FORBIDDEN = { namespace = true, api_keys = true }
@@ -96,6 +115,10 @@ local SELF_FORBIDDEN = { namespace = true, api_keys = true }
 -- kanban feature's module in helper/project-config.lua), so a member holding
 -- projects.X holds kanban.X for this purpose.
 local SCOPE_ALIASES = { kanban = "projects" }
+-- Modules whose writes each route decides per project (project owner/admin/member/viewer), exactly as
+-- for the same person in the dashboard: any access to the aliased module lets a key carry every action
+-- but manage, and the route still refuses what the person can't do in that project.
+local ROLE_GOVERNED = { kanban = { "read", "create", "update", "delete" } }
 
 -- The actions a member holds on a module (alias included), as a set.
 local function held(perms, module_name)
@@ -105,6 +128,9 @@ local function held(perms, module_name)
         if type(acts) == "table" then
             for _, a in ipairs(acts) do set[a] = true end
         end
+    end
+    if ROLE_GOVERNED[module_name] and next(set) ~= nil then
+        for _, a in ipairs(ROLE_GOVERNED[module_name]) do set[a] = true end
     end
     return set
 end
@@ -308,6 +334,7 @@ function ApiKey.authenticate(raw)
 
     local principal = {
         api_key = true,
+        self_service = row.created_via == ApiKey.SELF,
         key_id = row.id,
         key_uuid = row.uuid,
         key_name = row.name,

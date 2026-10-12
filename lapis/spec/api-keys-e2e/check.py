@@ -137,6 +137,28 @@ s, j = call("POST", "/api/v2/kanban/projects/%s/members" % PROJECT, owner_a, ID_
 s, j = call("POST", "/api/v2/kanban/tasks/%s/assignees" % TASK, owner_a, ID_A, {"user_uuid": dev["uuid"]})
 check("task assigned to the dev", s in (200, 201), j)
 
+print("== the key keeps to the actions its owner chose (by HTTP method)")
+dev2 = user("devtwo")
+add_member(dev2, ID_A, "agent_dev")
+s, j = call("POST", "/api/v2/kanban/projects/%s/members" % PROJECT, owner_a, ID_A,
+            {"user_uuid": dev2["uuid"], "role": "member"})
+check("dev2 joins the project as a member", s in (200, 201), (s, j))
+s, j = mint(dev2, ID_A)
+AGENT = data(j).get("key") or ""
+s, j = call("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, AGENT, ID_A, {"title": "Made by the agent " + RUN})
+check("preset key (create) can create a task in a project the member belongs to", s == 201, (s, j))
+s, j = mint(dev2, ID_A, scopes={"kanban": ["read"], "projects": ["read"]})
+RO = data(j).get("key") or ""
+check("member mints a read-only key", s == 201 and RO.startswith("opsk_"), (s, j))
+s, j = my_tasks(RO)
+check("read-only key reads my tasks", s == 200, (s, j))
+s, j = call("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, RO, ID_A, {"title": "must not exist " + RUN})
+check("read-only key cannot create a task (403), even as a project member", s == 403, (s, j))
+s, j = call("PUT", "/api/v2/kanban/tasks/%s" % TASK, RO, ID_A, {"priority": "high"})
+check("read-only key cannot update a task (403)", s == 403, (s, j))
+check("nothing was created by the read-only key",
+      one("SELECT COUNT(*) FROM kanban_tasks WHERE title = 'must not exist %s'" % RUN) == "0")
+
 # ---------------------------------------------------------------------------
 print("== a member mints a personal key and it works")
 s, j = mint(dev, ID_A)
@@ -144,8 +166,9 @@ check("member mints a key with the default preset (201)", s == 201, j)
 K = data(j)
 KEY = K.get("key") or ""
 check("raw key returned once, opsk_ + 48 hex", len(KEY) == 53 and KEY.startswith("opsk_"), KEY[:8])
-check("default preset = kanban read/update + projects read",
-      K.get("scopes") == {"kanban": ["read", "update"], "projects": ["read"]}, K.get("scopes"))
+check("default preset = kanban read/create/update + projects read",
+      {m: sorted(a) for m, a in (K.get("scopes") or {}).items()}
+      == {"kanban": ["create", "read", "update"], "projects": ["read"]}, K.get("scopes"))
 check("bound to the caller, marked self-service", K.get("user_uuid") == dev["uuid"] and K.get("created_via") == "self", K)
 days = one("SELECT round(EXTRACT(EPOCH FROM (expires_at - created_at)) / 86400) FROM api_keys WHERE uuid = '%s'"
            % K.get("uuid"))

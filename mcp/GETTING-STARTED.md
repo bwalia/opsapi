@@ -20,7 +20,8 @@ Total time: about 5 minutes.
 
 The quickest way is the self-service page: open your avatar menu → **My API keys**
 (`/dashboard/settings/api-keys`), press **Create key**, keep the **AI agent (MCP)** preset
-(it is limited to what your own role allows), copy the key — it is shown only once — and go
+(read, create and update tasks — or **Read only** for an agent that may look but not change anything;
+both are limited to what your own role allows), copy the key — it is shown only once — and go
 to Part B. The same page shows your workspace's numeric id for `OPSAPI_NAMESPACE` and
 ready-to-paste setup for Claude Code and Cursor.
 

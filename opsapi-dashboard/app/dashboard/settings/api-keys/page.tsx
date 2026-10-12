@@ -14,7 +14,14 @@ const MCP_URL = (process.env.NEXT_PUBLIC_MCP_URL || '').replace(/\/+$/, '');
 const KEY_PLACEHOLDER = 'opsk_YOUR_KEY';
 const EXPIRY_OPTIONS = [30, 90, 180, 365];
 // What the server grants when no scopes are sent (narrowed to your role there).
-const AGENT_PRESET: ApiKeyScopes = { kanban: ['read', 'update'], projects: ['read'] };
+const AGENT_PRESET: ApiKeyScopes = { kanban: ['read', 'create', 'update'], projects: ['read'] };
+// An agent that may look but never change anything (writes are refused by HTTP method).
+const READ_ONLY: ApiKeyScopes = { kanban: ['read'], projects: ['read'] };
+const ACCESS = [
+  { key: 'agent', title: 'AI agent (MCP)', text: 'Read your tasks, create tasks, update them, log time and comment.',
+    scopes: AGENT_PRESET },
+  { key: 'readonly', title: 'Read only', text: 'See your tasks and projects; any change is refused.', scopes: READ_ONLY },
+] as const;
 
 // Postgres sends "2027-01-10 09:30:00.123456" (UTC, no zone): make it parseable everywhere.
 function parseTs(s?: string | null): Date | null {
@@ -216,6 +223,7 @@ export default function MyApiKeysPage() {
 
   const [name, setName] = useState('');
   const [days, setDays] = useState(90);
+  const [access, setAccess] = useState<'agent' | 'readonly'>('agent');
   const [isCreating, setIsCreating] = useState(false);
   // The key just made, tied to its workspace so a switch never shows it elsewhere.
   const [made, setMade] = useState<{ ns: string; key: CreatedMyApiKey } | null>(null);
@@ -246,7 +254,9 @@ export default function MyApiKeysPage() {
     if (!name.trim() || !nsUuid) return toast.error('Give the key a name');
     setIsCreating(true);
     try {
-      setMade({ ns: nsUuid, key: await myApiKeysService.create({ name: name.trim(), expires_in_days: days }) });
+      setMade({ ns: nsUuid, key: await myApiKeysService.create({
+        name: name.trim(), expires_in_days: days, ...(access === 'readonly' ? { scopes: READ_ONLY } : {}),
+      }) });
       setName('');
       load();
     } catch (err) {
@@ -363,16 +373,30 @@ export default function MyApiKeysPage() {
 
                 <fieldset className="space-y-2">
                   <legend className="block text-sm font-medium text-secondary-700 mb-1.5">Access</legend>
-                  <label className="flex items-start gap-3 rounded-xl border border-primary-300 bg-primary-500/[0.04] p-4 cursor-pointer">
-                    <input type="radio" name="preset" checked readOnly className="mt-1 accent-primary-600" />
-                    <span className="space-y-1.5">
-                      <span className="block text-sm font-semibold text-secondary-900">AI agent (MCP)</span>
-                      <span className="block text-xs text-secondary-500">
-                        Read your tasks and update them. Limited to what your role allows.
+                  {ACCESS.map((o) => (
+                    <label
+                      key={o.key}
+                      className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer ${
+                        access === o.key ? 'border-primary-300 bg-primary-500/[0.04]' : 'border-secondary-200'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="preset"
+                        value={o.key}
+                        checked={access === o.key}
+                        onChange={() => setAccess(o.key)}
+                        className="mt-1 accent-primary-600"
+                      />
+                      <span className="space-y-1.5">
+                        <span className="block text-sm font-semibold text-secondary-900">{o.title}</span>
+                        <span className="block text-xs text-secondary-500">
+                          {o.text} Limited to what your role allows.
+                        </span>
+                        <ScopeBadges scopes={o.scopes} />
                       </span>
-                      <ScopeBadges scopes={AGENT_PRESET} />
-                    </span>
-                  </label>
+                    </label>
+                  ))}
                 </fieldset>
 
                 <div className="flex justify-end">

@@ -356,8 +356,11 @@ Approval policy (workspace default set in the admin dashboard, per-project overr
   `search_tasks`, `list_my_tasks(due, priority)`, `start_ai_run`, `list_runs`, `get_run`.
 - Streamable HTTP transport from the same code (`/mcp`, Bearer personal key), stdio kept. Deployed as a small Node service
   behind the existing ingress. Prepared for npm as `@opsapi/mcp`, not published.
-- Self-service personal key ("My API key"): any member mints a key bound to themselves, scopes limited to their own
-  permissions, expiry and revoke.
+- Self-service personal key ("My API keys", `/dashboard/settings/api-keys`): any member mints a key bound to themselves,
+  expiry and revoke. Two choices: **AI agent** (`kanban` read/create/update + `projects` read) or **Read only**. On every
+  request the key is narrowed to its owner's current role (removed or suspended owners lose it), and its actions are
+  enforced by HTTP method (GET read, POST create, PUT/PATCH update, DELETE delete) — so a read-only key never writes,
+  even on kanban routes that only check project membership. Kanban writes stay decided per project, as in the dashboard.
 - README fix: `OPSAPI_NAMESPACE` takes the numeric id or uuid, never the slug.
 
 ---
