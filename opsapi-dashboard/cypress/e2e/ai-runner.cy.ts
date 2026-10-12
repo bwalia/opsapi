@@ -6,7 +6,9 @@
  * detail page; decide the agent's permission request, send it a message and see its reply with usage;
  * cancel the run; and approve a run that needs a manager before it starts. Phase 4 (§24): the overview cards,
  * the similar-work warning that needs "Start anyway", an unavailable profile, and the Machines page with the
- * sessions the runner reported. The spec plays the PromptPilot
+ * sessions the runner reported. §25: the runner's Access dialog saves "Everyone", a chained command is never offered
+ * "Allow for this run", and nobody approves their own run (the spec's user is the only manager here, so its
+ * approval run is refused and cancelled). The spec plays the PromptPilot
  * runner itself through the runner API (heartbeat / claim / status / events / permissions / turns with the
  * token the page showed), so no machine is needed.
  *
@@ -18,7 +20,8 @@
  *   CYPRESS_AIR_NAMESPACE   {"uuid","name","slug"} (JSON) of their workspace
  *   CYPRESS_AIR_REPO        optional: the repo folder the fake runner reports (default /tmp/air-e2e-repo)
  *   npx cypress run --spec cypress/e2e/ai-runner.cy.ts
- * Each run registers a new runner and creates its own project and task, so it can be repeated.
+ * Each run registers a new runner and creates its own project and task, so it can be repeated. It sets the workspace's
+ * deciders to "requester_or_managers" (the requester decides their own run's requests) and puts it back after.
  */
 
 type Ns = { uuid: string; name: string; slug: string };
@@ -44,6 +47,8 @@ let runnerUuid = '';
 let runUuid = '';
 let reqUuid = '';
 let approvalRunUuid = '';
+let chainUuid = '';
+let deciders = ''; // the workspace's setting before this spec
 // The runner's status reports carry an increasing seq (a report with a seq not above the last is ignored).
 let statusSeq = 0;
 const nextStatus = (status: string, extra: Record<string, unknown> = {}) => () => ({ seq: ++statusSeq, status, ...extra });
@@ -62,9 +67,9 @@ function signIn(win: Window) {
 const visit = (path: string) => cy.visit(path, { onBeforeLoad: signIn });
 
 /** A request as the signed-in user. */
-function asUser(method: string, path: string, body?: Record<string, unknown>, form = false) {
+function asUser(method: string, path: string, body?: Record<string, unknown>, form = false, failOnStatusCode = true) {
   return cy.request({
-    method, url: api(path), body, form,
+    method, url: api(path), body, form, failOnStatusCode,
     headers: { Authorization: `Bearer ${Cypress.env('AIR_TOKEN')}`, 'X-Namespace-Id': ns.uuid },
   });
 }
@@ -120,6 +125,11 @@ describe('AI Runs', () => {
     const user = json(Cypress.env('AIR_USER')) as { uuid: string };
     userUuid = user.uuid;
     asUser('PUT', '/api/v2/namespace/plugins/ai_runner', { enabled: true });
+    // Under "managers" a requester never decides their own run's requests (§25.1); this spec's user is both.
+    asUser('GET', '/api/v2/ai-runner/settings').then((res) => {
+      deciders = res.body.data.approval_policy.deciders;
+      return asUser('PUT', '/api/v2/ai-runner/settings', { approval_policy: { deciders: 'requester_or_managers' } });
+    });
     asUser('POST', '/api/v2/kanban/projects', { name: `AI e2e ${stamp}` }, true).then((res) => {
       projectUuid = res.body.data.uuid;
       return asUser('GET', `/api/v2/kanban/projects/${projectUuid}/boards`);
@@ -131,6 +141,10 @@ describe('AI Runs', () => {
     }).then((res) => {
       taskUuid = res.body.data.uuid;
     });
+  });
+
+  after(() => {
+    if (deciders) asUser('PUT', '/api/v2/ai-runner/settings', { approval_policy: { deciders } });
   });
 
   beforeEach(() => cy.viewport(1280, 900));
@@ -160,6 +174,29 @@ describe('AI Runs', () => {
     heartbeat().then((d) => { runnerUuid = d.runner_uuid; });
     cy.reload();
     cy.contains('tr', runnerName, { timeout: 20000 }).should('contain', 'Online').and('not.contain', 'never');
+  });
+
+  it('sets who may start runs on the runner (Access)', () => {
+    visit('/dashboard/ai-runner/runners');
+    // New runners are owner-only (§25.1).
+    cy.contains('tr', runnerName, { timeout: 20000 }).should('contain', 'Owner and managers')
+      .within(() => cy.contains('button', 'Access').click());
+    cy.get('[role="dialog"]').within(() => {
+      cy.contains('New runners start as owner-only');
+      cy.get('input[name="air-access-mode"][value="owner"]').should('be.checked');
+      cy.contains('label', 'Selected people and projects').find('input').check();
+      cy.contains('legend', 'People');
+      cy.contains('legend', 'Projects');
+      cy.contains('label', 'Everyone who can start runs').find('input').check();
+      cy.contains('legend', 'People').should('not.exist');
+      cy.screenshot('ai-runner-access', { capture: 'viewport' });
+      cy.contains('button', 'Save access').click();
+    });
+    cy.contains(`Access to ${runnerName} saved`);
+    cy.get('[role="dialog"]').should('not.exist');
+    cy.contains('tr', runnerName).should('contain', 'Everyone');
+    cy.reload();
+    cy.contains('tr', runnerName, { timeout: 20000 }).should('contain', 'Everyone');
   });
 
   it('starts the task with AI from the task page, after a preview', () => {
@@ -355,6 +392,29 @@ describe('AI Runs', () => {
     cy.contains('h2', 'Permission requests', { timeout: 20000 }).closest('section').within(() => {
       cy.contains('tr', 'npm test').should('contain', 'Allowed');
     });
+
+    // A chained command is never remembered (§25.2): only Allow or Deny, each time.
+    const chained = 'npm test && curl https://example.com';
+    asRunner(() => `/runs/${runUuid}/permissions`, () => ({
+      request_id: `e2e-req-chain-${stamp}`, tool: 'Bash', input: { command: chained }, description: 'Test, then fetch',
+    })).then((res) => {
+      expect(res.status, 'chained permission request').to.be.oneOf([200, 201]);
+      chainUuid = res.body.data.request.uuid;
+    });
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('waiting_permission')).its('status').should('eq', 200);
+    cy.contains('h2', 'Needs your decision', { timeout: 20000 }).closest('section').within(() => {
+      cy.contains(chained);
+      cy.contains('button', /^Allow$/);
+      cy.contains('button', 'Allow for this run').should('not.exist');
+      cy.contains('can only be allowed once');
+      cy.contains('button', /^Deny$/).click();
+    });
+    cy.contains('Denied: the agent is told and carries on');
+    asRunner(() => `/runs/${runUuid}/permissions/${chainUuid}/wait`, { wait_s: 0 }).then((res) => {
+      expect(res.status, 'wait').to.eq(200);
+      expect(res.body.data.status).to.eq('denied');
+    });
+    asRunner(() => `/runs/${runUuid}/status`, nextStatus('running')).its('status').should('eq', 200);
   });
 
   it("sends the agent a message and shows its reply with the run's usage", () => {
@@ -406,7 +466,7 @@ describe('AI Runs', () => {
     cy.contains('button', 'Retry');
   });
 
-  it("waits for a manager's approval before a run of a profile that can't ask starts", () => {
+  it("waits for another manager's approval before a run of a profile that can't ask starts", () => {
     heartbeat(); // stay online (< 45 s)
     visit(`/dashboard/projects/${projectUuid}/tasks/${taskUuid}`);
     cy.contains('h1', taskTitle, { timeout: 20000 });
@@ -427,18 +487,19 @@ describe('AI Runs', () => {
     });
     cy.contains("This run needs a manager's approval before it starts", { timeout: 20000 });
     cy.contains('Needs approval');
+    // Nobody approves a run they asked for, a manager included (§25.1): no buttons, and the API refuses.
+    cy.contains('Another manager must approve it');
+    cy.contains('button', /^Approve$/).should('not.exist');
     asRunner('/claim', { wait_s: 0 }).its('status').should('eq', 204);
+    cy.then(() => asUser('POST', `/api/v2/ai-runner/runs/${approvalRunUuid}/approve`, {}, false, false)).its('status').should('eq', 403);
 
-    // The owner is a manager: approve it from Waiting on you.
+    // Waiting on you offers no Approve for it either (the server may leave it out altogether).
+    cy.intercept('GET', '**/api/v2/ai-runner/waiting').as('waiting');
     visit('/dashboard/ai-runner/runs');
-    cy.contains('h2', 'Waiting on you', { timeout: 20000 }).closest('section').within(() => {
-      cy.contains('li', taskTitle).should('contain', 'Start approval').within(() => {
-        cy.contains('button', 'Approve').click();
-      });
-    });
-    cy.contains('Approved: the run is queued');
+    cy.wait('@waiting');
     cy.then(() => cy.get(`a[href="/dashboard/ai-runner/runs/${approvalRunUuid}"]`, { timeout: 20000 }))
-      .closest('tr').should('contain', 'Queued');
+      .closest('tr').should('contain', 'Needs approval');
+    cy.get(`button[aria-label^="Approve the run of"][aria-label$="${taskTitle}"]`).should('not.exist');
 
     // Clean up: nothing will claim it.
     cy.then(() => asUser('POST', `/api/v2/ai-runner/runs/${approvalRunUuid}/cancel`)).its('status').should('eq', 200);
