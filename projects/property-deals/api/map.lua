@@ -1,5 +1,5 @@
 -- Map / deal finder (SPEC §3.6):
---   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings
+--   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings   (leads: property_deals_leads.read)
 --   GET /map?polygon=lat,lng;lat,lng;lat,lng&layers=...
 --   GET /properties/:id/card    the map's property card: summary, deal, yield/discount, top 3 matching buyers
 -- Radius: bounding-box prefilter on (namespace_id, lat, lng), then exact haversine
@@ -15,15 +15,8 @@ local cjson = require("cjson")
 local U = require("property_deals.util")
 
 local MAX_FEATURES = 2000
-local EARTH_MILES = 3958.8
 local LAYERS = { properties = true, deals = true, leads = true, holdings = true,
     sold_prices = "sold_price", epc = "epc", listings = "listing", auction_lots = "auction_lot" }
-
-local function haversine_sql(lat_col, lng_col, lat, lng)
-    return string.format([[(%f * 2 * asin(sqrt(power(sin(radians(%s - %f) / 2), 2)
-        + cos(radians(%f)) * cos(radians(%s)) * power(sin(radians(%s - %f) / 2), 2))))]],
-        EARTH_MILES, lat_col, lat, lat, lat_col, lng_col, lng)
-end
 
 --- Parse "lat,lng;lat,lng;..." into a list of {lat,lng} (3..200 points).
 local function parse_polygon(s)
@@ -51,7 +44,7 @@ local function area(p, lat_col, lng_col)
     end
     local dlat = p.radius / 69.0
     local dlng = p.radius / math.max(0.01, 69.0 * math.cos(math.rad(p.lat)))
-    local dist = haversine_sql(lat_col, lng_col, p.lat, p.lng)
+    local dist = U.miles_sql(lat_col, lng_col, p.lat, p.lng)
     return string.format("%s BETWEEN %f AND %f AND %s BETWEEN %f AND %f AND %s <= %f",
         lat_col, p.lat - dlat, p.lat + dlat, lng_col, p.lng - dlng, p.lng + dlng, dist, p.radius), dist
 end
@@ -113,7 +106,8 @@ return function(app)
             if p.layers.deals then add("deals", deals) end
             if p.layers.properties then add("properties", props) end
         end
-        if p.layers.leads then
+        -- Leads (who is selling and why) only for people allowed to see leads.
+        if p.layers.leads and sdk.can(self, "property_deals_leads", "read") then
             add("leads", db.query([[
                 SELECT l.uuid, p.lat, p.lng, trim(l.first_name || ' ' || COALESCE(l.last_name, '')) AS title,
                        p.address_line1 AS subtitle, ld.lead_kind, ld.situation, ld.deadline_date, l.status,
