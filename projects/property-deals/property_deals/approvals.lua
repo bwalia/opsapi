@@ -86,7 +86,8 @@ end
 --- A comment on the kanban task (best effort).
 function Approvals.comment(ns, task_uuid, text, user_uuid)
     if not user_uuid or not text then return end
-    local t = U.one("SELECT id FROM kanban_tasks WHERE uuid = ?", task_uuid)
+    local t = U.one([[SELECT t.id FROM kanban_tasks t JOIN property_deals_task_details d ON d.task_uuid = t.uuid
+        WHERE d.namespace_id = ? AND t.uuid = ?]], ns, task_uuid)
     if not t then return end
     local ok, err = pcall(require("queries.KanbanTaskQueries").addComment,
         { task_id = t.id, user_uuid = user_uuid, content = text })
@@ -99,7 +100,10 @@ local function mirror_to_jobshout(ns, a, decision, note)
     if not row then return { error = "JobShout link no longer exists" } end
     local res, err = require("lib.jobshout-client").decide(ns, row, a.jobshout_approval_id, decision,
         note or (decision == "approve" and "Approved in Property Deals" or nil))
-    if not res then return { error = err } end
+    if not res then
+        ngx.log(ngx.WARN, "[property_deals] approval ", a.uuid, ": JobShout decide: ", tostring(err))
+        return { error = "Couldn't pass the decision to JobShout" }
+    end
     return { ok = true }
 end
 
@@ -187,7 +191,8 @@ function Approvals.decide(ns, id, me, input, can_manage)
             end
         else
             if a.agent_run_uuid and a.agent_run_uuid ~= db.NULL then
-                db.update("property_deals_agent_runs", { retry_note = input.note }, { uuid = a.agent_run_uuid })
+                db.update("property_deals_agent_runs", { retry_note = input.note },
+                    { namespace_id = ns, uuid = a.agent_run_uuid })
             end
             Approvals.back_to_todo(ns, a.task_uuid ~= db.NULL and a.task_uuid or nil,
                 "Draft rejected: " .. tostring(input.note) .. " — run the agent again to redraft with this note.", me)
@@ -199,7 +204,8 @@ function Approvals.decide(ns, id, me, input, can_manage)
 end
 
 --- Carry out an approved action once (claimed by the UPDATE). Failures leave the
--- approval `failed` with the reason; POST /approvals/:id/retry runs it again.
+-- approval `failed` with the reason; POST /approvals/:id/retry runs it again, skipping
+-- the sends already done (executor steps).
 function Approvals.execute(ns, id, actor)
     local a = U.one([[
         UPDATE property_deals_approvals SET execution_attempts = execution_attempts + 1, updated_at = NOW(),
@@ -233,11 +239,14 @@ function Approvals.execute(ns, id, actor)
         return res
     end
     local reason = ok and err or res
+    -- Our own failures (U.fail) are written for people; anything else (a database or Lua error, an
+    -- upstream reply) is logged and stored as a plain category, never shown.
+    local message = type(reason) == "table" and reason.pd_error and reason.message or "Couldn't save the result"
     if type(reason) == "table" then reason = reason.message or cjson.encode(reason) end
     ngx.log(ngx.WARN, "[property_deals] approval ", a.uuid, " execution failed: ", tostring(reason))
     db.update("property_deals_approvals", { status = "failed",
-        execution_result = cjson.encode({ error = tostring(reason) }) }, { id = a.id })
-    return nil, tostring(reason)
+        execution_result = cjson.encode({ error = message }) }, { id = a.id })
+    return nil, message
 end
 
 return Approvals

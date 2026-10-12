@@ -13,6 +13,10 @@
 --                      Android SMS Gateway) is sent; WhatsApp gives a click-to-chat link a person sends from
 --                      (no paid API). Refused when the lead opted out or has no lawful basis recorded.
 --   (anything else)    recorded as approved; nothing to run
+--
+-- A retry (POST /approvals/:id/retry) never repeats a send: each email / SMS, and the records written
+-- after it, is a step marked done on the approval (execution_steps) as it happens. Actions that only
+-- write here run in one transaction.
 local cjson = require("cjson")
 local db = require("lapis.db")
 local U = require("property_deals.util")
@@ -34,8 +38,39 @@ function X.send_email(ns, to, subject, body)
     local msg = { to = to, subject = subject, text = body, sync = true, smtp = smtp }
     if smtp then msg.from_email, msg.from_name, msg.reply_to = smtp.from_email, smtp.from_name, smtp.reply_to end
     local ok, err = Mail.send(msg)
-    if not ok then U.fail(502, "Email not sent: " .. tostring(err)) end
+    if not ok then
+        ngx.log(ngx.WARN, "[property_deals] email not sent (namespace ", ns, "): ", tostring(err))
+        U.fail(502, "Couldn't send the email")
+    end
     return true
+end
+
+--- Do one side effect of an approved action once: done steps are recorded on the approval as they
+-- happen, and skipped by a retry. tx = database work, committed together with its marker.
+local function step(a, key, fn, tx)
+    if a.steps[key] ~= nil then return a.steps[key] end
+    local function run()
+        local v = fn()
+        if v == nil then v = true end
+        db.query([[UPDATE property_deals_approvals SET updated_at = NOW(),
+            execution_steps = execution_steps || jsonb_build_object(?::text, ?::jsonb) WHERE id = ?]],
+            key, cjson.encode(v), a.id)
+        return v
+    end
+    local v
+    if tx then v = U.tx(run) else v = run() end
+    a.steps[key] = v
+    return v
+end
+
+-- property_deals_enquiries.owner_party; a role it doesn't know is filed under "other".
+local OWNER_PARTIES = { seller = true, buyer = true, buyer_solicitor = true, seller_solicitor = true, lender = true,
+    broker = true, surveyor = true, estate_agent = true, freeholder = true, managing_agent = true, council = true,
+    other = true }
+
+local function owner_party(v)
+    if v == nil or v == cjson.null then return "seller_solicitor" end
+    return OWNER_PARTIES[v] and v or "other"
 end
 
 local function apply_enquiries(ns, p, actor)
@@ -52,7 +87,7 @@ local function apply_enquiries(ns, p, actor)
     for _, n in ipairs(type(p.new_enquiries) == "table" and p.new_enquiries or {}) do
         if type(n.title) == "string" and n.title ~= "" and U.is_uuid(p.deal_uuid) then
             db.insert("property_deals_enquiries", { namespace_id = ns, deal_uuid = p.deal_uuid, title = n.title:sub(1, 255),
-                detail = n.detail, owner_party = n.owner_party or "seller_solicitor", source = "agent" })
+                detail = n.detail, owner_party = owner_party(n.owner_party), source = "agent" })
             added = added + 1
         end
     end
@@ -62,18 +97,21 @@ end
 X.actions = {}
 
 X.actions.send_email = function(ns, a, p, actor)
-    X.send_email(ns, p.to, p.subject or a.title, p.body or "")
-    local enquiries = type(p.enquiry_uuids) == "table" and p.enquiry_uuids or {}
-    local chase = db.insert("property_deals_chases", {
-        namespace_id = ns, deal_uuid = U.is_uuid(p.deal_uuid) and p.deal_uuid or a.deal_uuid,
-        task_uuid = a.task_uuid, to_party = p.to_party or "other", to_name = p.to_name, to_address = p.to,
-        channel = "email", subject = p.subject, body = p.body, status = "sent", sent_at = db.raw("NOW()"),
-        sent_by_user_uuid = actor, approval_uuid = a.uuid,
-        enquiry_uuid = #enquiries == 1 and U.is_uuid(enquiries[1]) and enquiries[1] or nil,
-    }, { returning = "*" })[1]
-    local resolved, added = apply_enquiries(ns, p, actor)
-    return { result = { chase_uuid = chase.uuid, sent_to = p.to, enquiries_resolved = resolved, enquiries_added = added },
-        task_status = "done" }
+    step(a, "email", function() X.send_email(ns, p.to, p.subject or a.title, p.body or "") end)
+    local done = step(a, "recorded", function()
+        local enquiries = type(p.enquiry_uuids) == "table" and p.enquiry_uuids or {}
+        local chase = db.insert("property_deals_chases", {
+            namespace_id = ns, deal_uuid = U.is_uuid(p.deal_uuid) and p.deal_uuid or a.deal_uuid,
+            task_uuid = a.task_uuid, to_party = p.to_party or "other", to_name = p.to_name, to_address = p.to,
+            channel = "email", subject = p.subject, body = p.body, status = "sent", sent_at = db.raw("NOW()"),
+            sent_by_user_uuid = actor, approval_uuid = a.uuid,
+            enquiry_uuid = #enquiries == 1 and U.is_uuid(enquiries[1]) and enquiries[1] or nil,
+        }, { returning = "*" })[1]
+        local resolved, added = apply_enquiries(ns, p, actor)
+        return { chase_uuid = chase.uuid, enquiries_resolved = resolved, enquiries_added = added }
+    end, true)
+    return { result = { chase_uuid = done.chase_uuid, sent_to = p.to, enquiries_resolved = done.enquiries_resolved,
+        enquiries_added = done.enquiries_added }, task_status = "done" }
 end
 
 X.actions.update_enquiries = function(ns, a, p, actor)
@@ -91,14 +129,18 @@ X.actions.request_booking = function(ns, a, p, actor)
         if not s or s.email == db.NULL then
             skipped[#skipped + 1] = { supplier_uuid = r.supplier_uuid, reason = "no active supplier with an email" }
         else
-            X.send_email(ns, s.email, r.subject or a.title, r.body or "")
-            local b = db.insert("property_deals_bookings", {
-                namespace_id = ns, supplier_uuid = s.uuid, deal_uuid = U.is_uuid(p.deal_uuid) and p.deal_uuid or a.deal_uuid,
-                property_uuid = U.is_uuid(p.property_uuid) and p.property_uuid or nil, task_uuid = a.task_uuid,
-                service = p.service or "other", status = "requested", approval_uuid = a.uuid,
-                notes = "Slots requested by email (approved request)",
-            }, { returning = "*" })[1]
-            bookings[#bookings + 1] = { booking_uuid = b.uuid, supplier_uuid = s.uuid, sent_to = s.email }
+            -- Per supplier: one emailed and booked, then another failing, is retried from the failed one.
+            step(a, "email:" .. s.uuid, function() X.send_email(ns, s.email, r.subject or a.title, r.body or "") end)
+            local booking_uuid = step(a, "booking:" .. s.uuid, function()
+                return db.insert("property_deals_bookings", {
+                    namespace_id = ns, supplier_uuid = s.uuid,
+                    deal_uuid = U.is_uuid(p.deal_uuid) and p.deal_uuid or a.deal_uuid,
+                    property_uuid = U.is_uuid(p.property_uuid) and p.property_uuid or nil, task_uuid = a.task_uuid,
+                    service = p.service or "other", status = "requested", approval_uuid = a.uuid,
+                    notes = "Slots requested by email (approved request)",
+                }, { returning = "*" })[1].uuid
+            end, true)
+            bookings[#bookings + 1] = { booking_uuid = booking_uuid, supplier_uuid = s.uuid, sent_to = s.email }
         end
     end
     if #bookings == 0 then U.fail(422, "No booking request could be sent", { skipped = skipped }) end
@@ -114,7 +156,7 @@ X.actions.confirm_booking = function(ns, a, p, actor)
     if not b then U.fail(404, "Booking not found") end
     if b.status == "confirmed" or b.status == "done" then return { result = { booking_uuid = b.uuid, already = b.status } } end
     local to = type(p.to) == "string" and p.to ~= "" and p.to or (b.email ~= db.NULL and b.email or nil)
-    X.send_email(ns, to, p.subject or a.title, p.body or "Please confirm the booking.")
+    step(a, "email", function() X.send_email(ns, to, p.subject or a.title, p.body or "Please confirm the booking.") end)
     db.update("property_deals_bookings", { status = "confirmed", confirmed_at = db.raw("NOW()"),
         slot_start = p.slot_start, slot_end = p.slot_end, cost = tonumber(p.cost), updated_at = db.raw("NOW()") },
         { id = b.id })
@@ -131,7 +173,7 @@ end
 
 --- A deal pack to a matched buyer: email them, mark the match sent.
 X.actions.send_deal_pack = function(ns, a, p, actor)
-    X.send_email(ns, p.to, p.subject or a.title, p.body or "")
+    step(a, "email", function() X.send_email(ns, p.to, p.subject or a.title, p.body or "") end)
     if U.is_uuid(p.match_uuid) then
         db.query([[UPDATE property_deals_matches SET status = 'sent', sent_at = NOW(), approval_uuid = ?, updated_at = NOW()
             WHERE namespace_id = ? AND uuid = ?]], a.uuid, ns, p.match_uuid)
@@ -210,7 +252,7 @@ X.actions.add_red_flags = function(ns, a, p, actor)
         if type(f.title) == "string" and f.title ~= "" then
             local where = f.filename and (" (" .. f.filename .. (f.page and (", page " .. f.page) or "") .. ")") or ""
             local e = db.insert("property_deals_enquiries", { namespace_id = ns, deal_uuid = p.deal_uuid,
-                title = (f.title .. where):sub(1, 255), detail = f.detail, owner_party = f.owner_party or "seller_solicitor",
+                title = (f.title .. where):sub(1, 255), detail = f.detail, owner_party = owner_party(f.owner_party),
                 blocking = f.severity == "high", source = "agent" }, { returning = "*" })[1]
             added[#added + 1] = e.uuid
         end
@@ -268,14 +310,22 @@ X.actions.send_lead_followup = function(ns, a, p, actor)
     local result = { channel = channel, sent_to = to }
     local status = "sent"
     if channel == "email" then
-        X.send_email(ns, to, p.subject or a.title, body .. "\n\n--\nIf you'd rather not hear from us, just reply STOP.")
+        step(a, "sent", function()
+            X.send_email(ns, to, p.subject or a.title,
+                body .. "\n\n--\nIf you'd rather not hear from us, just reply STOP.")
+        end)
     elseif channel == "sms" then
         if not to then U.fail(422, "The lead has no phone number") end
         local M = require("property_deals.messaging")
         local text = body .. " Reply STOP to opt out."
         if M.available(ns, "sms") then
-            local ok, err = M.send(ns, "sms", M.e164(to) or to, { body = text })
-            if not ok then U.fail(502, "SMS not sent: " .. tostring(err)) end
+            step(a, "sent", function()
+                local ok, err = M.send(ns, "sms", M.e164(to) or to, { body = text })
+                if not ok then
+                    ngx.log(ngx.WARN, "[property_deals] SMS not sent (approval ", a.uuid, "): ", tostring(err))
+                    U.fail(502, "Couldn't send the SMS")
+                end
+            end)
         else
             status, result.manual_link = "draft", "sms:" .. to:gsub("%s+", "") .. "?&body=" .. ngx.escape_uri(text)
         end
@@ -286,28 +336,38 @@ X.actions.send_lead_followup = function(ns, a, p, actor)
     else
         U.fail(422, "Unknown channel")
     end
-    local chase = db.insert("property_deals_chases", {
-        namespace_id = ns, lead_uuid = lead.uuid, task_uuid = a.task_uuid, to_party = "other",
-        to_name = p.to_name, to_address = to, channel = channel, subject = p.subject, body = body,
-        status = status, sent_at = status == "sent" and db.raw("NOW()") or nil, sent_by_user_uuid = actor,
-        approval_uuid = a.uuid, outcome = "followup",
-    }, { returning = "*" })[1]
-    if U.is_uuid(p.signal_uuid) then
-        db.query("UPDATE property_deals_lead_signals SET used_at = NOW() WHERE namespace_id = ? AND uuid = ?", ns, p.signal_uuid)
-    end
-    db.query([[UPDATE property_deals_lead_details SET last_followup_at = NOW(), updated_at = NOW()
-        WHERE namespace_id = ? AND lead_uuid = ?]], ns, lead.uuid)
-    result.chase_uuid = chase.uuid
+    result.chase_uuid = step(a, "recorded", function()
+        local chase = db.insert("property_deals_chases", {
+            namespace_id = ns, lead_uuid = lead.uuid, task_uuid = a.task_uuid, to_party = "other",
+            to_name = p.to_name, to_address = to, channel = channel, subject = p.subject, body = body,
+            status = status, sent_at = status == "sent" and db.raw("NOW()") or nil, sent_by_user_uuid = actor,
+            approval_uuid = a.uuid, outcome = "followup",
+        }, { returning = "*" })[1]
+        if U.is_uuid(p.signal_uuid) then
+            db.query("UPDATE property_deals_lead_signals SET used_at = NOW() WHERE namespace_id = ? AND uuid = ?",
+                ns, p.signal_uuid)
+        end
+        db.query([[UPDATE property_deals_lead_details SET last_followup_at = NOW(), updated_at = NOW()
+            WHERE namespace_id = ? AND lead_uuid = ?]], ns, lead.uuid)
+        return chase.uuid
+    end, true)
     -- Sent: done. A click-to-send link: the task stays open until the person sends it and marks it done.
     return { result = result, task_status = status == "sent" and "done" or "in_progress" }
 end
+
+-- Actions that send something (their steps are marked one by one); the others only write here.
+local SENDS = { send_email = true, request_booking = true, confirm_booking = true, send_deal_pack = true,
+    send_lead_followup = true }
 
 function X.run(ns, a, actor)
     local fn = X.actions[a.action]
     local p = U.json(a.payload)
     if type(p) ~= "table" then p = {} end
     if not fn then return { result = { note = "approved; no automatic action for '" .. tostring(a.action) .. "'" } } end
-    return fn(ns, a, p, actor)
+    local steps = U.json(a.execution_steps)
+    a.steps = type(steps) == "table" and steps or {}
+    if SENDS[a.action] then return fn(ns, a, p, actor) end
+    return U.tx(function() return fn(ns, a, p, actor) end)
 end
 
 return X
