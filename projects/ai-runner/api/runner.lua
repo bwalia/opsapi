@@ -1,9 +1,13 @@
--- Runner API (docs/AI_RUNNER.md §22.2). No user session: under public/, authenticated by the runner token
+-- Runner API (docs/AI_RUNNER.md §22.2, §23.2). No user session: under public/, authenticated by the runner token
 -- ("Authorization: Bearer oprn_<48 hex>", stored as a SHA-256 hash and bound to one workspace).
 --   POST /public/runner/heartbeat              capabilities, repos, inventory -> runs to cancel; renews leases
---   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } or 204
---   POST /public/runner/runs/:uuid/status      { seq, status, ... } compare-and-set; stale seq ignored
+--   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } (+ run_token) or 204
+--   POST /public/runner/runs/:uuid/status      { seq, status, question?, ... } compare-and-set; stale seq ignored
 --   POST /public/runner/runs/:uuid/events      { events: [{ seq, type, text?, data? }] } idempotent on (run, seq)
+--   POST /public/runner/runs/:uuid/permissions              ask a person; idempotent on request_id
+--   POST /public/runner/runs/:uuid/permissions/:req/wait    long-poll for the decision
+--   POST /public/runner/runs/:uuid/turns                    an agent turn + its usage; idempotent on turn
+--   POST /public/runner/runs/:uuid/turns/next               long-poll for people's messages
 -- Revoked token -> 401; plugin off in the workspace -> 404; paused runner: heartbeat works, claim gives 204.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -15,6 +19,7 @@ local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
 
 local MAX_EVENTS, MAX_EVENT_TEXT, MAX_EVENT_DATA = 200, 4096, 8192
+local MAX_INPUT, MAX_TURN_TEXT, INT_MAX = 8192, 8192, 2147483647
 local EVENT_TYPES = { log = true, progress = true, tool = true, usage = true }
 local BRANCH = "^[%w%._/%-]+$"
 
@@ -27,9 +32,7 @@ local function auth()
     local r = U.one("SELECT " .. R.RUNNER_COLS .. [[, n.status AS ns_status FROM ar_runners r
         JOIN namespaces n ON n.id = r.namespace_id WHERE r.token_hash = ?]], U.sha256(raw))
     if not r or r.status == "revoked" then U.fail(401, "Unauthorized") end
-    if r.ns_status ~= "active" or not require("helper.plugin-workspaces").isEnabled("ai_runner", r.namespace_id) then
-        U.fail(404, "AI Runs is turned off for this workspace", { code = "PLUGIN_DISABLED" })
-    end
+    R.require_plugin(r.ns_status, r.namespace_id)
     return r
 end
 
@@ -43,6 +46,49 @@ local function str(v, max)
     if type(v) == "string" then return U.clean(v, max) end
 end
 
+-- Redact before cutting, so a cut never leaves half a key in clear.
+local function safe_text(v, max)
+    if type(v) == "string" then return U.clean(U.redact(U.clean(v)), max) end
+end
+
+-- A run this runner claimed: 404 when it isn't its own or not claimed yet, 409 once it ended.
+local function claimed_run(runner, uuid)
+    local run = U.is_uuid(uuid) and U.one([[SELECT * FROM ar_runs WHERE uuid = ? AND namespace_id = ?
+        AND runner_uuid = ?]], uuid, runner.namespace_id, runner.uuid)
+    if not run or not (R.IS_ACTIVE[run.status] or R.TERMINAL[run.status]) then U.fail(404, "Run not found") end
+    if R.TERMINAL[run.status] then U.fail(409, "This run has ended (" .. run.status .. ")", { status = run.status }) end
+    return run
+end
+
+-- Has the run been cancelled (or ended) under the runner? Long polls return early on it.
+local function stopping(run)
+    local st = U.one("SELECT status FROM ar_runs WHERE id = ?", run.id).status
+    return st == "cancelling" or R.TERMINAL[st] == true
+end
+
+-- What a person sees for a permission request: the command, the file, the URL; else the input as JSON.
+local function input_summary(input)
+    local s = input.command or input.file_path or input.notebook_path or input.url or input.path or input.pattern
+    if type(s) ~= "string" then
+        local ok, enc = pcall(cjson.encode, input)
+        s = ok and enc or ""
+    end
+    return safe_text(s, 2000)
+end
+
+local function num(v)
+    v = tonumber(v)
+    if v and v == v and v ~= math.huge and v ~= -math.huge then return v end
+end
+
+-- The profile's plan usage window, as the agent reported it (Claude's rate_limit_event), for the Runners page.
+local function rate_limit(v)
+    if type(v) ~= "table" then return nil end
+    return { status = str(v.status, 40) or cjson.null, type = str(v.type, 40) or cjson.null,
+        resets_at = num(v.resets_at) or str(v.resets_at, 64) or cjson.null,
+        utilization = num(v.utilization) or cjson.null }
+end
+
 local function capabilities(c)
     if type(c) ~= "table" then return nil end
     local profiles = {}
@@ -54,7 +100,8 @@ local function capabilities(c)
                 if type(m) == "string" and #models < 50 then models[#models + 1] = U.clean(m, 120) end
             end
             profiles[#profiles + 1] = { key = key, label = str(p.label, 120) or key, models = U.array(models),
-                approval = (p.approval == "bridge" or p.approval == "unsupported") and p.approval or "none" }
+                approval = (p.approval == "bridge" or p.approval == "unsupported") and p.approval or "none",
+                rate_limit = rate_limit(p.rate_limit) }
         end
     end
     local n = tonumber(c.max_concurrency)
@@ -110,7 +157,9 @@ end
 
 local STATUS_RULES = {
     seq = { type = "integer", required = true, min = 1 },
-    status = { required = true, enum = { "starting", "running", "succeeded", "failed", "cancelled" } },
+    status = { required = true, enum = { "starting", "running", "waiting_permission", "needs_input", "succeeded",
+        "failed", "cancelled" } },
+    question = { type = "text" },
     pid = { type = "integer", min = 0 },
     agent_session_id = { max = 255 },
     exit_code = { type = "integer" },
@@ -175,9 +224,7 @@ return function(app)
 
     app:post("/public/runner/claim", sdk.handler({ namespace = false }, U.guard(function(self)
         local runner = auth()
-        local wait = tonumber(body(self).wait_s)
-        wait = wait and wait == wait and math.max(0, math.min(R.CLAIM_WAIT_S, wait)) or R.CLAIM_WAIT_S
-        local run = R.claim(runner, wait)
+        local run = R.claim(runner, R.wait_s(body(self).wait_s))
         if not run then return { status = 204, layout = false, "" } end
         return sdk.ok({ run = R.payload(run) })
     end)))
@@ -196,6 +243,7 @@ return function(app)
         end
         if d.error then d.error = U.clean(U.redact(d.error), 2000) end
         if d.summary then d.summary = U.clean(U.redact(d.summary), 8000) end
+        if d.question then d.question = U.clean(U.redact(d.question), 4000) end
         return sdk.ok(R.report(runner, self.params.uuid, d))
     end)))
 
@@ -205,7 +253,7 @@ return function(app)
         local run = U.is_uuid(self.params.uuid) and U.one([[SELECT uuid, status FROM ar_runs
             WHERE uuid = ? AND namespace_id = ? AND runner_uuid = ?]], self.params.uuid, runner.namespace_id,
             runner.uuid)
-        if not run or run.status == "queued" then U.fail(404, "Run not found") end
+        if not run or run.status == "queued" or run.status == "pending_approval" then U.fail(404, "Run not found") end
         local list = b.events
         if type(list) ~= "table" or (next(list) ~= nil and list[1] == nil) then
             U.invalid({ events = "must be a list" })
@@ -227,9 +275,7 @@ return function(app)
                 data = U.redact_value(e.data)
                 if #cjson.encode(data) > MAX_EVENT_DATA then data = { truncated = true } end
             end
-            -- Redact before cutting, so a cut never leaves half a key in clear.
-            rows[#rows + 1] = { seq = seq, type = e.type, data = data,
-                text = type(e.text) == "string" and U.clean(U.redact(U.clean(e.text)), MAX_EVENT_TEXT) or nil }
+            rows[#rows + 1] = { seq = seq, type = e.type, data = data, text = safe_text(e.text, MAX_EVENT_TEXT) }
         end
         if #rows == 0 then return sdk.ok({ stored = 0 }) end
         -- ponytail: no cap on events per run yet; add one (or MinIO chunks, §5) when long runs make the table heavy.
@@ -240,5 +286,152 @@ return function(app)
             ON CONFLICT (run_uuid, seq) DO NOTHING
         ]], run.uuid, runner.namespace_id, cjson.encode(rows))
         return sdk.ok({ stored = res.affected_rows or 0 })
+    end)))
+
+    -- The permission bridge (§23.2): the runner is Claude's permission host and asks a person through OpsAPI.
+    app:post("/public/runner/runs/:uuid/permissions", sdk.handler({ namespace = false }, U.guard(function(self)
+        local runner = auth()
+        local run = claimed_run(runner, self.params.uuid)
+        local b = body(self)
+        local d, errors = sdk.validate(b, { request_id = { required = true, max = 255 },
+            tool = { required = true, max = 120 }, tool_use_id = { max = 255 }, description = { type = "text" },
+            blocked_path = { type = "text", max = 4096 }, rule_key = { max = 255 } })
+        if not d then U.invalid(errors) end
+        if type(b.input) ~= "table" or (next(b.input) ~= nil and b.input[1] ~= nil) then
+            U.invalid({ input = "must be an object" })
+        end
+        for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
+        local input = U.redact_value(b.input)
+        local ok, enc = pcall(cjson.encode, input)
+        if not ok or #enc > MAX_INPUT then enc = cjson.encode({ truncated = true }) end
+
+        local function existing()
+            return U.one("SELECT uuid, status, reason FROM ar_run_requests WHERE run_uuid = ? AND request_id = ?",
+                run.uuid, d.request_id)
+        end
+        local found = existing()
+        if found then
+            return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
+        end
+        -- "Allow for this run" covers later requests of the same kind (same rule_key) at once.
+        local earlier = d.rule_key and U.one([[SELECT decided_by FROM ar_run_requests WHERE run_uuid = ?
+            AND rule_key = ? AND status = 'allowed' AND remember ORDER BY decided_at DESC LIMIT 1]], run.uuid,
+            d.rule_key)
+        local minutes = R.policy(run.namespace_id).permission_timeout_s / 60
+        local row = U.one([[
+            INSERT INTO ar_run_requests (run_uuid, namespace_id, kind, request_id, tool, input_summary, input,
+                description, blocked_path, rule_key, tool_use_id, status, decided_by, decided_at, reason, expires_at)
+            VALUES (?, ?, 'permission', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, NOW() + make_interval(mins => ?))
+            ON CONFLICT (run_uuid, request_id) DO NOTHING
+            RETURNING uuid, status, reason
+        ]], run.uuid, run.namespace_id, d.request_id, U.clean(d.tool), input_summary(b.input), enc,
+            safe_text(d.description, 2000) or db.NULL, d.blocked_path and U.clean(d.blocked_path) or db.NULL,
+            d.rule_key and U.clean(d.rule_key) or db.NULL, d.tool_use_id or db.NULL,
+            earlier and "allowed" or "pending", earlier and earlier.decided_by or db.NULL,
+            earlier and db.raw("NOW()") or db.NULL, earlier and "Allowed earlier in this run" or db.NULL, minutes)
+        if not row then -- the same request_id raced in
+            found = existing()
+            return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
+        end
+        R.notify(run)
+        return sdk.created({ request = { uuid = row.uuid, status = row.status, reason = U.null(row.reason) } })
+    end)))
+
+    app:post("/public/runner/runs/:uuid/permissions/:req_uuid/wait", sdk.handler({ namespace = false },
+        U.guard(function(self)
+            local runner = auth()
+            local run = claimed_run(runner, self.params.uuid)
+            local req = U.is_uuid(self.params.req_uuid) and U.one([[SELECT id FROM ar_run_requests
+                WHERE uuid = ? AND run_uuid = ? AND namespace_id = ?]], self.params.req_uuid, run.uuid,
+                run.namespace_id)
+            if not req then U.fail(404, "Request not found") end
+            local function state(last)
+                R.expire_requests(req.id)
+                local q = U.one(R.REQUEST_SQL .. " WHERE q.id = ?", req.id)
+                local cancel = stopping(run)
+                if last or cancel or q.status ~= "pending" then
+                    return { status = q.status, reason = U.null(q.reason), decided_by_name = U.null(q.decided_by_name),
+                        cancel = cancel }
+                end
+            end
+            return sdk.ok(R.long_poll(R.wait_s(body(self).wait_s), state) or state(true))
+        end)))
+
+    -- One agent turn (a stream-json `result`) with its usage: stored, added to the run's totals and metered.
+    app:post("/public/runner/runs/:uuid/turns", sdk.handler({ namespace = false }, U.guard(function(self)
+        local runner = auth()
+        local run = claimed_run(runner, self.params.uuid)
+        local b = body(self)
+        local d, errors = sdk.validate(b, { turn = { type = "integer", required = true, min = 1 },
+            text = { type = "text" }, model = { max = 120 },
+            cost_estimate = { type = "number", min = 0, max = 99999999 },
+            num_turns = { type = "integer", min = 0 }, duration_ms = { type = "integer", min = 0 },
+            needs_input = { type = "boolean" } })
+        if not d then U.invalid(errors) end
+        for k, v in pairs(d) do if v == db.NULL then d[k] = nil end end
+        if b.usage ~= nil and (type(b.usage) ~= "table" or b.usage[1] ~= nil) then
+            U.invalid({ usage = "must be an object" })
+        end
+        local usage = {}
+        for key, col in pairs({ input_tokens = "tokens_in", output_tokens = "tokens_out",
+            cache_read_tokens = "cache_read", cache_write_tokens = "cache_write" }) do
+            local v = (b.usage or {})[key]
+            local n = v == nil and 0 or num(v)
+            if not n or n < 0 or n > 1e12 then U.invalid({ ["usage." .. key] = "must be a token count" }) end
+            usage[col] = math.floor(n)
+        end
+        local model = d.model and U.clean(d.model) or run.model or run.profile
+
+        local stored = U.tx(function()
+            U.one("SELECT id FROM ar_runs WHERE id = ? FOR UPDATE", run.id) -- a replayed turn waits for the first
+            if U.one([[SELECT 1 AS x FROM ar_run_turns WHERE run_uuid = ? AND role = 'assistant'
+                AND runner_turn = ?]], run.uuid, d.turn) then return 0 end
+            R.insert_turn(run, { role = "assistant", status = "delivered", runner_turn = d.turn,
+                text = safe_text(d.text, MAX_TURN_TEXT) or db.NULL, model = model, tokens_in = usage.tokens_in,
+                tokens_out = usage.tokens_out, cache_read = usage.cache_read, cache_write = usage.cache_write,
+                cost_estimate = d.cost_estimate or db.NULL, num_turns = d.num_turns or db.NULL,
+                duration_ms = d.duration_ms or db.NULL, needs_input = d.needs_input == true })
+            db.query([[UPDATE ar_runs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?,
+                cache_read = cache_read + ?, cache_write = cache_write + ?, cost_estimate = cost_estimate + ?,
+                turns = turns + 1, updated_at = NOW() WHERE id = ?]], usage.tokens_in, usage.tokens_out,
+                usage.cache_read, usage.cache_write, d.cost_estimate or 0, run.id)
+            -- Metered like every other model call (lib/agent/llm.lua): the AI usage page and limits see it. A lost
+            -- usage row is logged, never a failed turn (the savepoint keeps the turn).
+            local ok, err = pcall(U.tx, function()
+                db.insert("ai_usage", { namespace_id = run.namespace_id, user_uuid = run.requested_by,
+                    feature = "agent_run", scope = run.profile:sub(1, 60), run_uuid = run.uuid,
+                    provider = run.profile:sub(1, 20), model = model,
+                    input_tokens = math.min(usage.tokens_in, INT_MAX),
+                    output_tokens = math.min(usage.tokens_out, INT_MAX),
+                    cached_input_tokens = math.min(usage.cache_read, INT_MAX), latency_ms = d.duration_ms or 0,
+                    ok = true })
+            end)
+            if not ok then ngx.log(ngx.ERR, "[ai_runner] usage not recorded: ", tostring(err)) end
+            return 1
+        end)
+        return sdk.ok({ stored = stored })
+    end)))
+
+    -- People's follow-ups and needs_input answers, handed over once (marked delivered).
+    app:post("/public/runner/runs/:uuid/turns/next", sdk.handler({ namespace = false }, U.guard(function(self)
+        local runner = auth()
+        local run = claimed_run(runner, self.params.uuid)
+        local function next_turns(last)
+            if stopping(run) then return { turns = U.array(), cancel = true } end
+            local rows = db.query([[
+                WITH d AS (UPDATE ar_run_turns SET status = 'delivered'
+                           WHERE run_uuid = ? AND role = 'user' AND status = 'queued'
+                           RETURNING uuid, seq, text, author_user_uuid)
+                SELECT d.uuid, d.text, ]] .. R.name_sql("au") .. [[ AS author_name
+                FROM d LEFT JOIN users au ON au.uuid = d.author_user_uuid ORDER BY d.seq
+            ]], run.uuid)
+            if #rows > 0 or last then
+                for i, t in ipairs(rows) do
+                    rows[i] = { uuid = t.uuid, text = U.null(t.text), author_name = U.null(t.author_name) }
+                end
+                return { turns = U.array(rows), cancel = false }
+            end
+        end
+        return sdk.ok(R.long_poll(R.wait_s(body(self).wait_s), next_turns) or next_turns(true))
     end)))
 end
