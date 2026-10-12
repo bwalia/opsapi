@@ -11,6 +11,8 @@
     - Same key, different body or path: 422 (a client bug; nothing runs).
     - Same key while the first is still running: 409, try again shortly.
     - The first attempt failed with 5xx (or raised): the key is released so a retry runs.
+    - The first attempt never finished (its worker died): after LEASE a retry takes the key over.
+    The request hash covers the whole body, also when nginx spooled a large one to a temp file.
 ]]
 
 local db = require("lapis.db")
@@ -19,10 +21,26 @@ local cjson = require("cjson")
 local Idempotency = {}
 
 local TTL = "24 hours"
+-- A claim with no response after this long belongs to a worker that died mid-handler (creates take
+-- seconds), so a retry may run instead of getting 409 for a day.
+local LEASE = "2 minutes"
 
-local function sha256_hex(s)
+-- sha256 of method, path and body; a body bigger than client_body_buffer_size is in a temp file.
+local function request_sha256(method, path)
     local h = require("resty.sha256"):new()
-    h:update(s)
+    h:update(method .. " " .. path .. "\n")
+    ngx.req.read_body()
+    local data = ngx.req.get_body_data()
+    if data then
+        h:update(data)
+    else
+        local file = ngx.req.get_body_file()
+        local f = file and io.open(file, "rb")
+        if f then
+            for chunk in function() return f:read(65536) end do h:update(chunk) end
+            f:close()
+        end
+    end
     return require("resty.string").to_hex(h:final())
 end
 
@@ -39,9 +57,8 @@ function Idempotency.run(self, ns, user_uuid, handler)
     if #key > 255 then
         return { status = 400, json = { success = false, error = "Idempotency-Key is too long (255 characters at most)" } }
     end
-    ngx.req.read_body()
     local method, path = ngx.req.get_method(), ngx.var.uri
-    local request = sha256_hex(method .. " " .. path .. "\n" .. (ngx.req.get_body_data() or ""))
+    local request = request_sha256(method, path)
 
     db.query("DELETE FROM idempotency_keys WHERE namespace_id = ? AND user_uuid = ? AND idem_key = ? AND created_at < NOW() - ?::interval",
         ns, user_uuid, key, TTL)
@@ -61,12 +78,19 @@ function Idempotency.run(self, ns, user_uuid, handler)
             return { status = 422, json = { success = false,
                 error = "This Idempotency-Key was already used for a different request" } }
         end
-        if row.status == nil or row.status == db.NULL then
+        if row.status ~= nil and row.status ~= db.NULL then
+            ngx.header["Idempotent-Replayed"] = "true"
+            local body = type(row.response) == "string" and cjson.decode(row.response) or row.response
+            return { status = tonumber(row.status), json = body }
+        end
+        -- Still running, or abandoned: past the lease, one retry (atomically) takes the claim over.
+        claimed = db.query([[
+            UPDATE idempotency_keys SET created_at = NOW()
+            WHERE id = ? AND status IS NULL AND created_at < NOW() - ?::interval RETURNING id
+        ]], row.id, LEASE)[1]
+        if not claimed then
             return { status = 409, json = { success = false, error = "The first request with this Idempotency-Key is still running" } }
         end
-        ngx.header["Idempotent-Replayed"] = "true"
-        local body = type(row.response) == "string" and cjson.decode(row.response) or row.response
-        return { status = tonumber(row.status), json = body }
     end
 
     local ok, res = pcall(handler)
