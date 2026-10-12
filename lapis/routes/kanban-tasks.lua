@@ -58,12 +58,19 @@ local db = require("lapis.db")
 -- Task metadata arrives as an object (JSON body) or as a JSON string (form-encoded body).
 -- Returns the JSON text to store, or nil + message when it isn't a JSON object.
 local function metadata_json(v)
-    if type(v) == "table" then return cJson.encode(v) end
-    if type(v) == "string" then
-        local ok, decoded = pcall(cJson.decode, v)
-        if ok and type(decoded) == "table" and decoded[1] == nil then return v end
+    local bad = "metadata must be a JSON object"
+    if type(v) == "table" then
+        -- An empty table is {} here: this app's cjson would encode it as [].
+        if next(v) == nil then return "{}" end
+        if v[1] ~= nil then return nil, bad end
+        return cJson.encode(v)
     end
-    return nil, "metadata must be a JSON object"
+    -- Decoded, [] and {} are both an empty table: only text starting with { is an object.
+    if type(v) == "string" and v:match("^%s*{") then
+        local ok, decoded = pcall(cJson.decode, v)
+        if ok and type(decoded) == "table" then return v end
+    end
+    return nil, bad
 end
 
 return function(app)

@@ -330,6 +330,62 @@ check("enabled once for every namespace", one("""
         AND c.menu_item_id = (SELECT id FROM menu_items WHERE key = 'my_tasks')) <> 1""") == "0"
       and int(one("SELECT COUNT(*) FROM namespaces")) >= 2)
 
+print("== kanban fixes: project search, task metadata, unassignable people")
+s, j = call("GET", "/api/v2/kanban/projects?" + urllib.parse.urlencode({"search": "alpha"}), owner_a, NS_A)
+names = [p.get("name") for p in (j.get("data") or [])]
+check("project search filters by name", s == 200 and names == ["Alpha Web"], (s, names))
+for wild in ("%", "_"):
+    s, j = call("GET", "/api/v2/kanban/projects?" + urllib.parse.urlencode({"search": wild}), owner_a, NS_A)
+    check("search %r is literal (no project names contain it)" % wild, s == 200 and (j.get("data") or []) == [],
+          (s, j.get("data")))
+s, j = call("GET", "/api/v2/kanban/projects", owner_a, NS_A)
+check("no search: both of A's projects", s == 200 and len(j.get("data") or []) == 2, s)
+
+
+def call_form(method, path, u, ns, fields):
+    h = {"Content-Type": "application/x-www-form-urlencoded", "Authorization": "Bearer " + jwt(u),
+         "X-Namespace-Id": ns}
+    req = urllib.request.Request(API + path, data=urllib.parse.urlencode(fields).encode(), method=method, headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+BOARD = projects["Alpha Web"]["board"]
+s, j = call_form("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, owner_a, NS_A,
+                 {"title": "Form metadata", "metadata": json.dumps({"source": "mcp", "n": 1})})
+tid = (j.get("data") or {}).get("uuid")
+check("create (form-encoded) with metadata -> 201", s == 201 and tid, (s, j))
+check("form-encoded metadata stored as an object, not a string",
+      one("SELECT jsonb_typeof(metadata) || ':' || (metadata->>'source') FROM kanban_tasks WHERE uuid = '%s'" % tid)
+      == "object:mcp")
+s, j = call("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, owner_a, NS_A,
+            {"title": "JSON metadata", "metadata": {"source": "json"}})
+tid2 = (j.get("data") or {}).get("uuid")
+check("create (JSON) with a metadata object", s == 201 and one(
+    "SELECT metadata->>'source' FROM kanban_tasks WHERE uuid = '%s'" % tid2) == "json", (s, j))
+for bad in ("[1,2]", "not json", '"just a string"'):
+    s, j = call_form("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, owner_a, NS_A,
+                     {"title": "Bad metadata", "metadata": bad})
+    check("create with metadata %r -> 400" % bad, s == 400, (s, j))
+s, j = call_form("PUT", "/api/v2/kanban/tasks/%s" % tid, owner_a, NS_A, {"metadata": json.dumps({"pr_url": "x"})})
+check("update with a metadata JSON string", s == 200 and one(
+    "SELECT metadata->>'pr_url' FROM kanban_tasks WHERE uuid = '%s'" % tid) == "x", (s, j))
+for bad in ("[]", "[1]", "3"):
+    s, j = call_form("PUT", "/api/v2/kanban/tasks/%s" % tid, owner_a, NS_A, {"metadata": bad})
+    check("update with metadata %r -> 400" % bad, s == 400, (s, j))
+s, j = call("PUT", "/api/v2/kanban/tasks/%s" % tid, owner_a, NS_A, {"metadata": {}})
+check("update with an empty object stores {} (not [])", s == 200 and one(
+    "SELECT jsonb_typeof(metadata) FROM kanban_tasks WHERE uuid = '%s'" % tid) == "object", (s, j))
+s, j = call("POST", "/api/v2/kanban/boards/%s/tasks" % BOARD, owner_a, NS_A,
+            {"title": "Assign two", "assignee_uuids": json.dumps([alice["uuid"], carol["uuid"]])})
+d = j.get("data") or {}
+check("create: a non-member is reported in not_assigned, the member is assigned",
+      s == 201 and d.get("not_assigned") == [carol["uuid"]]
+      and alice["uuid"] in json.dumps(d.get("assignees") or []), (s, d.get("not_assigned"), d.get("assignees")))
+
 print()
 print("All checks passed." if failures == 0 else "%d check(s) FAILED." % failures)
 sys.exit(0 if failures == 0 else 1)
