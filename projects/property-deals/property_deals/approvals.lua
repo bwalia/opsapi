@@ -89,8 +89,11 @@ function Approvals.comment(ns, task_uuid, text, user_uuid)
     local t = U.one([[SELECT t.id FROM kanban_tasks t JOIN property_deals_task_details d ON d.task_uuid = t.uuid
         WHERE d.namespace_id = ? AND t.uuid = ?]], ns, task_uuid)
     if not t then return end
-    local ok, err = pcall(require("queries.KanbanTaskQueries").addComment,
-        { task_id = t.id, user_uuid = user_uuid, content = text })
+    -- In its own savepoint: a failed comment mustn't abort a transaction it's called from.
+    local ok, err = pcall(U.tx, function()
+        return require("queries.KanbanTaskQueries").addComment({ task_id = t.id, user_uuid = user_uuid,
+            content = text })
+    end)
     if not ok then ngx.log(ngx.WARN, "[property_deals] task comment: ", tostring(err)) end
 end
 

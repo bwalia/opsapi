@@ -52,13 +52,19 @@ local function finish(run, changes)
 end
 
 local function fail(ns, run, task, message)
-    -- Not running any more: whoever stopped it already gave the task back.
-    if not finish(run, { status = "failed", error = tostring(message):sub(1, 2000) }) then
-        return nil, "the run had already ended"
-    end
+    -- One transaction: nobody sees the run failed while its task still says the AI has it.
+    local ended = U.tx(function()
+        -- Not running any more: whoever stopped it already gave the task back.
+        if not finish(run, { status = "failed", error = tostring(message):sub(1, 2000) }) then return false end
+        if task then
+            require("property_deals.approvals").back_to_todo(ns, task.task_uuid,
+                "AI couldn't finish: " .. tostring(message),
+                run.triggered_by_user_uuid ~= db.NULL and run.triggered_by_user_uuid or nil)
+        end
+        return true
+    end)
+    if not ended then return nil, "the run had already ended" end
     if task then
-        require("property_deals.approvals").back_to_todo(ns, task.task_uuid, "AI couldn't finish: " .. tostring(message),
-            run.triggered_by_user_uuid ~= db.NULL and run.triggered_by_user_uuid or nil)
         local owner = task.owner_user_uuid ~= db.NULL and task.owner_user_uuid or nil
         require("property_deals.notify").send(ns, { owner }, { kind = "agent_update", event = "property_deals.agent.failed",
             route = "task", uuid = task.task_uuid, deal_uuid = task.deal_uuid ~= db.NULL and task.deal_uuid or nil,
