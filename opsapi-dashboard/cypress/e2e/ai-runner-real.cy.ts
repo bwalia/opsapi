@@ -177,6 +177,8 @@ describe('AI Runs with the real PromptPilot runner', () => {
     startWithAI('ok', 'fake');
     cy.contains('Succeeded', { timeout: 120000 });
     cy.get('[role="log"]').invoke('text').should('not.be.empty');
+    // §24.9: the runner renders the agent's stream-json as readable lines, never raw JSON.
+    cy.get('[role="log"]').should('contain', 'Turn 1 finished').and('not.contain', '{"type":');
     const user = json(Cypress.env('AIR_USER')) as { first_name: string; last_name: string };
     fact('Requested by').should('have.text', `${user.first_name} ${user.last_name}`);
     ['Queued', 'Started', 'Finished', 'Duration'].forEach((f) => fact(f).invoke('text').should('not.eq', '—'));
@@ -272,6 +274,10 @@ describe('AI Runs with the real PromptPilot runner', () => {
     visit('/dashboard/ai-runner/runners');
     cy.contains('tr', runnerName, { timeout: 30000 }).within(() => cy.get(`[aria-label="Sessions on ${runnerName}"]`).click());
     cy.contains(`Sessions on ${runnerName}`);
+    visit('/dashboard/ai-runner/machines');
+    cy.contains('h1', 'Machines', { timeout: 30000 });
+    cy.contains(runnerName);
+    cy.screenshot('real-machines', { capture: 'viewport' });
   });
 });
 
