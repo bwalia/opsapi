@@ -36,6 +36,7 @@ STATE = {
     "pa_answer": None,     # the next Property PA run's output (set via /_ctl)
     "s3": {},              # "/bucket/key" -> bytes
     "alerts": [],          # staff alerts: ntfy / Telegram / SMS gateway
+    "model_delay": 0,      # seconds the "local model" takes to answer (a slow model)
 }
 JS_AGENT = "11111111-2222-4333-8444-555555555555"
 POSTCODES = {"YO1 7AA": (53.96, -1.08), "YO1 9AB": (53.962, -1.085), "YO10 5DD": (53.947, -1.05),
@@ -298,6 +299,8 @@ class Http(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p, b = self.path, self.body()
+        if p == "/v1/chat/completions" and STATE["model_delay"]:
+            time.sleep(STATE["model_delay"])  # outside the lock: everything else keeps answering
         with LOCK:
             if p == "/v1/chat/completions":
                 STATE["log"].append({"messages": b.get("messages"), "tools": [t["function"]["name"] for t in b.get("tools") or []],
@@ -306,12 +309,12 @@ class Http(BaseHTTPRequestHandler):
             if p == "/down/v1/chat/completions":
                 return self.send(503, {"error": {"message": "overloaded"}})
             if p == "/_ctl":
-                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down", "pa_answer")})
+                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down", "pa_answer", "model_delay")})
                 if b.get("reset_log"):
                     STATE["log"] = []
                 if b.get("reset_all"):
                     STATE.update(log=[], smtp=[], mailbox=[], jobshout_down=False, js_runs={}, js_approvals={},
-                                 js_launches=[], js_task_runs=[], pa_answer=None, s3={}, alerts=[])
+                                 js_launches=[], js_task_runs=[], pa_answer=None, s3={}, alerts=[], model_delay=0)
                 if b.get("reset_alerts"):
                     STATE["alerts"] = []
                 if b.get("decide_external"):
