@@ -23,12 +23,13 @@ import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import { chatService, type AgentTurn, type AgentAction, type AgentScope } from '@/services/chat.service';
 import { onChatEvent } from '@/store/chat-realtime.store';
-import { useVoice } from '@/hooks/useVoice';
+import { useVoice, useVoiceLevel, type LevelStore } from '@/hooks/useVoice';
 import AvatarFace, { type FaceMood } from './AvatarFace';
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
 // styling that sits on the neutral assistant bubble.
-function MarkdownMessage({ text }: { text: string }) {
+// Memoised: the pane re-renders while a run streams in; old messages needn't re-parse.
+const MarkdownMessage = React.memo(function MarkdownMessage({ text }: { text: string }) {
   return (
     <div className="space-y-1.5">
       <ReactMarkdown
@@ -61,6 +62,11 @@ function MarkdownMessage({ text }: { text: string }) {
       </ReactMarkdown>
     </div>
   );
+});
+
+/** The face, fed by the voice level store: only this re-renders per audio frame, not the pane. */
+function LiveFace({ level, ...props }: { level: LevelStore; mood: FaceMood; size: number; label: string }) {
+  return <AvatarFace {...props} level={useVoiceLevel(level)} />;
 }
 
 const WELCOME =
@@ -262,7 +268,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     try {
       await voice.listen();
     } catch {
-      toast.error('Microphone not available — allow it in the browser');
+      toast.error(window.isSecureContext ? 'Microphone not available — allow it in the browser' : 'The microphone needs a secure (https) page');
     }
   };
 
@@ -284,7 +290,7 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     // letting the list scroll, pushing the composer off-screen.
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-secondary-200 px-4 py-2.5">
-        <AvatarFace mood={mood} level={voice.level} size={44} label={pageTitle || 'Assistant'} />
+        <LiveFace mood={mood} level={voice.level} size={44} label={pageTitle || 'Assistant'} />
         <div className="min-w-0">
           <h1 className="truncate text-sm font-bold text-secondary-900">
             AI Assistant{pageTitle ? ` · ${pageTitle}` : ''}

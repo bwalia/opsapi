@@ -8,6 +8,7 @@
 --   GET    /opportunities/:id/timeline     interactions, events, offers, next actions and changes, newest first
 --   GET    /people?q=                      find people by name, email, phone or their property's address
 --   GET    /people/:id                     contact + roles + relationship + opportunities
+--   PUT    /people/:id/consent             { consent_basis?, opted_out? } record consent or an opt-out
 --   GET    /people/:id/timeline
 --   POST   /interactions                   log a call / email / note / voice note (text stored as data)
 --   GET    /interactions/:id
@@ -211,7 +212,24 @@ return function(app)
             WHERE namespace_id = ? AND user_uuid = ? AND person_uuid = ?]], ns, me, p.uuid) or cjson.null
         p.opportunities = sdk.array(db.query([[SELECT uuid, kind, title, status, temperature, last_meaningful_contact_at
             FROM pa_opportunities WHERE namespace_id = ? AND person_uuid = ? ORDER BY updated_at DESC]], ns, p.uuid))
+        local k = require("property_pa.consent").get(ns, p.uuid)
+        p.consent_basis, p.opted_out_at = k.consent_basis, k.opted_out_at
         return sdk.ok(p)
+    end)))
+
+    -- Consent: { consent_basis?, opted_out? }. opted_out = false (a person only) lifts an opt-out.
+    app:put("/people/:id/consent", sdk.handler({ permission = "property_pa_records.update" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local p = person(ns, self.params.id)
+        if not p then return sdk.not_found("Person") end
+        local K = require("property_pa.consent")
+        local d = valid(body_or_fail(self), { consent_basis = { enum = K.BASES }, opted_out = { type = "boolean" } })
+        local opted = d.opted_out
+        if opted == db.NULL then opted = nil end
+        K.set(ns, p.uuid, { consent_basis = d.consent_basis ~= db.NULL and d.consent_basis or nil, opted_out = opted,
+            source = "human" })
+        local k = K.get(ns, p.uuid)
+        return sdk.ok({ person_uuid = p.uuid, consent_basis = k.consent_basis, opted_out_at = k.opted_out_at })
     end)))
 
     app:get("/people/:id/timeline", sdk.handler({ permission = "property_pa_records.read" }, U.guard(function(self)

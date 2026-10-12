@@ -1,11 +1,13 @@
--- GoHighLevel contacts, hourly, when the workspace has set a location and token (read only).
+-- GoHighLevel contacts (read only), when the workspace has set a location and token. Every 15 minutes it carries on
+-- a pull under way (big locations take several runs) or starts the hourly one; POST /integrations/ghl/sync asks for
+-- one now. property_pa.integrations.ghl_sync decides which.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/jobs/[^/]+%.lua$")
 for _, p in ipairs({ root, root and (root:match("^(.*)/[^/]+$") .. "/property-deals") }) do
     if p and not package.path:find(p .. "/?.lua", 1, true) then package.path = p .. "/?.lua;" .. package.path end
 end
 
 return {
-    every = "1h",
+    every = "15m",
     run = function(job)
         local s = job.settings or {}
         if (s.ghl_location_id or "") == "" or (s.ghl_token or "") == "" then return end

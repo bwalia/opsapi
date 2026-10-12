@@ -8,11 +8,25 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "../../property-deals/spec"))
 sys.path.insert(0, os.path.join(HERE, "regression"))
-from pdtest import API, USERS, call, expect, workspace  # noqa: E402
+from pdtest import API, USERS, call, expect, sql, workspace  # noqa: E402
 
 PA = API + "/api/v2/property-pa"
 PD = API + "/api/v2/property-deals"
 SOPHIE, ASHLEY = "operator_s", "manager_s"
+ADMIN = "pa_platform_admin"  # demo reset is for platform admins only
+
+
+def platform_admin():
+    """A platform admin (the 'administrative' role) for the demo routes. Idempotent."""
+    uuid, email = USERS.setdefault(ADMIN, ("c9999999-0000-4000-8000-000000000009", "pa.admin@pd.invalid"))
+    sql(f"INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) "
+        f"SELECT '{uuid}', 'PA', 'Admin', '{email}', 'pa.admin', 'x', true, now(), now() "
+        f"WHERE NOT EXISTS (SELECT 1 FROM users WHERE uuid = '{uuid}')")
+    sql(f"INSERT INTO user__roles (uuid, role_id, user_id, created_at, updated_at) "
+        f"SELECT gen_random_uuid()::text, r.id, u.id, now(), now() FROM roles r, users u "
+        f"WHERE r.role_name = 'administrative' AND u.uuid = '{uuid}' AND NOT EXISTS (SELECT 1 FROM user__roles x "
+        f"WHERE x.role_id = r.id AND x.user_id = u.id)")
+    return ADMIN
 
 
 def data(res, status, name):
@@ -48,7 +62,7 @@ def setup(name, slug, jobshout=False):
         expect(f"add {user}", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
                {"email": USERS[user][1], "role_ids": [role_id[role]]}), 201)
     data(call("POST", PA + "/setup", "owner_s", S), 200, "PA setup")
-    fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+    fx = data(call("POST", PA + "/demo/reset", platform_admin(), S, {"sophie_user_uuid": USERS[SOPHIE][0],
               "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "fixtures")
     if jobshout:
         js = data(call("POST", API + "/api/v2/namespace/ai-providers", "owner_s", S, {"name": "JobShout PA",

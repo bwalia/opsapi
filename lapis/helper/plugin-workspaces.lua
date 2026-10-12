@@ -268,6 +268,17 @@ function PluginWorkspaces.update(manifest, namespace_id, input, actor_uuid)
         end
     end
 
+    -- A plugin that builds on another plugin (manifest `depends`) can't be switched on before it.
+    if input.enabled == true then
+        local plugins = {}
+        for _, dep in ipairs(manifest.depends or {}) do
+            if require("helper.project-loader").getByCode(dep) then plugins[#plugins + 1] = dep end
+        end
+        local off = {}
+        for dep in pairs(PluginWorkspaces.disabledIn(namespace_id, plugins)) do off[dep] = "turn this plugin on first" end
+        if next(off) then return nil, 422, manifest.name .. " needs these plugins turned on first", off end
+    end
+
     local before = PluginWorkspaces.describe(manifest, namespace_id)
     local turning_on = input.enabled == true or (input.enabled == nil and before.enabled)
     if turning_on then

@@ -13,11 +13,14 @@ Gmail / Microsoft 365 mailboxes. Covers:
     approves both; a decision made in JobShout's UI is mirrored back; JobShout down → fallback or a note
   * booking agent: 3 nearest suppliers asked, then one confirmed (approval) and the others cancelled
   * daily digest writer: prose from a local-only route
+  * hardening: approval rules only go up, retries never re-send, one run per task, late answers dropped,
+    the concurrency cap and the switch for automatic runs, the inbox is paged
   * another workspace sees none of it
 """
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -187,7 +190,7 @@ tampered = sealed.split(":")
 tampered[2] = "AAAAAAAAAAAAAAAAAAAAAA=="
 sql(f"UPDATE namespace_ai_providers SET secret_sealed = '{':'.join(tampered)}' WHERE uuid = '{cloud_ok['uuid']}'")
 res = call("POST", NSP + f"/{cloud_ok['uuid']}/test", "owner_s", S)
-check("a tampered key fails the GCM check and is never sent", res[0] == 422 and "decrypted" in res[1].get("error", ""), res)
+check("a tampered key fails the GCM check and is never sent", res[0] == 422 and "can't be opened" in res[1].get("error", ""), res)
 sql(f"UPDATE namespace_ai_providers SET secret_sealed = '{other_seal}' WHERE uuid = '{cloud_ok['uuid']}'")
 
 # --- Routes: fallback order -----------------------------------------------------------------------------------------
@@ -264,6 +267,8 @@ check("5. inbox shows the run behind it (agent, model, cost)", row.get("agent_ke
       and row.get("model") == "qwen-local" and row.get("can_decide"), row)
 res = call("POST", P + f"/approvals/{A1['uuid']}/decide", "agent", S, {"decision": "approve"})
 check("the AI service account can't approve (403)", res[0] == 403, res)
+res = call("POST", P + f"/approvals/{A1['uuid']}/decide", "agent", S, {"decision": "reject", "note": "no"})
+check("... nor reject (403)", res[0] == 403, res)
 res = call("POST", P + f"/approvals/{A1['uuid']}/decide", "manager_s", S, {"decision": "approve", "payload_version": 7})
 check("iOS version guard: approving a version you didn't see → 409 with the current version",
       res[0] == 409 and res[1]["details"]["payload_version"] == 1, res)
@@ -365,6 +370,12 @@ check("local-only: a cloud-only route is refused, no data sent anywhere",
       r["status"] == "failed" and "local" in r.get("error", "") and len(mock("GET", "/_log")) == before, r)
 check("failed run → task back to a person with a comment", task(T3)["pd_status"] == "todo")
 data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"local_only": False}), 200, "local only off")
+data(call("PUT", P + "/ai/routes/draft", "manager_s", S, {"chain": [{"provider_uuid": cloud["uuid"]}]}), 200,
+     "draft route: only the provider that is down")
+st, b = call("POST", P + f"/tasks/{T3}/agent-run", "operator_s", S)
+r = wait_run(b["data"]["uuid"])
+check("provider down: the run says so in plain words, never the provider's own reply", r["status"] == "failed"
+      and r.get("error") == "The AI model didn't answer" and "overloaded" not in json.dumps(r), r)
 data(call("PUT", P + "/ai/routes/draft", "manager_s", S, {"chain": [{"provider_uuid": local["uuid"]}]}), 200, "draft → local")
 expect("tiny per-run cap", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
        {"settings": {"ai_max_cost_run_usd": 0.0000001}}), 200)
@@ -375,8 +386,13 @@ expect("tiny daily budget", call("PUT", API + "/api/v2/namespace/plugins/propert
        {"settings": {"ai_max_cost_run_usd": 0.5, "ai_max_cost_day_usd": 0.0000001}}), 200)
 res = call("POST", P + f"/tasks/{T3}/agent-run", "operator_s", S)
 check("daily budget used up → 429, no run", res[0] == 429 and "budget" in res[1]["error"], res)
+expect("a tiny daily token allowance", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
+       {"settings": {"ai_max_cost_day_usd": 10, "ai_max_tokens_day": 1}}), 200)
+res = call("POST", P + f"/tasks/{T3}/agent-run", "operator_s", S)
+check("daily token allowance used up → 429 (counts models that cost nothing too)",
+      res[0] == 429 and "token allowance" in res[1]["error"], res)
 expect("normal caps", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
-       {"settings": {"ai_max_cost_day_usd": 10}}), 200)
+       {"settings": {"ai_max_cost_day_usd": 10, "ai_max_tokens_day": 2000000}}), 200)
 
 # --- Scenario 6: the same chase through JobShout -----------------------------------------------------------------------------
 res = call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"route": "jobshout"})
@@ -425,6 +441,24 @@ out = data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["agents"]
 a5 = data(call("GET", P + f"/approvals/{a5['uuid']}", "manager_s", S), 200, "approval")
 ds = a5["decisions"] if isinstance(a5["decisions"], list) else json.loads(a5["decisions"])
 check("6. a decision made in JobShout is mirrored here", a5["status"] == "executed" and ds[-1].get("by") == "jobshout", a5)
+# ... but only for an any-operator approval: a manager's approval is decided here, where our roles apply.
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"approval_rule": "manager"}), 200,
+     "legal chaser drafts need a manager")
+TM = data(call("POST", P + "/tasks", "operator_s", S, {"deal_uuid": D, "title": "Chase via JobShout (manager rule)",
+          "agent_eligible": True, "agent_key": "legal_chaser"}), 201, "task")["task_uuid"]
+call("POST", P + f"/tasks/{TM}/agent-run", "operator_s", S)
+time.sleep(1)
+data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["agents"]}), 200, "tick")
+am = approvals(task_uuid=TM, status="pending")[0]
+check("6. the mirrored approval carries the stricter rule", am["rule"] == "manager", am)
+mock("POST", "/_ctl", {"decide_external": am["jobshout_approval_id"], "status": "approved"})
+data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["agents"]}), 200, "tick")
+am = data(call("GET", P + f"/approvals/{am['uuid']}", "manager_s", S), 200, "approval")
+check("6. a JobShout decision on a manager's approval isn't taken: still pending here", am["status"] == "pending", am)
+dec = data(call("POST", P + f"/approvals/{am['uuid']}/decide", "manager_s", S, {"decision": "approve"}), 200,
+           "a manager approves it here")
+check("6. decided here by a manager", dec["status"] == "executed", dec)
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"approval_rule": None}), 200, "setting cleared")
 # JobShout down.
 mock("POST", "/_ctl", {"jobshout_down": True})
 T6 = data(call("POST", P + "/tasks", "operator_s", S, {"deal_uuid": D, "title": "Chase while JobShout is down",
@@ -485,6 +519,142 @@ prose = sql(f"SELECT payload->>'prose' FROM property_deals_digest_log WHERE name
 check("digest writer turned the digest into prose", prose and prose[0].startswith("Digest prose"), prose)
 used = sql(f"SELECT DISTINCT model FROM property_deals_agent_runs WHERE agent_key = 'digest_writer' AND status = 'succeeded' AND namespace_id = (SELECT id FROM namespaces WHERE uuid = '{S}')")
 check("digest writer skipped the non-local model (local-only)", used == ["qwen-local"], used)
+
+# --- Hardening -----------------------------------------------------------------------------------------------------------------
+def tick():
+    return data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["agents"]}), 200, "agents tick")["agents"]
+
+
+def chase_task(title, **extra):
+    return data(call("POST", P + "/tasks", "operator_s", S, dict({"deal_uuid": D, "title": title, "agent_eligible": True,
+                "agent_key": "legal_chaser"}, **extra)), 201, "task " + title)["task_uuid"]
+
+
+def settings(**s):
+    expect("settings " + json.dumps(s), call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S,
+           {"settings": s}), 200)
+
+
+# A setting can only raise an approval rule, never lower it.
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"approval_rule": "any_operator"}), 200,
+     "legal chaser setting: any operator")
+T7 = chase_task("Chase (two people)", approval_rule="two_person")
+st, b = call("POST", P + f"/tasks/{T7}/agent-run", "operator_s", S)
+wait_run(b["data"]["uuid"])
+a7 = approvals(task_uuid=T7, status="pending")
+check("a setting can't lower the task's two-person rule", len(a7) == 1 and a7[0]["rule"] == "two_person", a7)
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"approval_rule": None}), 200, "setting cleared")
+
+# The digest writer has nothing to draft on a task.
+TD = chase_task("Write my digest", agent_key="digest_writer")
+res = call("POST", P + f"/tasks/{TD}/agent-run", "operator_s", S)
+check("the digest writer can't be put on a task (422, not a crash)", res[0] == 422 and "can't work on a task"
+      in res[1].get("error", ""), res)
+
+# Enquiries owed by every party an agent may name.
+ea = data(call("POST", P + "/approvals", "operator_s", S, {"subject_type": "agent_draft", "action": "update_enquiries",
+          "title": "New enquiries", "deal_uuid": D, "payload": {"deal_uuid": D, "new_enquiries": [
+              {"title": "Broker: mortgage offer", "owner_party": "broker"},
+              {"title": "Agent: sales history", "owner_party": "estate_agent"},
+              {"title": "Wizard: spell check", "owner_party": "wizard"}]}}), 201, "ask to add enquiries")
+ok = data(call("POST", P + f"/approvals/{ea['uuid']}/decide", "manager_s", S, {"decision": "approve"}), 200, "approve them")
+owed = sql(f"SELECT owner_party FROM property_deals_enquiries WHERE deal_uuid = '{D}' AND title IN "
+           "('Broker: mortgage offer', 'Agent: sales history', 'Wizard: spell check') ORDER BY title")
+check("enquiries owed by a broker / an estate agent are saved; an unknown role is filed under other",
+      ok["status"] == "executed" and owed == ["estate_agent", "broker", "other"], (ok["status"], owed))
+
+# Sent, then saving failed: the retry finishes the job without sending the email again.
+sql("""CREATE OR REPLACE FUNCTION pd_test_chase_down() RETURNS trigger AS $$ BEGIN
+       IF NEW.to_address = 'retry@pd-test.test' THEN RAISE EXCEPTION 'chase log is down (test)'; END IF;
+       RETURN NEW; END $$ LANGUAGE plpgsql;
+       CREATE TRIGGER pd_test_chase_down BEFORE INSERT ON property_deals_chases
+       FOR EACH ROW EXECUTE FUNCTION pd_test_chase_down()""")
+ra = data(call("POST", P + "/approvals", "operator_s", S, {"subject_type": "chase", "action": "send_email", "title": "Retry me",
+          "deal_uuid": D, "payload": {"to": "retry@pd-test.test", "subject": "Hello", "body": "Just checking in.",
+                                      "deal_uuid": D}}), 201, "an email to approve")
+dec = data(call("POST", P + f"/approvals/{ra['uuid']}/decide", "manager_s", S, {"decision": "approve"}), 200, "approve it")
+er = dec["execution_result"] if isinstance(dec["execution_result"], dict) else json.loads(dec["execution_result"])
+check("sent, then saving failed → failed with a plain reason (no database text)", dec["status"] == "failed"
+      and er == {"error": "Couldn't save the result"} and len(emails_to("retry@pd-test.test")) == 1, (dec["status"], er))
+sql("DROP TRIGGER pd_test_chase_down ON property_deals_chases")
+ret = data(call("POST", P + f"/approvals/{ra['uuid']}/retry", "manager_s", S), 200, "retry")
+check("the retry saves it without sending the email again", ret["status"] == "executed"
+      and len(emails_to("retry@pd-test.test")) == 1
+      and sql(f"SELECT COUNT(*) FROM property_deals_chases WHERE approval_uuid = '{ra['uuid']}'") == ["1"], ret)
+
+# An approved action whose worker died (still "running" after 15 minutes) can be retried.
+sa = data(call("POST", P + "/approvals", "operator_s", S, {"subject_type": "other", "action": "note_only", "title": "Stuck",
+          "payload": {"note": "x"}}), 201, "another approval")
+sql(f"""UPDATE property_deals_approvals SET status = 'approved', execution_result = '{{"running": true}}',
+        updated_at = NOW() - interval '20 minutes' WHERE uuid = '{sa['uuid']}'""")
+out = tick()
+stuck = data(call("GET", P + f"/approvals/{sa['uuid']}", "manager_s", S), 200, "the stuck approval")
+check("the tick marks an action stuck running as failed", stuck["status"] == "failed", (out, stuck))
+check("... so it can be retried", data(call("POST", P + f"/approvals/{sa['uuid']}/retry", "manager_s", S), 200,
+                                        "retry it")["status"] == "executed")
+
+# A double click starts one run.
+T8 = chase_task("Chase (double click)")
+mock("POST", "/_ctl", {"model_delay": 1})
+clicks = []
+threads = [threading.Thread(target=lambda: clicks.append(call("POST", P + f"/tasks/{T8}/agent-run", "operator_s", S)))
+           for _ in range(2)]
+for th in threads:
+    th.start()
+for th in threads:
+    th.join()
+check("double click: one run, the other click gets 409", sorted(c[0] for c in clicks) == [202, 409]
+      and sql(f"SELECT COUNT(*) FROM property_deals_agent_runs WHERE task_uuid = '{T8}'") == ["1"], clicks)
+for c in clicks:
+    if c[0] == 202:
+        wait_run(c[1]["data"]["uuid"], timeout=60)
+
+# A run the tick timed out: its model's late answer is dropped (no approval, no second draft).
+mock("POST", "/_ctl", {"model_delay": 4})
+T9 = chase_task("Chase (slow model)")
+st, b = call("POST", P + f"/tasks/{T9}/agent-run", "operator_s", S)
+R9, before = b["data"]["uuid"], len(mock("GET", "/_log"))
+deadline = time.time() + 10
+while time.time() < deadline and sql(f"SELECT status FROM property_deals_agent_runs WHERE uuid = '{R9}'") != ["running"]:
+    time.sleep(0.2)
+sql(f"UPDATE property_deals_agent_runs SET started_at = NOW() - interval '16 minutes' WHERE uuid = '{R9}'")
+out = tick()
+check("the tick times out a run stuck for 15 minutes; the task goes back to a person",
+      sql(f"SELECT status || ':' || error FROM property_deals_agent_runs WHERE uuid = '{R9}'") == ["failed:timed out"]
+      and task(T9)["pd_status"] == "todo", out)
+deadline = time.time() + 20
+while time.time() < deadline and len(mock("GET", "/_log")) <= before:
+    time.sleep(0.3)
+time.sleep(2)
+mock("POST", "/_ctl", {"model_delay": 0})
+r9 = data(call("GET", P + f"/agent-runs/{R9}", "operator_s", S), 200, "the timed-out run")
+check("its model answered later and the answer was dropped: no approval, run failed, task with a person",
+      len(mock("GET", "/_log")) > before and not approvals(task_uuid=T9) and r9["status"] == "failed"
+      and task(T9)["pd_status"] == "todo", r9)
+
+# Auto pickup: never more runs at once than the cap, and a switch for runs nobody clicked.
+for i in range(3):
+    chase_task(f"Chase batch {i}")
+settings(ai_max_concurrent_runs=2, ai_auto_runs=False)
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"auto_pickup": True, "auto_pickup_at": "00:00"}), 200,
+     "the legal chaser picks up its tasks by itself")
+out = tick()
+check("automatic runs switched off: nothing starts by itself", out["auto_started"] == 0, out)
+settings(ai_auto_runs=True)
+out = tick()
+auto = sql("SELECT uuid FROM property_deals_agent_runs WHERE trigger = 'auto' AND agent_key = 'legal_chaser' "
+           f"AND namespace_id = (SELECT id FROM namespaces WHERE uuid = '{S}')")
+check("auto pickup starts no more runs than the cap (2); the rest wait", out["auto_started"] == 2 and len(auto) == 2,
+      (out, auto))
+data(call("PUT", P + "/ai/agents/legal_chaser", "manager_s", S, {"auto_pickup": False}), 200, "auto pickup off")
+settings(ai_max_concurrent_runs=3)
+for rid in auto:
+    wait_run(rid)
+
+# The approvals inbox is paged.
+st, ib = call("GET", P + "/approvals/inbox?all=true&per_page=1", "manager_s", S)
+check("inbox is paged: per_page caps it, meta carries the total", st == 200 and len(ib["data"]) == 1
+      and ib["meta"]["total"] > 1 and ib["meta"]["per_page"] == 1 and ib["meta"]["page"] == 1, ib.get("meta"))
 
 # --- Usage + isolation -------------------------------------------------------------------------------------------------------
 u = data(call("GET", P + "/ai/usage", "manager_s", S), 200, "AI usage")

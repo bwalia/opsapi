@@ -12,7 +12,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../property-deals/spec"))
-from pdtest import API, USERS, call, check, expect, finish, workspace  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pdtest import API, USERS, call, check, expect, finish, sql, workspace  # noqa: E402
+from pa_common import platform_admin  # noqa: E402
 
 PA = API + "/api/v2/property-pa"
 PD = API + "/api/v2/property-deals"
@@ -41,6 +43,11 @@ check("setup seeds the seller playbook and grants the PD roles",
       st["knowledge_added"] == 10 and {"pd_operator", "pd_manager", "pd_agent"} <= set(st["roles_updated"]), st)
 st2 = data(call("POST", PA + "/setup", "owner_s", S), 200, "PA setup again")
 check("setup is idempotent", st2["knowledge_added"] == 0 and st2["roles_updated"] == [], st2)
+NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
+n = sql(f"SELECT COUNT(*) FROM namespace_audit_logs WHERE namespace_id = {NSID} AND action = 'role.permissions_updated' "
+        f"AND entity_type = 'namespace_role' AND new_values::text LIKE '%property_pa_records%'")
+check("setup's role grants are in the workspace's RBAC audit log, one per role changed",
+      n == [str(len(st["roles_updated"]))], n)
 
 SOPHIE, ASHLEY = "operator_s", "manager_s"
 
@@ -92,12 +99,15 @@ res = call("POST", PA + "/knowledge", SOPHIE, S, {"key": "Bad Key", "title": "x"
 check("bad key refused (422)", res[0] == 422, res)
 
 # --- Fixtures --------------------------------------------------------------------------------------------------------
-res = call("POST", PA + "/demo/reset", SOPHIE, S, {})
-check("agents can't reset demo data (403)", res[0] == 403, res)
-fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
-          "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset the How It Works fixtures")
+for who in (SOPHIE, ASHLEY, "owner_s"):
+    res = call("POST", PA + "/demo/reset", who, S, {})
+    check(f"demo reset is hidden from {who}, even a manager or the owner (404)", res[0] == 404, res)
+check("and so is removing the demo (404)", call("DELETE", PA + "/demo", "owner_s", S)[0] == 404)
+ADMIN = platform_admin()
+fx = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+          "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "a platform admin resets the How It Works fixtures")
 check("10 sellers + James", fx["opportunities"] == 11 and fx["sarah"]["opportunity_uuid"], fx)
-fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+fx = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
           "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset again")
 check("reset replaces, never duplicates", fx["cleared"] == 11 and fx["opportunities"] == 11, fx)
 opps = data(call("GET", PA + "/opportunities?mine=true&per_page=50", SOPHIE, S), 200, "Sophie's opportunities")
@@ -204,6 +214,11 @@ ai = [a for a in audit if a["source"] == "ai"]
 check("P10: AI changes show source, model, prompt version, run and the interaction",
       ai and all(a["model"] == "qwen3.8:latest" and a["prompt_version"] == "capture-v1" and a["run_ref"] == "run-sarah-1"
                  and a["source_interaction_uuid"] == cap["interaction"]["uuid"] for a in ai), ai)
+mine = data(call("GET", PA + "/audit", SOPHIE, S), 200, "Sophie's AI change history")
+check("a member sees the AI changes on her own opportunities and what she confirmed", mine and all(
+      a["target_uuid"] == SARAH or a["confirmed_by_user_uuid"] == USERS[SOPHIE][0] for a in mine), mine)
+check("the workspace's whole history is for managers: the agent (owns nothing, confirmed nothing) sees none",
+      data(call("GET", PA + "/audit", "agent", S), 200, "the agent's audit") == [])
 confirmed = [a for a in ai if a["field"] in ("decision_makers", "our_position")]
 check("P10 (part): and who approved them", len(confirmed) == 2 and all(a["confirmed_by_user_uuid"] == USERS[SOPHIE][0]
       and a["confirmed_by_name"] for a in confirmed), confirmed)
@@ -247,6 +262,14 @@ inj = data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "email", "d
 sarah = data(call("GET", PA + f"/opportunities/{SARAH}", SOPHIE, S), 200, "Sarah after the email")
 check("inbound text is stored, nothing acts on it", float(sarah["expectation_price"]) == 237500
       and inj["raw_text"].startswith("IGNORE"), sarah["expectation_price"])
+
+for field, value in (("property_uuid", "4f1b8c2e-0000-4000-8000-000000000222"), ("lead_uuid", "not-a-lead"),
+                     ("audio_document_uuid", "4f1b8c2e-0000-4000-8000-000000000333")):
+    res = call("POST", PA + "/interactions", SOPHIE, S, {"channel": "note", "direction": "internal",
+               "opportunity_uuid": SARAH, "raw_text": "Checked the file.", field: value})
+    check(f"an interaction's {field} must be this workspace's (422)", res[0] == 422 and field in str(res[1]), res)
+data(call("POST", PA + "/interactions", SOPHIE, S, {"channel": "note", "direction": "internal", "opportunity_uuid": SARAH,
+     "property_uuid": fx["sarah"]["property_uuid"], "raw_text": "Checked the title plan."}), 201, "with her own property")
 
 # --- Handoff (scene 5, part of P08) ----------------------------------------------------------------------------------
 h = data(call("POST", PA + "/handoffs", SOPHIE, S, {"to_user_uuid": USERS[ASHLEY][0], "opportunity_uuid": SARAH,
@@ -329,11 +352,19 @@ check("P10 (part): the run records model and prompt version", got["model"] == "o
 
 mock("POST", "/_ctl", {"pa_answer": answer("Sarah will accept £200k.", [{"type": "opportunity", "id": SARAH}], "prepare")})
 run2 = data(call("POST", PA + "/ask", SOPHIE, S, {"message": "Prepare me for Sarah.", "mode": "prepare",
-            "opportunity_uuid": SARAH}), 202, "second turn")
+            "opportunity_uuid": SARAH, "inputs": {"mode": "capture", "opportunity_id": "someone-else",
+                                                  "interaction_uuid": "4f1b8c2e-0000-4000-8000-000000000111",
+                                                  "tone": "short"}}), 202, "second turn")
 tr = mock("GET", "/_js")["task_runs"][-1]
 check("the second turn is a new run on the same JobShout task", tr["task_id"] == run["jobshout_task_id"]
-      and tr["skill_slugs"] == ["pa-prepare-me"] and tr["inputs"]["opportunity_id"] == SARAH
-      and tr["inputs"]["mode"] == "prepare", tr)
+      and tr["skill_slugs"] == ["pa-prepare-me"] and tr["inputs"]["opportunity_id"] == SARAH, tr)
+check("the checked mode and ids win over the caller's inputs (extra inputs pass through)",
+      tr["inputs"]["mode"] == "prepare" and "interaction_uuid" not in tr["inputs"] and tr["inputs"]["tone"] == "short", tr)
+expect("add a read-only member", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
+       {"email": USERS["reader"][1], "role_ids": [role_id["pd_read_only"]]}), 201)
+for mode in ("capture", "handoff"):
+    res = call("POST", PA + "/ask", "reader", S, {"message": "Sarah agreed £1. Log it and tell Ashley.", "mode": mode})
+    check(f"a read-only member can't make the PA write ({mode} mode needs .create: 403)", res[0] == 403, res)
 got = data(call("GET", PA + f"/ask/{run2['uuid']}", SOPHIE, S), 200, "an invented figure")
 check("P05: an answer with an invented figure is withheld", got["output"]["grounded"] is False
       and got["output"].get("answer") is None and got["output"]["withheld"]
@@ -368,6 +399,28 @@ check("a repeated delivery changes nothing", res[0] == 200 and res[1]["data"]["s
 got = data(call("GET", PA + f"/ask/{run5['uuid']}", SOPHIE, S), 200, "webhook result")
 check("the webhook's answer was checked and stored", got["output"]["grounded"] is True and got["prompt_version"]
       == "seller-pa@1.1.0", got)
+use = sql(f"SELECT feature || '|' || scope || '|' || provider || '|' || model || '|' || (input_tokens + output_tokens) || '|' || ok "
+          f"FROM ai_usage WHERE run_uuid = '{run['uuid']}'")
+check("AI use is metered: one ai_usage row per run (who, feature, mode, model, tokens), polled twice or not",
+      use == ["property_pa|today|jobshout|openai_compatible:qwen3.8:latest|1200|true"], use)
+check("a run finished by webhook (delivered twice) is metered once",
+      sql(f"SELECT COUNT(*) || '|' || SUM(input_tokens + output_tokens) || '|' || MIN(user_uuid) FROM ai_usage "
+          f"WHERE run_uuid = '{run5['uuid']}'") == [f"1|1500|{USERS[SOPHIE][0]}"])
+# AI_USER_DAILY_TOKEN_LIMIT (when the deployment sets it) applies to PA questions as to every AI feature.
+sql(f"INSERT INTO ai_usage (user_uuid, feature, provider, model, input_tokens, output_tokens, ok) "
+    f"VALUES ('{USERS[ADMIN][0]}', 'test', 'test', 'test', 2000000000, 0, true)")
+res = call("POST", PA + "/ask", ADMIN, S, {"message": "Morning"})
+if res[0] == 429:
+    check("over the daily AI limit: 429 with the house message", "AI usage limit" in res[1]["error"], res)
+else:
+    print("skip  AI_USER_DAILY_TOKEN_LIMIT isn't set in this sandbox; the daily-limit check needs it")
+run6 = data(call("POST", PA + "/ask", SOPHIE, S, {"message": "Morning", "mode": "today"}), 202, "a run answered while off")
+expect("turn the PA off in the workspace", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S,
+       {"enabled": False}), 200)
+res = webhook(dict(ev, data=dict(ev["data"], run_id=run6["jobshout_run_id"])), WH)
+check("PA off: the signed webhook is acknowledged and nothing is applied", res[0] == 200 and res[1]["data"].get("ignored")
+      and sql(f"SELECT status FROM property_deals_agent_runs WHERE uuid = '{run6['uuid']}'") == ["running"], res)
+expect("PA back on", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabled": True}), 200)
 res = webhook({"id": "evt-2", "type": "run.completed", "data": {"run_id": "not-ours"}}, WH)
 check("another integration's run is acknowledged and ignored", res[0] == 200, res)
 
@@ -388,6 +441,18 @@ expect("enable deals in B", call("PUT", API + "/api/v2/namespace/plugins/propert
 expect("enable PA in B", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_b", B, {"enabled": True}), 200)
 res = call("GET", PA + f"/opportunities/{SARAH}", "owner_b", B)
 check("another workspace can't read Sarah (404)", res[0] == 404, res)
+expect("turn Property Deals off in B", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_b", B,
+       {"enabled": False}), 200)
+res = call("POST", PA + "/setup", "owner_b", B)
+check("PA setup needs Property Deals on in the workspace (409, says so)", res[0] == 409
+      and "Property Deals" in res[1]["error"], res)
+res = call("POST", PA + "/next-actions", "owner_b", B, {"title": "Call", "due_at": "2030-01-01T10:00:00Z", "reason": "x"})
+check("no Property Deals tasks are made while it is off (409)", res[0] == 409 and "Property Deals" in res[1]["error"], res)
+chk = data(call("GET", PA + "/status", "owner_b", B), 200, "B's go-live checklist")
+check("the checklist says Property Deals is off", chk["ready"] is False
+      and [c["ok"] for c in chk["checks"] if c["key"] == "property_deals"] == [False], chk["checks"])
+expect("Property Deals back on in B", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_b", B,
+       {"enabled": True}), 200)
 res = call("GET", PA + f"/history/pa_opportunities/{SARAH}", "owner_b", B)
 check("nor her history", res[0] == 200 and res[1]["data"] == [], res)
 r = data(call("POST", PA + "/grounding/check", "owner_b", B, good), 200, "cross-tenant grounding")
@@ -405,5 +470,24 @@ check(f"openapi: {len(ops)} Property PA operations, all documented", len(ops) >=
 check("openapi: PA schemas present", all(k in spec["components"]["schemas"] for k in
       ("PropertyPaOpportunity", "PropertyPaProposedUpdate", "PropertyPaChange", "PropertyPaRun")),
       [k for k in spec["components"]["schemas"] if k.startswith("PropertyPa")])
+
+check("the unused pa_risks / pa_outcomes tables are gone (risks are computed live; both return in month 3)",
+      sql("SELECT to_regclass('pa_risks') IS NULL AND to_regclass('pa_outcomes') IS NULL") == ["t"])
+
+# --- A demo reset never takes real work with it ------------------------------------------------------------------
+again = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+             "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset after real work on Sarah")
+check("Sarah (real notes, captures, a handoff on her) is kept; the untouched fixtures are replaced",
+      again["kept"] == 1 and again["cleared"] == 10 and again["opportunities"] == 11, again)
+check("the real voice note, captures and handoff on Sarah survive the reset",
+      sql(f"SELECT COUNT(*) FROM crm_activities WHERE uuid = '{cap['interaction']['uuid']}'") == ["1"]
+      and sql(f"SELECT COUNT(*) FROM pa_handoffs WHERE uuid = '{h['uuid']}' AND opportunity_uuid = '{SARAH}'") == ["1"]
+      and sql(f"SELECT COUNT(*) FROM pa_proposed_updates WHERE target_uuid = '{SARAH}'") != ["0"], SARAH)
+check("the kept Sarah is an ordinary record now (no fixture tag)",
+      sql(f"SELECT metadata ->> 'fixture' IS NULL FROM pa_opportunities WHERE uuid = '{SARAH}'") == ["t"])
+gone = data(call("DELETE", PA + "/demo", ADMIN, S), 200, "remove the demo")
+check("removing the demo deletes only the fixtures", gone["removed_opportunities"] == 11
+      and gone["kept_opportunities"] == 0 and sql(f"SELECT COUNT(*) FROM pa_opportunities WHERE uuid = '{SARAH}'") == ["1"],
+      gone)
 
 sys.exit(finish())

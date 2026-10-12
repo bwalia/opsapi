@@ -52,11 +52,11 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   pd_active_deals: { label: 'Active deals', module: 'property_deals_deals', source: 'property', size: 'stat' },
   pd_due_today: { label: 'Tasks due today', module: 'property_deals_tasks', source: 'property', size: 'stat' },
   pd_overdue: { label: 'Overdue tasks', module: 'property_deals_tasks', source: 'property', size: 'stat' },
-  pd_hot_leads_count: { label: 'Hot leads to call', module: 'property_deals_tasks', source: 'property', size: 'stat' },
+  pd_hot_leads_count: { label: 'Hot leads to call', module: 'property_deals_leads', source: 'property', size: 'stat' },
   pd_money_at_risk: { label: 'Money at risk', module: 'property_deals_deals', source: 'property', size: 'stat' },
   pd_renovations: { label: 'Active renovations', module: 'property_deals_deals', source: 'property', size: 'stat' },
   pd_approvals: { label: 'Approvals waiting', module: 'property_deals_approvals', source: 'property', size: 'stat' },
-  pd_hot_leads: { label: 'Hot leads — call now', module: 'property_deals_tasks', size: 'full' },
+  pd_hot_leads: { label: 'Hot leads — call now', module: 'property_deals_leads', size: 'full' },
   pd_due_soon: { label: 'Due this week', module: 'property_deals_tasks', size: 'full' },
   pd_deals_at_risk: { label: 'Deals at risk', module: 'property_deals_deals', source: 'property', size: 'full' },
 };
@@ -66,7 +66,7 @@ export const LAYOUTS: Record<'general' | BusinessType, WidgetId[]> = {
   ecommerce: ['users', 'orders', 'products', 'stores', 'revenue', 'orders_chart', 'health', 'recent_orders'],
   property_portfolio_manager: [
     'pd_active_deals', 'pd_due_today', 'pd_overdue', 'pd_hot_leads_count', 'pd_money_at_risk', 'pd_renovations',
-    'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk', 'recent_orders',
+    'pd_approvals', 'pd_hot_leads', 'pd_due_soon', 'pd_deals_at_risk',
   ],
   // Until these have their own widgets they start from the general layout.
   field_service: ['users', 'orders', 'revenue', 'health'],

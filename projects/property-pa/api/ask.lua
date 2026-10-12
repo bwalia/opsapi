@@ -13,6 +13,9 @@ local U = require("property_deals.util")
 local B = require("property_pa.bridge")
 
 local MODES = { "today", "prepare", "capture", "coach", "ask", "handoff", "manager_today", "teach" }
+-- Modes in which the agent proposes or writes (as the pd_agent service account): the person asking must be allowed
+-- to make that change themselves. The other modes only read.
+local WRITES = { capture = "property_pa_updates", handoff = "property_pa_handoffs", teach = "property_pa_knowledge" }
 local MAX_SKEW = 300 -- seconds a webhook timestamp may be off
 
 local function view(r)
@@ -31,14 +34,7 @@ local function hmac_hex(secret, msg)
     return hex(h:final())
 end
 
--- constant-time compare
-local function same(a, b)
-    if type(a) ~= "string" or type(b) ~= "string" or #a ~= #b then return false end
-    local diff = 0
-    local bit = require("bit")
-    for i = 1, #a do diff = bit.bor(diff, bit.bxor(a:byte(i), b:byte(i))) end
-    return diff == 0
-end
+local function same(a, b) return require("lib.stripe")._secure_compare(a, b) end -- constant time
 
 return function(app)
     app:post("/ask", sdk.handler({ permission = "property_pa_records.read" }, U.guard_create(function(self)
@@ -57,6 +53,9 @@ return function(app)
         end
         if B.MANAGER_ONLY[d.mode] and d.role ~= "manager" then
             return sdk.error(422, "Validation failed", { mode = d.mode .. " is a Manager PA mode" })
+        end
+        if WRITES[d.mode] and not sdk.can(self, WRITES[d.mode], "create") then
+            return sdk.error(403, "Permission denied: " .. d.mode .. " mode needs " .. WRITES[d.mode] .. ".create")
         end
         if body.inputs ~= nil and type(body.inputs) ~= "table" then
             return sdk.error(422, "Validation failed", { inputs = "must be an object" })
@@ -96,6 +95,10 @@ return function(app)
         local secret = sdk.settings("property_pa", ns).jobshout_webhook_secret
         if type(secret) ~= "string" or secret == "" then return sdk.error(401, "Webhook secret not set") end
         if not same("sha256=" .. hmac_hex(secret, ts .. "." .. raw), sig) then return sdk.error(401, "Bad signature") end
+        -- Turned off in that workspace: acknowledged (so JobShout stops retrying), nothing applied.
+        if not require("helper.plugin-workspaces").isEnabled("property_pa", ns) then
+            return sdk.ok({ ignored = "Property PA is off in this workspace" })
+        end
         local full = U.one(B.SELECT .. " WHERE namespace_id = ? AND provider = ? AND jobshout_run_id = ?", ns, B.PROVIDER, run_id)
         local done = B.finish(ns, full, ev.data)
         return sdk.ok({ run = done.uuid, status = done.status })

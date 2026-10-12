@@ -16,12 +16,14 @@ import base64
 import datetime
 import email.utils
 import json
+import quopri
 import re
 import socketserver
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlencode, urlparse
 
 LOCK = threading.Lock()
 STATE = {
@@ -36,6 +38,7 @@ STATE = {
     "pa_answer": None,     # the next Property PA run's output (set via /_ctl)
     "s3": {},              # "/bucket/key" -> bytes
     "alerts": [],          # staff alerts: ntfy / Telegram / SMS gateway
+    "model_delay": 0,      # seconds the "local model" takes to answer (a slow model)
 }
 JS_AGENT = "11111111-2222-4333-8444-555555555555"
 POSTCODES = {"YO1 7AA": (53.96, -1.08), "YO1 9AB": (53.962, -1.085), "YO10 5DD": (53.947, -1.05),
@@ -298,6 +301,8 @@ class Http(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p, b = self.path, self.body()
+        if p == "/v1/chat/completions" and STATE["model_delay"]:
+            time.sleep(STATE["model_delay"])  # outside the lock: everything else keeps answering
         with LOCK:
             if p == "/v1/chat/completions":
                 STATE["log"].append({"messages": b.get("messages"), "tools": [t["function"]["name"] for t in b.get("tools") or []],
@@ -306,12 +311,13 @@ class Http(BaseHTTPRequestHandler):
             if p == "/down/v1/chat/completions":
                 return self.send(503, {"error": {"message": "overloaded"}})
             if p == "/_ctl":
-                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down", "pa_answer")})
+                STATE.update({k: v for k, v in b.items() if k in ("jobshout_down", "pa_answer", "model_delay", "ch_429")})
                 if b.get("reset_log"):
                     STATE["log"] = []
                 if b.get("reset_all"):
                     STATE.update(log=[], smtp=[], mailbox=[], jobshout_down=False, js_runs={}, js_approvals={},
-                                 js_launches=[], js_task_runs=[], pa_answer=None, s3={}, alerts=[])
+                                 js_launches=[], js_task_runs=[], pa_answer=None, s3={}, alerts=[], model_delay=0,
+                                 ch_429=False)
                 if b.get("reset_alerts"):
                     STATE["alerts"] = []
                 if b.get("decide_external"):
@@ -345,10 +351,16 @@ class Http(BaseHTTPRequestHandler):
                     STATE["alerts"].append({"channel": "sms", "to": n, "text": b.get("message")})
                 return self.send(202, {"id": "sms1", "state": "Pending"})
             if p == "/_mail/inbox":
-                n = len(STATE["mailbox"]) + 1
-                ts = time.time()
-                STATE["mailbox"].append({"id": "m%d" % n, "uid": 100 + n, "from": b["from"], "subject": b["subject"],
-                                         "body": b["body"], "ts": ts, "date": email.utils.formatdate(ts)})
+                # Optional: count (that many, subjects numbered), charset (body sent in it, quoted-printable over
+                # IMAP), auth (an Authentication-Results header).
+                count = int(b.get("count") or 1)
+                for i in range(count):
+                    n = len(STATE["mailbox"]) + 1
+                    ts = time.time() + i * 0.001
+                    STATE["mailbox"].append({"id": "m%d" % n, "uid": 100 + n, "from": b["from"],
+                                             "subject": b["subject"] + (" #%d" % (i + 1) if count > 1 else ""),
+                                             "body": b["body"], "ts": ts, "date": email.utils.formatdate(ts),
+                                             "charset": b.get("charset"), "auth": b.get("auth")})
                 return self.send(201, {"ok": True})
             if p.startswith("/js/api/v1/"):
                 return self.jobshout("POST", p[len("/js/api/v1"):], b)
@@ -413,6 +425,8 @@ class Http(BaseHTTPRequestHandler):
                                                            (150000, "2025-06-30", 11)])]
             return self.send(200, {"result": {"items": items}})
         if p.startswith("/ch/"):
+            if STATE.get("ch_429"):
+                return self.send(429, {"error": "Rate limit exceeded"})
             if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"ch-key:").decode():
                 return self.send(401, {"error": "Invalid Authorization"})
             today = datetime.date.today()
@@ -444,6 +458,8 @@ class Http(BaseHTTPRequestHandler):
                     {"transaction_id": "TX0", "date": "2019-02-01", "category": "incorporation", "type": "NEWINC",
                      "description": "incorporation-company"}]})
             if p.startswith("/ch/advanced-search/companies"):
+                if "location=Nowhere" in p:
+                    return self.send(500, {"error": "Internal Server Error"})
                 return self.send(200, {"items": [{"company_number": "07654321", "company_name": "ELM PROPERTY HOLDINGS LTD",
                                                   "date_of_creation": ago(5), "sic_codes": ["68100"],
                                                   "registered_office_address": {"locality": "Leeds"}}]})
@@ -544,7 +560,8 @@ class Http(BaseHTTPRequestHandler):
              "phone": "+447700900222"},
         ], "meta": {"total": 2, "startAfterId": None}})
 
-    # Gmail ------------------------------------------------------------------
+    # Gmail: like the real API, the list is newest first, maxResults per page (default 100, max 500) and a
+    # nextPageToken while there is more; "after:<epoch>" in q. Bodies are in the message's own charset.
     def gmail(self, p):
         if self.headers.get("Authorization") != "Bearer tok-gmail":
             return self.send(401, {"error": {"message": "unauthorized"}})
@@ -552,27 +569,52 @@ class Http(BaseHTTPRequestHandler):
         if m:
             for x in STATE["mailbox"]:
                 if x["id"] == m.group(1):
+                    cs = x.get("charset") or "utf-8"
+                    headers = [{"name": "From", "value": x["from"]}, {"name": "To", "value": "deals@ai-buyers.test"},
+                               {"name": "Subject", "value": x["subject"]}]
+                    if x.get("auth"):
+                        headers.append({"name": "Authentication-Results", "value": x["auth"]})
                     return self.send(200, {"id": x["id"], "internalDate": str(int(x["ts"] * 1000)), "snippet": x["body"][:40],
-                                           "payload": {"mimeType": "multipart/alternative", "headers": [
-                                               {"name": "From", "value": x["from"]}, {"name": "To", "value": "deals@ai-buyers.test"},
-                                               {"name": "Subject", "value": x["subject"]}],
-                                               "parts": [{"mimeType": "text/plain", "body": {
-                                                   "data": base64.urlsafe_b64encode(x["body"].encode()).decode().rstrip("=")}}]}})
+                                           "payload": {"mimeType": "multipart/alternative", "headers": headers,
+                                               "parts": [{"mimeType": "text/plain", "headers": [
+                                                   {"name": "Content-Type", "value": "text/plain; charset=" + cs}], "body": {
+                                                   "data": base64.urlsafe_b64encode(x["body"].encode(cs)).decode().rstrip("=")}}]}})
             return self.send(404, {"error": {"message": "not found"}})
-        after = re.search(r"after%3A(\d+)|after:(\d+)", p)
-        after = int(after.group(1) or after.group(2)) if after else 0
-        return self.send(200, {"messages": [{"id": x["id"]} for x in STATE["mailbox"] if x["ts"] > after]})
+        q = parse_qs(urlparse(p).query)
+        after = re.search(r"after:(\d+)", q.get("q", [""])[0])
+        after = int(after.group(1)) if after else 0
+        size = min(int(q.get("maxResults", ["100"])[0]), 500)
+        start = int(q.get("pageToken", ["0"])[0])
+        hits = [x for x in sorted(STATE["mailbox"], key=lambda x: -x["ts"]) if x["ts"] > after]
+        out = {"resultSizeEstimate": len(hits)}
+        if hits[start:start + size]:
+            out["messages"] = [{"id": x["id"], "threadId": x["id"]} for x in hits[start:start + size]]
+        if start + size < len(hits):
+            out["nextPageToken"] = str(start + size)
+        return self.send(200, out)
 
-    # Microsoft Graph ----------------------------------------------------------
+    # Microsoft Graph: $filter on receivedDateTime (ge / gt), oldest first, $top per page, @odata.nextLink.
     def m365(self, p):
         if self.headers.get("Authorization") != "Bearer tok-m365":
             return self.send(401, {"error": {"message": "unauthorized"}})
-        return self.send(200, {"value": [{
+        u = urlparse(p)
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        iso = lambda x: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(x["ts"]))  # noqa: E731
+        f = re.match(r"receivedDateTime (ge|gt) (\S+)", q.get("$filter", ""))
+        hits = [x for x in sorted(STATE["mailbox"], key=lambda x: x["ts"])
+                if not f or (iso(x) >= f.group(2) if f.group(1) == "ge" else iso(x) > f.group(2))]
+        top, skip = int(q.get("$top", "10")), int(q.get("$skip", "0"))
+        out = {"value": [{
             "id": x["id"], "internetMessageId": "<%s@mock>" % x["id"], "subject": x["subject"],
             "from": {"emailAddress": {"address": email.utils.parseaddr(x["from"])[1], "name": "Seller Solicitor"}},
             "toRecipients": [{"emailAddress": {"address": "deals@ai-buyers.test"}}],
-            "receivedDateTime": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(x["ts"])),
-            "body": {"contentType": "text", "content": x["body"]}} for x in STATE["mailbox"]]})
+            "receivedDateTime": iso(x),
+            "internetMessageHeaders": [{"name": "Authentication-Results", "value": x["auth"]}] if x.get("auth") else [],
+            "body": {"contentType": "text", "content": x["body"]}} for x in hits[skip:skip + top]]}
+        if skip + top < len(hits):
+            q["$skip"] = str(skip + top)
+            out["@odata.nextLink"] = "http://%s%s?%s" % (self.headers.get("Host"), u.path, urlencode(q))
+        return self.send(200, out)
 
 
 # ---------------------------------------------------------------- SMTP sink
@@ -656,9 +698,18 @@ class Imap(socketserver.StreamRequestHandler):
                 uid = int(rest.split()[1])
                 x = next((x for x in STATE["mailbox"] if x["uid"] == uid), None)
                 if x:
+                    cs = x.get("charset")
                     hdr = ("From: %s\r\nTo: deals@ai-buyers.test\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s@imap.mock>\r\n"
-                           "Content-Type: text/plain; charset=utf-8\r\n\r\n" % (x["from"], x["subject"], x["date"], x["id"])).encode()
-                    txt = x["body"].encode()
+                           % (x["from"], x["subject"], x["date"], x["id"]))
+                    if x.get("auth"):
+                        hdr += "Authentication-Results: mx.mock; %s\r\n" % x["auth"]
+                    if cs:
+                        hdr += "Content-Type: text/plain; charset=%s\r\nContent-Transfer-Encoding: quoted-printable\r\n" % cs
+                        txt = quopri.encodestring(x["body"].encode(cs))
+                    else:
+                        hdr += "Content-Type: text/plain; charset=utf-8\r\n"
+                        txt = x["body"].encode()
+                    hdr = (hdr + "\r\n").encode()
                     self.w(b"* 1 FETCH (UID %d BODY[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] {%d}\r\n" % (uid, len(hdr)))
                     self.w(hdr)
                     self.w(b" BODY[TEXT]<0> {%d}\r\n" % len(txt))

@@ -1,6 +1,6 @@
 -- Per-workspace AI settings: the model chain per job type (property_deals_ai_routes),
--- per-agent settings (property_deals_agent_configs) and the cost caps
--- (plugin settings ai_max_cost_run_usd / ai_max_cost_day_usd, USD).
+-- per-agent settings (property_deals_agent_configs) and the caps (plugin settings
+-- ai_max_cost_run_usd / ai_max_cost_day_usd in USD, ai_max_tokens_day, ai_max_concurrent_runs).
 local db = require("lapis.db")
 local cjson = require("cjson")
 local U = require("property_deals.util")
@@ -13,7 +13,7 @@ local function null(v) return v == nil or v == db.NULL end
 
 --- { chain = { {provider_uuid, model}… }, local_only, max_tokens } for a job type.
 -- Without a route of its own a job uses the "draft" route, then any enabled
--- model provider in name order (so one provider is enough to get started).
+-- model provider, self-hosted ones first (so one provider is enough to get started).
 function C.route(ns, job_type)
     local r = U.one("SELECT * FROM property_deals_ai_routes WHERE namespace_id = ? AND job_type = ?", ns, job_type)
         or (job_type ~= "draft" and U.one("SELECT * FROM property_deals_ai_routes WHERE namespace_id = ? AND job_type = 'draft'", ns))
@@ -24,7 +24,7 @@ function C.route(ns, job_type)
     local chain = {}
     for _, p in ipairs(db.query([[
         SELECT uuid FROM namespace_ai_providers
-        WHERE namespace_id = ? AND enabled AND provider_type <> 'jobshout' ORDER BY is_local, name
+        WHERE namespace_id = ? AND enabled AND provider_type <> 'jobshout' ORDER BY is_local DESC, name
     ]], ns)) do chain[#chain + 1] = { provider_uuid = p.uuid } end
     return { chain = chain, local_only = false, job_type = job_type, implicit = true }
 end
@@ -109,7 +109,8 @@ function C.save_agent(ns, key, b)
         end
     end
     if row.route and row.route ~= "builtin" and row.route ~= "jobshout" then errors.route = "builtin or jobshout" end
-    if row.approval_rule and not ({ any_operator = 1, manager = 1, two_person = 1 })[row.approval_rule] then
+    if row.approval_rule and row.approval_rule ~= db.NULL
+        and not ({ any_operator = 1, manager = 1, two_person = 1 })[row.approval_rule] then
         errors.approval_rule = "any_operator, manager or two_person"
     end
     if row.auto_pickup_at and not tostring(row.auto_pickup_at):match("^[01]%d:[0-5]%d$")
@@ -137,18 +138,42 @@ function C.save_agent(ns, key, b)
     return C.agent(ns, key)
 end
 
---- USD spent by agents in this workspace today (UTC day).
+--- USD spent and tokens used by agents in this workspace today (UTC day).
 function C.spent_today(ns)
     local r = U.one([[
-        SELECT COALESCE(SUM(cost_usd), 0) AS c FROM property_deals_agent_runs
+        SELECT COALESCE(SUM(cost_usd), 0) AS c, COALESCE(SUM(tokens_in + tokens_out), 0) AS t
+        FROM property_deals_agent_runs
         WHERE namespace_id = ? AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
     ]], ns)
-    return tonumber(r.c) or 0
+    return tonumber(r.c) or 0, tonumber(r.t) or 0
+end
+
+--- Why agents must stop for today (nil = carry on): the USD budget, or the token allowance, which also
+-- counts models that cost nothing per token (Ollama, the platform model).
+function C.over_budget(ns, caps)
+    local spent, tokens = C.spent_today(ns)
+    if caps.day and spent >= caps.day then return string.format("Today's AI budget ($%.2f) is used up", caps.day) end
+    if caps.day_tokens and tokens >= caps.day_tokens then
+        return string.format("Today's AI token allowance (%d tokens) is used up", caps.day_tokens)
+    end
+end
+
+--- Built-in runs going now, and runs waiting to start.
+function C.busy(ns)
+    local r = U.one([[
+        SELECT COUNT(*) FILTER (WHERE status = 'running' AND provider = 'builtin')::int AS running,
+               COUNT(*) FILTER (WHERE status = 'queued')::int AS queued
+        FROM property_deals_agent_runs WHERE namespace_id = ? AND status IN ('queued', 'running')
+    ]], ns)
+    return r.running, r.queued
 end
 
 function C.caps(settings)
     settings = settings or {}
+    local day_tokens = tonumber(settings.ai_max_tokens_day) or 2000000
     return { run = tonumber(settings.ai_max_cost_run_usd), day = tonumber(settings.ai_max_cost_day_usd),
+        day_tokens = day_tokens > 0 and day_tokens or nil,
+        concurrent = math.max(1, tonumber(settings.ai_max_concurrent_runs) or 3),
         max_tokens = tonumber(settings.ai_max_tokens) or 2048 }
 end
 

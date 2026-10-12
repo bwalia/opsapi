@@ -1,6 +1,7 @@
 -- Leads with the Property Deals extension (gap map D2). The lead itself stays
 -- in crm_leads (created through /api/v2/crm/leads); these routes read it joined
--- with property_deals_lead_details and edit the extension.
+-- with property_deals_lead_details and edit the extension. Leads (and their situation, vulnerability
+-- notes, replies and news) need property_deals_leads: builders on renovation boards don't get it.
 --   GET /leads                 list  ?lead_kind=&situation=&status=&temperature=hot|warm|cold&vulnerable=true
 --                                    &deadline_before=&q=&sort=deadline|created|last_reply
 --   GET /leads/:uuid           one lead + details
@@ -44,7 +45,7 @@ local SELECT = [[
 ]]
 
 return function(app)
-    app:get("/leads", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
+    app:get("/leads", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local p = self.params
         local where = { "l.namespace_id = " .. db.escape_literal(sdk.namespace_id(self)), "l.deleted_at IS NULL" }
         for _, col in ipairs({ "lead_kind", "situation", "temperature" }) do
@@ -73,14 +74,14 @@ return function(app)
                                          total_pages = math.ceil(total / per_page) })
     end))
 
-    app:get("/leads/:uuid", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
+    app:get("/leads/:uuid", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local row = U.one(SELECT .. " WHERE l.namespace_id = ? AND l.uuid = ? AND l.deleted_at IS NULL",
             sdk.namespace_id(self), self.params.uuid)
         if not row then return sdk.not_found("Lead") end
         return sdk.ok(row)
     end))
 
-    app:put("/leads/:uuid/details", sdk.handler({ permission = "property_deals_deals.update" }, U.guard(function(self)
+    app:put("/leads/:uuid/details", sdk.handler({ permission = "property_deals_leads.update" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local lead = U.one("SELECT uuid FROM crm_leads WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL",
             ns, self.params.uuid)

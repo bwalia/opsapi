@@ -31,28 +31,21 @@ local function dict()
     }
 end
 ngx = { log = function() end, ERR = 3, WARN = 4, time = os.time, now = os.time, update_time = function() end, -- luacheck: ignore 111
-    ctx = {}, shared = { cache = dict(), locks = dict() } }
+    ctx = {}, shared = { cache = dict(), locks = dict() }, get_phase = function() return "content" end }
 
 -- Scripted providers: URL substring -> list of responses (status, body) or "timeout".
 local script, hits = {}, {}
-package.loaded["resty.http"] = {
-    new = function()
-        return {
-            set_timeout = function() end,
-            request_uri = function(_, url)
-                for pattern, queue in pairs(script) do
-                    if url:find(pattern, 1, true) then
-                        hits[#hits + 1] = pattern
-                        local r = table.remove(queue, 1) or queue.default
-                        if r == "timeout" then return nil, "timeout" end
-                        return { status = r.status or 200, body = cjson.encode(r.body) }
-                    end
-                end
-                return nil, "no route for " .. url
-            end,
-        }
-    end,
-}
+package.loaded["resty.http"] = require("spec.fixtures.fake-http")(function(url)
+    for pattern, queue in pairs(script) do
+        if url:find(pattern, 1, true) then
+            hits[#hits + 1] = pattern
+            local r = table.remove(queue, 1) or queue.default
+            if r == "timeout" then return nil, "timeout" end
+            return { status = r.status or 200, body = cjson.encode(r.body) }
+        end
+    end
+    return nil, "no route for " .. url
+end)
 package.loaded["resty.jwt"] = { sign = function() return "eyJ.minted.sig" end }
 local rows = {}
 package.loaded["lapis.db"] = { insert = function(_, row) rows[#rows + 1] = row end, query = function() return {} end }

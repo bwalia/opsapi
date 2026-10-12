@@ -83,7 +83,8 @@ return function(app)
         local url, err = client:upload(file, { object_key = key, validate_type = false })
         if not url then
             db.query("DELETE FROM property_deals_documents WHERE id = ?", row.id)
-            return sdk.error(502, "Could not store the file: " .. tostring(err))
+            ngx.log(ngx.ERR, "[property_deals] document upload: ", tostring(err))
+            return sdk.error(502, "Could not store the file; try again")
         end
         db.update("property_deals_documents", { bucket = client.bucket }, { id = row.id })
         return sdk.created(get(ns, doc_uuid))

@@ -74,6 +74,7 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
     namespaces,
     namespacesLoading,
     namespacesError,
+    namespacesLoaded,
     userSettings,
     userSettingsLoading,
     isSwitching,
@@ -116,7 +117,9 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
         namespace_settings?: UserNamespaceSettings;
       };
 
-      if (userAny.namespace) {
+      // Never re-adopt a workspace the fresh list says this user no longer belongs to.
+      const jwtUuid = userAny.namespace?.uuid;
+      if (userAny.namespace && !(namespacesLoaded && !namespaces.some((n) => n.uuid === jwtUuid))) {
         // Extract permissions from the JWT namespace object
         const namespacePermissions = userAny.namespace.permissions || null;
         const isOwner = userAny.namespace.is_owner || userAny.namespace.role === 'owner' || false;
@@ -133,7 +136,7 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
         setUserSettings(userAny.namespace_settings);
       }
     }
-  }, [user, _hasHydrated, currentNamespace, setCurrentNamespace, setUserSettings]);
+  }, [user, _hasHydrated, currentNamespace, namespacesLoaded, namespaces, setCurrentNamespace, setUserSettings]);
 
   // Reconcile a stale/leaked selection against the user's real memberships.
   // The effect above only fills an EMPTY selection, so a namespace persisted from

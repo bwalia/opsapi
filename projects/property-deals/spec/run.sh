@@ -47,6 +47,7 @@ docker run -d --name pd-api-$ID --network "$NET" -p 127.0.0.1::80 -v "$W/src/lap
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=property -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e OPSAPI_AI_ALLOW_PRIVATE=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e AI_FALLBACK_PROVIDER=none \
+  -e AI_USER_DAILY_TOKEN_LIMIT=100000000 \
   -e VOICE_URL=http://pd-mock:8080/voice \
   -e GHL_API_URL=http://pd-mock:8080/ghl -e OPSAPI_INTEGRATIONS_ALLOW_PRIVATE=true \
   -e MINIO_ENDPOINT=http://pd-mock:8080 -e MINIO_ACCESS_KEY=minio -e MINIO_SECRET_KEY=minio123 -e MINIO_BUCKET=pd-docs \

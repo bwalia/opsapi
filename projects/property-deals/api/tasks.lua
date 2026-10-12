@@ -2,7 +2,9 @@
 --   GET    /tasks               list ?deal_uuid=&pd_status=a,b&owner_user_uuid=&open=true&blocking=true&compliance=true&sort=urgency|due|created
 --   GET    /tasks/:id           one task (id = kanban task uuid)
 --   POST   /tasks               ad-hoc task on a deal (workflow tasks are created by the engine)
---   PUT    /tasks/:id           update status, owner, due time, snooze...
+--   PUT    /tasks/:id           update status, owner, due time, snooze... The PA (X-OpsAPI-Agent) closes a lead's
+--                                task only with evidence.chase_uuid: the call / message it just logged for that lead
+--                                that did the task's work. One chase closes one task, never all of a lead's tasks.
 --   GET    /tasks/:id/dependencies, POST /tasks/:id/dependencies {depends_on_task_uuid}, DELETE /tasks/:id/dependencies/:dep
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -96,7 +98,28 @@ return function(app)
         if data.snoozed_until and data.snoozed_until ~= db.NULL and not (data.snooze_reason or current.snooze_reason) then
             return sdk.error(422, "Validation failed", { snooze_reason = "is required when snoozing" })
         end
-        local task = U.tx(function() return Tasks.update(ns, current.task_uuid, data, sdk.user(self).uuid) end)
+        local chase
+        local lead_task = current.lead_uuid and current.lead_uuid ~= db.NULL
+        if ngx.var.http_x_opsapi_agent and data.pd_status == "done" and lead_task then
+            local ev = U.json(data.evidence)
+            local id = type(ev) == "table" and ev.chase_uuid
+            chase = U.is_uuid(id) and U.one([[
+                SELECT uuid FROM property_deals_chases WHERE namespace_id = ? AND uuid = ? AND lead_uuid = ?
+                  AND (task_uuid IS NULL OR task_uuid = ?)
+            ]], ns, id, current.lead_uuid, current.task_uuid)
+            if not chase then
+                return sdk.error(422, "Validation failed", { evidence = "the assistant closes a lead's task only "
+                    .. "with evidence.chase_uuid: the call or message just logged for this lead (POST /chases) that "
+                    .. "did this task's work. Each one closes one task." })
+            end
+        end
+        local task = U.tx(function()
+            -- The chase now belongs to the task it completed, so it can't close another one.
+            if chase then
+                db.update("property_deals_chases", { task_uuid = current.task_uuid }, { uuid = chase.uuid })
+            end
+            return Tasks.update(ns, current.task_uuid, data, sdk.user(self).uuid)
+        end)
         if task.deal_uuid then require("property_deals.health").recompute_deal(ns, task.deal_uuid, sdk.settings(self)) end
         return sdk.ok(Tasks.get(ns, current.task_uuid))
     end)))

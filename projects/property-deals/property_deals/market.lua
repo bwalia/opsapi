@@ -9,11 +9,16 @@ local M = {}
 
 M.TYPES = { sold_price = true, epc = true, listing = true, auction_lot = true, other = true }
 
-local function date_or_null(v)
+-- Dates are parsed by Postgres (any format it reads), once per distinct value and outside the
+-- import's transaction: a bad one is NULL, not an aborted import.
+local function date_or_null(v, memo)
     if type(v) ~= "string" or v == "" then return db.NULL end
     v = v:gsub("^%a%a%a,%s*", "")
-    local ok, r = pcall(U.one, "SELECT ?::date::text AS d", v)
-    return ok and r and r.d or db.NULL
+    if memo[v] == nil then
+        local ok, r = pcall(U.one, "SELECT ?::date::text AS d", v)
+        memo[v] = ok and r and r.d or db.NULL
+    end
+    return memo[v]
 end
 
 local function num(v)
@@ -21,8 +26,13 @@ local function num(v)
     return n or db.NULL
 end
 
+local COLUMNS = "namespace_id, connector_uuid, source, record_type, external_id, address, postcode, lat, lng, "
+    .. "property_type, tenure, bedrooms, price, event_date, epc_rating, status, cash_only, url, data"
+local BATCH = 500
+
 --- Insert or refresh records. A price change keeps the old price in previous_price
--- (the deal scout's "reduced" signal). @return number of rows inserted or changed
+-- (the deal scout's "reduced" signal). All or nothing: one transaction, in batches of 500
+-- (a record repeated in the input counts once, the last one wins). @return number of rows inserted or changed
 function M.upsert(ns, conn, records)
     local Connectors = require("property_deals.connectors")
     local missing = {}
@@ -30,16 +40,28 @@ function M.upsert(ns, conn, records)
         if (not r.lat or not r.lng) and r.postcode then missing[#missing + 1] = r.postcode end
     end
     local geo = #missing > 0 and Connectors.geocode(ns, missing) or {}
-    local stored = 0
+    local source = (conn and conn.kind) or nil
+    local rows, at, dates = {}, {}, {}
     for _, r in ipairs(records) do
         if r.external_id and M.TYPES[r.record_type or ""] then
             local g = r.postcode and geo[tostring(r.postcode):upper()]
             local lat, lng = tonumber(r.lat) or (g and g.lat), tonumber(r.lng) or (g and g.lng)
-            local row = db.query([[
-                INSERT INTO property_deals_market_records (namespace_id, connector_uuid, source, record_type, external_id,
-                    address, postcode, lat, lng, property_type, tenure, bedrooms, price, event_date, epc_rating, status,
-                    cash_only, url, data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::date, ?, ?, ?, ?, ?::jsonb)
+            local src = source or r.source or "csv"
+            local id = U.cut(U.utf8(tostring(r.external_id)), 255)
+            local values = db.interpolate_query("(" .. string.rep("?, ", 13) .. "?::date, ?, ?, ?, ?, ?::jsonb)",
+                ns, conn and conn.uuid or db.NULL, src, r.record_type, id, r.address or db.NULL,
+                r.postcode or db.NULL, lat or db.NULL, lng or db.NULL, r.property_type or db.NULL, r.tenure or db.NULL,
+                num(r.bedrooms), num(r.price), date_or_null(r.event_date, dates), r.epc_rating or db.NULL,
+                r.status or db.NULL, r.cash_only == true, r.url or db.NULL, cjson.encode(r.data or {}))
+            local key = src .. "\0" .. id
+            if at[key] then rows[at[key]] = values else rows[#rows + 1] = values; at[key] = #rows end
+        end
+    end
+    return U.tx(function()
+        local stored = 0
+        for i = 1, #rows, BATCH do
+            local res = db.query("INSERT INTO property_deals_market_records (" .. COLUMNS .. ") VALUES "
+                .. table.concat(rows, ", ", i, math.min(i + BATCH - 1, #rows)) .. [[
                 ON CONFLICT (namespace_id, source, external_id) DO UPDATE SET
                     previous_price = CASE WHEN EXCLUDED.price IS DISTINCT FROM property_deals_market_records.price
                                           THEN property_deals_market_records.price
@@ -53,15 +75,11 @@ function M.upsert(ns, conn, records)
                    OR property_deals_market_records.cash_only IS DISTINCT FROM EXCLUDED.cash_only
                    OR property_deals_market_records.lat IS NULL
                 RETURNING id
-            ]], ns, conn and conn.uuid or db.NULL, (conn and conn.kind) or r.source or "csv", r.record_type,
-                tostring(r.external_id):sub(1, 255), r.address or db.NULL, r.postcode or db.NULL, lat or db.NULL,
-                lng or db.NULL, r.property_type or db.NULL, r.tenure or db.NULL, num(r.bedrooms), num(r.price),
-                date_or_null(r.event_date), r.epc_rating or db.NULL, r.status or db.NULL, r.cash_only == true,
-                r.url or db.NULL, cjson.encode(r.data or {}))
-            stored = stored + #row
+            ]])
+            stored = stored + #res
         end
-    end
-    return stored
+        return stored
+    end)
 end
 
 --- Sold-price comparables near a point: median, count, the window used.
@@ -77,9 +95,9 @@ function M.comps(ns, lat, lng, opts)
         FROM property_deals_market_records
         WHERE namespace_id = ? AND record_type = 'sold_price' AND price IS NOT NULL
           AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
-          AND earth_distance(ll_to_earth(lat, lng), ll_to_earth(?, ?)) <= ? * 1609.344
+          AND ]] .. U.miles_sql("lat", "lng", lat, lng) .. [[ <= ?
           AND (event_date IS NULL OR event_date >= CURRENT_DATE - make_interval(months => ?))]] .. type_sql,
-        ns, lat - dlat, lat + dlat, lng - dlng, lng + dlng, lat, lng, miles, months)
+        ns, lat - dlat, lat + dlat, lng - dlng, lng + dlng, miles, months)
     if not r or r.n == 0 then return { count = 0, radius_miles = miles, months = months } end
     return { count = r.n, median = r.median, radius_miles = miles, months = months, from = r.from_date, to = r.to_date }
 end

@@ -2,6 +2,10 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## Unreleased
+
+- `@opsapi/client/property-deals`: types regenerated from the hardened API — renovations, `/due`, hot leads, lead signals and replies, playbooks, the PA briefing and follow-ups; paging (`page` / `per_page`, `meta.total_pages`) on the approvals inbox, market records, scout alerts, inbound messages and the buyer directory; approvals gain `execution_steps`; `/ai/usage` gains `tokens_today` / `cap_day_tokens`; the new `property_deals_leads` permission in `/me`; enquiry parties `broker`, `surveyor`, `estate_agent`.
+
 ## 1.3.0
 
 - `@opsapi/client/property-deals`: the AI layer (Phase 5) — "Let AI do it" (`POST /tasks/{id}/agent-run`), agent runs, `/ai/agents`, `/ai/routes`, `/ai/usage`, approval retry and booking confirmation, mail connectors and inbound messages, notification preferences, the task contact log; `ApprovalDecision` gains `payload_version` / `payload_sha256`. New named types `Agent`, `AgentConfig`, `AiRoute`, `MailConnector`, `MailConnectorWrite`, `InboundMessage`, `NotificationPreferences`; more events in `PROPERTY_DEALS_EVENTS`.

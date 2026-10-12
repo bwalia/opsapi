@@ -68,8 +68,13 @@ pp = data(call("POST", C, "manager_s", S, {"kind": "price_paid", "name": "Price 
           "sync_enabled": True}), 201, "Price Paid connector")
 chc = data(call("POST", C, "manager_s", S, {"kind": "companies_house", "name": "Companies House", "secret": "ch-key",
            "config": {"base_url": M + "/ch"}}), 201, "Companies House connector")
-stub = data(call("POST", C, "manager_s", S, {"kind": "propertydata", "name": "PropertyData", "secret": "pd-key"}), 201,
-            "paid feed (stub)")
+res = call("POST", C, "manager_s", S, {"kind": "propertydata", "name": "PropertyData", "secret": "pd-key"})
+check("a paid feed isn't available yet: it can't be switched on (422)", res[0] == 422
+      and "available yet" in res[1]["details"]["kind"], res)
+stub = data(call("POST", C, "manager_s", S, {"kind": "propertydata", "name": "PropertyData", "secret": "pd-key",
+                                              "enabled": False}), 201, "paid feed (stub) kept switched off")
+res = call("PUT", C + f"/{stub['uuid']}", "manager_s", S, {"enabled": True})
+check("...and it can't be switched on later either (422)", res[0] == 422, res)
 listed = data(call("GET", C, "manager_s", S), 200, "list connectors")
 check("keys never returned; has_secret instead", "epc-key" not in json.dumps(listed) and "ch-key" not in json.dumps(listed)
       and epc["has_secret"] and not pp["has_secret"], listed)
@@ -94,8 +99,10 @@ r = data(call("POST", C + f"/{pp['uuid']}/run", "manager_s", S, {"postcode": "YO
 check("re-running stores nothing new", r["fetched"] == 3 and r["stored"] == 0, r)
 res = call("PUT", C + f"/{epc['uuid']}", "manager_s", S, {"secret": "wrong"})
 res = call("POST", C + f"/{epc['uuid']}/run", "manager_s", S, {"postcode": "YO1 7AA"})
-check("a bad key fails clearly (502) and is recorded", res[0] == 502 and "401" in res[1]["error"]
-      and data(call("GET", C + f"/{epc['uuid']}", "manager_s", S), 200, "epc")["last_error"], res)
+last_error = data(call("GET", C + f"/{epc['uuid']}", "manager_s", S), 200, "epc").get("last_error") or ""
+check("a bad key fails clearly (502) and is recorded", res[0] == 502 and "401" in res[1]["error"] and last_error, res)
+check("what the provider said stays in the log, not in the answer or last_error",
+      "unauthorised" not in json.dumps(res[1]) and "unauthorised" not in last_error, [res, last_error])
 call("PUT", C + f"/{epc['uuid']}", "manager_s", S, {"secret": "epc-key"})
 en = data(call("POST", P + f"/properties/{prop['uuid']}/enrich", "operator_s", S), 200, "enrich on demand")
 check("enrich: EPC + comps (sales in the last 24 months only)", en["epc"]["rating"] == "C" and en["comps"]["count"] == 2
@@ -115,6 +122,19 @@ data(call("POST", P + "/market-records/import", "operator_s", S, {"record_type":
      "csv": "lot,address,postcode,price,date\n7,Old Chapel,YO10 5DD,95000,2026-11-20\n"}), 200, "import an auction lot")
 res = call("POST", P + "/market-records/import", "operator_s", S, {"record_type": "rumour", "csv": "a\n1"})
 check("bad record type → 422", res[0] == 422, res)
+big = "external_id,address,postcode,price\n" + "".join(f"B{i},{i} Big Rd,YO1 7AA,100000\n" for i in range(5001))
+res = call("POST", P + "/market-records/import", "operator_s", S, {"record_type": "listing", "csv": big})
+check("over 5,000 rows → 413, nothing stored", res[0] == 413
+      and sql("SELECT COUNT(*) FROM property_deals_market_records WHERE external_id LIKE 'B%'") == ["0"], res)
+bad = "external_id,address,postcode,price,lat,lng\n" + "".join(
+    f"T{i},{i} Tx Rd,YO1 7AA,100000,{95 if i == 700 else 53.96},-1.08\n" for i in range(800))
+res = call("POST", P + "/market-records/import", "operator_s", S, {"record_type": "listing", "csv": bad})
+check("a bad row in the second batch → refused and nothing from the file kept (all or nothing)", 400 <= res[0] < 500
+      and sql("SELECT COUNT(*) FROM property_deals_market_records WHERE external_id LIKE 'T%'") == ["0"], res)
+pg = expect("market records, page 2 of 2-per-page", call("GET", P + "/market-records?record_type=sold_price&per_page=2&page=2",
+            "operator_s", S), 200)
+check("market records page: the third sold price, meta says which page", len(pg["data"]) == 1
+      and pg["meta"] == {"page": 2, "per_page": 2}, pg)
 mp = data(call("GET", P + "/map?lat=53.96&lng=-1.08&radius_miles=5&layers=properties,sold_prices,epc,listings,auction_lots",
                "operator_s", S), 200, "map with market layers")
 check("map: sold prices, EPCs, listings (not the London one), auction lots, the property",
@@ -231,6 +251,30 @@ seen = data(call("POST", P + "/scout-alerts/seen", "operator_s", S, {}), 200, "m
 check("mark seen", seen["updated"] == 4 and not data(call("GET", P + "/scout-alerts?unseen=true", "operator_s", S), 200, "a"))
 res = call("POST", P + "/saved-searches", "operator_s", S, {"name": "nowhere"})
 check("a saved search needs a pin or a polygon (422)", res[0] == 422, res)
+page2 = expect("scout alerts, one a page", call("GET", P + "/scout-alerts?per_page=1&page=2", "operator_s", S), 200)
+check("scout alerts page", len(page2["data"]) == 1 and page2["meta"] == {"page": 2, "per_page": 1}, page2)
+for poly, why in (([1, 2, 3], "not pairs"), ([[53.95, -1.08], [53.97, -1.07]], "two points"),
+                  ([[95, -1.08], [53.97, -1.08], [53.97, -1.07]], "latitude out of range"),
+                  ([["x", -1.08], [53.97, -1.08], [53.97, -1.07]], "text, not numbers"), ({"lat": 1}, "an object")):
+    res = call("POST", P + "/saved-searches", "operator_s", S, {"name": "bad area", "polygon": poly})
+    check(f"a malformed polygon is refused (422: {why})", res[0] == 422, res)
+box = data(call("POST", P + "/saved-searches", "operator_s", S, {"name": "Mill Lane box",
+           "polygon": [[53.95, -1.09], [53.97, -1.09], [53.97, -1.07], [53.95, -1.07]]}), 201, "polygon search")
+r = data(call("POST", P + f"/saved-searches/{box['uuid']}/run", "operator_s", S), 200, "run the polygon search")
+check("polygon search runs (cash-only listing inside the box)", r.get("cash_only") == 1, r)
+# A polygon saved before the check existed can still be broken: the scout skips it and runs the rest.
+NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
+sql("ALTER TABLE property_deals_saved_searches DROP CONSTRAINT property_deals_saved_searches_polygon")
+sql(f"INSERT INTO property_deals_saved_searches (namespace_id, name, polygon) VALUES ({NSID}, 'legacy broken', '[1,2,3]')")
+sql("ALTER TABLE property_deals_saved_searches ADD CONSTRAINT property_deals_saved_searches_polygon "
+    "CHECK (polygon IS NULL OR property_deals_valid_polygon(polygon)) NOT VALID")
+legacy = sql(f"SELECT uuid FROM property_deals_saved_searches WHERE namespace_id = {NSID} AND name = 'legacy broken'")[0]
+out = data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["scout"]}), 200, "deal scout with a broken search")
+check("the broken saved search is skipped, the others still run", out["scout"]["errors"] == 1
+      and out["scout"]["searches"] >= 3, out["scout"])
+res = call("POST", P + f"/saved-searches/{legacy}/run", "operator_s", S)
+check("running the broken one says why (422)", res[0] == 422 and "pin or polygon" in res[1]["error"], res)
+sql(f"DELETE FROM property_deals_saved_searches WHERE uuid = '{legacy}'")
 
 # --- Book nearest ----------------------------------------------------------------------------------------------------------------
 for name, lat in (("Next Door EPC", 53.961), ("County EPC", 54.1)):
@@ -244,6 +288,18 @@ near = data(call("POST", P + "/suppliers/nearest", "operator_s", S, {"kind": "ep
 check("from a pin, limit respected", [n["name"] for n in near] == ["County EPC"], near)
 res = call("POST", P + "/suppliers/nearest", "operator_s", S, {"kind": "epc_assessor"})
 check("needs a place (422)", res[0] == 422, res)
+
+# --- No earthdistance needed (plain-SQL haversine): comps, the scout and the map work without the extension -----------------
+sql("DROP EXTENSION earthdistance")
+try:
+    card = data(call("GET", P + f"/properties/{prop['uuid']}/card", "operator_s", S), 200, "card without earthdistance")
+    check("comparables without the extension", card["comps"]["count"] == 2 and card["comps"]["median"] == 155000, card["comps"])
+    out = data(call("POST", P + "/engine/run", "manager_s", S, {"checks": ["scout"]}), 200, "scout without earthdistance")
+    check("scout without the extension", out["scout"]["searches"] >= 2 and out["scout"]["errors"] == 0, out["scout"])
+    expect("map radius without the extension", call("GET", P + "/map?lat=53.96&lng=-1.08&radius_miles=5&layers=sold_prices",
+           "operator_s", S), 200)
+finally:
+    sql("CREATE EXTENSION IF NOT EXISTS earthdistance")
 
 # --- Isolation ----------------------------------------------------------------------------------------------------------------------
 B = sql("SELECT uuid FROM namespaces WHERE slug = 'other-co'")[0]

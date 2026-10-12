@@ -19,6 +19,8 @@ import {
   ThumbsUp,
   FolderKanban,
   ExternalLink,
+  PackageX,
+  Undo2,
 } from 'lucide-react';
 import { Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -28,6 +30,7 @@ import {
   purchaseOrdersService,
   purchaseOrderError,
   type PurchaseOrder,
+  type PurchaseOrderBill,
   type PurchaseOrderItem,
   type PurchaseOrderItemPayload,
 } from '@/services/purchase-orders.service';
@@ -43,6 +46,15 @@ const btnSecondary =
   'flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors';
 
 const money = (amount: number, currency: string) => formatCurrency(amount, currency || 'GBP', 'en-GB');
+
+// Half away from zero, like the server (Postgres ROUND); the nudge keeps 1.005 -> 1.01.
+const round2 = (n: number) => (Math.sign(n) * Math.floor(Math.abs(n) * 100 + 0.5 + 1e-9)) / 100;
+// Quantities have 3 decimals: drop float noise from differences.
+const qty3 = (n: number) => Math.round(n * 1000) / 1000;
+const outstanding = (it: PurchaseOrderItem) => Math.max(0, qty3(it.quantity - it.received_quantity));
+
+// The ledger records GBP only (server: PurchaseOrderQueries.LEDGER_CURRENCY).
+const LEDGER_CURRENCY = 'GBP';
 
 // ============================================
 // Add / edit line
@@ -182,34 +194,38 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose, onSaved, p
 
   useEffect(() => {
     if (!isOpen) return;
-    const init: Record<string, string> = {};
-    po.items.forEach((it) => (init[it.uuid] = String(it.received_quantity)));
-    setQty(init);
+    setQty({});
     setNote('');
-  }, [isOpen, po.items]);
+  }, [isOpen]);
 
   const receiveAll = () => {
     const all: Record<string, string> = {};
-    po.items.forEach((it) => (all[it.uuid] = String(it.quantity)));
+    po.items.forEach((it) => {
+      if (outstanding(it) > 0) all[it.uuid] = String(outstanding(it));
+    });
     setQty(all);
   };
 
+  // Sends what arrived now; the server adds it to each line (so two people
+  // receiving at once can't overwrite each other) and refuses more than ordered.
   const handleSubmit = async () => {
     const lines = [];
     for (const it of po.items) {
-      const v = parseFloat(qty[it.uuid] ?? '');
+      const raw = (qty[it.uuid] ?? '').trim();
+      if (raw === '') continue;
+      const v = parseFloat(raw);
       if (Number.isNaN(v) || v < 0) {
-        toast.error(`Enter a received quantity for "${it.description}"`);
+        toast.error(`"${it.description}": enter the quantity received now`);
         return;
       }
-      if (v > it.quantity) {
-        toast.error(`"${it.description}": received ${v} is more than the ${it.quantity} ordered`);
+      if (v > outstanding(it)) {
+        toast.error(`"${it.description}": ${v} is more than the ${outstanding(it)} still to come`);
         return;
       }
-      if (v !== it.received_quantity) lines.push({ item_uuid: it.uuid, received_quantity: v });
+      if (v > 0) lines.push({ item_uuid: it.uuid, quantity: v });
     }
     if (lines.length === 0) {
-      toast.error('No quantities changed');
+      toast.error('Enter the quantity received now on at least one line');
       return;
     }
     setIsSubmitting(true);
@@ -229,8 +245,8 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose, onSaved, p
     <Modal isOpen={isOpen} onClose={onClose} title={`Receive Goods — ${po.po_number}`} size="lg">
       <div className="space-y-4">
         <p className="text-sm text-secondary-500">
-          Enter the total quantity received so far on each line. When every line is complete the order becomes
-          Received.
+          Enter what has arrived in this delivery; it is added to what was received before. When every line is
+          complete the order becomes Received.
         </p>
         <div className="overflow-x-auto border border-secondary-200 rounded-lg">
           <table className="w-full text-sm">
@@ -238,7 +254,8 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose, onSaved, p
               <tr>
                 <th className="text-left px-4 py-2 text-secondary-600 font-medium">Item</th>
                 <th className="text-right px-4 py-2 text-secondary-600 font-medium">Ordered</th>
-                <th className="text-right px-4 py-2 text-secondary-600 font-medium w-36">Received</th>
+                <th className="text-right px-4 py-2 text-secondary-600 font-medium">Received so far</th>
+                <th className="text-right px-4 py-2 text-secondary-600 font-medium w-36">Received now</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-secondary-200">
@@ -246,15 +263,18 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose, onSaved, p
                 <tr key={it.uuid}>
                   <td className="px-4 py-2 text-secondary-900">{it.description}</td>
                   <td className="px-4 py-2 text-right text-secondary-600">{it.quantity}</td>
+                  <td className="px-4 py-2 text-right text-secondary-600">{it.received_quantity}</td>
                   <td className="px-4 py-2 text-right">
                     <input
                       type="number"
                       min="0"
-                      max={it.quantity}
+                      max={outstanding(it)}
                       step="any"
                       value={qty[it.uuid] ?? ''}
                       onChange={(e) => setQty((p) => ({ ...p, [it.uuid]: e.target.value }))}
-                      aria-label={`Received quantity for ${it.description}`}
+                      disabled={outstanding(it) === 0}
+                      placeholder={outstanding(it) === 0 ? 'Complete' : '0'}
+                      aria-label={`Quantity of ${it.description} received now`}
                       className={`${inputClass} text-right`}
                     />
                   </td>
@@ -322,17 +342,26 @@ const BillModal: React.FC<BillModalProps> = ({ isOpen, onClose, onSaved, po }) =
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Bills what has been received (matches the backend's billAmounts).
+  // What this bill covers: per line, received minus already billed (same
+  // maths as the server: the amount of all received less what bills hold).
+  const lines = useMemo(
+    () =>
+      po.items
+        .filter((it) => it.received_quantity > it.billed_quantity)
+        .map((it) => {
+          const lineNet = round2(it.received_quantity * it.unit_price);
+          const net = round2(lineNet - it.billed_net);
+          const tax = round2(round2((lineNet * it.tax_rate) / 100) - it.billed_tax);
+          return { item: it, quantity: qty3(it.received_quantity - it.billed_quantity), net, tax };
+        }),
+    [po.items]
+  );
   const amounts = useMemo(() => {
-    let net = 0;
-    let tax = 0;
-    po.items.forEach((it) => {
-      const lineNet = it.received_quantity * it.unit_price;
-      net += lineNet;
-      tax += (lineNet * it.tax_rate) / 100;
-    });
-    return { net, tax, gross: net + tax };
-  }, [po.items]);
+    const net = round2(lines.reduce((sum, l) => sum + l.net, 0));
+    const tax = round2(lines.reduce((sum, l) => sum + l.tax, 0));
+    return { net, tax, gross: round2(net + tax) };
+  }, [lines]);
+  const offLedger = po.currency !== LEDGER_CURRENCY;
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -344,8 +373,8 @@ const BillModal: React.FC<BillModalProps> = ({ isOpen, onClose, onSaved, po }) =
       });
       toast.success(
         updated.accounting_expense_created
-          ? 'Billed — expense added to the purchase ledger'
-          : 'Purchase order marked as billed'
+          ? 'Billed — pending expense added to the purchase ledger'
+          : updated.bill?.ledger_note || 'Bill recorded on the purchase order'
       );
       onSaved();
       onClose();
@@ -357,12 +386,40 @@ const BillModal: React.FC<BillModalProps> = ({ isOpen, onClose, onSaved, po }) =
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Convert ${po.po_number} to Bill`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`Bill ${po.po_number}`} size="lg">
       <div className="space-y-4">
         <p className="text-sm text-secondary-500">
-          Bills the goods received so far. If Bookkeeping is enabled, a pending expense for {po.supplier_name} is
-          added to the purchase ledger. This can only be done once.
+          Bills the goods received and not billed yet; bill again as more arrives. If Bookkeeping is enabled, a
+          pending expense for {po.supplier_name} is added to the purchase ledger.
         </p>
+        {offLedger && (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            This order is in {po.currency}. The purchase ledger records {LEDGER_CURRENCY} only, so no ledger expense
+            is created — enter the bill there in {LEDGER_CURRENCY} yourself.
+          </p>
+        )}
+        <div className="overflow-x-auto border border-secondary-200 rounded-lg">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary-50">
+              <tr>
+                <th className="text-left px-4 py-2 text-secondary-600 font-medium">This bill covers</th>
+                <th className="text-right px-4 py-2 text-secondary-600 font-medium">Qty</th>
+                <th className="text-right px-4 py-2 text-secondary-600 font-medium">Net</th>
+                <th className="text-right px-4 py-2 text-secondary-600 font-medium">Tax</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-secondary-200">
+              {lines.map((l) => (
+                <tr key={l.item.uuid}>
+                  <td className="px-4 py-2 text-secondary-900">{l.item.description}</td>
+                  <td className="px-4 py-2 text-right text-secondary-600">{l.quantity}</td>
+                  <td className="px-4 py-2 text-right text-secondary-600">{money(l.net, po.currency)}</td>
+                  <td className="px-4 py-2 text-right text-secondary-600">{money(l.tax, po.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="bg-secondary-50 rounded-lg p-4 text-sm space-y-1">
           <div className="flex justify-between">
             <span className="text-secondary-500">Net</span>
@@ -410,10 +467,10 @@ const BillModal: React.FC<BillModalProps> = ({ isOpen, onClose, onSaved, po }) =
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting || amounts.gross <= 0}
+            disabled={isSubmitting || lines.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {isSubmitting ? 'Billing...' : 'Convert to Bill'}
+            {isSubmitting ? 'Billing...' : 'Create Bill'}
           </button>
         </div>
       </div>
@@ -489,12 +546,49 @@ function PurchaseOrderDetailContent() {
     }
     if (!window.confirm(`Email purchase order ${po.po_number} to ${to}?`)) return;
     const { base64, filename } = purchaseOrderPdfBase64(po, company);
-    await act(
-      () => purchaseOrdersService.emailPurchaseOrder(po.uuid, { pdf_base64: base64, filename }),
-      `Purchase order emailed to ${to}`,
-      'Failed to email purchase order'
+    setBusy(true);
+    try {
+      // Queued / handed to the mail server — not proof of delivery.
+      const res = await purchaseOrdersService.emailPurchaseOrder(po.uuid, { pdf_base64: base64, filename });
+      toast.success(res.message || `Purchase order queued for sending to ${to}`);
+      await fetchPo();
+    } catch (error) {
+      toast.error(purchaseOrderError(error, 'Failed to email purchase order'));
+    } finally {
+      setBusy(false);
+    }
+  }, [po, company, fetchPo]);
+
+  const handleClose = useCallback(async () => {
+    if (!po) return;
+    const reason = window.prompt(
+      `Close ${po.po_number} short? No more goods will be received; what has arrived can still be billed. Reason:`,
+      ''
     );
-  }, [po, company, act]);
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast.error('A reason is required to close the order short');
+      return;
+    }
+    await act(() => purchaseOrdersService.closeShort(po.uuid, reason.trim()), 'Purchase order closed short', 'Failed to close');
+  }, [po, act]);
+
+  const handleVoidBill = useCallback(
+    async (bill: PurchaseOrderBill) => {
+      if (!po) return;
+      const reason = window.prompt(
+        `Void the ${money(bill.gross, po.currency)} bill? Its pending ledger expense is removed and the goods can be billed again. Reason (optional):`,
+        ''
+      );
+      if (reason === null) return;
+      await act(
+        () => purchaseOrdersService.voidBill(po.uuid, bill.uuid, reason || undefined),
+        'Bill voided',
+        'Failed to void the bill'
+      );
+    },
+    [po, act]
+  );
 
   const handleCancel = useCallback(async () => {
     if (!po) return;
@@ -558,10 +652,14 @@ function PurchaseOrderDetailContent() {
   const canResend = s === 'sent' || s === 'acknowledged';
   const canAcknowledge = s === 'sent';
   const canReceive = (s === 'sent' || s === 'acknowledged' || s === 'partially_received') && po.items.length > 0;
-  const canBill = s === 'received' || s === 'partially_received';
+  const canBill =
+    (s === 'received' || s === 'partially_received') && po.items.some((it) => it.received_quantity > it.billed_quantity);
+  const canCloseShort = s === 'partially_received';
   const canCancel = s === 'draft' || s === 'sent' || s === 'acknowledged';
-  const receipts = po.metadata?.receipts || [];
-  const bill = po.metadata?.bill;
+  const receipts = po.metadata.receipts;
+  const bills = po.metadata.bills;
+  const closed = po.metadata.closed;
+  const billedGross = round2(bills.filter((b) => !b.voided_at).reduce((sum, b) => sum + b.gross, 0));
   const itemName = (itemUuid: string) => po.items.find((i) => i.uuid === itemUuid)?.description || 'Removed line';
 
   return (
@@ -653,7 +751,13 @@ function PurchaseOrderDetailContent() {
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
             >
               <Receipt className="w-4 h-4" />
-              Convert to Bill
+              Bill Received Goods
+            </button>
+          )}
+          {canCloseShort && (
+            <button onClick={handleClose} disabled={busy} className={btnSecondary}>
+              <PackageX className="w-4 h-4" />
+              Close Short
             </button>
           )}
           {canCancel && (
@@ -757,10 +861,10 @@ function PurchaseOrderDetailContent() {
               <span className="text-secondary-900">Total</span>
               <span className="text-primary-600">{money(po.total, po.currency)}</span>
             </div>
-            {bill && (
+            {billedGross > 0 && (
               <div className="flex justify-between pt-2 border-t border-secondary-200">
                 <span className="text-secondary-500">Billed</span>
-                <span className="text-green-600 font-medium">{money(bill.gross, po.currency)}</span>
+                <span className="text-green-600 font-medium">{money(billedGross, po.currency)}</span>
               </div>
             )}
           </div>
@@ -789,6 +893,7 @@ function PurchaseOrderDetailContent() {
                   <th className="text-left px-5 py-3 text-secondary-600 font-medium">Description</th>
                   <th className="text-right px-5 py-3 text-secondary-600 font-medium">Qty</th>
                   <th className="text-right px-5 py-3 text-secondary-600 font-medium">Received</th>
+                  <th className="text-right px-5 py-3 text-secondary-600 font-medium">Billed</th>
                   <th className="text-right px-5 py-3 text-secondary-600 font-medium">Unit Price</th>
                   <th className="text-right px-5 py-3 text-secondary-600 font-medium">Tax</th>
                   <th className="text-right px-5 py-3 text-secondary-600 font-medium">Total</th>
@@ -809,6 +914,7 @@ function PurchaseOrderDetailContent() {
                       >
                         {it.received_quantity}
                       </td>
+                      <td className="px-5 py-3 text-right text-secondary-600">{it.billed_quantity}</td>
                       <td className="px-5 py-3 text-right text-secondary-600">{money(it.unit_price, po.currency)}</td>
                       <td className="px-5 py-3 text-right text-secondary-600">
                         {it.tax_amount ? `${money(it.tax_amount, po.currency)} (${it.tax_rate}%)` : '-'}
@@ -856,24 +962,59 @@ function PurchaseOrderDetailContent() {
         )}
       </div>
 
-      {/* Bill */}
-      {bill && (
-        <div className="bg-green-50 rounded-xl border border-green-200 p-5">
-          <h3 className="font-medium text-green-900 mb-2">Bill</h3>
-          <p className="text-sm text-green-800">
-            Billed {money(bill.gross, po.currency)} (net {money(bill.net, po.currency)}, tax{' '}
-            {money(bill.tax, po.currency)}){po.billed_at ? ` on ${formatDate(po.billed_at)}` : ''}.
-          </p>
-          {po.metadata.expense_uuid ? (
-            <Link
-              href="/dashboard/accounting/purchase-ledger"
-              className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-green-700 hover:text-green-900"
-            >
-              View in the purchase ledger <ExternalLink className="w-3 h-3" />
-            </Link>
-          ) : (
-            <p className="text-xs text-green-700 mt-1">Bookkeeping is not enabled, so no ledger expense was created.</p>
-          )}
+      {/* Bills */}
+      {bills.length > 0 && (
+        <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">
+          <div className="p-5 border-b border-secondary-200">
+            <h3 className="font-medium text-secondary-900">Bills</h3>
+          </div>
+          <ul className="divide-y divide-secondary-200 text-sm">
+            {bills.map((b, i) => (
+              <li key={b.uuid || i} className={`px-5 py-3 ${b.voided_at ? 'opacity-60' : ''}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className={`font-medium text-secondary-900 ${b.voided_at ? 'line-through' : ''}`}>
+                      {money(b.gross, b.currency || po.currency)}{' '}
+                      <span className="font-normal text-secondary-500">
+                        (net {money(b.net, b.currency || po.currency)}, tax {money(b.tax, b.currency || po.currency)})
+                        {b.bill_date ? ` · ${formatDate(b.bill_date)}` : ''}
+                        {b.notes ? ` · ${b.notes}` : ''}
+                      </span>
+                    </p>
+                    <p className="text-secondary-600">
+                      {b.lines.map((l) => `${itemName(l.item_uuid)}: ${l.quantity}`).join(' · ')}
+                    </p>
+                    {b.voided_at ? (
+                      <p className="text-xs text-secondary-500 mt-1">
+                        Voided{b.void_reason ? ` — ${b.void_reason}` : ''}
+                      </p>
+                    ) : b.expense_uuid ? (
+                      <Link
+                        href="/dashboard/accounting/purchase-ledger"
+                        className="inline-flex items-center gap-1 mt-1 text-xs font-medium text-green-700 hover:text-green-900"
+                      >
+                        Pending expense in the purchase ledger <ExternalLink className="w-3 h-3" />
+                      </Link>
+                    ) : (
+                      <p className="text-xs text-secondary-500 mt-1">
+                        {b.ledger_note || 'Not posted to a ledger (Bookkeeping is not enabled).'}
+                      </p>
+                    )}
+                  </div>
+                  {!b.voided_at && b.uuid && (
+                    <button
+                      onClick={() => handleVoidBill(b)}
+                      disabled={busy}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                    >
+                      <Undo2 className="w-3 h-3" />
+                      Void
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -887,11 +1028,19 @@ function PurchaseOrderDetailContent() {
             {receipts.map((r, i) => (
               <li key={i} className="px-5 py-3">
                 <p className="text-secondary-900 font-medium">
-                  {r.at ? formatDateTime(r.at.replace(' ', 'T') + (r.at.endsWith('Z') ? '' : 'Z')) : 'Receipt'}
+                  {typeof r.at === 'string'
+                    ? formatDateTime(r.at.replace(' ', 'T') + (r.at.endsWith('Z') ? '' : 'Z'))
+                    : 'Receipt'}
                   {r.note ? ` — ${r.note}` : ''}
                 </p>
                 <p className="text-secondary-600">
-                  {(r.lines || []).map((l) => `${itemName(l.item_uuid)}: ${l.received_quantity}`).join(' · ')}
+                  {r.lines
+                    .map((l) =>
+                      l.quantity != null
+                        ? `${itemName(l.item_uuid)}: +${l.quantity}`
+                        : `${itemName(l.item_uuid)}: ${l.received_quantity} in total`
+                    )
+                    .join(' · ')}
                 </p>
               </li>
             ))}
@@ -899,7 +1048,7 @@ function PurchaseOrderDetailContent() {
         </div>
       )}
 
-      {(po.notes || po.terms || po.metadata?.cancelled_reason) && (
+      {(po.notes || po.terms || po.metadata.cancelled_reason || closed) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {po.notes && (
             <div className="bg-amber-50 rounded-xl border border-amber-200 p-5">
@@ -913,10 +1062,19 @@ function PurchaseOrderDetailContent() {
               <p className="text-sm text-secondary-700 whitespace-pre-line">{po.terms}</p>
             </div>
           )}
-          {po.metadata?.cancelled_reason && (
+          {po.metadata.cancelled_reason && (
             <div className="bg-gray-50 rounded-xl border border-gray-200 p-5">
               <h3 className="font-medium text-gray-900 mb-2">Cancellation reason</h3>
               <p className="text-sm text-gray-700">{String(po.metadata.cancelled_reason)}</p>
+            </div>
+          )}
+          {closed && (
+            <div className="bg-gray-50 rounded-xl border border-gray-200 p-5">
+              <h3 className="font-medium text-gray-900 mb-2">Closed short</h3>
+              <p className="text-sm text-gray-700">
+                {String(closed.reason || '')}
+                {typeof closed.at === 'string' ? ` · ${formatDate(closed.at)}` : ''}
+              </p>
             </div>
           )}
         </div>

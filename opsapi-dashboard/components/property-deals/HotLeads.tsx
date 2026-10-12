@@ -8,13 +8,19 @@ import React from 'react';
 import Link from 'next/link';
 import { Flame, Phone, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, buttonClass } from '@/components/ui';
 import { pdService, pdErrorText } from '@/services/property-deals.service';
-import { usePdData } from './usePd';
+import { usePdData, usePdMe } from './usePd';
 import { dueText, label } from './ui';
 import { cn } from '@/lib/utils';
 
+/** Leads are their own module (builders don't get it): without it, nothing is fetched or shown. */
 export default function HotLeads() {
+  const { me, can } = usePdMe();
+  return me && can('leads') ? <HotLeadList /> : null;
+}
+
+function HotLeadList() {
   const { data, refresh } = usePdData(async () => (await pdService.hotLeads()).data, [], 30_000);
   if (!data?.length) return null;
   return (
@@ -46,11 +52,11 @@ export default function HotLeads() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {h.phone ? (
-                  <a href={`tel:${h.phone.replace(/\s+/g, '')}`}>
-                    <Button size="sm" leftIcon={<Phone className="h-4 w-4" />}>Call {h.phone}</Button>
+                  <a className={buttonClass('primary', 'sm')} href={`tel:${h.phone.replace(/\s+/g, '')}`}>
+                    <Phone className="h-4 w-4" aria-hidden />Call {h.phone}
                   </a>
                 ) : (
-                  <Link href="/dashboard/leads"><Button size="sm" variant="outline">No number — open lead</Button></Link>
+                  <Link className={buttonClass('outline', 'sm')} href="/dashboard/leads">No number — open lead</Link>
                 )}
                 {h.call_task_uuid && (
                   <Button

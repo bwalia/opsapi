@@ -5,25 +5,37 @@ import React from 'react';
 import Link from 'next/link';
 import { Users, NotebookPen, RefreshCw } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Badge, Button, Card } from '@/components/ui';
+import { Badge, Button, Card, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner, Empty, gbp, dateText, dueText } from '@/components/property-deals/ui';
 import { usePdData } from '@/components/property-deals/usePd';
 import { paService } from '@/services/property-pa.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const TEMP: Record<string, 'error' | 'warning' | 'info'> = { hot: 'error', warm: 'warning', cold: 'info' };
 
 export default function OpportunitiesPage() {
+  return (
+    <PaPage>
+      <Opportunities />
+    </PaPage>
+  );
+}
+
+function Opportunities() {
+  const { can } = usePaCan();
   const { data, error, loading, refresh } = usePdData(async () => (await paService.opportunities({ status: 'open', mine: true, per_page: 100 })).data, [], 60_000);
   return (
     <div className="space-y-6">
       <PageHeader title="My opportunities" description="Sellers and buyers you're working with" icon={<Users className="h-6 w-6" />}
         actions={
           <>
-            <Link href="/dashboard/property-pa/capture"><Button leftIcon={<NotebookPen className="h-4 w-4" />}>Capture</Button></Link>
+            {can('property_pa_records', 'create') && can('property_pa_updates', 'create') && (
+              <Link className={buttonClass()} href="/dashboard/property-pa/capture"><NotebookPen className="h-4 w-4" aria-hidden />Capture</Link>
+            )}
             <Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={refresh}>Refresh</Button>
           </>
         } />
-      <ErrorNote error={error} />
+      <ErrorNote product="Property PA" error={error} />
       {loading && !data ? <Spinner /> : !data?.length ? (
         <Empty title="No open opportunities">Ask a manager to load the demo data, or add one from a capture.</Empty>
       ) : (

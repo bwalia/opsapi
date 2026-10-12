@@ -430,6 +430,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/buyer-profiles/directory": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buyers with names (Buyers page)
+         * @description Most recently updated first; meta: { page, per_page }.
+         *
+         *     Needs property_deals_buyers.read in the workspace.
+         */
+        get: operations["property_deals_get_buyer_profiles_directory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/chases": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -471,6 +493,26 @@ export interface paths {
          * @description Needs property_deals_tasks.update in the workspace.
          */
         put: operations["property_deals_chases_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/companies-house/officers": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find a Companies House officer to link to a lead
+         * @description Needs property_deals_deals.read in the workspace.
+         */
+        get: operations["property_deals_get_companies_house_officers"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -970,6 +1012,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/due": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deal tasks and renovation jobs due soon
+         * @description Needs property_deals_tasks.read in the workspace.
+         */
+        get: operations["property_deals_get_due"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/engine/run": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -981,7 +1043,9 @@ export interface paths {
         put?: never;
         /**
          * Run engine checks now
-         * @description Needs property_deals_settings.manage in the workspace.
+         * @description mail, signals and scout share a ~25 s budget here; what doesn't fit is done by the next scheduled run.
+         *
+         *     Needs property_deals_settings.manage in the workspace.
          */
         post: operations["property_deals_post_engine_run"];
         delete?: never;
@@ -1051,7 +1115,7 @@ export interface paths {
         };
         /**
          * Export a workspace's data (CSV or JSON)
-         * @description At most 50,000 rows (header X-Truncated when cut). CSV cells that start with = + - @ are prefixed with ' so spreadsheets don't run them.
+         * @description 10,000 rows a page (headers X-Truncated and X-Next-Page when there is more). CSV cells that start with = + - @ are prefixed with ' so spreadsheets don't run them.
          *
          *     Needs property_deals_reports.manage in the workspace.
          */
@@ -1116,6 +1180,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/hot-leads": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Leads whose last reply was hot (7 days)
+         * @description Needs property_deals_leads.read in the workspace.
+         */
+        get: operations["property_deals_get_hot_leads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/inbound-messages": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -1124,8 +1208,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Emails received about deals
-         * @description Needs property_deals_tasks.read in the workspace.
+         * Emails received (the whole inbox)
+         * @description meta: { page, per_page }. matched_by "error": a message that couldn't be stored.
+         *
+         *     Needs property_deals_leads.read in the workspace.
          */
         get: operations["property_deals_get_inbound_messages"];
         put?: never;
@@ -1149,7 +1235,7 @@ export interface paths {
         };
         /**
          * Leads with Property Deals fields
-         * @description Needs property_deals_deals.read in the workspace.
+         * @description Needs property_deals_leads.read in the workspace.
          */
         get: operations["property_deals_get_leads"];
         put?: never;
@@ -1169,7 +1255,7 @@ export interface paths {
         };
         /**
          * A lead with its Property Deals fields
-         * @description Needs property_deals_deals.read in the workspace.
+         * @description Needs property_deals_leads.read in the workspace.
          */
         get: operations["property_deals_get_leads_uuid"];
         put?: never;
@@ -1190,10 +1276,84 @@ export interface paths {
         get?: never;
         /**
          * Set a lead's Property Deals fields
-         * @description Needs property_deals_deals.update in the workspace.
+         * @description Needs property_deals_leads.update in the workspace.
          */
         put: operations["property_deals_put_leads_uuid_details"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/leads/{uuid}/follow-up": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * AI drafts a personal follow-up (approved before sending)
+         * @description Starts the lead_followup agent on a follow-up task. The draft becomes an approval (action send_lead_followup): email is sent through the workspace SMTP, SMS through the workspace's Android SMS Gateway, WhatsApp becomes a click-to-chat link a person sends. 409 if the lead opted out or a follow-up is already being drafted / waiting.
+         *
+         *     Needs property_deals_tasks.create in the workspace.
+         */
+        post: operations["property_deals_post_leads_uuid_follow_up"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/leads/{uuid}/replies": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A lead's replies, scored
+         * @description Needs property_deals_leads.read in the workspace.
+         */
+        get: operations["property_deals_get_leads_uuid_replies"];
+        put?: never;
+        /**
+         * Log a reply (WhatsApp, SMS, call, DM): scored, hot -> call alert
+         * @description All or nothing: if scoring or the call task fails nothing is kept (a retry can't log it twice). The owner is alerted while they are an active member, else the managers (the call task then waits unassigned). From the PA (X-OpsAPI-Agent) only messages the lead wrote: phone and other are 422, a call the user made is a chase.
+         *
+         *     Needs property_deals_leads.update in the workspace.
+         */
+        post: operations["property_deals_post_leads_uuid_replies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/leads/{uuid}/signals": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A lead's recent news
+         * @description Needs property_deals_leads.read in the workspace.
+         */
+        get: operations["property_deals_get_leads_uuid_signals"];
+        put?: never;
+        /**
+         * Capture a post, page or note about a lead
+         * @description Paste what they posted (or its link). Social networks are never fetched by the server.
+         *
+         *     Needs property_deals_leads.update in the workspace.
+         */
+        post: operations["property_deals_post_leads_uuid_signals"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1263,7 +1423,9 @@ export interface paths {
         put?: never;
         /**
          * Fetch new mail now
-         * @description Needs property_deals_settings.update in the workspace.
+         * @description Up to 20 s / 100 messages, oldest first; the scheduled sync carries on from there. A message that can't be stored is skipped and kept with matched_by "error".
+         *
+         *     Needs property_deals_settings.update in the workspace.
          */
         post: operations["property_deals_post_mail_connectors_id_sync"];
         delete?: never;
@@ -1301,7 +1463,9 @@ export interface paths {
         };
         /**
          * Market data (sold prices, EPCs, listings, auction lots)
-         * @description Needs property_deals_properties.read in the workspace.
+         * @description meta: { page, per_page }.
+         *
+         *     Needs property_deals_properties.read in the workspace.
          */
         get: operations["property_deals_get_market_records"];
         put?: never;
@@ -1323,7 +1487,7 @@ export interface paths {
         put?: never;
         /**
          * Import market data from CSV
-         * @description Header row; columns used: external_id|id|lot|url, address, postcode, lat, lng, property_type, tenure, bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded.
+         * @description Header row; columns used: external_id|id|lot|url, address, postcode, lat, lng, property_type, tenure, bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded. At most 5,000 rows, stored in one transaction (all or nothing).
          *
          *     Needs property_deals_properties.create in the workspace.
          */
@@ -1458,6 +1622,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/property-deals/pa/briefing": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The PA's briefing: my day + the playbook in one call
+         * @description hot_leads and fresh_news are empty without property_deals_leads.read.
+         *
+         *     Needs property_deals_tasks.read in the workspace.
+         */
+        get: operations["property_deals_get_pa_briefing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/playbooks": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The workspace playbook (how we operate)
+         * @description Seeded from a default UK property playbook the first time; the PA and the follow-up agent follow it.
+         *
+         *     Needs property_deals_deals.read in the workspace.
+         */
+        get: operations["property_deals_get_playbooks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/playbooks/{key}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Create or edit a playbook section
+         * @description Needs property_deals_settings.manage in the workspace.
+         */
+        put: operations["property_deals_put_playbooks_key"];
+        post?: never;
+        /**
+         * Delete a playbook section
+         * @description Needs property_deals_settings.manage in the workspace.
+         */
+        delete: operations["property_deals_delete_playbooks_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/property-deals/properties": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -1564,6 +1796,30 @@ export interface paths {
         get: operations["property_deals_get_properties_id_matches"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/renovations": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Renovation projects with progress
+         * @description Needs property_deals_deals.read in the workspace.
+         */
+        get: operations["property_deals_get_renovations"];
+        put?: never;
+        /**
+         * Start a renovation (kanban project with build-stage columns)
+         * @description Needs property_deals_deals.create in the workspace.
+         */
+        post: operations["property_deals_post_renovations"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1771,7 +2027,9 @@ export interface paths {
         };
         /**
          * Deal scout alerts
-         * @description Needs property_deals_properties.read in the workspace.
+         * @description Newest first; meta: { page, per_page }.
+         *
+         *     Needs property_deals_properties.read in the workspace.
          */
         get: operations["property_deals_get_scout_alerts"];
         put?: never;
@@ -1822,6 +2080,48 @@ export interface paths {
          * @description Needs property_deals_settings.manage in the workspace.
          */
         post: operations["property_deals_post_setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/signals/{id}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a signal
+         * @description Needs property_deals_leads.update in the workspace.
+         */
+        delete: operations["property_deals_delete_signals_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/property-deals/signals/run": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the Companies House watch now
+         * @description Up to ~20 s for each part; leads not reached are checked by the next run.
+         *
+         *     Needs property_deals_settings.manage in the workspace.
+         */
+        post: operations["property_deals_post_signals_run"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1938,7 +2238,7 @@ export interface paths {
         get: operations["property_deals_get_tasks_id"];
         /**
          * Update a task (do it, assign, snooze...)
-         * @description Finishing a task starts its dependants, closes tasks whose condition now holds and repeats repeating tasks.
+         * @description Finishing a task starts its dependants, closes tasks whose condition now holds and repeats repeating tasks. From the PA (X-OpsAPI-Agent), a task on a lead closes only with evidence.chase_uuid: the chase (call / message) logged for that lead that did the work; the chase is linked to the task, so it closes one task.
          *
          *     Needs property_deals_tasks.update in the workspace.
          */
@@ -2885,7 +3185,7 @@ export interface components {
              * @description To party
              * @enum {string|null}
              */
-            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
             /** Format: date-time */
             updated_at: string;
             /** Format: uuid */
@@ -2948,7 +3248,7 @@ export interface components {
              * @description To party
              * @enum {string|null}
              */
-            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
         };
         /** @description Only the fields sent are changed; null clears an optional field. */
         PropertyDealsChaseUpdate: {
@@ -3008,7 +3308,7 @@ export interface components {
              * @description To party
              * @enum {string|null}
              */
-            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
         };
         PropertyDealsCompanyCheck: {
             /** Format: date-time */
@@ -3439,7 +3739,7 @@ export interface components {
                 /** Format: date-time */
                 due_at?: string;
                 /** @enum {string} */
-                owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other";
+                owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other";
                 /** Format: date-time */
                 raised_at?: string;
                 source?: string;
@@ -3692,6 +3992,25 @@ export interface components {
             /** Format: uuid */
             task_uuid?: string;
         };
+        PropertyDealsDueItem: {
+            assignee?: string;
+            /** @description Build stage (renovation jobs) */
+            column_name?: string;
+            deal_name?: string;
+            /** Format: uuid */
+            deal_uuid?: string;
+            /** Format: date-time */
+            due_at?: string;
+            /** @enum {string} */
+            kind?: "deal_task" | "renovation_job";
+            overdue?: boolean;
+            project_name?: string;
+            project_uuid?: string;
+            status?: string;
+            title?: string;
+            /** @description Kanban task uuid */
+            uuid?: string;
+        };
         /** @description Enquiries (Property Deals plugin) */
         PropertyDealsEnquiry: {
             /** @description Blocking */
@@ -3716,7 +4035,7 @@ export interface components {
              * @description Waiting on
              * @enum {string|null}
              */
-            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
             /**
              * Format: date-time
              * @description Raised at
@@ -3765,7 +4084,7 @@ export interface components {
              * @description Waiting on
              * @enum {string|null}
              */
-            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
             /**
              * Format: date-time
              * @description Raised at
@@ -3811,7 +4130,7 @@ export interface components {
              * @description Waiting on
              * @enum {string|null}
              */
-            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other" | null;
+            owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other" | null;
             /**
              * Format: date-time
              * @description Raised at
@@ -3893,6 +4212,23 @@ export interface components {
             /** @description Name */
             name?: string;
         };
+        PropertyDealsHotLead: {
+            /** Format: date-time */
+            call_due_at?: string;
+            call_task_uuid?: string;
+            company_name?: string;
+            email?: string;
+            first_name?: string;
+            hot_reason?: string;
+            hot_score?: number;
+            last_name?: string;
+            /** Format: date-time */
+            last_reply_at?: string;
+            lead_kind?: string;
+            lead_uuid?: string;
+            owner_user_uuid?: string;
+            phone?: string;
+        };
         PropertyDealsInboundMessage: {
             /**
              * Format: uuid
@@ -3910,10 +4246,13 @@ export interface components {
             connector_uuid?: string;
             /** Format: uuid */
             deal_uuid?: string;
-            from_address: string;
+            from_address?: string;
             from_name?: string;
-            /** @enum {string} */
-            matched_by?: "reference" | "sender";
+            /**
+             * @description error: the message couldn't be stored; only who / what / when were kept
+             * @enum {string}
+             */
+            matched_by?: "reference" | "sender" | "lead" | "logged" | "error";
             /** Format: date-time */
             processed_at?: string;
             /** Format: date-time */
@@ -3992,6 +4331,64 @@ export interface components {
             situation_note?: string;
             vulnerability_flag?: boolean;
             vulnerability_note?: string;
+        };
+        PropertyDealsLeadReply: {
+            /** @description People alerted (POST only) */
+            alerted?: number;
+            body_text?: string;
+            /** @enum {string} */
+            channel?: "email" | "sms" | "whatsapp" | "phone" | "social" | "other";
+            /** Format: uuid */
+            deal_uuid?: string;
+            from_address?: string;
+            from_name?: string;
+            /** @description The "call now" task a hot reply raised */
+            hot_task_uuid?: string;
+            lead_uuid?: string;
+            logged_by_user_uuid?: string;
+            matched_by?: string;
+            /** Format: date-time */
+            received_at?: string;
+            /** @description Why */
+            reply_reason?: string;
+            /** @description 0-100 */
+            reply_score?: number;
+            /** @enum {string} */
+            reply_temperature?: "hot" | "warm" | "cold";
+            /**
+             * @description POST only
+             * @enum {string}
+             */
+            scored_by?: "ai" | "rules";
+            /** @description Email: the mail server verified the sender (DMARC pass) */
+            sender_verified?: boolean;
+            subject?: string;
+            /** Format: uuid */
+            uuid?: string;
+        };
+        PropertyDealsLeadSignal: {
+            /** Format: date-time */
+            created_at?: string;
+            created_by_user_uuid?: string;
+            /** @description Source details (company number, SIC codes, role...) */
+            data?: unknown;
+            /** @enum {string} */
+            kind?: "company_formed" | "officer_appointed" | "company_filing" | "charge_registered" | "social_post" | "website" | "news" | "note";
+            lead_uuid?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            /** @enum {string} */
+            source?: "companies_house" | "manual" | "share";
+            summary?: string;
+            title?: string;
+            url?: string;
+            /**
+             * Format: date-time
+             * @description When a follow-up last quoted it
+             */
+            used_at?: string;
+            /** Format: uuid */
+            uuid?: string;
         };
         PropertyDealsMailConnector: {
             /** @description imap { host, port, ssl, username, mailbox } | gmail { client_id } | m365 { tenant_id, client_id, mailbox } */
@@ -4220,7 +4617,7 @@ export interface components {
         PropertyDealsMe: {
             is_manager?: boolean;
             namespace_uuid?: string;
-            /** @description module (deals, properties, buyers, tasks, suppliers, compliance, approvals, ai, settings, reports) -> allowed actions (read, create, update, delete, manage) */
+            /** @description module (deals, leads, properties, buyers, tasks, suppliers, compliance, approvals, ai, settings, reports) -> allowed actions (read, create, update, delete, manage) */
             permissions: {
                 [key: string]: unknown;
             };
@@ -4242,29 +4639,92 @@ export interface components {
         PropertyDealsNotificationPreferences: {
             agent_update?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
             approval_requested?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
             compliance_expiring?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
+            };
+            deal_scout?: {
+                email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
+                push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
             digest?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
             escalated?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
+            /** @description A lead replied and looks keen: call them now. Every channel is on by default. */
+            hot_lead?: {
+                email?: boolean;
+                ntfy?: boolean;
+                push?: boolean;
+                sms?: boolean;
+                telegram?: boolean;
+            };
+            /** @description My ntfy topic; send "generate" for a random private one. No topic, no ntfy alerts; they only say "open OpsAPI" (anyone who knows a topic can read it) */
+            ntfy_topic?: string;
             overdue?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
-            /** @description Workspace time; holds back push, not the digest */
+            /** @description Workspace time; holds back push, ntfy, Telegram and SMS, not email or the digest */
             quiet_hours?: {
                 /** @description HH:MM */
                 from: string;
@@ -4273,8 +4733,29 @@ export interface components {
             };
             sla_warning?: {
                 email?: boolean;
+                /** @description ntfy connector; off unless turned on */
+                ntfy?: boolean;
+                /** @description App push (WSLCRM iOS/Android) + in-app */
                 push?: boolean;
+                /** @description Android SMS Gateway connector; off unless turned on */
+                sms?: boolean;
+                /** @description Telegram bot connector; off unless turned on */
+                telegram?: boolean;
             };
+            /** @description My chat id with the workspace's Telegram bot */
+            telegram_chat_id?: string;
+        };
+        PropertyDealsPlaybookSection: {
+            /** @description Markdown */
+            body?: string;
+            key?: string;
+            position?: number;
+            title?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            updated_by_user_uuid?: string;
+            /** Format: uuid */
+            uuid?: string;
         };
         /** @description Properties (Property Deals plugin) */
         PropertyDealsProperty: {
@@ -4568,6 +5049,36 @@ export interface components {
             /** @description UPRN */
             uprn?: string | null;
         };
+        PropertyDealsRenovation: {
+            address?: string;
+            board_uuid?: string;
+            budget?: number;
+            budget_currency?: string;
+            budget_spent?: number;
+            builders_added?: string[];
+            /** Format: date-time */
+            created_at?: string;
+            deal_name?: string;
+            /** Format: uuid */
+            deal_uuid?: string;
+            /** Format: date */
+            due_date?: string;
+            jobs_done?: number;
+            jobs_overdue?: number;
+            jobs_total?: number;
+            name?: string;
+            postcode?: string;
+            /** @description Kanban project uuid: open it at /dashboard/projects/<uuid> */
+            project_uuid?: string;
+            /** Format: uuid */
+            property_uuid?: string;
+            /** Format: date */
+            start_date?: string;
+            status?: string;
+            template_key?: string;
+            /** Format: uuid */
+            uuid?: string;
+        };
         /** @description Saved searches (Property Deals plugin) */
         PropertyDealsSavedSearch: {
             /** @description Alerts */
@@ -4589,7 +5100,7 @@ export interface components {
              * @description Owner user uuid
              */
             owner_user_uuid?: string | null;
-            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            /** @description [[lat,lng], ...] (3 to 200 points) instead of a pin (any JSON object or array) */
             polygon?: unknown;
             /** @description Radius (miles), default 25 */
             radius_miles?: number | null;
@@ -4616,7 +5127,7 @@ export interface components {
              * @description Owner user uuid
              */
             owner_user_uuid?: string | null;
-            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            /** @description [[lat,lng], ...] (3 to 200 points) instead of a pin (any JSON object or array) */
             polygon?: unknown;
             /** @description Radius (miles), default 25 */
             radius_miles?: number | null;
@@ -4640,7 +5151,7 @@ export interface components {
              * @description Owner user uuid
              */
             owner_user_uuid?: string | null;
-            /** @description [[lat,lng], ...] instead of a pin (any JSON object or array) */
+            /** @description [[lat,lng], ...] (3 to 200 points) instead of a pin (any JSON object or array) */
             polygon?: unknown;
             /** @description Radius (miles), default 25 */
             radius_miles?: number | null;
@@ -6734,6 +7245,89 @@ export interface operations {
             };
         };
     };
+    property_deals_get_buyer_profiles_directory: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description From 1 */
+                page?: number;
+                /** @description 1–500, default 500 */
+                per_page?: number;
+                pof_status?: string;
+                /** @description Name or email */
+                q?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            account_uuid?: string;
+                            active?: boolean;
+                            /** @description Any JSON value */
+                            areas?: unknown;
+                            /** @description Any JSON value */
+                            company_check?: unknown;
+                            company_number?: string;
+                            contact_uuid?: string;
+                            /** @description Any JSON value */
+                            deal_breakers?: unknown;
+                            email?: string;
+                            entity_type?: string;
+                            funding_route?: string;
+                            min_discount_pct?: number;
+                            min_yield_pct?: number;
+                            name?: string;
+                            /** Format: date */
+                            pof_expires_on?: string;
+                            pof_status?: string;
+                            price_max?: number;
+                            price_min?: number;
+                            refurb_appetite?: string;
+                            /** @description Any JSON value */
+                            strategies?: unknown;
+                            /** Format: date-time */
+                            updated_at?: string;
+                            /** Format: uuid */
+                            uuid: string;
+                        }[];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
     property_deals_chases_list: {
         parameters: {
             query?: {
@@ -6750,7 +7344,7 @@ export interface operations {
                 sort?: "sent_at" | "reply_at" | "created_at";
                 status?: "sent" | "replied" | "failed";
                 task_uuid?: string;
-                to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other";
+                to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other";
             };
             header?: {
                 /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
@@ -6989,6 +7583,71 @@ export interface operations {
             };
             /** @description Conflicts with an existing record */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_companies_house_officers: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Name, 3+ characters */
+                q?: string;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            address?: string;
+                            appointments?: number;
+                            /** @description MM/YYYY */
+                            born?: string;
+                            name?: string;
+                            officer_id?: string;
+                        }[];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7490,7 +8149,7 @@ export interface operations {
                     "application/json": components["schemas"]["PluginError"];
                 };
             };
-            /** @description Validation failed (details: field -> message) */
+            /** @description Validation failed; a paid feed (propertydata, searchland, streetdata, homedata) isn't available yet and can only be saved with enabled: false */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9198,6 +9857,62 @@ export interface operations {
             };
         };
     };
+    property_deals_get_due: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Look-ahead in days (default 7, max 60) */
+                days?: number;
+                /** @description Managers: only my own */
+                mine?: boolean;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            days?: number;
+                            /** @description True when a manager sees the whole team */
+                            everyone?: boolean;
+                            items?: components["schemas"]["PropertyDealsDueItem"][];
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
     property_deals_post_engine_run: {
         parameters: {
             query?: { [key: string]: unknown };
@@ -9211,7 +9926,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail" | "scout" | "nightly")[];
+                    checks?: ("sla" | "health" | "compliance_expiry" | "digest" | "agents" | "mail" | "scout" | "nightly" | "signals")[];
                 };
             };
         };
@@ -9255,11 +9970,32 @@ export interface operations {
                             };
                             scout?: {
                                 alerts?: number;
+                                /** @description Saved searches skipped */
+                                errors?: number;
                                 searches?: number;
                                 synced?: {
                                     connectors?: number;
                                     postcodes?: number;
                                     stored?: number;
+                                };
+                            };
+                            signals?: {
+                                new_companies?: {
+                                    areas?: number;
+                                    companies?: number;
+                                    errors?: number;
+                                    leads?: number;
+                                    rate_limited?: boolean;
+                                };
+                                watch?: {
+                                    /** @description Failed Companies House calls */
+                                    errors?: number;
+                                    /** @description Follow-up drafts started for leads with news */
+                                    followups?: number;
+                                    leads?: number;
+                                    /** @description Companies House said slow down: the rest waits for the next run */
+                                    rate_limited?: boolean;
+                                    signals?: number;
                                 };
                             };
                             sla?: {
@@ -9309,7 +10045,7 @@ export interface operations {
                 blocking?: boolean;
                 deal_uuid?: string;
                 order?: "asc" | "desc";
-                owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other";
+                owner_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other";
                 page?: number;
                 per_page?: number;
                 /** @description Search text */
@@ -9644,6 +10380,8 @@ export interface operations {
                 format?: "csv" | "json";
                 /** @description created on/after */
                 from?: string;
+                /** @description 10,000 rows a page, oldest first (default 1) */
+                page?: number;
                 /** @description created before */
                 to?: string;
             };
@@ -10032,12 +10770,64 @@ export interface operations {
             };
         };
     };
+    property_deals_get_hot_leads: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                limit?: number;
+                /** @description Only leads I own */
+                mine?: boolean;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsHotLead"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
     property_deals_get_inbound_messages: {
         parameters: {
             query?: {
 [key: string]: unknown;
                 deal_uuid?: string;
-                /** @description 1–100 */
+                /** @description From 1 */
+                page?: number;
+                /** @description 1–100, default 25 */
                 per_page?: number;
                 unmatched?: "true";
             };
@@ -10174,9 +10964,11 @@ export interface operations {
                 /** @description Name, email or phone */
                 q?: string;
                 situation?: string;
-                sort?: "created" | "deadline";
+                sort?: "created" | "deadline" | "last_reply";
                 source?: string;
                 status?: string;
+                /** @description From the last reply */
+                temperature?: "hot" | "warm" | "cold";
                 vulnerable?: "true";
             };
             header?: {
@@ -10330,6 +11122,338 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_leads_uuid_follow_up: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Lead uuid */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    channel?: "email" | "whatsapp" | "sms";
+                    /** @description A steer for the AI, e.g. 'mention the Leeds HMO' */
+                    note?: string;
+                    /**
+                     * Format: uuid
+                     * @description News item to open with
+                     */
+                    signal_uuid?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: uuid */
+                            run_uuid?: string;
+                            status?: string;
+                            task_uuid?: string;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_leads_uuid_replies: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Lead uuid */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsLeadReply"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_leads_uuid_replies: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Lead uuid */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    channel: "whatsapp" | "sms" | "phone" | "social" | "email" | "other";
+                    from_name?: string;
+                    /** Format: date-time */
+                    received_at?: string;
+                    subject?: string;
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsLeadReply"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_leads_uuid_signals: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Default 50, max 200 */
+                limit?: number;
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Lead uuid */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsLeadSignal"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_leads_uuid_signals: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description Lead uuid */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "social_post" | "website" | "news" | "note";
+                    /** Format: date-time */
+                    occurred_at?: string;
+                    text?: string;
+                    title?: string;
+                    url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsLeadSignal"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10651,6 +11775,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: {
+                            /** @description What went wrong, if anything (also last_error) */
+                            error?: string;
+                            /** @description Messages that couldn't be stored */
+                            failed?: number;
                             fetched?: number;
                             matched?: number;
                             stored?: number;
@@ -10703,7 +11831,7 @@ export interface operations {
             query?: {
 [key: string]: unknown;
                 lat?: number;
-                /** @description Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots (default properties,deals) */
+                /** @description Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots (default properties,deals). leads needs property_deals_leads.read, else it is left out */
                 layers?: string;
                 lng?: number;
                 /** @description lat,lng;lat,lng;… (3–200 points) instead of lat/lng/radius */
@@ -10766,7 +11894,9 @@ export interface operations {
         parameters: {
             query?: {
 [key: string]: unknown;
-                /** @description 1–200 */
+                /** @description From 1 */
+                page?: number;
+                /** @description 1–200, default 50 */
                 per_page?: number;
                 postcode?: string;
                 record_type?: "sold_price" | "epc" | "listing" | "auction_lot" | "other";
@@ -10869,7 +11999,7 @@ export interface operations {
                     "application/json": components["schemas"]["PluginError"];
                 };
             };
-            /** @description Over 5 MB */
+            /** @description Over 5 MB or 5,000 rows */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -11356,6 +12486,239 @@ export interface operations {
             };
             /** @description Validation failed (details: field -> message) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_pa_briefing: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            approvals_waiting?: unknown[];
+                            counts?: {
+                                due_today?: number;
+                                open?: number;
+                                overdue?: number;
+                            };
+                            deals_at_risk?: unknown[];
+                            fresh_news?: unknown[];
+                            hot_leads?: components["schemas"]["PropertyDealsHotLead"][];
+                            me?: {
+                                is_manager?: boolean;
+                                name?: string;
+                            };
+                            my_tasks?: unknown[];
+                            /** @description Markdown */
+                            playbook?: string;
+                            /** Format: date */
+                            today?: string;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_playbooks: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsPlaybookSection"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_put_playbooks_key: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                /** @description lowercase, digits, _ */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Markdown, max 20000 */
+                    body?: string;
+                    position?: number;
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsPlaybookSection"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_delete_playbooks_key: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted?: boolean;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11874,6 +13237,129 @@ export interface operations {
             };
             /** @description No permission in this namespace */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_get_renovations: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                deal_uuid?: string;
+                status?: "active" | "completed" | "all";
+            };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsRenovation"][];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_renovations: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    budget?: number;
+                    builder_user_uuids?: string[];
+                    currency?: string;
+                    /** Format: uuid */
+                    deal_uuid?: string;
+                    name?: string;
+                    /** Format: uuid */
+                    property_uuid?: string;
+                    /** Format: date */
+                    start_date?: string;
+                    /**
+                     * Format: date
+                     * @description The standard jobs are spread to finish by this date
+                     */
+                    target_end_date?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PropertyDealsRenovation"];
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Validation failed (details: field -> message) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12670,8 +14156,17 @@ export interface operations {
                     "application/json": components["schemas"]["PluginError"];
                 };
             };
-            /** @description Not found in this workspace */
+            /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No usable pin or polygon */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12685,6 +14180,10 @@ export interface operations {
         parameters: {
             query?: {
 [key: string]: unknown;
+                /** @description From 1 */
+                page?: number;
+                /** @description 1–200, default 200 */
+                per_page?: number;
                 saved_search_uuid?: string;
                 unseen?: "true";
             };
@@ -12854,6 +14353,127 @@ export interface operations {
                                 templates?: string[];
                             };
                             state?: components["schemas"]["PropertyDealsWorkspaceState"];
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_delete_signals_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted?: boolean;
+                        };
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description No permission in this namespace */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginError"];
+                };
+            };
+        };
+    };
+    property_deals_post_signals_run: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: {
+                /** @description Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace. */
+                "X-Namespace-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            new_companies?: {
+                                areas?: number;
+                                companies?: number;
+                                errors?: number;
+                                leads?: number;
+                                rate_limited?: boolean;
+                            };
+                            watch?: {
+                                /** @description Failed Companies House calls */
+                                errors?: number;
+                                /** @description Follow-up drafts started for leads with news */
+                                followups?: number;
+                                leads?: number;
+                                /** @description Companies House said slow down: the rest waits for the next run */
+                                rate_limited?: boolean;
+                                signals?: number;
+                            };
                         };
                         /** @example true */
                         success: boolean;
@@ -13530,7 +15150,7 @@ export interface operations {
                     "application/json": components["schemas"]["PluginError"];
                 };
             };
-            /** @description Validation failed — compliance tasks need evidence to close; snoozing needs a reason */
+            /** @description Validation failed — compliance tasks need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13659,7 +15279,7 @@ export interface operations {
                     to_address?: string;
                     to_name?: string;
                     /** @enum {string} */
-                    to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "freeholder" | "managing_agent" | "council" | "other";
+                    to_party?: "seller" | "buyer" | "buyer_solicitor" | "seller_solicitor" | "lender" | "broker" | "surveyor" | "estate_agent" | "freeholder" | "managing_agent" | "council" | "other";
                 };
             };
         };

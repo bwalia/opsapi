@@ -12,25 +12,28 @@ import { Button, Modal, Input, Select, Textarea } from '@/components/ui';
 import { pdService, pdErrorText, type TaskSummary, type Task } from '@/services/property-deals.service';
 import { namespaceService } from '@/services/namespace.service';
 import { usePdMe } from './usePd';
+import { useNamespaceStore } from '@/store/namespace.store';
 
 type AnyTask = (TaskSummary | Task) & { task_uuid: string; title: string };
 
-let membersCache: { uuid: string; name: string }[] | null = null;
-async function loadMembers(): Promise<{ uuid: string; name: string }[]> {
-  if (membersCache) return membersCache;
+// Per workspace: switching workspace must not offer the last one's people as assignees.
+const membersCache: Record<string, { uuid: string; name: string }[]> = {};
+async function loadMembers(ns: string): Promise<{ uuid: string; name: string }[]> {
+  if (membersCache[ns]) return membersCache[ns];
   // The members route reads per_page (snake case), which PaginationParams doesn't declare.
   const res = await namespaceService.getMembers({ per_page: 100 } as Parameters<typeof namespaceService.getMembers>[0]);
-  membersCache = (res.data || [])
+  membersCache[ns] = (res.data || [])
     .filter((m) => m.user)
     .map((m) => ({ uuid: m.user!.uuid, name: `${m.user!.first_name || ''} ${m.user!.last_name || ''}`.trim() || m.user!.email }));
-  return membersCache;
+  return membersCache[ns];
 }
 
 export function useMembers() {
-  const [members, setMembers] = useState<{ uuid: string; name: string }[]>(membersCache || []);
+  const ns = useNamespaceStore((s) => s.currentNamespace?.uuid || 'default');
+  const [members, setMembers] = useState<{ uuid: string; name: string }[]>(membersCache[ns] || []);
   useEffect(() => {
-    loadMembers().then(setMembers).catch(() => setMembers([]));
-  }, []);
+    loadMembers(ns).then(setMembers).catch(() => setMembers([]));
+  }, [ns]);
   return members;
 }
 

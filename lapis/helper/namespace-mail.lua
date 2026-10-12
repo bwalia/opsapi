@@ -98,6 +98,8 @@ local function host_ok(host)
     return true
 end
 
+NamespaceMail.hostOk = host_ok
+
 function NamespaceMail.settings(namespace_id)
     return db.query("SELECT * FROM namespace_mail_settings WHERE namespace_id = ?", namespace_id)[1]
 end

@@ -13,8 +13,7 @@ import { cn } from '@/lib/utils';
 import type { UrgencyFactor } from '@/services/property-deals.service';
 import { pdService, pdErrorText, type PdError } from '@/services/property-deals.service';
 import { usePdMe, type PdModule } from './usePd';
-import TourHost, { maybeAutoStartTour } from './Tour';
-import { useAuthStore } from '@/store/auth.store';
+import TourHost, { startTour } from './Tour';
 import toast from 'react-hot-toast';
 
 export const BASE = '/dashboard/property-deals';
@@ -171,12 +170,13 @@ export function Empty({ title, children }: { title: string; children?: React.Rea
   );
 }
 
-export function ErrorNote({ error }: { error?: PdError }) {
+/** An error from a plugin route; `product` names the plugin whose role a 403 asks for. */
+export function ErrorNote({ error, product = 'Property Deals' }: { error?: PdError; product?: string }) {
   if (!error) return null;
   if (error.status === 403) {
     return (
       <div className="flex items-center gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700">
-        <Lock className="h-4 w-4" aria-hidden /> You don&apos;t have access to this. Ask a workspace admin for a Property Deals role.
+        <Lock className="h-4 w-4" aria-hidden /> You don&apos;t have access to this. Ask a workspace admin for a {product} role.
       </div>
     );
   }
@@ -192,6 +192,19 @@ export function Spinner({ label: l = 'Loading…' }: { label?: string }) {
     <div className="flex items-center gap-2 py-10 text-secondary-500" role="status">
       <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> {l}
     </div>
+  );
+}
+
+/** The plugin is switched off for this workspace (its routes answer 404 PLUGIN_DISABLED). */
+export function PluginOff({ product }: { product: string }) {
+  return (
+    <Card className="mx-auto mt-10 max-w-xl text-center">
+      <Power className="mx-auto mb-3 h-8 w-8 text-secondary-400" aria-hidden />
+      <h2 className="text-lg font-semibold text-secondary-900">{product} is switched off for this workspace</h2>
+      <p className="mt-1 text-sm text-secondary-500">
+        A workspace admin can switch it on under <Link className="text-primary-600 underline" href="/dashboard/namespace/plugins">Plugins</Link>.
+      </p>
+    </Card>
   );
 }
 
@@ -211,21 +224,13 @@ export function PdPage({ module, children }: { module?: PdModule; children: Reac
 function PdPageBody({ module, children }: { module?: PdModule; children: React.ReactNode }) {
   const { me, error, loading, can, reload } = usePdMe();
   const [settingUp, setSettingUp] = useState(false);
-  const email = useAuthStore((s) => s.user?.email);
+  // The tour starts only when asked: "Take the tour" on Today, or a link with ?tour=1.
   React.useEffect(() => {
-    if (me?.setup_done) maybeAutoStartTour(email);
-  }, [me?.setup_done, email]);
+    if (me?.setup_done && new URLSearchParams(window.location.search).get('tour') === '1') startTour();
+  }, [me?.setup_done]);
   if (loading && !me) return <Spinner />;
   if (error?.code === 'PLUGIN_DISABLED' || (error?.status === 404 && /turned off/i.test(error.message))) {
-    return (
-      <Card className="mx-auto mt-10 max-w-xl text-center">
-        <Power className="mx-auto mb-3 h-8 w-8 text-secondary-400" aria-hidden />
-        <h2 className="text-lg font-semibold text-secondary-900">Property Deals is switched off for this workspace</h2>
-        <p className="mt-1 text-sm text-secondary-500">
-          A workspace admin can switch it on under <Link className="text-primary-600 underline" href="/dashboard/namespace/plugins">Plugins</Link>.
-        </p>
-      </Card>
-    );
+    return <PluginOff product="Property Deals" />;
   }
   if (error) return <div className="mt-6"><ErrorNote error={error} /></div>;
   if (me && me.setup_done === false) {

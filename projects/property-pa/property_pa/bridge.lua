@@ -46,6 +46,25 @@ function B.get(ns, uuid, user_uuid)
         ns, uuid, B.PROVIDER, user_uuid)
 end
 
+--- One ai_usage row (core metering, the same columns lib/agent/llm writes), so PA runs show on the AI usage page
+-- and count towards AI_USER_DAILY_TOKEN_LIMIT. Never fails the caller: a lost row is logged.
+local function meter(ns, user, run_uuid, scope, model, input, output, ms, err)
+    local ok, ierr = pcall(db.insert, "ai_usage", { namespace_id = ns, user_uuid = nz(user), feature = "property_pa",
+        scope = nz(scope), run_uuid = run_uuid, provider = "jobshout",
+        model = tostring(model or "jobshout"):sub(1, 120), input_tokens = input or 0, output_tokens = output or 0,
+        latency_ms = ms or 0, ok = err == nil, error = err })
+    if not ok then ngx.log(ngx.ERR, "[property_pa] usage not recorded: ", tostring(ierr)) end
+end
+
+--- AI_USER_DAILY_TOKEN_LIMIT, counted the way lib/agent/llm counts it (tokens per user per UTC day, every feature).
+local function over_daily_limit(user_uuid)
+    local limit = tonumber(os.getenv("AI_USER_DAILY_TOKEN_LIMIT") or "")
+    if not limit then return false end
+    local r = U.one([[SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM ai_usage WHERE user_uuid = ?
+        AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC']], user_uuid)
+    return tonumber(r.used) >= limit
+end
+
 -- Limits per person (hardening for real use): runs in flight, and runs per hour.
 B.MAX_RUNNING = 3
 B.MAX_PER_HOUR = 60
@@ -61,6 +80,10 @@ function B.ask(ns, user_uuid, settings, req)
         U.fail(429, "Your PA is still working on " .. load.running .. " questions. Wait for one to finish.")
     end
     if load.hour >= B.MAX_PER_HOUR then U.fail(429, "That's " .. load.hour .. " questions this hour. Try again later.") end
+    if over_daily_limit(user_uuid) then
+        meter(ns, user_uuid, nil, req.mode, nil, 0, 0, 0, "daily limit reached")
+        U.fail(429, require("lib.agent.llm").LIMIT_MESSAGE)
+    end
     local role = req.role or "seller_agent"
     local agent_id = nz(role == "manager" and settings.jobshout_manager_agent_id or settings.jobshout_seller_agent_id)
     if not agent_id then U.fail(409, "The PA isn't connected: set the JobShout " .. (role == "manager" and "Manager" or "Seller")
@@ -69,10 +92,10 @@ function B.ask(ns, user_uuid, settings, req)
     local JobShout = require("lib.jobshout-client")
     local agent_key = "pa_" .. role
     local context = { role = role, user_ref = user_uuid, workspace_ref = tostring(ns) }
-    local inputs = { mode = req.mode }
+    local inputs = {}
     for k, v in pairs(req.inputs or {}) do inputs[k] = v end
-    if req.opportunity_uuid then inputs.opportunity_id = req.opportunity_uuid end
-    if req.interaction_uuid then inputs.interaction_uuid = req.interaction_uuid end
+    -- What the server checked always wins over the caller's inputs.
+    inputs.mode, inputs.opportunity_id, inputs.interaction_uuid = req.mode, req.opportunity_uuid, req.interaction_uuid
     local skill = B.SKILLS[req.mode]
     local skills = skill and { skill } or nil
     -- One JobShout task per person and role: every turn is a new run on it.
@@ -91,7 +114,9 @@ function B.ask(ns, user_uuid, settings, req)
         run_id = res and res.run_id
     end
     if not res or not run_id then
-        U.fail(502, "The PA couldn't be reached: " .. tostring(err or "JobShout returned no run id"):sub(1, 200))
+        -- JobShout's own words stay in the log: they can carry its internals.
+        ngx.log(ngx.ERR, "[property_pa] JobShout run not started: ", tostring(err or "no run id"):sub(1, 500))
+        U.fail(502, "The PA couldn't be reached. Try again in a minute.")
     end
     local r = db.insert("property_deals_agent_runs", {
         namespace_id = ns, agent_key = agent_key, provider = B.PROVIDER, provider_uuid = row.uuid,
@@ -175,7 +200,8 @@ function B.finish(ns, run, data)
     if nz(data.model_name) then upd.model = (nz(data.model_provider) and (data.model_provider .. ":") or "") .. data.model_name end
     if nz(data.prompt_version) then upd.prompt_version = tostring(data.prompt_version):sub(1, 40) end
     if status == "failed" then
-        upd.status, upd.error = "failed", tostring(nz(data.error_message) or "the PA run failed"):sub(1, 1000)
+        ngx.log(ngx.WARN, "[property_pa] run ", run.uuid, " failed: ", tostring(nz(data.error_message)):sub(1, 500))
+        upd.status, upd.error = "failed", "The PA couldn't finish this one. Try asking again."
     else
         local raw = nz(data.output) or ""
         local out, perr = B.parse_output(raw)
@@ -198,8 +224,16 @@ function B.finish(ns, run, data)
         upd.output_draft = raw:sub(1, 60000)
         upd.sources = db.raw(db.escape_literal(cjson.encode(result.sources or arr({}))) .. "::jsonb")
     end
-    -- Only a running run is finished (a webhook and a poll may race; the first one wins).
-    db.update("property_deals_agent_runs", upd, { namespace_id = ns, uuid = run.uuid, status = "running" })
+    -- Only a running run is finished (a webhook and a poll may race; the first one wins, and meters it).
+    local res = db.update("property_deals_agent_runs", upd, { namespace_id = ns, uuid = run.uuid, status = "running" })
+    if (res.affected_rows or 0) > 0 then
+        local total = tonumber(data.total_tokens) or 0
+        local input = math.min(total, tonumber(data.prompt_tokens or data.input_tokens) or 0)
+        local snap = U.json(run.input_snapshot)
+        meter(ns, run.triggered_by_user_uuid, run.uuid, type(snap) == "table" and snap.mode or nil,
+            upd.model or run.model, input, total - input, tonumber(data.latency_ms) or 0,
+            status == "failed" and "the PA run failed" or nil)
+    end
     -- What the run wrote while it was running (captures) gets the model and prompt version it really used (P10).
     if upd.model or upd.prompt_version then
         for _, t in ipairs({ "pa_proposed_updates", "pa_field_facts" }) do

@@ -6,7 +6,7 @@ import { Settings } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { PdPage, Tabs } from '@/components/property-deals/ui';
 import { usePdMe } from '@/components/property-deals/usePd';
-import { useIsNamespaceOwner } from '@/contexts/NamespaceContext';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import TemplateEditor from '@/components/property-deals/settings/TemplateEditor';
 import PluginSettings from '@/components/property-deals/settings/PluginSettings';
 import AiSettings from '@/components/property-deals/settings/AiSettings';
@@ -25,9 +25,10 @@ export default function SettingsPage() {
 
 function SettingsBody() {
   const { can } = usePdMe();
-  const owner = useIsNamespaceOwner();
   const [tab, setTab] = useState<Tab>(can('settings', 'read') ? 'templates' : 'me');
   const canEdit = can('settings', 'update');
+  // AI providers and plugin settings are core workspace APIs: namespace.update (read: namespace.read).
+  const canEditWorkspace = usePermissions().hasPermission('namespace', 'update');
   return (
     <div className="space-y-6">
       <PageHeader title="Deals settings" description="Workflow templates, deadlines and urgency, AI and data sources." icon={<Settings className="h-6 w-6" />} />
@@ -50,10 +51,10 @@ function SettingsBody() {
           ]}
         />
       </div>
-      {tab === 'playbook' && <PlaybookEditor canEdit={owner || can('settings', 'manage')} />}
+      {tab === 'playbook' && <PlaybookEditor canEdit={can('settings', 'manage')} />}
       {tab === 'templates' && <TemplateEditor canEdit={canEdit} />}
-      {tab === 'rules' && <PluginSettings canEdit={owner || can('settings', 'manage')} />}
-      {tab === 'ai' && <AiSettings canEditProviders={owner || can('settings', 'manage')} canEditPlugin={canEdit} />}
+      {tab === 'rules' && <PluginSettings canEdit={canEditWorkspace} />}
+      {tab === 'ai' && <AiSettings canEditProviders={canEditWorkspace} canEditPlugin={canEdit} />}
       {tab === 'data' && <DataConnectors canEdit={canEdit} />}
       {tab === 'mail' && <Mailboxes canEdit={canEdit} />}
       {tab === 'me' && <MyNotifications />}

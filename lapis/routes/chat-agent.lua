@@ -180,9 +180,9 @@ return function(app)
     end
 
     -- A run still "running" after this long died with its worker (restart /
-    -- deploy) — report it as failed rather than spinning forever.
-    -- A run with several model calls at up to AI_TIMEOUT_MS each (5 min) can legitimately take a while.
-    local STALE_SECONDS = 1800
+    -- deploy) — report it as failed rather than spinning forever. Twice a
+    -- run's own time limit (Agent.RUN_SECONDS), so a live run is never stale.
+    local STALE_SECONDS = 2 * Agent.RUN_SECONDS
     local MAX_STORED_TURNS = 40
     local MAX_MODEL_TURNS = 20
     -- Records returned by tools are resent only for the latest assistant turns;
@@ -308,7 +308,8 @@ return function(app)
     end
 
     -- The model the workspace chose for its assistant: an enabled workspace AI provider with
-    -- options.assistant = true (e.g. the platform model with a faster default_model). nil = server default.
+    -- options.assistant = true (e.g. the platform model with a faster default_model). nil = server default;
+    -- false = it chose one that can't be used right now (never silently the server default instead).
     local function assistant_model(namespace_id)
         local okp, Providers = pcall(require, "lib.ai-providers")
         if not okp or not namespace_id then return nil end
@@ -321,8 +322,11 @@ return function(app)
                 opts = okd and dec or {}
             end
             if type(opts) == "table" and opts.assistant == true then
-                local cfg = Providers.cfg(row)
-                if cfg then return cfg end
+                local okc, cfg, cerr = pcall(Providers.cfg, row)
+                if okc and cfg then return cfg end
+                ngx.log(ngx.ERR, "[chat-agent] namespace ", namespace_id, " assistant provider ", tostring(row.uuid),
+                    " unavailable: ", tostring(okc and cerr or cfg))
+                return false
             end
         end
         return nil
@@ -584,6 +588,12 @@ return function(app)
                 db.query("UPDATE chat_agent_runs SET pending = NULL WHERE uuid = ?", prev.uuid)
             end
 
+            local cfg = assistant_model(ns.id)
+            if cfg == false then
+                return { status = 503, json = { error = "This workspace's AI provider for the assistant is "
+                    .. "unavailable. Ask a workspace admin to check it under AI providers." } }
+            end
+
             local turns = full_turns(prev)
             turns[#turns + 1] = { role = "user", content = text }
             while #turns > MAX_STORED_TURNS do table.remove(turns, 1) end
@@ -609,7 +619,7 @@ return function(app)
             -- after this response is sent, independent of the browser.
             local ok, terr = ngx.timer.at(0, run_in_background, {
                 run_uuid = run_uuid,
-                cfg = assistant_model(ns.id),
+                cfg = cfg,
                 ctx = request_ctx(self, ns, user, scope, tool_names),
                 page_path = page_path,
                 tools = tools,

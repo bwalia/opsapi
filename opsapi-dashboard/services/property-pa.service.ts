@@ -426,8 +426,10 @@ export const paService = {
   async importMail() {
     return (await apiClient.post<Env<{ imported: number; considered: number }>>(`${BASE}/integrations/mail/import`, {}, JSON_HDR)).data.data;
   },
+  /** GoHighLevel pull: counts when it ran inline, or nothing yet when the server queued it (202). */
   async syncGhl() {
-    return (await apiClient.post<Env<{ created: number; updated: number; unchanged: number }>>(`${BASE}/integrations/ghl/sync`, {}, JSON_HDR)).data.data;
+    const res = await apiClient.post<Env<{ created?: number; updated?: number; unchanged?: number }>>(`${BASE}/integrations/ghl/sync`, {}, JSON_HDR);
+    return { queued: res.status === 202, ...(res.data?.data || {}) };
   },
   async startCapture(body: { text: string; channel?: 'voice' | 'note' | 'call'; opportunity_uuid?: string }) {
     return (
@@ -447,5 +449,30 @@ export const paService = {
     ).data.data;
   },
 };
+
+/**
+ * Poll fetch() while running(value) says so (every `everyMs`, at most `maxMs`), handing each value to
+ * onValue. Stops quietly when `signal` aborts (unmount, "Capture another"). Errors reach the caller.
+ */
+export async function pollWhileRunning<T>(
+  fetch: () => Promise<T>,
+  running: (v: T) => boolean,
+  onValue: (v: T) => void,
+  { signal, everyMs = 4000, maxMs = 10 * 60_000 }: { signal: AbortSignal; everyMs?: number; maxMs?: number },
+): Promise<'done' | 'timeout' | 'cancelled'> {
+  const until = Date.now() + maxMs;
+  while (!signal.aborted) {
+    const v = await fetch();
+    if (signal.aborted) break;
+    onValue(v);
+    if (!running(v)) return 'done';
+    if (Date.now() >= until) return 'timeout';
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, everyMs);
+      signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+    });
+  }
+  return 'cancelled';
+}
 
 export default paService;

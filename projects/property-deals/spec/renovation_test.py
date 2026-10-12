@@ -4,10 +4,15 @@
     stretched to the finish date; builders are added as project members
   * GET /due lists deal tasks and renovation jobs due soon: managers see the team, others only theirs
   * seeded roles carry the back-office modules (orders, invoices, CRM, projects) and the builder role exists
+  * builders read deals, properties and tasks for their boards but not leads (situation, vulnerability notes),
+    lead replies, hot leads or the inbox; operators and managers still do, also in workspaces set up before the
+    Leads permission existed (the migration grants it)
   * another workspace can't see or link to any of it
 """
 import json
 import os
+import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -101,6 +106,55 @@ sql(f"""UPDATE kanban_tasks t SET column_id = {done_col} FROM kanban_boards b, k
 after = data(call("GET", P + "/due?days=7", "manager_s", S), 200, "due after moving a card to Done")
 check("a card in Done is no longer due", "Get three builder quotes" not in [i["title"] for i in after["items"]], after["items"])
 check("progress counts the done card", data(call("GET", P + "/renovations", "manager_s", S), 200, "progress")[0]["jobs_done"] == 1)
+
+# --- Builders don't see leads, lead replies, hot leads or the inbox ---------------------------------------------------
+expect("add a builder", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
+       {"email": USERS["reader"][1], "role_ids": [by_name["pd_builder"]["id"]]}), 201)
+lead = expect("a seller lead", call("POST", API + "/api/v2/crm/leads", "operator_s", S, {"first_name": "Dee",
+              "last_name": "Vorce", "owner_user_uuid": USERS["operator_s"][0]}), 201)
+L = (lead.get("data") or lead)["uuid"]
+data(call("PUT", P + f"/leads/{L}/details", "operator_s", S, {"situation": "divorce", "vulnerability_flag": True,
+     "vulnerability_note": "Recently separated, finds calls stressful"}), 200, "sensitive lead details")
+for path in ("/leads", f"/leads/{L}", f"/leads/{L}/replies", f"/leads/{L}/signals", "/hot-leads", "/inbound-messages"):
+    res = call("GET", P + path, "reader", S)
+    check(f"builder: {path} is 403", res[0] == 403, res)
+    for user in ("operator_s", "manager_s"):
+        res = call("GET", P + path, user, S)
+        check(f"{user}: {path} is 200", res[0] == 200, res)
+for path in ("/renovations", "/deals", "/tasks", f"/deals/{deal['uuid']}", "/due"):
+    expect(f"builder still reads {path}", call("GET", P + path, "reader", S), 200)
+me = data(call("GET", P + "/me", "reader", S), 200, "builder's /me")
+check("/me: the builder has no leads permission", me["permissions"].get("leads") == [], me["permissions"])
+pb = data(call("GET", P + "/pa/briefing", "reader", S), 200, "builder's briefing")
+check("briefing: no hot leads or lead news for a builder", pb["hot_leads"] == [] and pb["fresh_news"] == [], pb)
+mp = data(call("GET", P + "/map?lat=53.8&lng=-1.55&radius_miles=50&layers=properties,leads", "reader", S), 200, "builder map")
+check("map: the leads layer is left out for a builder", "leads" not in mp["counts"], mp["counts"])
+
+# Workspaces set up before the Leads permission existed: the migration grants it to every role that could read
+# deals or tasks, except the builder. Simulate that state and run the migration again.
+NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
+sql(f"UPDATE namespace_roles SET permissions = (permissions::jsonb - 'property_deals_leads')::text WHERE namespace_id = {NSID}")
+check("old state: the operator can't read leads", call("GET", P + "/leads", "operator_s", S)[0] == 403)
+pg = re.search(r"pd-pg-(\d+)", os.environ.get("PD_PSQL", ""))
+if pg:
+    sql("DELETE FROM project_migrations WHERE project_code = 'property_deals' AND migration_name LIKE '20261021200000%'")
+    out = subprocess.run(["docker", "exec", "-w", "/app", "pd-api-" + pg.group(1), "lapis", "migrate"],
+                         capture_output=True, text=True)
+    check("the migration runs on an existing database", out.returncode == 0, (out.stdout + out.stderr)[-600:])
+
+    def perms_of(role):
+        return json.loads(sql(f"SELECT permissions FROM namespace_roles WHERE namespace_id = {NSID} AND role_name = '{role}'")[0])
+    check("upgrade: operator, manager, compliance and read-only roles have leads again; the builder doesn't",
+          perms_of("pd_operator").get("property_deals_leads") == ["create", "read", "update"]
+          and perms_of("pd_manager").get("property_deals_leads") == ["manage"]
+          and perms_of("pd_compliance").get("property_deals_leads") == ["read"]
+          and perms_of("pd_read_only").get("property_deals_leads") == ["read"]
+          and "property_deals_leads" not in perms_of("pd_builder"), {r: perms_of(r).get("property_deals_leads")
+          for r in ("pd_operator", "pd_manager", "pd_builder")})
+    expect("upgrade: the operator reads leads again", call("GET", P + "/leads", "operator_s", S), 200)
+    expect("upgrade: the builder still can't", call("GET", P + "/leads", "reader", S), 403)
+else:
+    print("skip  migration upgrade check (PD_PSQL isn't the run.sh sandbox)")
 
 # --- Isolation ------------------------------------------------------------------------------------------------------
 B = workspace("owner_b", "Other Reno Co", "other-reno")

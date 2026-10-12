@@ -46,7 +46,7 @@ local function send_event(event)
                 ["Content-Type"] = "application/json",
                 ["Authorization"] = "Basic " .. auth,
             },
-            ssl_verify = false,
+            ssl_verify = os.getenv("AI_TLS_VERIFY") ~= "false", -- same switch as lib/agent/llm.lua
         })
 
         if not res then

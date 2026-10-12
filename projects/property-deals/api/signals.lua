@@ -6,8 +6,12 @@
 --   POST   /leads/:uuid/replies          log a WhatsApp / SMS / call / DM reply { channel, text, received_at? }
 --                                        -> scored; a hot one raises a "call now" task + alerts
 --   GET    /hot-leads                    hot in the last 7 days ?mine=true
+-- Everything about a lead needs property_deals_leads (read / update): builders don't have it.
+-- The PA (requests with X-OpsAPI-Agent) logs as replies only messages the lead wrote: a call the user made is
+-- a chase (POST /chases), never the lead's reply, so it can't raise a needless "call now".
 --   GET    /companies-house/officers     ?q=name -> officer ids to link a lead to (the watch then follows them)
---   POST   /signals/run                  run the Companies House watch + new-company search now (managers)
+--   POST   /signals/run                  run the Companies House watch + new-company search now (managers;
+--                                        up to ~20 s each, the rest on the next run)
 --   POST   /leads/:uuid/follow-up        AI drafts a personal follow-up { channel?: email|whatsapp|sms,
 --                                        signal_uuid?, note? } -> an approval; nothing is sent until approved
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -27,13 +31,13 @@ local function lead_of(self)
 end
 
 return function(app)
-    app:get("/leads/:uuid/signals", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
+    app:get("/leads/:uuid/signals", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local lead = lead_of(self)
         if not lead then return sdk.not_found("Lead") end
         return sdk.ok(Signals.list(sdk.namespace_id(self), lead.uuid, math.min(tonumber(self.params.limit) or 50, 200)))
     end))
 
-    app:post("/leads/:uuid/signals", sdk.handler({ permission = "property_deals_deals.update" }, U.guard_create(function(self)
+    app:post("/leads/:uuid/signals", sdk.handler({ permission = "property_deals_leads.update" }, U.guard_create(function(self)
         local lead = lead_of(self)
         if not lead then return sdk.not_found("Lead") end
         local body, err = sdk.body(self)
@@ -53,7 +57,7 @@ return function(app)
         return sdk.created(row)
     end)))
 
-    app:delete("/signals/:id", sdk.handler({ permission = "property_deals_deals.update" }, function(self)
+    app:delete("/signals/:id", sdk.handler({ permission = "property_deals_leads.update" }, function(self)
         if not U.is_uuid(self.params.id) then return sdk.not_found("Signal") end
         local res = db.query("DELETE FROM property_deals_lead_signals WHERE namespace_id = ? AND uuid = ? RETURNING uuid",
             sdk.namespace_id(self), self.params.id)
@@ -61,13 +65,13 @@ return function(app)
         return sdk.ok({ deleted = true })
     end))
 
-    app:get("/leads/:uuid/replies", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
+    app:get("/leads/:uuid/replies", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local lead = lead_of(self)
         if not lead then return sdk.not_found("Lead") end
         return sdk.ok(Replies.list(sdk.namespace_id(self), lead.uuid, math.min(tonumber(self.params.limit) or 50, 200)))
     end))
 
-    app:post("/leads/:uuid/replies", sdk.handler({ permission = "property_deals_deals.update" }, U.guard_create(function(self)
+    app:post("/leads/:uuid/replies", sdk.handler({ permission = "property_deals_leads.update" }, U.guard_create(function(self)
         local lead = lead_of(self)
         if not lead then return sdk.not_found("Lead") end
         local body, err = sdk.body(self)
@@ -78,6 +82,10 @@ return function(app)
             from_name = { type = "string", max = 255 }, subject = { type = "string", max = 300 },
         })
         if not data then return sdk.error(422, "Validation failed", errors) end
+        if ngx.var.http_x_opsapi_agent and (data.channel == "phone" or data.channel == "other") then
+            return sdk.error(422, "Validation failed", { channel = "the assistant logs only messages the lead wrote "
+                .. "(email, whatsapp, sms, social); a call the user made is a chase: POST /chases" })
+        end
         local ns = sdk.namespace_id(self)
         local row, result = Replies.log(ns, lead.uuid, data, sdk.user(self).uuid)
         local out = U.one([[
@@ -90,7 +98,7 @@ return function(app)
         return sdk.created(out)
     end)))
 
-    app:get("/hot-leads", sdk.handler({ permission = "property_deals_tasks.read" }, function(self)
+    app:get("/hot-leads", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local me = self.params.mine == "true" and sdk.user(self).uuid or nil
         return sdk.ok(Replies.hot(sdk.namespace_id(self), me, math.min(tonumber(self.params.limit) or 20, 100)))
     end))
@@ -123,8 +131,8 @@ return function(app)
 
     app:post("/signals/run", sdk.handler({ permission = "property_deals_settings.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
-        local watch = Signals.watch(ns, sdk.settings(self))
-        local fresh = Signals.new_companies(ns, sdk.settings(self))
+        local watch = Signals.watch(ns, sdk.settings(self), { budget = 20 })
+        local fresh = Signals.new_companies(ns, sdk.settings(self), { budget = 20 })
         return sdk.ok({ watch = watch, new_companies = fresh })
     end)))
 end

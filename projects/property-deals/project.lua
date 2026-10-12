@@ -22,7 +22,8 @@ return {
     default_enabled = false,      -- opt-in per workspace (Workspace -> Plugins)
 
     modules = {
-        module("property_deals_deals", "Deals", "Deals, parties, seller leads and the deal timeline"),
+        module("property_deals_deals", "Deals", "Deals, parties and the deal timeline"),
+        module("property_deals_leads", "Leads", "Leads and their situation, replies and news, and the inbox"),
         module("property_deals_properties", "Properties", "Property records, valuations and documents"),
         module("property_deals_buyers", "Buyers", "Buyer profiles and matches"),
         module("property_deals_tasks", "Tasks", "Deal tasks, enquiries and the chase log"),
@@ -135,7 +136,15 @@ return {
         ai_max_cost_run_usd = { type = "number", label = "AI: stop a run above (USD)", default = 0.5, min = 0,
                                 description = "An agent run is stopped once it costs more than this." },
         ai_max_cost_day_usd = { type = "number", label = "AI: daily budget (USD)", default = 10, min = 0,
-                                description = "No new agent runs today once agents have spent this." },
+                                description = "Agents stop for the day once they have spent this." },
+        ai_max_tokens_day = { type = "integer", label = "AI: daily token allowance", default = 2000000, min = 0,
+                              description = "Agents stop for the day once they have used this many tokens, "
+                                  .. "free and self-hosted models included. 0 = no limit." },
+        ai_max_concurrent_runs = { type = "integer", label = "AI: agent runs at the same time", default = 3, min = 1,
+                                   max = 20, description = "More wait their turn (queued)." },
+        ai_auto_runs = { type = "boolean", label = "AI: agents start by themselves", default = true,
+                         description = "Off: agents only run when a person clicks \"Let AI do it\" (none from email "
+                             .. "replies, lead news or scheduled pickup)." },
         ai_max_tokens = { type = "integer", label = "AI: max tokens per reply", default = 2048, min = 64, max = 200000 },
         escalations_always_notify = { type = "boolean", label = "Escalations can't be muted", default = false,
                                       description = "Managers get escalations by push/email even if they turned them off." },

@@ -74,6 +74,16 @@ const STATUS_OPTIONS: { value: PurchaseOrderStatus | 'all'; label: string }[] = 
 
 const OPEN_STATUSES: PurchaseOrderStatus[] = ['sent', 'acknowledged', 'partially_received'];
 
+type MoneyStat = 'open_value' | 'to_bill_value' | 'billed_value';
+
+/** One amount per currency in use ("£1,200.00 · €300.00"); never added across currencies. */
+function perCurrency(stats: PurchaseOrderStats, key: MoneyStat): string {
+  const parts = stats.by_currency
+    .filter((c) => c[key] !== 0)
+    .map((c) => formatCurrency(c[key], c.currency, 'en-GB'));
+  return parts.length ? parts.join(' · ') : formatCurrency(0, stats.by_currency[0]?.currency || 'GBP', 'en-GB');
+}
+
 function PurchaseOrdersPageContent() {
   const router = useRouter();
 
@@ -307,7 +317,7 @@ function PurchaseOrdersPageContent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Open"
-            value={formatCurrency(stats.open_value, 'GBP', 'en-GB')}
+            value={perCurrency(stats, 'open_value')}
             hint={`${stats.open_count} awaiting delivery`}
             icon={<Truck className="w-6 h-6" />}
             color="info"
@@ -321,14 +331,14 @@ function PurchaseOrdersPageContent() {
           />
           <StatCard
             title="To Bill"
-            value={formatCurrency(stats.to_bill_value, 'GBP', 'en-GB')}
-            hint={`${stats.to_bill_count} received, not billed`}
+            value={perCurrency(stats, 'to_bill_value')}
+            hint={`${stats.to_bill_count} with goods received, not billed`}
             icon={<Receipt className="w-6 h-6" />}
             color="warning"
           />
           <StatCard
             title="Billed"
-            value={formatCurrency(stats.billed_value, 'GBP', 'en-GB')}
+            value={perCurrency(stats, 'billed_value')}
             hint={`${stats.total_count} purchase orders in total`}
             icon={<CheckCircle className="w-6 h-6" />}
             color="success"
