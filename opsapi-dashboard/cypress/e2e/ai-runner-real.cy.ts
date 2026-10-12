@@ -228,7 +228,7 @@ describe('AI Runs with the real PromptPilot runner', () => {
     visit('/dashboard/ai-runner/runs');
     cy.contains('Waiting on you', { timeout: 60000 });
     cy.get(`[aria-label^="Deny Bash for"][aria-label*="${tasks.deny.title}"]`, { timeout: 60000 }).click();
-    visit(`/dashboard/ai-runner/runs/${runs.deny}`);
+    cy.then(() => visit(`/dashboard/ai-runner/runs/${runs.deny}`)); // runs.deny is only known once the start ran
     cy.contains('Succeeded', { timeout: 120000 });
     cy.contains('dt', /^Commit$/i).next().invoke('text').then((sha) => {
       git(`show --name-only --format= ${sha.trim()}`).should('not.contain', 'fake-perm-bash-make-deploy.txt');
