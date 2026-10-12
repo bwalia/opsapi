@@ -4,7 +4,9 @@
  * AI Runs (docs/AI_RUNNER.md §22, §23) in the browser: register a runner and see its token once, start a task
  * with AI from the task page (with the preview), see the run on AI Runs, its prompt and live log on the
  * detail page; decide the agent's permission request, send it a message and see its reply with usage;
- * cancel the run; and approve a run that needs a manager before it starts. The spec plays the PromptPilot
+ * cancel the run; and approve a run that needs a manager before it starts. Phase 4 (§24): the overview cards,
+ * the similar-work warning that needs "Start anyway", an unavailable profile, and the Machines page with the
+ * sessions the runner reported. The spec plays the PromptPilot
  * runner itself through the runner API (heartbeat / claim / status / events / permissions / turns with the
  * token the page showed), so no machine is needed.
  *
@@ -29,8 +31,12 @@ const stamp = Date.now();
 let runnerName = `e2e-runner-${stamp}`;
 const taskTitle = `AI e2e task ${stamp}`;
 const repo = (Cypress.env('AIR_REPO') as string) || '/tmp/air-e2e-repo';
+// A second folder for the similar task: the first run holds the folder lock on `repo`.
+const repo2 = `${repo}-similar`;
 
 let ns: Ns;
+let userUuid = '';
+let boardUuid = '';
 let projectUuid = '';
 let taskUuid = '';
 let runnerToken = '';
@@ -77,8 +83,9 @@ function asRunner(path: string | (() => string), body: Body | (() => Body)) {
   }));
 }
 
-function heartbeat() {
-  return asRunner('/heartbeat', {
+/** A heartbeat; `inventory` (the sessions on the machine) is built when it runs and replaces the last one. */
+function heartbeat(inventory: () => Body[] = () => []) {
+  return asRunner('/heartbeat', () => ({
     version: 'e2e', host: 'e2e-host', os: 'linux',
     capabilities: {
       max_concurrency: 1,
@@ -86,12 +93,17 @@ function heartbeat() {
         { key: 'fake', label: 'Fake agent', approval: 'bridge', models: [] },
         // Can't ask for permissions (like Cursor): every run needs a manager's approval to start.
         { key: 'noask', label: 'No-ask agent', approval: 'unsupported', models: [] },
+        // Its health check failed on the machine: it takes no work.
+        { key: 'locked', label: 'Logged-out agent', approval: 'bridge', models: [], available: false, unavailable_reason: 'not logged in' },
       ],
     },
     load: { running: 0 },
-    inventory: [],
-    repos: [{ path: repo, remote: 'git@example.com:e2e/repo.git', branch: 'main', dirty: false }],
-  }).then((res) => {
+    inventory: inventory(),
+    repos: [
+      { path: repo, remote: 'git@example.com:e2e/repo.git', branch: 'main', dirty: false },
+      { path: repo2, remote: 'git@example.com:e2e/repo.git', branch: 'main', dirty: false },
+    ],
+  })).then((res) => {
     expect(res.status, 'heartbeat').to.eq(200);
     return res.body.data as { runner_uuid: string; cancel: string[] };
   });
@@ -103,13 +115,14 @@ describe('AI Runs', () => {
     if (!Cypress.env('AIR_TOKEN')) this.skip();
     ns = json(Cypress.env('AIR_NAMESPACE')) as Ns;
     const user = json(Cypress.env('AIR_USER')) as { uuid: string };
+    userUuid = user.uuid;
     asUser('PUT', '/api/v2/namespace/plugins/ai_runner', { enabled: true });
     asUser('POST', '/api/v2/kanban/projects', { name: `AI e2e ${stamp}` }, true).then((res) => {
       projectUuid = res.body.data.uuid;
       return asUser('GET', `/api/v2/kanban/projects/${projectUuid}/boards`);
     }).then((res) => {
-      const board = res.body.data[0].uuid;
-      return asUser('POST', `/api/v2/kanban/boards/${board}/tasks`, {
+      boardUuid = res.body.data[0].uuid;
+      return asUser('POST', `/api/v2/kanban/boards/${boardUuid}/tasks`, {
         title: taskTitle, description: 'Add a line to README.md.', assignee_uuids: JSON.stringify([user.uuid]),
       }, true);
     }).then((res) => {
@@ -184,6 +197,60 @@ describe('AI Runs', () => {
     });
   });
 
+  it('shows the overview cards to a manager', () => {
+    heartbeat(); // online for the runner count
+    visit('/dashboard/ai-runner/runs');
+    cy.contains('h1', 'AI Runs', { timeout: 20000 });
+    cy.get('section[aria-label="Overview"]', { timeout: 20000 }).within(() => {
+      // The queued run is open; the fake runner is online.
+      cy.contains('p', 'Open runs').next().invoke('text').then((t) => expect(Number(t)).to.be.gte(1));
+      cy.contains('p', 'Runners online').next().invoke('text').then((t) => expect(Number(t)).to.be.gte(1));
+      cy.contains('p', 'Tokens today');
+      cy.contains('p', 'Last 7 days').next().should('contain', 'succeeded');
+      cy.contains('p', 'Avg permission wait');
+    });
+    cy.screenshot('ai-runner-overview', { capture: 'viewport' });
+  });
+
+  it('warns about similar open work and needs "Start anyway"', () => {
+    const title = `${taskTitle} (copy)`;
+    let similarTaskUuid = '';
+    let similarRunUuid = '';
+    heartbeat(); // stay online (< 45 s)
+    // A second task with a near-identical title, while the first task's run is open.
+    asUser('POST', `/api/v2/kanban/boards/${boardUuid}/tasks`, {
+      title, description: 'The same work again.', assignee_uuids: JSON.stringify([userUuid]),
+    }, true).then((res) => { similarTaskUuid = res.body.data.uuid; });
+    cy.then(() => visit(`/dashboard/projects/${projectUuid}/tasks/${similarTaskUuid}`));
+    cy.contains('h1', title, { timeout: 20000 });
+    cy.contains('button', 'Start with AI').click();
+
+    cy.get('[role="dialog"]').within(() => {
+      cy.get('#air-runner', { timeout: 20000 }).select(runnerUuid);
+      cy.get('#air-profile option[value="locked"]').should('be.disabled').and('contain', 'not logged in');
+      cy.get('#air-repo').clear().type(repo2);
+      cy.contains('button', 'Preview').click();
+      cy.get('[data-testid="air-similar"]', { timeout: 20000 }).within(() => {
+        cy.contains('Similar work is already open');
+        cy.get(`a[href="/dashboard/ai-runner/runs/${runUuid}"]`).should('contain', taskTitle);
+      });
+      cy.get('[data-testid="air-limits"]').should('contain', 'open runs');
+      cy.contains("This run can't start yet").should('not.exist');
+      cy.contains('button', /^Start$/).should('be.disabled');
+      cy.screenshot('ai-runner-similar-work', { capture: 'viewport' });
+      cy.contains('label', 'Start anyway').find('input').check();
+      cy.contains('button', /^Start$/).should('not.be.disabled').click();
+    });
+
+    // Started with confirm_similar: its own run page.
+    cy.location('pathname', { timeout: 20000 }).should('match', /^\/dashboard\/ai-runner\/runs\/[0-9a-f-]{36}$/).then((p) => {
+      similarRunUuid = p.split('/').pop() as string;
+      expect(similarRunUuid).not.to.eq(runUuid);
+    });
+    // Clean up, so the runner claims the first run next.
+    cy.then(() => asUser('POST', `/api/v2/ai-runner/runs/${similarRunUuid}/cancel`)).its('status').should('eq', 200);
+  });
+
   it('shows the prompt and the live log on the run page', () => {
     // The runner claims the run, starts it and streams two log lines.
     asRunner('/claim', { wait_s: 0 }).then((res) => {
@@ -208,6 +275,37 @@ describe('AI Runs', () => {
     cy.contains('pre', taskTitle);
     cy.contains('button', 'Copy prompt');
     cy.screenshot('ai-runner-run-detail', { capture: 'viewport' });
+  });
+
+  it('lists the machine and its sessions on Machines', () => {
+    const now = () => new Date().toISOString();
+    const byHand = `${repo}-by-hand`;
+    // The machine reports the run's own session (its session id is the run uuid), one started by hand and an idle one.
+    heartbeat(() => [
+      { key: `run-${runUuid}`, tool: 'claude', status: 'running', cwd: repo, branch: 'ai/e2e', session_id: runUuid,
+        started_at: now(), updated_at: now(), prompt_preview: `Task ${taskTitle}` },
+      { key: 'e2e-by-hand', tool: 'claude', status: 'working', cwd: byHand, branch: 'feature/by-hand',
+        session_id: 'e2e-by-hand-session', started_at: now(), updated_at: now(), prompt_preview: 'e2e: tidy the README by hand' },
+      { key: 'e2e-idle', tool: 'cursor', status: 'idle', cwd: `${repo}-idle`, branch: 'main', session_id: 'e2e-idle-session',
+        started_at: now(), updated_at: now(), prompt_preview: 'e2e: an idle session' },
+    ]);
+    visit('/dashboard/ai-runner/machines');
+    cy.contains('h1', 'Machines', { timeout: 20000 });
+    cy.get('#air-m-runner', { timeout: 20000 }).select(runnerUuid);
+    cy.contains('h2', runnerName, { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('Online');
+      cy.contains('Unavailable — not logged in');
+      cy.contains('tr', 'ai/e2e').find(`a[href="/dashboard/ai-runner/runs/${runUuid}"]`).should('contain', taskTitle);
+      cy.contains('tr', 'e2e: tidy the README by hand').should('contain', 'Started by hand').and('contain', byHand).and('contain', 'working');
+      cy.contains('tr', 'e2e: an idle session').should('contain', 'idle');
+    });
+    cy.screenshot('ai-runner-machines', { capture: 'viewport' });
+
+    cy.contains('label', 'Busy only').find('input').check();
+    cy.contains('h2', runnerName).closest('section').within(() => {
+      cy.contains('tr', 'e2e: an idle session').should('not.exist');
+      cy.contains('tr', 'e2e: tidy the README by hand');
+    });
   });
 
   it("asks for a permission and hands the user's decision to the runner", () => {
