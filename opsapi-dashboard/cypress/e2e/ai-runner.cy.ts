@@ -23,7 +23,8 @@ type Ns = { uuid: string; name: string; slug: string };
 const json = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v);
 const api = (path: string) => `${Cypress.env('API_URL')}${path}`;
 const stamp = Date.now();
-const runnerName = `e2e-runner-${stamp}`;
+// Per attempt: a retried test registers a new runner, and a runner name is unique in a workspace.
+let runnerName = `e2e-runner-${stamp}`;
 const taskTitle = `AI e2e task ${stamp}`;
 const repo = (Cypress.env('AIR_REPO') as string) || '/tmp/air-e2e-repo';
 
@@ -55,12 +56,15 @@ function asUser(method: string, path: string, body?: Record<string, unknown>, fo
   });
 }
 
-/** A request as the runner (the token the Runners page showed once). */
-function asRunner(path: string, body: Record<string, unknown>) {
-  return cy.request({
-    method: 'POST', url: api(`/api/v2/ai-runner/public/runner${path}`), body,
+/**
+ * A request as the runner (the token the Runners page showed once). Built when it runs, not when Cypress
+ * queues it: the token (and a run uuid in the path) are only known once the earlier commands have run.
+ */
+function asRunner(path: string | (() => string), body: Record<string, unknown>) {
+  return cy.then(() => cy.request({
+    method: 'POST', url: api(`/api/v2/ai-runner/public/runner${typeof path === 'function' ? path() : path}`), body,
     headers: { Authorization: `Bearer ${runnerToken}` }, failOnStatusCode: false,
-  });
+  }));
 }
 
 function heartbeat() {
@@ -99,6 +103,7 @@ describe('AI Runs', () => {
   beforeEach(() => cy.viewport(1280, 900));
 
   it('registers a runner and shows its token once', () => {
+    runnerName = `e2e-runner-${stamp}-${Cypress.currentRetry}`;
     visit('/dashboard/ai-runner/runners');
     cy.contains('h1', 'Runners', { timeout: 20000 });
     cy.contains('button', 'Register runner').click();
@@ -135,7 +140,7 @@ describe('AI Runs', () => {
       cy.get('#air-repo').clear().type(repo);
       cy.contains('Press Preview');
       cy.contains('button', 'Preview').click();
-      cy.contains('Output:', { timeout: 20000 }).should('contain', 'Pull request');
+      cy.contains('Output:', { timeout: 20000 }).parent().should('contain', 'Pull request');
       cy.get('#air-prompt, pre[aria-labelledby="air-prompt-label"]').should(($el) => {
         const text = ($el.val() as string) || $el.text();
         expect(text).to.contain(taskTitle).and.to.contain(repo);
@@ -168,8 +173,8 @@ describe('AI Runs', () => {
       expect(res.status, 'claim').to.eq(200);
       expect(res.body.data.run.uuid).to.eq(runUuid);
     });
-    asRunner(`/runs/${runUuid}/status`, { seq: 1, status: 'running', work_branch: 'ai/e2e' }).its('status').should('eq', 200);
-    asRunner(`/runs/${runUuid}/events`, {
+    asRunner(() => `/runs/${runUuid}/status`, { seq: 1, status: 'running', work_branch: 'ai/e2e' }).its('status').should('eq', 200);
+    asRunner(() => `/runs/${runUuid}/events`, {
       events: [
         { seq: 1, type: 'log', text: 'e2e: reading the task' },
         { seq: 2, type: 'log', text: 'e2e: editing README.md' },
@@ -196,7 +201,7 @@ describe('AI Runs', () => {
     heartbeat().then((d) => {
       expect(d.cancel).to.include(runUuid);
     });
-    asRunner(`/runs/${runUuid}/status`, { seq: 2, status: 'cancelled' }).its('status').should('eq', 200);
+    asRunner(() => `/runs/${runUuid}/status`, { seq: 2, status: 'cancelled' }).its('status').should('eq', 200);
     cy.contains('Cancelled', { timeout: 20000 });
     cy.contains('button', 'Cancel run').should('not.exist');
     cy.contains('button', 'Retry');
