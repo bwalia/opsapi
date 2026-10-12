@@ -9,7 +9,8 @@
 
     The key is SHA-256(OPENSSL_SECRET_KEY .. "|" .. purpose): one deployment
     secret, a different key per purpose. Never log `plain`; return only
-    Box.hint(plain) ("…a1b2") to a browser.
+    Box.hint(plain) ("…a1b2") to a browser. Without OPENSSL_SECRET_KEY, seal
+    raises (nothing is stored unsealed) and open returns nil, err.
 ]]
 
 local aes = require("resty.aes")
@@ -22,7 +23,7 @@ local PREFIX = "gcm1"
 
 local function key_for(purpose)
     local secret = os.getenv("OPENSSL_SECRET_KEY")
-    if not secret or secret == "" then error("OPENSSL_SECRET_KEY is not set; secrets can't be stored") end
+    if not secret or secret == "" then return nil, "OPENSSL_SECRET_KEY is not set" end
     local h = sha256:new()
     h:update(secret .. "|" .. (purpose or "default"))
     return h:final()
@@ -32,7 +33,9 @@ function Box.seal(plain, purpose)
     if plain == nil then return nil end
     local iv = random.bytes(12, true)
     if not iv then error("no secure random bytes available") end
-    local c = assert(aes:new(key_for(purpose), nil, aes.cipher(256, "gcm"), { iv = iv }))
+    local key, kerr = key_for(purpose)
+    if not key then error(kerr .. "; secrets can't be stored") end
+    local c = assert(aes:new(key, nil, aes.cipher(256, "gcm"), { iv = iv }))
     local out = c:encrypt(tostring(plain))
     if type(out) ~= "table" then error("encryption failed") end
     return table.concat({ PREFIX, ngx.encode_base64(iv), ngx.encode_base64(out[2]), ngx.encode_base64(out[1]) }, ":")
@@ -44,7 +47,9 @@ function Box.open(sealed, purpose)
     if p ~= PREFIX then return nil, "unknown secret format" end
     iv, tag, ct = ngx.decode_base64(iv), ngx.decode_base64(tag), ngx.decode_base64(ct)
     if not iv or not tag or not ct then return nil, "corrupt secret" end
-    local c = aes:new(key_for(purpose), nil, aes.cipher(256, "gcm"), { iv = iv })
+    local key, kerr = key_for(purpose)
+    if not key then return nil, kerr end
+    local c = aes:new(key, nil, aes.cipher(256, "gcm"), { iv = iv })
     local plain = c and c:decrypt(ct, tag)
     if not plain then return nil, "secret could not be decrypted (tampered or the deployment key changed)" end
     return plain
