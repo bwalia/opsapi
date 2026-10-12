@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import { Badge, Button, Card, Input } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { paService, type CaptureSheet, type Decision, type SheetRow } from '@/services/property-pa.service';
+import { usePaCan } from './PaPage';
 import { pdErrorText } from '@/services/property-deals.service';
 
 const MONEY_FIELDS = new Set(['expectation_price', 'est_market_value']);
@@ -99,6 +100,7 @@ export default function ConfirmSheet({ sheet, onDecided }: { sheet: CaptureSheet
   const [changing, setChanging] = useState(false);
   const [saving, setSaving] = useState(false);
   const open = useMemo(() => sheet.proposals.filter((r) => r.status === 'proposed'), [sheet.proposals]);
+  const canDecide = usePaCan().can('property_pa_updates', 'update');
 
   const submit = async () => {
     const decisions: Decision[] = [];
@@ -205,7 +207,10 @@ export default function ConfirmSheet({ sheet, onDecided }: { sheet: CaptureSheet
         })}
       </ul>
 
-      {open.length > 0 && (
+      {open.length > 0 && !canDecide && (
+        <p className="text-sm text-secondary-500">Someone with access to confirm PA changes decides these.</p>
+      )}
+      {open.length > 0 && canDecide && (
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setChanging(!changing)}>
             {changing ? 'Done changing' : 'Change something'}

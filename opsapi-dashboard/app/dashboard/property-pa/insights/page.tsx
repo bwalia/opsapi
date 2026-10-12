@@ -14,11 +14,22 @@ import { ErrorNote, Spinner, Stat, dateText } from '@/components/property-deals/
 import { usePdData } from '@/components/property-deals/usePd';
 import { paService } from '@/services/property-pa.service';
 import { pdErrorText } from '@/services/property-deals.service';
+import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
 const secs = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v < 120 ? `${v}s` : `${Math.round(v / 60)} min`);
 
+// Metrics, the AI change history and the GoHighLevel sync are for managers (property_pa_knowledge.manage).
 export default function InsightsPage() {
+  return (
+    <PaPage module="property_pa_knowledge" manager>
+      <Insights />
+    </PaPage>
+  );
+}
+
+function Insights() {
+  const { can } = usePaCan();
   const metrics = usePdData(() => paService.metrics(30), []);
   const status = usePdData(() => paService.status(), []);
   const audit = usePdData(() => paService.audit({ per_page: 50 }), []);
@@ -36,7 +47,7 @@ export default function InsightsPage() {
     <div className="space-y-6">
       <PageHeader title="PA insights" description="Is the PA helping? Last 30 days" icon={<BarChart3 className="h-6 w-6" />}
         actions={<Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={() => { metrics.refresh(); status.refresh(); audit.refresh(); }}>Refresh</Button>} />
-      <ErrorNote error={metrics.error} />
+      <ErrorNote product="Property PA" error={metrics.error} />
       {metrics.loading && !m ? <Spinner /> : m && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Notes captured" value={m.capture.captures} hint={`${m.capture.proposals} changes proposed, ${m.capture.waiting} waiting`} />
@@ -55,7 +66,7 @@ export default function InsightsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="space-y-2">
           <h3 className="font-semibold text-secondary-900">Go-live checklist {status.data && <Badge size="sm" variant={status.data.ready ? 'success' : 'warning'} className="ml-2">{status.data.ready ? 'ready' : 'not ready'}</Badge>}</h3>
-          <ErrorNote error={status.error} />
+          <ErrorNote product="Property PA" error={status.error} />
           <ul className="space-y-1 text-sm">
             {(status.data?.checks || []).map((c) => (
               <li key={c.key} className="flex items-start gap-2">
@@ -69,10 +80,14 @@ export default function InsightsPage() {
           <h3 className="font-semibold text-secondary-900">Integrations</h3>
           <p className="text-sm text-secondary-600">Inbound email from people you work with goes onto their timeline every 5 minutes; GoHighLevel contacts are pulled every hour.</p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" leftIcon={<Mail className="h-4 w-4" />}
-              onClick={() => run(paService.importMail, (r: { imported: number }) => `${r.imported} email(s) added to timelines`)}>Import email now</Button>
+            {can('property_pa_records', 'create') && (
+              <Button size="sm" variant="outline" leftIcon={<Mail className="h-4 w-4" />}
+                onClick={() => run(paService.importMail, (r: { imported: number }) => `${r.imported} email(s) added to timelines`)}>Import email now</Button>
+            )}
             <Button size="sm" variant="outline" leftIcon={<Users className="h-4 w-4" />}
-              onClick={() => run(paService.syncGhl, (r: { created: number; updated: number }) => `GoHighLevel: ${r.created} new, ${r.updated} updated`)}>Sync GoHighLevel now</Button>
+              onClick={() => run(paService.syncGhl, (r: { queued: boolean; created?: number; updated?: number }) => (r.queued || r.created === undefined
+                ? 'GoHighLevel sync started. New contacts appear within a few minutes.'
+                : `GoHighLevel: ${r.created} new, ${r.updated ?? 0} updated`))}>Sync GoHighLevel now</Button>
           </div>
         </Card>
       </div>
@@ -80,7 +95,7 @@ export default function InsightsPage() {
       <Card className="space-y-2">
         <h3 className="font-semibold text-secondary-900">AI change history</h3>
         <p className="text-xs text-secondary-500">Every change the PA made: where it came from, the model and prompt version, and who confirmed it.</p>
-        <ErrorNote error={audit.error} />
+        <ErrorNote product="Property PA" error={audit.error} />
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-left text-xs text-secondary-500">

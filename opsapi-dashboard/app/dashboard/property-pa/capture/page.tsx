@@ -15,14 +15,17 @@ import { Button, Card, Input, Textarea } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import ConfirmSheet from '@/components/property-pa/ConfirmSheet';
 import { useVoice } from '@/hooks/useVoice';
-import { paService, type CaptureSheet, type PersonHit } from '@/services/property-pa.service';
+import { paService, pollWhileRunning, type CaptureSheet, type PersonHit } from '@/services/property-pa.service';
+import PaPage, { usePaCan, PA_PRODUCT } from '@/components/property-pa/PaPage';
 import { pdError, pdErrorText, type PdError } from '@/services/property-deals.service';
 
 export default function CapturePage() {
   return (
-    <Suspense fallback={null}>
-      <Capture />
-    </Suspense>
+    <PaPage>
+      <Suspense fallback={null}>
+        <Capture />
+      </Suspense>
+    </PaPage>
   );
 }
 
@@ -39,7 +42,32 @@ function Capture() {
   const [sheet, setSheet] = useState<CaptureSheet | null>(null);
   const [error, setError] = useState<PdError | undefined>();
   const voice = useVoice();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { can } = usePaCan();
+  // /captures/start: records.create, and the proposals it writes need updates.create.
+  const canCapture = can('property_pa_records', 'create') && can('property_pa_updates', 'create');
+  const pollCtl = useRef<AbortController | null>(null);
+  const [slow, setSlow] = useState(false); // still running after the poll's 10 minutes
+
+  // Poll the sheet while the PA works (it can take minutes on the private model). One chain at a
+  // time: a new poll, "Capture another" or leaving the page stops the previous one.
+  const poll = useCallback(async (id: string, onFirst?: (s: CaptureSheet) => void) => {
+    pollCtl.current?.abort();
+    const ctl = new AbortController();
+    pollCtl.current = ctl;
+    setSlow(false);
+    let first = onFirst;
+    try {
+      const end = await pollWhileRunning(() => paService.sheet(id), (s) => s.run?.status === 'running', (s) => {
+        first?.(s);
+        first = undefined;
+        setSheet(s);
+      }, { signal: ctl.signal });
+      if (end === 'timeout') setSlow(true);
+    } catch (e) {
+      if (!ctl.signal.aborted) setError(pdError(e));
+    }
+  }, []);
+  useEffect(() => () => pollCtl.current?.abort(), []);
 
   // ?opportunity=<uuid> preselects (links from the opportunity page).
   useEffect(() => {
@@ -53,13 +81,8 @@ function Capture() {
     const id = params.get('interaction');
     if (!id) return;
     setInteraction(id);
-    paService.sheet(id).then((s) => {
-      setText(s.interaction.transcript || s.interaction.raw_text || '');
-      setSheet(s);
-      if (s.run?.status === 'running') timer.current = setTimeout(() => poll(id), 4000);
-    }).catch((e) => setError(pdError(e)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+    void poll(id, (s) => setText(s.interaction.transcript || s.interaction.raw_text || ''));
+  }, [params, poll]);
 
   useEffect(() => {
     if (q.trim().length < 2) {
@@ -71,18 +94,6 @@ function Capture() {
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
-
-  // Poll the sheet while the PA works (it can take minutes on the private model).
-  const poll = useCallback(async (id: string) => {
-    try {
-      const s = await paService.sheet(id);
-      setSheet(s);
-      if (s.run?.status === 'running') timer.current = setTimeout(() => poll(id), 4000);
-    } catch (e) {
-      setError(pdError(e));
-    }
-  }, []);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const record = async () => {
     try {
@@ -96,7 +107,7 @@ function Capture() {
         await voice.listen();
       }
     } catch (e) {
-      toast.error(pdErrorText(e));
+      toast.error(window.isSecureContext ? pdErrorText(e) : 'The microphone needs a secure (https) page.');
     }
   };
 
@@ -107,7 +118,7 @@ function Capture() {
       const r = await paService.startCapture({ text: text.trim(), channel: fromVoice ? 'voice' : 'note', opportunity_uuid: opp?.uuid });
       setInteraction(r.interaction.uuid);
       setPaNote(r.pa.error ? `Saved to the timeline. The PA wasn't asked: ${r.pa.error}` : null);
-      if (!r.pa.error) poll(r.interaction.uuid);
+      if (!r.pa.error) void poll(r.interaction.uuid);
     } catch (e) {
       setError(pdError(e));
     } finally {
@@ -116,7 +127,8 @@ function Capture() {
   };
 
   const reset = () => {
-    if (timer.current) clearTimeout(timer.current);
+    pollCtl.current?.abort();
+    setSlow(false);
     setText('');
     setFromVoice(false);
     setInteraction(null);
@@ -124,13 +136,16 @@ function Capture() {
     setPaNote(null);
   };
 
-  const running = sheet?.run?.status === 'running' || (interaction && !sheet && !paNote);
+  const running = !slow && (sheet?.run?.status === 'running' || (interaction && !sheet && !paNote));
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader title="Capture" description="Say or type what happened. Your PA picks out the changes; you confirm them." icon={<NotebookPen className="h-6 w-6" />} />
-      <ErrorNote error={error} />
+      <ErrorNote product={PA_PRODUCT} error={error} />
 
-      {!interaction && (
+      {!interaction && !canCapture && (
+        <ErrorNote product={PA_PRODUCT} error={{ status: 403, message: 'No access' }} />
+      )}
+      {!interaction && canCapture && (
         <Card className="space-y-4">
           <div>
             <p className="mb-1 text-sm font-medium text-secondary-700">Who is it about?</p>
@@ -168,7 +183,7 @@ function Capture() {
                 {voice.state === 'listening' ? 'Stop' : voice.state === 'transcribing' ? 'Writing it down…' : 'Record a voice note'}
               </Button>
             ) : (
-              <span className="text-xs text-secondary-400">Voice notes need the speech server (PA_STT_URL).</span>
+              <span className="text-xs text-secondary-400">Voice notes aren&apos;t available here yet. Type the note instead.</span>
             )}
             <Button leftIcon={<Send className="h-4 w-4" />} isLoading={busy} disabled={!text.trim() || voice.state !== 'idle'} onClick={send}>
               Send to my PA
@@ -186,6 +201,9 @@ function Capture() {
             <p className="flex items-center gap-2 text-sm text-secondary-500">
               <Loader2 className="h-4 w-4 animate-spin" /> Your PA is reading it. On our private model this can take a few minutes; you can leave this page and come back from the opportunity.
             </p>
+          )}
+          {slow && (
+            <p className="text-sm text-warning-700">Still working on it. Refresh this page later, or come back from the opportunity.</p>
           )}
           {sheet?.run?.status === 'failed' && <p className="text-sm text-error-600">The PA couldn&apos;t finish: {sheet.run.error}</p>}
           {sheet && sheet.run?.status === 'succeeded' && sheet.proposals.length === 0 && (
