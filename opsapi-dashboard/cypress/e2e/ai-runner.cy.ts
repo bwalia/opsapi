@@ -124,7 +124,7 @@ describe('AI Runs', () => {
 
     heartbeat().then((d) => { runnerUuid = d.runner_uuid; });
     cy.reload();
-    cy.contains('tr', runnerName, { timeout: 20000 }).should('contain', 'Online');
+    cy.contains('tr', runnerName, { timeout: 20000 }).should('contain', 'Online').and('not.contain', 'never');
   });
 
   it('starts the task with AI from the task page, after a preview', () => {
@@ -184,6 +184,8 @@ describe('AI Runs', () => {
     visit(`/dashboard/ai-runner/runs/${runUuid}`);
     cy.contains('h1', taskTitle, { timeout: 20000 });
     cy.contains('Running');
+    cy.contains('dt', /^Started$/i).next().invoke('text').should('not.eq', '—');
+    cy.contains('dt', /^Requested by$/i).next().invoke('text').should('not.eq', '—');
     cy.get('[role="log"]').should('contain', 'e2e: reading the task').and('contain', 'e2e: editing README.md');
     cy.contains('summary', 'Prompt').click();
     cy.contains('pre', taskTitle);

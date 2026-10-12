@@ -97,7 +97,7 @@ function RunDetail({ uuid }: { uuid: string }) {
     ['Branch', <span key="b" className="break-all font-mono text-xs">{run.work_branch || '—'}{run.base_branch ? ` (from ${run.base_branch})` : ''}</span>],
     ['Output', outputModeLabel(run.output_mode)],
     ['Result', <RunResult key="r" run={run} />],
-    ['Commit', run.commit_sha ? <span key="c" className="font-mono text-xs">{run.commit_sha}</span> : '—'],
+    ['Commit', run.commit_sha ? <span key="c" className="break-all font-mono text-xs">{run.commit_sha}</span> : '—'],
     ['Queued', when(run.created_at)],
     ['Started', when(run.started_at)],
     ['Finished', when(run.finished_at)],

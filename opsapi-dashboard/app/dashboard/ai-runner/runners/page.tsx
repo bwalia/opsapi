@@ -186,9 +186,14 @@ function Runners() {
   const columns = [
     { key: 'name', header: 'Name', render: (r: Runner) => <span className="font-medium">{r.name}</span> },
     { key: 'status', header: 'Status', render: (r: Runner) => <RunnerStatusBadge status={r.status} /> },
-    { key: 'host', header: 'Host', render: (r: Runner) => r.host || '—' },
-    { key: 'os', header: 'OS', render: (r: Runner) => r.os || '—' },
-    { key: 'version', header: 'Version', render: (r: Runner) => r.version || '—' },
+    {
+      key: 'machine', header: 'Machine', render: (r: Runner) => (
+        <div>
+          <div>{r.host || '—'}</div>
+          {(r.os || r.version) && <div className="text-xs text-secondary-500">{[r.os, r.version && `v${r.version}`].filter(Boolean).join(' · ')}</div>}
+        </div>
+      ),
+    },
     { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => ago(r.last_heartbeat_at) },
     {
       key: 'profiles', header: 'Profiles',

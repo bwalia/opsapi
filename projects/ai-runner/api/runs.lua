@@ -210,6 +210,10 @@ return function(app)
         local runner = R.runner(ns, run.runner_uuid)
         v.runner = runner and { uuid = runner.uuid, name = runner.name, status = R.runner_status(runner),
             host = U.null(runner.host) } or cjson.null
+        local u = run.requested_by and db.query([[SELECT uuid, email,
+            NULLIF(TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), '') AS name
+            FROM users WHERE uuid = ?]], run.requested_by)[1]
+        v.requester = u and { uuid = u.uuid, name = U.null(u.name), email = U.null(u.email) } or cjson.null
         return sdk.ok(v)
     end)))
 

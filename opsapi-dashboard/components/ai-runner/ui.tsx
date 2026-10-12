@@ -168,6 +168,7 @@ export function toDate(v?: string | null): Date | null {
   if (!v) return null;
   let s = v.includes('T') ? v : v.replace(' ', 'T');
   if (!/([zZ]|[+-]\d\d(:?\d\d)?)$/.test(s)) s += 'Z';
+  s = s.replace(/(T[\d:.]+[+-]\d\d)(\d\d)?$/, (_, t: string, m?: string) => `${t}:${m || '00'}`);
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
