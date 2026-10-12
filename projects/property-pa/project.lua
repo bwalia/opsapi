@@ -27,6 +27,7 @@ end
 return {
     code = "property_pa",          -- stable id: keys migrations + RBAC; never rename
     name = "Property PA",
+    icon = "Sparkles",             -- its sidebar group
     version = "0.1.0",
     description = "AI PA for property professionals: talk to your PA, the CRM updates underneath.",
     sdk_version = 1,

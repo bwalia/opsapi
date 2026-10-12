@@ -14,6 +14,7 @@ end
 return {
     code = "property_deals",      -- stable id: keys migrations + RBAC; never rename
     name = "Property Deals",
+    icon = "Home",                -- its sidebar group
     version = "0.1.0",
     description = "Deals from first lead to completion: workflow, deadlines, compliance, suppliers and AI agents.",
     sdk_version = 1,

@@ -16,7 +16,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react';
 import { useMenuStore, useMenuHydrated } from '@/store/menu.store';
 import { useNamespaceStore } from '@/store/namespace.store';
 import { useAuthStore } from '@/store/auth.store';
-import type { MenuItem, MenuNamespaceContext } from '@/types';
+import type { MenuGroup, MenuItem, MenuNamespaceContext } from '@/types';
 
 // Import only the type and default icon - other icons loaded dynamically
 import { HelpCircle, type LucideIcon } from 'lucide-react';
@@ -139,6 +139,8 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Sunrise: icons.Sunrise,
     ShieldCheck: icons.ShieldCheck,
     Newspaper: icons.Newspaper,
+    BarChart: icons.BarChart,
+    Sparkles: icons.Sparkles,
   };
   NORMALIZED_MAP = {};
   for (const key of Object.keys(ICON_MAP)) {
@@ -168,6 +170,38 @@ export interface MenuItemWithIcon extends MenuItem {
   IconComponent: LucideIcon;
 }
 
+/** A sidebar group with its resolved icon. */
+export interface MenuGroupWithIcon extends MenuGroup {
+  IconComponent: LucideIcon;
+}
+
+export interface MenuSection {
+  group: MenuGroupWithIcon;
+  items: MenuItemWithIcon[];
+}
+
+/**
+ * Split menu items into the ones shown at the top (no group, or a group the
+ * response didn't describe — e.g. a menu cached before groups existed) and
+ * the collapsible groups, in the backend's group order. Empty groups are dropped.
+ */
+export function groupMenu(
+  items: MenuItemWithIcon[],
+  groups: MenuGroupWithIcon[],
+): { top: MenuItemWithIcon[]; sections: MenuSection[] } {
+  const byKey = new Map(groups.map((g) => [g.key, [] as MenuItemWithIcon[]]));
+  const top: MenuItemWithIcon[] = [];
+  for (const item of items) {
+    const bucket = item.group ? byKey.get(item.group) : undefined;
+    if (bucket) bucket.push(item);
+    else top.push(item);
+  }
+  const sections = groups
+    .map((group) => ({ group, items: byKey.get(group.key) || [] }))
+    .filter((s) => s.items.length > 0);
+  return { top, sections };
+}
+
 /**
  * Hook return type
  */
@@ -176,6 +210,8 @@ export interface UseMenuReturn {
   mainMenu: MenuItemWithIcon[];
   secondaryMenu: MenuItemWithIcon[];
   allMenu: MenuItemWithIcon[];
+  // Collapsible sidebar groups, in display order (see groupMenu)
+  groups: MenuGroupWithIcon[];
 
   // Loading states
   isLoading: boolean;
@@ -267,6 +303,7 @@ export function useMenu(): UseMenuReturn {
   const rawMainMenu = useMenuStore((state) => state.mainMenu ?? []);
   const rawSecondaryMenu = useMenuStore((state) => state.secondaryMenu ?? []);
   const rawMenu = useMenuStore((state) => state.menu ?? []);
+  const rawGroups = useMenuStore((state) => state.groups ?? []);
   const isLoading = useMenuStore((state) => state.isLoading ?? false);
   const error = useMenuStore((state) => state.error ?? null);
   const namespaceContext = useMenuStore((state) => state.namespaceContext ?? null);
@@ -317,6 +354,13 @@ export function useMenu(): UseMenuReturn {
   const allMenu = useMemo(
     () => transformMenuItems(rawMenu),
     [rawMenu, iconsLoaded]
+  );
+
+  const groups = useMemo(
+    () => (Array.isArray(rawGroups) ? rawGroups : [])
+      .filter((g): g is MenuGroup => !!g && typeof g.key === 'string')
+      .map((g) => ({ ...g, IconComponent: getIconComponent(g.icon) })),
+    [rawGroups, iconsLoaded]
   );
 
   // Refresh menu handler with error handling
@@ -407,6 +451,7 @@ export function useMenu(): UseMenuReturn {
     mainMenu,
     secondaryMenu,
     allMenu,
+    groups,
     isLoading,
     isHydrated: Boolean(menuHydrated && namespaceHydrated && authHydrated),
     error,

@@ -123,6 +123,7 @@ The endpoints also appear in Swagger at `/swagger`, under a tag named after the 
 return {
     code = "helpdesk",        -- required. Stable id: keys migrations + RBAC. Never rename.
     name = "Helpdesk",        -- required. Shown in Swagger and the admin API.
+    icon = "LifeBuoy",        -- optional: icon of its sidebar group (default Puzzle)
     version = "1.2.0",
     description = "Support tickets",
     sdk_version = 1,          -- SDK version the plugin targets (default 1)
@@ -358,7 +359,8 @@ menu = {
 | `resource` | The `sdk.crud` path without the leading `/`. The page lives at `/dashboard/plugins/<code-with-hyphens>/<resource>`. |
 | `module` | One of the plugin's `modules`. The item only shows to roles holding `<module>.read`, and each namespace can hide it in its menu settings. |
 | `icon` | Optional Lucide icon name (default `Puzzle`). Besides the icons built-in modules use, the dashboard ships: Puzzle, LifeBuoy, Ticket, Inbox, Mail, Bell, Calendar, CalendarDays, CheckSquare, ListTodo, Folder, Archive, Box, Database, Layers, Tag, Bookmark, Star, Flag, Receipt, Wallet, CreditCard, Car, Plane, Camera, Image, Link, Megaphone, Target, TrendingUp, PieChart, Activity, Zap, Award, Gift, Lightbulb, Bug, Code, Server, Cloud, Headphones, Stethoscope, Utensils, Leaf, Hammer, Handshake, Newspaper. Unknown names show a generic icon. |
-| `priority` | Optional sort position. By default plugin items come after the built-in ones. |
+| `priority` | Optional sort position within its group. By default plugin items come after the built-in ones. |
+| `group` | Optional. The sidebar shows a plugin's pages in a collapsible group named after the plugin (icon: the manifest's `icon`). Set `group` to one of the built-in groups (`sales`, `finance`, `commerce`, `work`, `field_service`, `healthcare`, `tax`, `content`, `admin`, `developer`) to file a page there instead. |
 
 Shape the page in `sdk.crud`:
 

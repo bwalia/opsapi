@@ -17,6 +17,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
+  MenuGroup,
   MenuItem,
   MenuResponse,
   MenuNamespaceContext,
@@ -36,6 +37,7 @@ export interface MenuState {
   menu: MenuItem[];
   mainMenu: MenuItem[];
   secondaryMenu: MenuItem[];
+  groups: MenuGroup[];
 
   // Loading and error states
   isLoading: boolean;
@@ -93,6 +95,7 @@ const initialState: MenuState = {
   menu: [],
   mainMenu: [],
   secondaryMenu: [],
+  groups: [],
   isLoading: false,
   error: null,
   lastFetched: null,
@@ -129,6 +132,7 @@ function parseMenuResponse(response: MenuResponse | null | undefined): Partial<M
       menu: [],
       mainMenu: [],
       secondaryMenu: [],
+      groups: [],
       namespaceContext: null,
       permissions: null,
       isAdmin: false,
@@ -139,6 +143,7 @@ function parseMenuResponse(response: MenuResponse | null | undefined): Partial<M
     menu: Array.isArray(response.menu) ? response.menu : [],
     mainMenu: Array.isArray(response.main_menu) ? response.main_menu : [],
     secondaryMenu: Array.isArray(response.secondary_menu) ? response.secondary_menu : [],
+    groups: Array.isArray(response.groups) ? response.groups : [],
     namespaceContext: response.namespace ?? null,
     permissions: response.permissions ?? null,
     isAdmin: Boolean(response.is_admin),
@@ -234,6 +239,7 @@ export const useMenuStore = create<MenuStore>()(
             menu: [],
             mainMenu: [],
             secondaryMenu: [],
+            groups: [],
             lastFetched: null,
             lastNamespaceUuid: null,
             lastUserUuid: null,
@@ -325,6 +331,7 @@ export const useMenuStore = create<MenuStore>()(
         menu: state.menu,
         mainMenu: state.mainMenu,
         secondaryMenu: state.secondaryMenu,
+        groups: state.groups,
         lastFetched: state.lastFetched,
         lastNamespaceUuid: state.lastNamespaceUuid,
         lastUserUuid: state.lastUserUuid,
