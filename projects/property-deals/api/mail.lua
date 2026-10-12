@@ -4,8 +4,10 @@
 --   GET    /mail-connectors/:id
 --   PUT    /mail-connectors/:id            only fields sent change; secret "" clears it
 --   DELETE /mail-connectors/:id
---   POST   /mail-connectors/:id/sync       fetch now → { fetched, stored, matched }
---   GET    /inbound-messages               ?deal_uuid=&unmatched=true  newest first
+--   POST   /mail-connectors/:id/sync       fetch now (up to 20 s; the rest on the next run)
+--                                          → { fetched, stored, matched, failed, error? }
+--   GET    /inbound-messages               ?deal_uuid=&unmatched=true&page=&per_page=  newest first (the whole
+--                                          inbox: property_deals_leads.read)
 --   POST   /inbound-messages               log an email by hand (pasted / forwarded) { from_address, subject,
 --                                          body_text, deal_uuid?, received_at? } — same matching as a connector
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -60,22 +62,22 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local row = Mail.get(ns, self.params.id)
         if not row then return sdk.not_found("Mail connector") end
-        local res, err = Mail.sync(ns, row)
-        if not res then return sdk.error(502, err) end
+        local res, err = Mail.sync(ns, row, { budget = 20 })
+        if not res then return sdk.error(502, err) end -- err is short and generic; the detail is in the log
         return sdk.ok(res)
     end)))
 
-    app:get("/inbound-messages", sdk.handler({ permission = "property_deals_tasks.read" }, function(self)
+    app:get("/inbound-messages", sdk.handler({ permission = "property_deals_leads.read" }, function(self)
         local ns = sdk.namespace_id(self)
         local where, args = { "namespace_id = ?" }, { ns }
         if U.is_uuid(self.params.deal_uuid) then where[#where + 1] = "deal_uuid = ?"; args[#args + 1] = self.params.deal_uuid end
         if self.params.unmatched == "true" then where[#where + 1] = "deal_uuid IS NULL" end
-        local per_page = math.max(1, math.min(100, tonumber(self.params.per_page) or 25))
-        args[#args + 1] = per_page
+        local page, per_page, offset = U.page(self.params, 25, 100)
+        args[#args + 1], args[#args + 2] = per_page, offset
         local rows = db.query("SELECT uuid, connector_uuid, from_address, from_name, subject, received_at, deal_uuid, matched_by, "
             .. "chase_uuid, agent_run_uuid, processed_at, LEFT(body_text, 2000) AS body_text FROM property_deals_inbound_messages WHERE "
-            .. table.concat(where, " AND ") .. " ORDER BY received_at DESC LIMIT ?", unpack(args))
-        return sdk.ok(sdk.array(rows))
+            .. table.concat(where, " AND ") .. " ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?", unpack(args))
+        return sdk.ok(sdk.array(rows), { page = page, per_page = per_page })
     end))
 
     app:post("/inbound-messages", sdk.handler({ permission = "property_deals_tasks.create" }, U.guard_create(function(self)

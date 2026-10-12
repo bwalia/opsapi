@@ -12,6 +12,11 @@
 --   imap  { host, port=993, ssl=true, username, mailbox="INBOX" }   password
 --   gmail { client_id, token_url?, api_base? }                     JSON { client_secret, refresh_token }
 --   m365  { tenant_id, client_id, mailbox, token_url?, api_base? } client secret
+-- Each run reads up to MAX_PER_RUN messages per mailbox, oldest first, within a time budget; the
+-- cursor only moves past what was processed, so a busy inbox catches up over the next runs. One
+-- message that can't be stored is logged, kept as a row with matched_by "error" and skipped: it
+-- never blocks the mailbox. Errors shown to people (and last_error) are short and generic; what a
+-- server said goes to the log.
 local cjson = require("cjson")
 local db = require("lapis.db")
 local U = require("property_deals.util")
@@ -20,7 +25,8 @@ local Box = require("helper.secret-box")
 local M = {}
 
 local PURPOSE = "property_deals_mail"
-local MAX_PER_SYNC = 25
+local MAX_PER_RUN = 100       -- messages per mailbox per run; the next run carries on
+local GMAIL_LIST_PAGES = 50   -- 500 ids a page
 
 local function null(v) return v == nil or v == db.NULL end
 
@@ -65,6 +71,20 @@ function M.save(ns, b, existing)
             local ok, err = Providers.url_ok(config[f])
             if not ok then errors["config." .. f] = err end
         end
+    end
+    if kind == "imap" then
+        for _, f in ipairs({ "host", "username", "mailbox" }) do
+            if type(config[f]) == "string" and config[f]:find("[%z\r\n]") then
+                errors["config." .. f] = "no line breaks"
+            end
+        end
+        if type(config.host) == "string" and not config.host:match("^[%w%-%.]+$") then
+            errors["config.host"] = "a host name, e.g. imap.example.com"
+        end
+        if config.ssl == false and os.getenv("OPSAPI_MAIL_ALLOW_PRIVATE") ~= "true" then
+            errors["config.ssl"] = "IMAP without TLS sends the password in clear; use ssl (port 993)"
+        end
+        if type(b.secret) == "string" and b.secret:find("[%z\r\n]") then errors.secret = "no line breaks" end
     end
     if b.config ~= nil then row.config = cjson.encode(config) end
     if b.secret ~= nil then
@@ -114,6 +134,10 @@ local function decode_part(body, encoding)
     return body
 end
 
+local function charset(content_type)
+    return content_type and content_type:match('[Cc][Hh][Aa][Rr][Ss][Ee][Tt]="?([^";%s]+)')
+end
+
 local function strip_html(s)
     s = s:gsub("<[Ss][Tt][Yy][Ll][Ee].-</[Ss][Tt][Yy][Ll][Ee]>", ""):gsub("<[Bb][Rr]%s*/?>", "\n")
         :gsub("</[Pp]>", "\n"):gsub("<[^>]+>", ""):gsub("&nbsp;", " "):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
@@ -146,15 +170,15 @@ function M.mime_text(content_type, encoding, body, depth)
                     local t = M.mime_text(ct, te, b, depth + 1)
                     if t and t ~= "" then return t end
                 elseif ct:lower():find("text/plain", 1, true) then
-                    return decode_part(b, te)
+                    return U.utf8(decode_part(b, te), charset(ct))
                 elseif ct:lower():find("text/html", 1, true) then
-                    html = html or strip_html(decode_part(b, te))
+                    html = html or strip_html(U.utf8(decode_part(b, te), charset(ct)))
                 end
             end
         end
         return html or ""
     end
-    local text = decode_part(body, encoding)
+    local text = U.utf8(decode_part(body, encoding), charset(content_type))
     if content_type:lower():find("text/html", 1, true) then text = strip_html(text) end
     return text
 end
@@ -165,6 +189,30 @@ local function address(s)
     if addr then return addr:lower(), name ~= "" and name or nil end
     addr = s:match("([%w%._%%%+%-]+@[%w%.%-]+)")
     return addr and addr:lower() or nil, nil
+end
+
+--- Did the receiving server check the sender (DMARC pass in Authentication-Results)?
+local function dmarc_pass(v)
+    return type(v) == "string" and v:lower():find("dmarc=pass", 1, true) ~= nil
+end
+
+local function out_of_time(deadline)
+    ngx.update_time()
+    return ngx.now() >= deadline
+end
+
+--- Which of these external ids (prefix .. id) are stored already: { [id] = true }.
+local function known_ids(ns, prefix, ids)
+    local known = {}
+    for i = 1, #ids, 500 do
+        local lits = {}
+        for j = i, math.min(i + 499, #ids) do lits[#lits + 1] = db.escape_literal(prefix .. ids[j]) end
+        for _, r in ipairs(db.query("SELECT external_id FROM property_deals_inbound_messages WHERE namespace_id = ? "
+            .. "AND external_id IN (" .. table.concat(lits, ",") .. ")", ns)) do
+            known[r.external_id:sub(#prefix + 1)] = true
+        end
+    end
+    return known
 end
 
 -- ---------------------------------------------------------------------------
@@ -178,25 +226,43 @@ end
 local Imap = {}
 Imap.__index = Imap
 
+--- @return Imap | nil, public error, raw error
 function Imap.connect(cfg, password)
+    local host, port = tostring(cfg.host or ""), tonumber(cfg.port) or 993
+    if not host:match("^[%w%-%.]+$") then return nil, "IMAP host must be a host name" end
+    -- A line break would end the LOGIN command and start another one.
+    if tostring(cfg.username or ""):find("[%z\r\n]") or tostring(password or ""):find("[%z\r\n]") then
+        return nil, "IMAP username or password contains a line break"
+    end
+    if cfg.ssl == false and os.getenv("OPSAPI_MAIL_ALLOW_PRIVATE") ~= "true" then
+        return nil, "IMAP without TLS sends the password in clear; turn ssl on"
+    end
+    -- Resolve once, check, and connect to the address that was checked (no DNS rebinding).
+    local Webhooks = require("lib.outbound-webhooks")
+    local ips, rerr = Webhooks.resolve(host)
+    if not ips then return nil, "IMAP host not found", rerr end
+    if os.getenv("OPSAPI_AI_ALLOW_PRIVATE") ~= "true" then
+        local named_private = host == "localhost" or host:match("%.local$") or host:match("%.internal$")
+            or host:match("%.svc$") or not host:find(".", 1, true)
+        for _, ip in ipairs(ips) do
+            if named_private or not Webhooks.isPublicIPv4(ip) then return nil, "IMAP host must be a public server" end
+        end
+    end
     local sock = ngx.socket.tcp()
     sock:settimeout(15000)
-    local Providers = require("lib.ai-providers")
-    local okurl, uerr = Providers.url_ok("https://" .. cfg.host)
-    if not okurl then return nil, "IMAP host: " .. uerr end
-    local port = tonumber(cfg.port) or 993
-    local ok, err = sock:connect(cfg.host, port)
-    if not ok then return nil, "IMAP connect: " .. tostring(err) end
+    local ok, err = sock:connect(ips[1], port)
+    if not ok then return nil, "could not connect to the IMAP server", err end
     if cfg.ssl ~= false then
+        -- SNI and the certificate check use the name, not the address.
         local verify = os.getenv("PROPERTY_DEALS_IMAP_TLS_VERIFY") ~= "false"
-        local sok, serr = sock:sslhandshake(nil, cfg.host, verify)
-        if not sok then return nil, "IMAP TLS: " .. tostring(serr) end
+        local sok, serr = sock:sslhandshake(nil, host, verify)
+        if not sok then sock:close(); return nil, "IMAP TLS handshake failed", serr end
     end
     local self = setmetatable({ sock = sock, n = 0 }, Imap)
     local greeting, gerr = sock:receive("*l")
-    if not greeting then return nil, "IMAP greeting: " .. tostring(gerr) end
+    if not greeting then sock:close(); return nil, "the IMAP server didn't answer", gerr end
     local res, lerr = self:cmd("LOGIN " .. imap_quote(cfg.username) .. " " .. imap_quote(password or ""))
-    if not res then sock:close(); return nil, "IMAP login failed: " .. tostring(lerr) end
+    if not res then sock:close(); return nil, "IMAP sign-in failed", lerr end
     return self
 end
 
@@ -229,42 +295,53 @@ function Imap:close()
     self.sock:close()
 end
 
-local function fetch_imap(conn, secret, cursor)
+-- Fetchers return messages oldest first, each with the cursor to save once it is processed:
+--   msgs | nil, public error, raw error     (msgs with an error: fetching stopped part way)
+local function fetch_imap(conn, secret, cursor, deadline)
     local cfg = U.json(conn.config) or {}
-    local c, err = Imap.connect(cfg, secret)
-    if not c then return nil, err end
+    local c, err, raw = Imap.connect(cfg, secret)
+    if not c then return nil, err, raw end
     local function done(...) c:close(); return ... end
-    local sel, serr = c:cmd("EXAMINE " .. imap_quote(cfg.mailbox or "INBOX"))
-    if not sel then return done(nil, "IMAP mailbox: " .. tostring(serr)) end
+    local mailbox = tostring(cfg.mailbox or "INBOX")
+    if mailbox:find("[%z\r\n]") then return done(nil, "IMAP mailbox name contains a line break") end
+    local sel, serr = c:cmd("EXAMINE " .. imap_quote(mailbox))
+    if not sel then return done(nil, "IMAP mailbox not found", serr) end
     local last = tonumber(cursor.last_uid) or 0
     local search = last > 0 and ("UID SEARCH UID " .. (last + 1) .. ":*")
         or ("UID SEARCH SINCE " .. os.date("!%d-%b-%Y", ngx.time() - 7 * 86400))
     local found, ferr = c:cmd(search)
-    if not found then return done(nil, "IMAP search: " .. tostring(ferr)) end
+    if not found then return done(nil, "IMAP search failed", ferr) end
     local uids = {}
     for _, l in ipairs(found.lines) do
         local list = l:match("^%* SEARCH(.*)$")
         if list then for u in list:gmatch("%d+") do if tonumber(u) > last then uids[#uids + 1] = tonumber(u) end end end
     end
     table.sort(uids)
-    local msgs = {}
-    for i, uid in ipairs(uids) do
-        if i > MAX_PER_SYNC then break end
-        local r = c:cmd("UID FETCH " .. uid .. " (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID CONTENT-TYPE "
-            .. "CONTENT-TRANSFER-ENCODING)] BODY.PEEK[TEXT]<0.60000>)")
-        if r and #r.literals >= 1 then
+    local msgs, fetched = {}, 0
+    for _, uid in ipairs(uids) do
+        if fetched >= MAX_PER_RUN or out_of_time(deadline) then break end
+        local r, rerr = c:cmd("UID FETCH " .. uid .. " (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID "
+            .. "CONTENT-TYPE CONTENT-TRANSFER-ENCODING AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.60000>)")
+        -- The connection broke: stop here, the cursor stays on the last message read.
+        if not r then return done(msgs, "IMAP fetch failed", rerr) end
+        fetched = fetched + 1
+        if #r.literals >= 1 then
             local hs = headers_ci(r.literals[1])
             local from, from_name = address(header(hs, "From"))
             msgs[#msgs + 1] = {
                 external_id = "imap:" .. (header(hs, "Message%-Id") or (cfg.host .. ":" .. uid)),
-                from_address = from, from_name = from_name, to_address = header(hs, "To"), subject = header(hs, "Subject"),
-                received_at = header(hs, "Date"),
-                body_text = M.mime_text(header(hs, "Content%-Type"), header(hs, "Content%-Transfer%-Encoding"), r.literals[2] or ""),
+                from_address = from, from_name = from_name, to_address = header(hs, "To"),
+                subject = header(hs, "Subject"), received_at = header(hs, "Date"),
+                sender_verified = dmarc_pass(header(hs, "Authentication%-Results")),
+                body_text = M.mime_text(header(hs, "Content%-Type"), header(hs, "Content%-Transfer%-Encoding"),
+                    r.literals[2] or ""),
+                cursor = { last_uid = uid },
             }
+        else
+            msgs[#msgs + 1] = { skip = true, cursor = { last_uid = uid } } -- expunged meanwhile: nothing to read
         end
-        last = math.max(last, uid)
     end
-    return done(msgs, nil, { last_uid = last })
+    return done(msgs)
 end
 
 -- ---------------------------------------------------------------------------
@@ -272,19 +349,8 @@ end
 -- ---------------------------------------------------------------------------
 
 local function http_json(url, opts)
-    local ok, err = require("lib.ai-providers").url_ok(url)
-    if not ok then return nil, err end
-    local httpc = require("resty.http").new()
-    httpc:set_timeout(20000)
-    local res, rerr = httpc:request_uri(url, { method = opts.method or "GET", headers = opts.headers, body = opts.body,
+    return require("property_deals.http").json(url, { method = opts.method, headers = opts.headers, body = opts.body,
         ssl_verify = os.getenv("PROPERTY_DEALS_MAIL_TLS_VERIFY") ~= "false" })
-    if not res then return nil, tostring(rerr) end
-    local data = require("cjson.safe").decode(res.body or "")
-    if res.status >= 300 then
-        return nil, "HTTP " .. res.status .. ": " .. tostring(type(data) == "table" and (data.error_description
-            or (type(data.error) == "table" and data.error.message) or data.error) or res.body):sub(1, 200)
-    end
-    return data or {}
 end
 
 local function form(t)
@@ -303,75 +369,114 @@ end
 
 local function gmail_text(part)
     if type(part) ~= "table" then return nil end
-    local mime = tostring(part.mimeType or "")
-    if mime == "text/plain" and part.body and part.body.data then return b64url(part.body.data) end
+    local mime, cs = tostring(part.mimeType or ""), nil
+    for _, h in ipairs(type(part.headers) == "table" and part.headers or {}) do
+        if tostring(h.name):lower() == "content-type" then cs = charset(h.value) end
+    end
+    if mime == "text/plain" and part.body and part.body.data then return U.utf8(b64url(part.body.data), cs) end
     for _, p in ipairs(part.parts or {}) do
         local t = gmail_text(p)
         if t then return t end
     end
-    if mime == "text/html" and part.body and part.body.data then return strip_html(b64url(part.body.data)) end
+    if mime == "text/html" and part.body and part.body.data then
+        return strip_html(U.utf8(b64url(part.body.data), cs))
+    end
     return nil
 end
 
-local function fetch_gmail(conn, secret, cursor)
+local function fetch_gmail(conn, secret, cursor, deadline, ns)
     local cfg = U.json(conn.config) or {}
     local s = require("cjson.safe").decode(secret or "") or {}
     local tok, err = http_json(cfg.token_url or "https://oauth2.googleapis.com/token", { method = "POST",
         headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
         body = form({ grant_type = "refresh_token", client_id = cfg.client_id, client_secret = s.client_secret or "",
             refresh_token = s.refresh_token or "" }) })
-    if not tok or not tok.access_token then return nil, "Gmail sign-in: " .. tostring(err or "no access token") end
+    if not tok or not tok.access_token then return nil, "Gmail sign-in failed", err or "no access token" end
     local api = (cfg.api_base or "https://gmail.googleapis.com"):gsub("/+$", "")
     local auth = { Authorization = "Bearer " .. tok.access_token }
     local after = tonumber(cursor.after) or (ngx.time() - 7 * 86400)
-    local list, lerr = http_json(api .. "/gmail/v1/users/me/messages?maxResults=" .. MAX_PER_SYNC .. "&q="
-        .. ngx.escape_uri("in:inbox after:" .. after), { headers = auth })
-    if not list then return nil, "Gmail list: " .. tostring(lerr) end
-    local msgs, newest = {}, after
-    for _, m in ipairs(list.messages or {}) do
-        local full = http_json(api .. "/gmail/v1/users/me/messages/" .. ngx.escape_uri(m.id) .. "?format=full", { headers = auth })
-        if full then
+    -- Gmail lists newest first: page through the ids, then read the oldest first.
+    local ids, page, pages = {}, nil, 0
+    repeat
+        local list, lerr = http_json(api .. "/gmail/v1/users/me/messages?maxResults=500&q="
+            .. ngx.escape_uri("in:inbox after:" .. after) .. (page and ("&pageToken=" .. ngx.escape_uri(page)) or ""),
+            { headers = auth })
+        if not list then return nil, "Gmail: couldn't list messages", lerr end
+        for _, m in ipairs(type(list.messages) == "table" and list.messages or {}) do ids[#ids + 1] = tostring(m.id) end
+        page, pages = list.nextPageToken, pages + 1
+    until not page or pages >= GMAIL_LIST_PAGES
+    -- The cursor overlaps by a second, so skip what's stored already.
+    local known = known_ids(ns, "gmail:", ids)
+    local msgs = {}
+    for i = #ids, 1, -1 do
+        local id = ids[i]
+        if not known[id] then
+            if #msgs >= MAX_PER_RUN or out_of_time(deadline) then break end
+            local full, ferr = http_json(api .. "/gmail/v1/users/me/messages/" .. ngx.escape_uri(id) .. "?format=full",
+                { headers = auth })
+            if not full then return msgs, "Gmail: couldn't read a message", ferr end
             local h = {}
             for _, x in ipairs(full.payload and full.payload.headers or {}) do h[tostring(x.name):lower()] = x.value end
             local from, from_name = address(h.from)
             local ms = tonumber(full.internalDate)
-            if ms then newest = math.max(newest, math.floor(ms / 1000)) end
-            msgs[#msgs + 1] = { external_id = "gmail:" .. m.id, from_address = from, from_name = from_name, to_address = h.to,
-                subject = h.subject, received_at = ms and os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(ms / 1000)) or h.date,
-                body_text = gmail_text(full.payload) or full.snippet or "" }
+            msgs[#msgs + 1] = { external_id = "gmail:" .. id, from_address = from, from_name = from_name,
+                to_address = h.to, subject = h.subject,
+                received_at = ms and os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(ms / 1000)) or h.date,
+                sender_verified = dmarc_pass(h["authentication-results"]),
+                body_text = gmail_text(full.payload) or full.snippet or "",
+                cursor = ms and { after = math.floor(ms / 1000) - 1 } or nil }
         end
     end
-    return msgs, nil, { after = newest }
+    -- ponytail: at most 25,000 ids listed per run; a mailbox past that loses the oldest of them.
+    if page then return msgs, "Gmail: more than 25,000 new messages; only the newest were read" end
+    return msgs
 end
 
-local function fetch_m365(conn, secret, cursor)
+local function fetch_m365(conn, secret, cursor, deadline, ns)
     local cfg = U.json(conn.config) or {}
     local tok, err = http_json(cfg.token_url or ("https://login.microsoftonline.com/" .. ngx.escape_uri(cfg.tenant_id)
         .. "/oauth2/v2.0/token"), { method = "POST", headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
         body = form({ grant_type = "client_credentials", client_id = cfg.client_id, client_secret = secret or "",
             scope = "https://graph.microsoft.com/.default" }) })
-    if not tok or not tok.access_token then return nil, "Microsoft 365 sign-in: " .. tostring(err or "no access token") end
+    if not tok or not tok.access_token then return nil, "Microsoft 365 sign-in failed", err or "no access token" end
     local api = (cfg.api_base or "https://graph.microsoft.com"):gsub("/+$", "")
+    local headers = { Authorization = "Bearer " .. tok.access_token, Prefer = 'outlook.body-content-type="text"' }
     local since = cursor.since or os.date("!%Y-%m-%dT%H:%M:%SZ", ngx.time() - 7 * 86400)
-    local url = api .. "/v1.0/users/" .. ngx.escape_uri(cfg.mailbox) .. "/mailFolders/inbox/messages?$top=" .. MAX_PER_SYNC
-        .. "&$orderby=receivedDateTime&$filter=" .. ngx.escape_uri("receivedDateTime gt " .. since)
-        .. "&$select=id,internetMessageId,subject,from,toRecipients,receivedDateTime,body"
-    local list, lerr = http_json(url, { headers = { Authorization = "Bearer " .. tok.access_token,
-        Prefer = 'outlook.body-content-type="text"' } })
-    if not list then return nil, "Microsoft 365 list: " .. tostring(lerr) end
-    local msgs, newest = {}, since
-    for _, m in ipairs(list.value or {}) do
-        local f = type(m.from) == "table" and m.from.emailAddress or {}
-        local to = {}
-        for _, r in ipairs(m.toRecipients or {}) do to[#to + 1] = r.emailAddress and r.emailAddress.address end
-        if m.receivedDateTime and m.receivedDateTime > newest then newest = m.receivedDateTime end
-        local body = type(m.body) == "table" and m.body or {}
-        msgs[#msgs + 1] = { external_id = "m365:" .. tostring(m.internetMessageId or m.id),
-            from_address = f.address and f.address:lower(), from_name = f.name, to_address = table.concat(to, ", "),
-            subject = m.subject, received_at = m.receivedDateTime,
-            body_text = body.contentType == "html" and strip_html(body.content or "") or (body.content or "") }
+    -- Oldest first from the last one read ("ge": its second is read again and skipped as known).
+    local url = api .. "/v1.0/users/" .. ngx.escape_uri(cfg.mailbox) .. "/mailFolders/inbox/messages?$top=50"
+        .. "&$orderby=receivedDateTime&$filter=" .. ngx.escape_uri("receivedDateTime ge " .. since)
+        .. "&$select=id,internetMessageId,subject,from,toRecipients,receivedDateTime,body,internetMessageHeaders"
+    local msgs = {}
+    while url and #msgs < MAX_PER_RUN and not out_of_time(deadline) do
+        local list, lerr = http_json(url, { headers = headers })
+        if not list then
+            if #msgs == 0 then return nil, "Microsoft 365: couldn't list messages", lerr end
+            return msgs, "Microsoft 365: couldn't list messages", lerr
+        end
+        local page, ext = type(list.value) == "table" and list.value or {}, {}
+        for _, m in ipairs(page) do ext[#ext + 1] = tostring(m.internetMessageId or m.id) end
+        local known = known_ids(ns, "m365:", ext)
+        for i, m in ipairs(page) do
+            if #msgs >= MAX_PER_RUN then break end
+            if not known[ext[i]] then
+                local f = type(m.from) == "table" and m.from.emailAddress or {}
+                local to, auth = {}, nil
+                for _, r in ipairs(m.toRecipients or {}) do to[#to + 1] = r.emailAddress and r.emailAddress.address end
+                for _, h in ipairs(type(m.internetMessageHeaders) == "table" and m.internetMessageHeaders or {}) do
+                    if tostring(h.name):lower() == "authentication-results" then auth = auth or h.value end
+                end
+                local body = type(m.body) == "table" and m.body or {}
+                msgs[#msgs + 1] = { external_id = "m365:" .. ext[i],
+                    from_address = f.address and tostring(f.address):lower(), from_name = f.name,
+                    to_address = table.concat(to, ", "), subject = m.subject, received_at = m.receivedDateTime,
+                    sender_verified = dmarc_pass(auth),
+                    body_text = body.contentType == "html" and strip_html(body.content or "") or (body.content or ""),
+                    cursor = m.receivedDateTime and { since = m.receivedDateTime } or nil }
+            end
+        end
+        url = list["@odata.nextLink"]
     end
-    return msgs, nil, { since = newest }
+    return msgs
 end
 
 local FETCH = { imap = fetch_imap, gmail = fetch_gmail, m365 = fetch_m365 }
@@ -416,18 +521,29 @@ local function received(v)
     return ok and r and r.t or db.raw("NOW()")
 end
 
+--- Any text from a mailbox: valid UTF-8, at most n bytes (fits VARCHAR(n)).
+local function clean(v, n)
+    if v == nil or v == db.NULL then return nil end
+    return U.cut(U.utf8(v), n)
+end
+
 function M.ingest(ns, conn, m)
+    m.external_id, m.subject = clean(m.external_id, 255), clean(m.subject, 2000)
+    m.from_address, m.from_name = clean(m.from_address, 255), clean(m.from_name, 255)
+    m.to_address, m.body_text = clean(m.to_address, 4000), clean(m.body_text or "", 60000)
     local deal_uuid, matched_by = match_deal(ns, m)
     local lead_uuid = not deal_uuid and match_lead(ns, m) or nil
     if lead_uuid then matched_by = "lead" end
     local row = db.query([[
         INSERT INTO property_deals_inbound_messages (namespace_id, connector_uuid, external_id, from_address, from_name,
-            to_address, subject, received_at, body_text, deal_uuid, matched_by, lead_uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?, ?, ?, ?)
+            to_address, subject, received_at, body_text, deal_uuid, matched_by, lead_uuid, sender_verified)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?, ?, ?, ?, ?)
         ON CONFLICT (namespace_id, external_id) DO NOTHING RETURNING *
-    ]], ns, conn and conn.uuid or db.NULL, tostring(m.external_id):sub(1, 255), m.from_address or db.NULL,
+    ]], ns, conn and conn.uuid or db.NULL, m.external_id, m.from_address or db.NULL,
         m.from_name or db.NULL, m.to_address or db.NULL, m.subject or db.NULL, received(m.received_at),
-        tostring(m.body_text or ""):sub(1, 60000), deal_uuid or db.NULL, matched_by or db.NULL, lead_uuid or db.NULL)[1]
+        m.body_text, deal_uuid or db.NULL, matched_by or db.NULL, lead_uuid or db.NULL,
+        -- Pasted by a person (no connector): they vouch for the sender.
+        not conn or m.sender_verified == true)[1]
     if not row then return nil end
     if deal_uuid then
         -- The last unanswered chase to this sender (or this deal, for a reference match) now has its reply.
@@ -465,38 +581,79 @@ function M.ingest(ns, conn, m)
     return row
 end
 
---- Fetch new mail for one connector. @return { fetched, stored, matched } | nil, err
-function M.sync(ns, conn)
-    local secret = not null(conn.secret_sealed) and Box.open(conn.secret_sealed, PURPOSE) or nil
-    local fetch = FETCH[conn.kind]
-    local ok, msgs, err, cursor = pcall(fetch, conn, secret, U.json(conn.cursor) or {})
-    if not ok then msgs, err = nil, msgs end
-    if not msgs then
-        db.update("property_deals_mail_connectors", { last_error = tostring(err):sub(1, 500), updated_at = db.raw("NOW()") },
-            { id = conn.id })
-        return nil, tostring(err)
-    end
-    local stored, matched = 0, 0
-    for _, m in ipairs(msgs) do
-        local r = M.ingest(ns, conn, m)
-        if r then
-            stored = stored + 1
-            if not null(r.deal_uuid) then matched = matched + 1 end
-        end
-    end
-    local merged = U.json(conn.cursor) or {}
-    for k, v in pairs(cursor or {}) do merged[k] = v end
-    db.update("property_deals_mail_connectors", { cursor = cjson.encode(merged), last_synced_at = db.raw("NOW()"),
-        last_error = db.NULL, updated_at = db.raw("NOW()") }, { id = conn.id })
-    return { fetched = #msgs, stored = stored, matched = matched }
+--- A message that couldn't be stored: keep who / what / when (matched_by "error") so it isn't lost silently.
+local function record_failed(ns, conn, m)
+    local ok, err = pcall(db.query, [[
+        INSERT INTO property_deals_inbound_messages (namespace_id, connector_uuid, external_id, from_address, subject,
+            matched_by)
+        VALUES (?, ?, ?, ?, ?, 'error') ON CONFLICT (namespace_id, external_id) DO NOTHING
+    ]], ns, conn.uuid, clean(m.external_id, 255) or ("error:" .. ngx.now()), clean(m.from_address, 255) or db.NULL,
+        clean(m.subject, 2000) or db.NULL)
+    if not ok then ngx.log(ngx.ERR, "[property_deals] mail: could not record a failed message: ", tostring(err)) end
 end
 
-function M.sync_all(ns)
+--- Fetch new mail for one connector. opts: { deadline (ngx.now() based) | budget (seconds, default 240) }
+-- @return { fetched, stored, matched, failed, error? } | nil, error (both safe to show)
+function M.sync(ns, conn, opts)
+    opts = opts or {}
+    local deadline = opts.deadline or (ngx.now() + (opts.budget or 240))
+    local secret = not null(conn.secret_sealed) and Box.open(conn.secret_sealed, PURPOSE) or nil
+    local cursor = U.json(conn.cursor)
+    if type(cursor) ~= "table" then cursor = {} end
+    local ok, msgs, err, raw = pcall(FETCH[conn.kind], conn, secret, cursor, deadline, ns)
+    if not ok then msgs, err, raw = nil, "mail sync failed", msgs end
+    if err then
+        ngx.log(ngx.WARN, "[property_deals] mail ", conn.kind, " ", conn.uuid, ": ", err, ": ", tostring(raw))
+    end
+    if not msgs then
+        db.update("property_deals_mail_connectors", { last_error = err, updated_at = db.raw("NOW()") },
+            { id = conn.id })
+        return nil, err
+    end
+    local fetched, stored, matched, failed = 0, 0, 0, 0
+    for _, m in ipairs(msgs) do
+        if not m.skip then
+            fetched = fetched + 1
+            local iok, r = pcall(M.ingest, ns, conn, m)
+            if not iok then
+                failed = failed + 1
+                ngx.log(ngx.ERR, "[property_deals] mail ", conn.uuid, ": message ", tostring(m.external_id),
+                    " could not be stored: ", tostring(r))
+                record_failed(ns, conn, m)
+            elseif r then
+                stored = stored + 1
+                if not null(r.deal_uuid) then matched = matched + 1 end
+            end
+        end
+        -- Processed (or kept as failed): the next run starts after it.
+        for k, v in pairs(m.cursor or {}) do cursor[k] = v end
+    end
+    if failed > 0 and not err then
+        err = failed .. " message(s) could not be stored; they are listed with matched_by \"error\""
+    end
+    db.update("property_deals_mail_connectors", { cursor = cjson.encode(cursor), last_synced_at = db.raw("NOW()"),
+        last_error = err or db.NULL, updated_at = db.raw("NOW()") }, { id = conn.id })
+    return { fetched = fetched, stored = stored, matched = matched, failed = failed, error = err }
+end
+
+--- Every enabled connector, each in its share of the time budget; one failing never stops the others.
+function M.sync_all(ns, opts)
+    local deadline = ngx.now() + ((opts or {}).budget or 240)
     local out = { connectors = 0, stored = 0, errors = 0 }
-    for _, c in ipairs(db.query("SELECT * FROM property_deals_mail_connectors WHERE namespace_id = ? AND enabled", ns)) do
+    local conns = db.query([[SELECT * FROM property_deals_mail_connectors WHERE namespace_id = ? AND enabled
+        ORDER BY last_synced_at NULLS FIRST]], ns)
+    for i, c in ipairs(conns) do
         out.connectors = out.connectors + 1
-        local r = M.sync(ns, c)
-        if r then out.stored = out.stored + r.stored else out.errors = out.errors + 1 end
+        ngx.update_time()
+        local share = ngx.now() + math.max(0, deadline - ngx.now()) / (#conns - i + 1)
+        local ok, r = pcall(M.sync, ns, c, { deadline = share })
+        if not ok then
+            ngx.log(ngx.ERR, "[property_deals] mail sync ", c.uuid, ": ", tostring(r))
+            pcall(db.update, "property_deals_mail_connectors", { last_error = "mail sync failed",
+                updated_at = db.raw("NOW()") }, { id = c.id })
+        end
+        if ok and r then out.stored = out.stored + r.stored end
+        if not (ok and r) or r.error then out.errors = out.errors + 1 end
     end
     return out
 end
