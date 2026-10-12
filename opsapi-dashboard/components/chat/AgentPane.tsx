@@ -27,6 +27,7 @@ import { onChatEvent } from '@/store/chat-realtime.store';
 import { useVoice, useVoiceLevel, type LevelStore } from '@/hooks/useVoice';
 import AvatarFace, { type FaceMood } from './AvatarFace';
 import { AgentTaskCards, tasksFromActions } from './AgentTaskCards';
+import { StartWithAIButton } from '@/components/ai-runner/StartWithAIDialog';
 
 /** A same-origin or relative link -> its in-app path (client navigation); anything else -> null. */
 function inAppPath(href?: string): string | null {
@@ -406,7 +407,16 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
                       <MarkdownMessage text={t.content} />
                     )}
                   </div>
-                  {taskList && <AgentTaskCards tasks={taskList.tasks} today={taskList.today} />}
+                  {taskList && (
+                    <AgentTaskCards
+                      tasks={taskList.tasks}
+                      today={taskList.today}
+                      renderStartWithAI={(task) => (
+                        <StartWithAIButton compact taskUuid={task.uuid} projectUuid={task.project_uuid}
+                          taskLabel={`${task.task_number != null ? `#${task.task_number} ` : ''}${task.title}`} />
+                      )}
+                    />
+                  )}
                   {!mine && (
                     <button
                       type="button"
