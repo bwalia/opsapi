@@ -1,113 +1,196 @@
-# OpsAPI Kanban — MCP server
+# @opsapi/mcp — OpsAPI kanban for AI agents
 
-An [MCP](https://modelcontextprotocol.io) server that lets Claude Code (or any
-MCP-compatible agent) work an employee's OpsAPI kanban tasks:
+An [MCP](https://modelcontextprotocol.io) server that lets Claude Code, Cursor or
+any MCP-capable agent work with OpsAPI kanban **as you**: list your tasks for
+today, create and update tasks, move them across columns, search, log time and
+attach the PR when the work ships.
 
-- **read the employee's tasks** — "what are my tasks today?"
-- **log time per task** — builds a per-task timesheet so you can see how long a
-  task took
-- **attach the PR link** and mark a task done when the work ships
+It authenticates with a **personal API key** (`opsk_…`) that is bound to one
+user, so `list_my_tasks` returns *your* tasks and every write is done and
+logged as *you*, with your project permissions.
 
-The agent acts **as a specific employee**, so `list_my_tasks` returns *their*
-tasks and logged time is attributed to *them*.
+Two ways to run it, same tools:
 
-> 👉 **New here? Start with the plain-English setup guide:
-> [GETTING-STARTED.md](GETTING-STARTED.md).** This README is the full technical
-> reference.
+- **stdio** (default): the agent starts it locally with your key in its env.
+- **Streamable HTTP**: one shared service at `https://…/mcp`; each agent sends
+  its own key as `Authorization: Bearer opsk_…`. The service holds no key.
 
-## How it authenticates: a personal API key
+> New here? The plain-English setup guide is [GETTING-STARTED.md](GETTING-STARTED.md).
 
-OpsAPI API keys can be **bound to a user** (a "personal access token"). Such a
-key both authenticates the request *and* identifies the employee. A namespace
-admin creates one:
+## Tools
+
+| tool | arguments | what it does |
+|---|---|---|
+| `list_my_tasks` | `due?` (today · overdue · today_and_overdue · week · upcoming · none), `date?` (YYYY-MM-DD, default: today on the machine running the server), `priority?[]`, `status?[]` (open · in_progress · blocked · review), `project?`, `search?`, `limit?` | your open assigned tasks, most urgent first, with overdue flag and dashboard link |
+| `get_task` | `task_uuid` | one task: status, priority, project/board/column, description, PR, link |
+| `list_projects` | `search?`, `limit?` | projects you are a member of |
+| `list_boards` | `project` | a project's boards with their columns (name + numeric id) |
+| `create_task` | `project`, `title`, `description?`, `board?`, `column?`, `priority?`, `due_date?`, `assignees?[]` | creates a task; returns uuid, number and link |
+| `update_task` | `task_uuid`, `status?`, `priority?`, `title?`, `description?`, `due_date?`, `metadata?` | changes fields; `metadata` is **merged** into the existing metadata (`null` removes a key) |
+| `move_task` | `task_uuid`, `column`, `position?` | moves a task to a column of its board |
+| `search_tasks` | `query`, `project?`, `limit?` | full-text search across your projects, or one |
+| `log_time` | `task_uuid`, `minutes`, `description?`, `billable?` | adds a timesheet entry |
+| `set_task_pr` | `task_uuid`, `pr_url` | sets `metadata.pr_url` (other metadata kept) |
+| `complete_task` | `task_uuid`, `pr_url?`, `minutes?`, `note?` | marks completed, optionally attaching the PR and logging time |
+| `add_comment` | `task_uuid`, `content` | comments on a task |
+
+`project`, `board`, `column` and `assignees` accept an id/uuid or a name:
+
+- projects, boards, columns: exact name, or a unique part of it (`"redesign"`);
+- assignees: user uuid, email, full name or username of a **project member**,
+  matched exactly;
+- several matches or none → the tool fails, names the candidates, and **creates
+  nothing**, so the agent can ask you or retry with the id.
+
+Tools return a short text answer plus `structuredContent` (JSON) for clients
+that use it. Task links are dashboard paths (`/dashboard/projects/…/tasks/…`),
+or full URLs when `OPSAPI_DASHBOARD_URL` is set.
+
+`list_my_tasks` filters need an OpsAPI with the my-tasks filters; older servers
+ignore them and the tool says the list is unfiltered.
+
+## The personal API key
+
+A key bound to a user both authenticates and identifies that user. Scopes the
+tools need:
+
+```json
+{ "kanban": ["read", "create", "update"], "projects": ["read"] }
+```
+
+- `kanban` lets the key reach the kanban routes; `projects: read` is needed for
+  `list_my_tasks`, `list_projects`, project-name lookups and assignees.
+- Writes also need an **editor** role (owner/admin/member) on the project.
+- The raw key is shown **once** at creation.
+
+Make one in the dashboard (see [GETTING-STARTED.md](GETTING-STARTED.md)) or via
+the API with an owner session:
 
 ```http
 POST /api/v2/api-keys
-Authorization: Bearer <an admin's session JWT>
+Authorization: Bearer <owner session JWT>
 Content-Type: application/json
 
-{
-  "name": "alice — claude code",
-  "user_uuid": "<the employee's user uuid>",
-  "scopes": { "kanban": ["read", "update"], "projects": ["read"] }
-}
+{ "name": "alice — claude code", "user_uuid": "<alice's user uuid>",
+  "scopes": { "kanban": ["read", "create", "update"], "projects": ["read"] } }
 ```
 
-- `user_uuid` must be a member of the admin's namespace — this is what makes the
-  key act as that employee. Omit it and you get an ordinary machine key.
-- `scopes` **must** include `"kanban"` (to reach the kanban routes) and
-  `"projects": ["read"]` (for `list_my_tasks`). `"update"` on `kanban` is for
-  logging time / attaching PRs.
-- The response returns the raw `opsk_...` key **once** — store it now.
-
-Writes (log time, attach PR, complete) also require the employee to be an
-**editor** (owner/admin/member) on the task's project.
-
-## Configure the MCP server
-
-Environment variables:
-
-| var | required | example |
-|---|---|---|
-| `OPSAPI_URL` | yes | `https://int-opsapi.workstation.co.uk` |
-| `OPSAPI_API_KEY` | yes | the employee's `opsk_...` personal key |
-| `OPSAPI_NAMESPACE` | no | `1` or a slug/uuid — only if your deployment requires an explicit `X-Namespace-*` header (the key is already namespace-bound) |
-
-### Build
+## Run it: stdio
 
 ```bash
-cd mcp
-npm install
-npm run build
+cd mcp && npm ci && npm run build
 ```
 
-### Register in Claude Code
+| env | required | notes |
+|---|---|---|
+| `OPSAPI_URL` | yes | e.g. `https://int-opsapi.workstation.co.uk` |
+| `OPSAPI_API_KEY` | yes | your `opsk_…` key |
+| `OPSAPI_NAMESPACE` | no | your workspace's **numeric id or uuid** (sent as `X-Namespace-Id`). **Not the slug** — a slug gets 403. The key is already bound to its workspace, so usually leave it out. |
+| `OPSAPI_DASHBOARD_URL` | no | e.g. `https://int-opsapi-ui.workstation.co.uk`, to return full task links |
 
-Add to your MCP settings (`claude mcp add`, or the JSON config):
+**Claude Code:**
+
+```bash
+claude mcp add opsapi -s user \
+  -e OPSAPI_URL=https://int-opsapi.workstation.co.uk \
+  -e OPSAPI_API_KEY=opsk_your_key \
+  -- node /absolute/path/to/opsapi/mcp/dist/index.js
+```
+
+**Cursor** (`~/.cursor/mcp.json`) and other clients:
 
 ```json
 {
   "mcpServers": {
-    "opsapi-kanban": {
+    "opsapi": {
       "command": "node",
       "args": ["/absolute/path/to/opsapi/mcp/dist/index.js"],
       "env": {
         "OPSAPI_URL": "https://int-opsapi.workstation.co.uk",
-        "OPSAPI_API_KEY": "opsk_....",
-        "OPSAPI_NAMESPACE": "1"
+        "OPSAPI_API_KEY": "opsk_your_key"
       }
     }
   }
 }
 ```
 
-The same `command`/`args`/`env` shape works in any MCP client (Claude Desktop,
-other agents).
+The package is prepared for npm as `@opsapi/mcp` but **not published yet**.
+Once it is, `npx -y @opsapi/mcp` replaces `node …/dist/index.js`. Binaries:
+`opsapi-mcp` (stdio), `opsapi-kanban-mcp` (same, old name kept for existing
+setups) and `opsapi-mcp-http`.
 
-## Tools
+## Run it: Streamable HTTP
 
-| tool | what it does |
-|---|---|
-| `list_my_tasks` | list the employee's open assigned tasks (with uuids) |
-| `get_task` | one task's details incl. any attached PR |
-| `log_time` | record minutes spent on a task (a timesheet entry) |
-| `set_task_pr` | attach/update the PR URL in the task's `metadata.pr_url` |
-| `complete_task` | in one step: optionally log time, attach the PR, set status = completed |
-| `add_comment` | add a comment to a task |
+```bash
+OPSAPI_URL=https://int-opsapi.workstation.co.uk npm run start:http
+# or
+docker build -t opsapi-mcp ./mcp
+docker run -p 8787:8787 -e OPSAPI_URL=https://int-opsapi.workstation.co.uk opsapi-mcp
+```
 
-Example conversation:
+| env | default | notes |
+|---|---|---|
+| `OPSAPI_URL` | — (required) | OpsAPI the service forwards to |
+| `PORT` | `8787` | |
+| `HOST` | `127.0.0.1` (`0.0.0.0` in the image) | |
+| `OPSAPI_DASHBOARD_URL` | — | full task links |
 
-> **You:** what are my tasks today?
-> **Claude** *(list_my_tasks)*: You have 2 open tasks: #14 "Refresh-token rotation" …
-> **You:** I finished #14, spent about 3 hours, PR is github.com/acme/api/pull/812
-> **Claude** *(complete_task minutes=180, pr_url=…)*: Task #14: logged 180m, attached PR, marked completed.
+Endpoints:
 
-## Notes
+- `POST /mcp` — MCP Streamable HTTP, **stateless** (JSON responses, no
+  sessions). Requires `Authorization: Bearer opsk_…`; optional `X-Namespace-Id`
+  (numeric id or uuid) is passed through. `GET`/`DELETE /mcp` answer 405.
+- `GET /healthz` — liveness, no auth.
 
-- Bodies are sent as `application/x-www-form-urlencoded` (what the OpsAPI routes
-  parse), with the jsonb `metadata` field carried as a JSON string — same as the
-  dashboard.
-- `set_task_pr` / `complete_task` read the task first and merge, so attaching a
-  PR never clobbers other `metadata` keys.
-- This server talks to OpsAPI's existing kanban REST API only; it stores nothing
-  locally and holds no state.
+Behaviour: no or malformed key → `401` JSON-RPC error and nothing is sent to
+OpsAPI; bodies over 1 MB → `413`; the request must arrive within 30 s and each
+OpsAPI call times out after 20 s. Logs are JSON lines (method, path, status,
+duration) and never include headers. SIGTERM/SIGINT stop accepting, finish
+in-flight requests (up to 10 s), then exit. No CORS headers: desktop/CLI agents
+don't need them; put a proxy in front if a browser-based client must call it.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http opsapi https://mcp.example.com/mcp \
+  --header "Authorization: Bearer opsk_your_key" -s user
+```
+
+**Cursor** (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "opsapi": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer opsk_your_key" }
+    }
+  }
+}
+```
+
+Serve it only over HTTPS: the key travels in every request.
+
+## Security
+
+- A personal key **acts as you**: anything the agent does is done and logged in
+  your name, with your project roles. Give it only the scopes above.
+- Keep it out of repos and shared configs (`-s user` keeps it in your user
+  config, not the project's `.mcp.json`).
+- Rotate it by creating a new key, updating the agent config, and deleting the
+  old key; delete it at once if it leaks. Revoked keys stop working immediately.
+- The HTTP service stores no keys and no state; it only forwards each request's
+  key to OpsAPI.
+
+## Development
+
+```bash
+npm ci
+npm run build
+npm test        # node:test: tools against a mocked OpsAPI + HTTP end-to-end
+```
+
+Writes are sent as `application/x-www-form-urlencoded` with nested values as
+JSON strings (what OpsAPI routes parse first). Task updates replace `metadata`
+wholesale on the server, so every tool that touches metadata reads, merges and
+writes back the whole object.
