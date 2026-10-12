@@ -136,6 +136,11 @@ cfg = {
                               ("p3-mcp", "mcp:get_task;mcp:add_comment:Started on it;edit"))),
         {"key": "p3-noask", "label": "Needs approval to start", "approval": "unsupported", "models": [],
          "command": [fake, "{{prompt}}", "{{run_uuid}}"], "env": {"FAKE_AGENT_SLEEP": "1"}},
+        # Phase 4: a profile whose health check fails (like a logged-out claude) takes no work.
+        {"key": "p4-down", "label": "Logged-out agent", "approval": "none", "models": [],
+         "command": [fake, "{{prompt}}", "{{run_uuid}}"],
+         "health": {"command": ["sh", "-c", "echo '{\"loggedIn\": false, \"email\": \"owner@secret.invalid\"}'"],
+                    "every_s": 30}},
     ],
     "restore_branch": True,
 }
@@ -311,6 +316,21 @@ try:
         check("4f: then it runs and succeeds", end.get("status") == "succeeded" and end.get("approved_by"), end)
     else:
         check("Phase 3 profiles reach OpsAPI (runner too old?)", False, profiles)
+
+    # 5. Phase 4 (§24.10): a profile whose health check fails is reported unavailable and takes no work.
+    down = wait_for("p4-down reported unavailable", lambda: next(
+        (p for p in ((next((r for r in data(call("GET", P + "/runners", NS)) or [] if r["uuid"] == runner["uuid"]),
+                           {}).get("capabilities") or {}).get("profiles") or []) if p.get("key") == "p4-down"
+         and p.get("available") is False), None), timeout=60)
+    check("5: logged-out profile reported unavailable, with a short reason", bool(down)
+          and down.get("unavailable_reason") == "not logged in", down)
+    check("5: the health output (an email) never reaches OpsAPI", "secret.invalid" not in json.dumps(
+        data(call("GET", P + "/runners", NS))))
+    t6 = task("Use the logged-out agent")
+    res = call("POST", P + f"/tasks/{t6['uuid']}/runs", NS,
+               {"runner_uuid": runner["uuid"], "profile": "p4-down", "repo_path": folder})
+    check("5: a start on it is refused (409 profile_unavailable)", res[0] == 409 and
+          ((res[1] or {}).get("conflict") or {}).get("type") == "profile_unavailable", res)
 
     # 3. The machine's sessions are visible to managers
     res = call("GET", P + f"/runners/{runner['uuid']}/sessions", NS)
