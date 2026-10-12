@@ -914,3 +914,77 @@ Everything is redacted as before. For `args` agents (Claude without the bridge),
   - the Start dialog shows similar work and needs "Start anyway";
   - the Machines page lists sessions;
   - the overview cards render.
+
+---
+
+## 25. Security review fixes (2026-10-12)
+
+A fresh review of the whole feature (plugin, runner, dashboard, MCP) confirmed the items below. Each one is fixed as specified. The review found tenant isolation, SQL, token handling, the dashboard and the long-polls clean.
+
+### 25.1 Who may use a machine, decide and approve (review finding 1, high)
+- **Runner access** is a new `ar_runners.access JSONB` column, default `{"mode":"owner"}`:
+  - `owner`: only the runner's `created_by` and AI-run managers.
+  - `everyone`: anyone who may start a run.
+  - `listed`: the runner's owner, managers, plus `users[]` (user uuids) and `projects[]` (kanban project uuids).
+  - Here, AI-run managers means `ai_runs.manage` or `ai_runners.manage`.
+  - It is set with `PUT /runners/:uuid/access { mode, users?, projects? }`, which needs `ai_runners.manage`; uuids are validated against the workspace.
+  - `GET /runners` (the Start dialog) lists only runners the caller may use, with `access` shown to `ai_runners.manage`.
+  - Start, retry and preview → 403 "You can't use this runner" otherwise.
+  - Runners registered before this change get `{"mode":"everyone"}`, so existing setups keep working.
+- **Managers (deciders, approvers):** only `ai_runs.manage` or `ai_runs_approvals.manage`.
+  - Project owners and admins count only when the new `approval_policy.project_admins_decide` is true (default false).
+  - `projects.manage` no longer gives any AI-run power beyond seeing runs.
+- **No self-approval:**
+  - Under `deciders = "managers"`, the requester never decides their own run's requests, even if they are a manager.
+  - Nobody approves a `pending_approval` run they requested (403); another manager must.
+  - `requester` and `requester_or_managers` keep the requester as a decider, which is the workspace's explicit choice.
+- **Custom prompts:** editing the prompt at start needs `ai_runs.manage`. Project admins no longer can.
+
+### 25.2 "Allow for this run" is exact (finding 2, high)
+- **The server computes the rule key** from the stored input and ignores the runner's `rule_key`:
+  - Bash: the command, trimmed, with whitespace collapsed.
+  - Edit / Write / MultiEdit / NotebookEdit: the tool name plus `file_path` (or `notebook_path`).
+  - Any other tool: the tool name plus the canonical input summary.
+- **Never remembered:** a Bash command containing any of `; & | \` $( ) < >`, a newline, or `\`. The server stores `remember = false`, and `rememberable: false` is returned on the request so the dashboard hides "Allow for this run".
+- **Auto-allow** happens only on an exact rule-key match. It is recorded with `decided_by` = the original decider and reason "Allowed earlier in this run (exact match)".
+
+### 25.3 The runner's git can't run repo code (finding 3, high)
+- **Disabled hooks and fsmonitor:** every git call the runner makes runs as `git -c core.hooksPath=/dev/null -c core.fsmonitor=false …`. Commit and push also pass `--no-verify`.
+- **Tamper check:**
+  - At run start, the runner records a sha256 of `.git/config` and the list of `.git/hooks/*` and `.git/info/*` files.
+  - Before committing, if any of them changed, the run fails as `git_tampered`: nothing is committed or pushed, and the folder is restored as for a failed run.
+
+### 25.4 The decider sees everything that will run (finding 4, medium)
+- **Oversized requests:** a request whose input JSON is over 8 KB, or whose readable summary is over 2,000 characters, is **denied automatically** with "Too large to review". That happens on the server (status `denied`, `decided_by` NULL, reason) and also in the runner, before asking.
+- **Request id reuse:** a repeated `request_id` with a different tool or summary gets 409 instead of the earlier decision.
+
+### 25.5 Safety list parsing (finding 5, medium)
+- **Unquoting:** before matching, each word is unquoted the way a shell would (quotes and backslashes removed), so `g\it`, `g'i't` and `su""do` match.
+- **Segments:** a command is split on `; && || | & $( \` ` and newlines, and every segment is checked.
+- **`git -c`:** any `git -c …` is blocked, since it can redefine aliases, hooks or ssh. `git -C <dir>` is skipped, and scanning continues for the subcommand.
+
+### 25.6 Secrets (finding 6, medium)
+- **Server redaction** (`U.redact`) also masks:
+  - `sk_live_`, `sk_test_`, `rk_live_`, `whsec_`, `glpat-`, `npm_` and `xox[abp]-` tokens;
+  - AWS `AKIA…` keys;
+  - JWTs (`eyJ…`);
+  - URL credentials (`://user:pass@`);
+  - `KEY=value` assignments whose key contains `SECRET`, `PASSWORD`, `TOKEN` or `API_KEY`.
+- **Runner redaction:** the runner applies the same patterns to everything it sends (events, turns, summary, permission summaries, run-mcp comments).
+- **Example profile:** the Claude profile adds `--disallowedTools "Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/id_*),Read(~/.ssh/**),Read(~/.aws/**),Read(~/.config/gh/**),Read(~/.netrc),Read(~/.npmrc),Read(~/.kube/**)"`.
+- **Required flags:** the runner requires `--restricted` (as well as `--strict-mcp-config`) in every `claude` profile.
+- **Agent environment** is an allow-list: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ`, `XDG_*`, `CLAUDE_CODE_OAUTH_TOKEN` (from the token file), the profile's `env`, and an optional `env_passthrough: [names]` in `runner.json`. Nothing else from the runner's own environment is passed (no `GH_TOKEN`, AWS keys, …).
+- **Hand-started sessions:** their `prompt_preview` is sent only when `share_manual_prompts: true` in `runner.json` (default false).
+
+### 25.7 Lower findings
+- **Prompt fencing:** `task.title` and `project.name` have newlines replaced by spaces before rendering.
+- **Branch names:** a branch name (`pr_base`, `base_branch`) may not start with `-`, on the server or in the runner.
+- **Caps race:** caps are counted and the run inserted in one transaction, under `pg_advisory_xact_lock(hashtext('ai_runner:start:' || namespace_id))`.
+- **Per-run limits:**
+  - at most 20,000 log events (beyond that: dropped, plus one "log truncated" event);
+  - at most 50 queued follow-ups (409 after that);
+  - at most 500 permission requests (auto-denied after that).
+- **MCP:**
+  - `task_uuid` (and other ids) must be uuids;
+  - `pr_url` must be `https://`;
+  - the HTTP transport accepts only its own Host, and an Origin from `MCP_ALLOWED_ORIGINS` when one is sent.
