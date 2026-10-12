@@ -1,7 +1,9 @@
 -- Runner API (docs/AI_RUNNER.md §22.2, §23.2). No user session: under public/, authenticated by the runner token
 -- ("Authorization: Bearer oprn_<48 hex>", stored as a SHA-256 hash and bound to one workspace).
---   POST /public/runner/heartbeat              capabilities, repos, inventory -> runs to cancel; renews leases
---   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } (+ run_token) or 204
+--   POST /public/runner/heartbeat              capabilities (+ profile health), repos, inventory -> runs to cancel;
+--                                              renews leases
+--   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } (+ run_token) or 204;
+--                                              skips runs of profiles the runner reports unavailable
 --   POST /public/runner/runs/:uuid/status      { seq, status, question?, ... } compare-and-set; stale seq ignored
 --   POST /public/runner/runs/:uuid/events      { events: [{ seq, type, text?, data? }] } idempotent on (run, seq)
 --   POST /public/runner/runs/:uuid/permissions              ask a person; idempotent on request_id
@@ -99,9 +101,13 @@ local function capabilities(c)
             for _, m in ipairs(type(p.models) == "table" and p.models or {}) do
                 if type(m) == "string" and #models < 50 then models[#models + 1] = U.clean(m, 120) end
             end
+            -- §24.3: the runner's health check. Only `false` takes the profile out of work; the reason is short and
+            -- cleaned (the check's own output never leaves the machine).
+            local available = p.available ~= false
             profiles[#profiles + 1] = { key = key, label = str(p.label, 120) or key, models = U.array(models),
                 approval = (p.approval == "bridge" or p.approval == "unsupported") and p.approval or "none",
-                rate_limit = rate_limit(p.rate_limit) }
+                rate_limit = rate_limit(p.rate_limit), available = available,
+                unavailable_reason = not available and safe_text(p.unavailable_reason, 120) or nil }
         end
     end
     local n = tonumber(c.max_concurrency)
@@ -334,6 +340,9 @@ return function(app)
             return sdk.ok({ request = { uuid = found.uuid, status = found.status, reason = U.null(found.reason) } })
         end
         R.notify(run)
+        if row.status == "pending" then -- not when "allow for this run" already covered it
+            R.alert(run, "permission", nil, U.clean(d.tool) .. ": " .. U.clean(input_summary(b.input) or "", 200))
+        end
         return sdk.created({ request = { uuid = row.uuid, status = row.status, reason = U.null(row.reason) } })
     end)))
 

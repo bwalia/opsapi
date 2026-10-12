@@ -2,13 +2,16 @@
 -- ai_runs.manage or owner/admin of its kanban project). Who sees: own runs (requested, or on a task assigned to
 -- them), project owners/admins their project's runs, ai_runs.manage all. Cancel / retry / messages: requester or
 -- ai_runs.manage. Start approvals: managers (R.is_manager). Permission requests: per approval_policy.deciders.
---   POST /tasks/:task_uuid/runs/preview     prompt, runners, suggested folder, conflicts, needs_approval
+-- Start and retry check the workspace guards first (§24.2): caps, the daily token limit, then similar work (which
+-- `confirm_similar: true` accepts).
+--   POST /tasks/:task_uuid/runs/preview     prompt, runners, suggested folder, conflicts (+ similar), limits,
+--                                           needs_approval
 --   POST /tasks/:task_uuid/runs             start (Idempotency-Key) -> 201 run | 409 { conflict } | 422
 --   GET  /tasks/:task_uuid/runs             the task's run history
 --   GET  /runs                              ?status&task_uuid&runner_uuid&mine&page&per_page, newest first
 --   GET  /runs/:uuid                        run + events + requests + turns + usage + task + runner + can_*
 --   POST /runs/:uuid/cancel                 pending_approval/queued -> cancelled; running -> cancelling
---   POST /runs/:uuid/retry                  a new run (attempt + 1) with the same inputs
+--   POST /runs/:uuid/retry                  { confirm_similar? } a new run (attempt + 1) with the same inputs
 --   POST /runs/:uuid/approve | /reject      pending_approval -> queued | cancelled (managers)
 --   POST /runs/:uuid/turns                  { text } a follow-up or needs_input answer, queued for the runner
 --   POST /runs/:uuid/requests/:req/decide   { decision: allow|deny, reason?, remember? }
@@ -148,6 +151,7 @@ return function(app)
         local suggested = R.default_repo_path(ns, task, runner_uuid, defaults.project_settings)
         local repo_path = type(d.repo_path) == "string" and U.path(d.repo_path) or suggested
         local tpl = R.template(ns)
+        local guards = R.settings(ns).guards
         local busy = runner_uuid and repo_path and R.busy_session(ns, runner_uuid, repo_path)
         local lock = runner_uuid and repo_path and R.folder_lock(ns, runner_uuid, repo_path)
         local profile
@@ -165,7 +169,8 @@ return function(app)
             runners = U.array(list_), runner_uuid = U.null(runner_uuid), default_repo_path = U.null(suggested),
             repo_path = U.null(repo_path), work_branch = R.work_branch(task), output_mode = defaults.output_mode,
             conflicts = { open_run = R.open_run(ns, task.uuid) or cjson.null, folder_lock = lock or cjson.null,
-                busy_session = busy or cjson.null },
+                busy_session = busy or cjson.null, similar = R.similar(self, ns, task, guards.similar_threshold) },
+            limits = R.limits(ns, sdk.user(self).uuid, guards),
             needs_approval = R.needs_approval(ns, profile, R.is_manager(self, task.project_uuid)),
         })
     end)))
@@ -180,6 +185,7 @@ return function(app)
                 runner_uuid = { type = "uuid", required = true }, profile = { required = true, max = 80 },
                 model = { max = 120 }, repo_path = { required = true, max = 1024 },
                 prompt = { type = "text", max = 100000 }, output_mode = { enum = R.OUTPUT_MODES },
+                confirm_similar = { type = "boolean" },
             })
             if not d then U.invalid(errors) end
             for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
@@ -188,6 +194,7 @@ return function(app)
             if d.prompt and not privileged then
                 return sdk.error(403, "Only an AI runs manager or an owner or admin of the project can edit the prompt")
             end
+            R.check_guards(self, ns, task, d.confirm_similar)
             local defaults = R.defaults(ns, task)
             local output_mode = d.output_mode or defaults.output_mode
             local tpl = R.template(ns)
@@ -274,6 +281,9 @@ return function(app)
             end
             local task = task_or_404(ns, run.task_uuid)
             if not R.can_start(self, task) then return sdk.error(403, NOT_ALLOWED) end
+            local d, errors = sdk.validate(body(self), { confirm_similar = { type = "boolean" } })
+            if not d then U.invalid(errors) end
+            R.check_guards(self, ns, task, d.confirm_similar)
             local key = ngx.req.get_headers()["Idempotency-Key"]
             local new = R.create(ns, me, task, {
                 runner_uuid = run.runner_uuid, profile = run.profile, model = run.model, repo_path = run.repo_path,

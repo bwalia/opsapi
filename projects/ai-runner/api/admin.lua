@@ -1,4 +1,4 @@
--- Runners, settings and the prompt template (docs/AI_RUNNER.md §22.3).
+-- Runners, machines, the overview, settings and the prompt template (docs/AI_RUNNER.md §22.3, §24).
 --   GET    /runners                         ai_runs.create or ai_runners.manage (?include_revoked=true)
 --   GET    /runners/:uuid                   same
 --   POST   /runners { name, labels? }       ai_runners.manage -> 201 { runner, token } (the token is shown once)
@@ -7,7 +7,10 @@
 --   POST   /runners/:uuid/pause | /resume   ai_runners.manage (a paused runner heartbeats but claims nothing)
 --   DELETE /runners/:uuid                   ai_runners.manage: revoke (its queued runs are cancelled)
 --   GET    /runners/:uuid/sessions          ai_runs.manage: the machine's last inventory, linked to runs
---   GET|PUT /settings                       ai_runs_settings.manage
+--   GET    /sessions                        ai_runs.manage or ai_runners.manage: every runner's sessions
+--                                           (?runner_uuid&busy=1&page&per_page)
+--   GET    /overview                        ai_runs.manage, ai_runners.manage or ai_runs_approvals.manage
+--   GET|PUT /settings                       ai_runs_settings.manage (+ guards, §24.1)
 --   GET|PUT /projects/:project_uuid/settings  owner/admin of the kanban project or ai_runs_settings.manage
 --   GET|PUT /template                       ai_runs_settings.manage: the workspace template, versioned on save
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -187,6 +190,91 @@ return function(app)
             total_pages = math.ceil(total / per_page) })
     end)))
 
+    -- Machines and the overview (§24.4, §24.5) -----------------------------------------------------------------
+    app:get("/sessions", sdk.handler({}, U.guard(function(self)
+        if not (sdk.can(self, "ai_runs", "manage") or sdk.can(self, "ai_runners", "manage")) then
+            return sdk.error(403, "Permission denied")
+        end
+        local ns, p = sdk.namespace_id(self), self.params
+        local where, args = { "s.namespace_id = ?", "ru.status <> 'revoked'" }, { ns }
+        if type(p.runner_uuid) == "string" and p.runner_uuid ~= "" then
+            if not U.is_uuid(p.runner_uuid) then U.fail(400, "runner_uuid must be a uuid") end
+            where[#where + 1] = "s.runner_uuid = ?"
+            args[#args + 1] = p.runner_uuid:lower()
+        end
+        if p.busy == "1" or p.busy == "true" then
+            where[#where + 1] = "lower(COALESCE(s.status, '')) NOT IN " .. R.IDLE_SQL
+        end
+        local w = table.concat(where, " AND ")
+        local page, per_page, offset = sdk.page(p)
+        local q_args = { unpack(args) }
+        q_args[#q_args + 1] = per_page
+        q_args[#q_args + 1] = offset
+        local out = {}
+        for i, s in ipairs(db.query([[
+            SELECT s.session_key, s.tool, s.status, s.cwd, s.branch, s.managed, s.prompt_preview, s.updated_at,
+                   s.seen_at, s.run_uuid, ru.uuid AS runner_uuid, ru.name AS runner_name, ru.status AS runner_state,
+                   (ru.last_heartbeat_at IS NOT NULL AND ru.last_heartbeat_at > NOW() - interval ']] .. R.ONLINE_S
+                .. [[ seconds') AS online,
+                   t.task_number, COALESCE(t.title, x.task_snapshot->>'title') AS task_title
+            FROM ar_sessions s
+            JOIN ar_runners ru ON ru.uuid = s.runner_uuid
+            LEFT JOIN ar_runs x ON x.uuid = s.run_uuid
+            LEFT JOIN kanban_tasks t ON t.uuid = x.task_uuid
+            WHERE ]] .. w .. [[
+            ORDER BY lower(ru.name), ru.id, s.managed DESC, s.updated_at DESC NULLS LAST, s.session_key
+            LIMIT ? OFFSET ?]], unpack(q_args))) do
+            out[i] = { key = s.session_key, tool = U.null(s.tool), status = U.null(s.status), cwd = U.null(s.cwd),
+                branch = U.null(s.branch), managed = s.managed == true, prompt_preview = U.null(s.prompt_preview),
+                updated_at = U.null(s.updated_at), seen_at = s.seen_at,
+                runner = { uuid = s.runner_uuid, name = s.runner_name,
+                    status = R.runner_status({ status = s.runner_state, online = s.online }) },
+                run = s.run_uuid and { uuid = s.run_uuid, task_title = U.null(s.task_title),
+                    task_number = U.null(s.task_number) } or cjson.null }
+        end
+        local total = db.query([[SELECT COUNT(*)::int AS n FROM ar_sessions s
+            JOIN ar_runners ru ON ru.uuid = s.runner_uuid WHERE ]] .. w, unpack(args))[1].n
+        return sdk.ok(U.array(out), { page = page, per_page = per_page, total = total,
+            total_pages = math.ceil(total / per_page) })
+    end)))
+
+    app:get("/overview", sdk.handler({}, U.guard(function(self)
+        if not (sdk.can(self, "ai_runs", "manage") or sdk.can(self, "ai_runners", "manage")
+            or sdk.can(self, "ai_runs_approvals", "manage")) then
+            return sdk.error(403, "Permission denied")
+        end
+        local ns = sdk.namespace_id(self)
+        local by_status = {}
+        for _, st in ipairs(R.OPEN) do by_status[st] = 0 end
+        for _, r in ipairs(db.query("SELECT status, COUNT(*)::int AS n FROM ar_runs WHERE namespace_id = ? "
+            .. "AND status IN " .. R.OPEN_SQL .. " GROUP BY status", ns)) do
+            by_status[r.status] = r.n
+        end
+        local online = "last_heartbeat_at > NOW() - interval '" .. R.ONLINE_S .. " seconds'"
+        local runners = U.one([[SELECT COUNT(*) FILTER (WHERE status = 'active' AND ]] .. online .. [[)::int AS online,
+                COUNT(*) FILTER (WHERE status = 'active' AND NOT COALESCE(]] .. online .. [[, false))::int AS offline,
+                COUNT(*) FILTER (WHERE status = 'paused')::int AS paused
+            FROM ar_runners WHERE namespace_id = ? AND status <> 'revoked']], ns)
+        local today = "date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        local cost = U.one([[SELECT COALESCE(SUM(cost_estimate), 0) AS c FROM ar_run_turns
+            WHERE namespace_id = ? AND role = 'assistant' AND at >= ]] .. today, ns).c
+        local week = U.one([[SELECT COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+                COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+                COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
+                COUNT(*) FILTER (WHERE status = 'lost')::int AS lost
+            FROM ar_runs WHERE namespace_id = ? AND finished_at > NOW() - interval '7 days']], ns)
+        -- Decided by a person: an "allow for this run" repeat is decided the moment it is asked, so it isn't a wait.
+        local wait = U.one([[SELECT round(AVG(EXTRACT(EPOCH FROM decided_at - created_at))::numeric, 1) AS s
+            FROM ar_run_requests WHERE namespace_id = ? AND status IN ('allowed', 'denied')
+              AND decided_at > NOW() - interval '7 days' AND decided_at > created_at]], ns).s
+        return sdk.ok({ runs_by_status = by_status, queue_depth = by_status.queued,
+            runners = { online = runners.online, offline = runners.offline, paused = runners.paused },
+            tokens_today = R.tokens_today(ns), cost_today = tonumber(cost) or 0,
+            runs_7d = { succeeded = week.succeeded, failed = week.failed, cancelled = week.cancelled,
+                lost = week.lost },
+            avg_permission_wait_s_7d = U.null(tonumber(wait)) })
+    end)))
+
     -- Workspace settings ---------------------------------------------------------------------------------------
     app:get("/settings", sdk.handler({ permission = "ai_runs_settings.manage" }, U.guard(function(self)
         return sdk.ok(R.settings(sdk.namespace_id(self)))
@@ -226,16 +314,21 @@ return function(app)
             require_start_approval = { type = "boolean" },
             permission_timeout_minutes = { type = "integer", min = 1, max = 1440 },
             input_timeout_minutes = { type = "integer", min = 1, max = 1440 } })
+        merge("guards", { similar_threshold = { type = "number", min = 0.1, max = 1 },
+            max_open_runs_per_user = { type = "integer", min = 0, max = 100 },
+            max_open_runs_per_workspace = { type = "integer", min = 0, max = 1000 },
+            daily_token_limit = { type = "integer", min = 0, max = 1000000000 },
+            retention_days = { type = "integer", min = 30, max = 3650 } })
         db.query([[
             INSERT INTO ar_settings (namespace_id, output_mode, pr_draft, pr_base, max_run_minutes, task_automation,
-                approval_policy, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
+                approval_policy, guards, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?)
             ON CONFLICT (namespace_id) DO UPDATE SET output_mode = EXCLUDED.output_mode, pr_draft = EXCLUDED.pr_draft,
                 pr_base = EXCLUDED.pr_base, max_run_minutes = EXCLUDED.max_run_minutes,
                 task_automation = EXCLUDED.task_automation, approval_policy = EXCLUDED.approval_policy,
-                updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                guards = EXCLUDED.guards, updated_by = EXCLUDED.updated_by, updated_at = NOW()
         ]], ns, s.output_mode, s.pr_draft, s.pr_base, s.max_run_minutes, cjson.encode(s.task_automation),
-            cjson.encode(s.approval_policy), sdk.user(self).uuid)
+            cjson.encode(s.approval_policy), cjson.encode(s.guards), sdk.user(self).uuid)
         return sdk.ok(R.settings(ns))
     end)))
 
