@@ -19,6 +19,7 @@ local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Stock = require("queries.ShopStockQueries")
+local Insights = require("queries.ShopInsightsQueries")
 
 local ShopMarketQueries = {}
 
@@ -865,6 +866,7 @@ function ShopMarketQueries.applyPrice(ns_id, uuid, body)
         UPDATE shop_products SET base_price_minor = ?, price_verified = true, updated_at = NOW()
          WHERE id = ? AND namespace_id = ?
     ]], value, p.id, ns_id)
+    Insights.snapshotPrices(ns_id, { p.id })
     ngx.log(ngx.NOTICE, "[shop-market] price applied: ", p.sku, " ", previous, " -> ", value, " (", strategy, ")")
     return {
         product_uuid = p.uuid,

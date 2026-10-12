@@ -13,6 +13,7 @@ local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Pricing = require("lib.shop-pricing")
 local Catalog = require("queries.ShopCatalogQueries")
+local Insights = require("queries.ShopInsightsQueries")
 
 local ShopCartQueries = {}
 
@@ -151,6 +152,7 @@ function ShopCartQueries.addLine(ns_id, cart, body)
             priced.unit_price_minor, priced.label, n)
     end
     db.query("UPDATE shop_carts SET updated_at = NOW() WHERE id = ?", cart.id)
+    Insights.recordCartAdd(ns_id, cart.id, bundle.product.id, priced.qty)
     return ShopCartQueries.view(ns_id, cart)
 end
 

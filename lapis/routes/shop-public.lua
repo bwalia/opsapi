@@ -12,6 +12,7 @@
       GET    /categories
       GET    /products
       GET    /products/:slug
+      GET    /products/:slug/insights   (real trust signals: price history, baskets in 24 h)
       POST   /price
       POST   /carts
       GET    /cart
@@ -38,6 +39,7 @@ local Orders = require("queries.ShopOrderQueries")
 local Search = require("queries.ShopSearchQueries")
 local Chat = require("queries.ShopChatQueries")
 local Market = require("queries.ShopMarketQueries")
+local Insights = require("queries.ShopInsightsQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -106,6 +108,12 @@ return function(app)
         local bundle = Catalog.loadBundle(ns_id, { slug = self.params.slug }, { public = true })
         if not bundle then return U.fail(404, "PRODUCT_NOT_FOUND", "Product not found") end
         return U.ok(Catalog.fullProduct(bundle))
+    end))
+
+    app:get(BASE .. "/products/:slug/insights", public(function(self, ns_id)
+        local data = Insights.forProduct(ns_id, self.params.slug)
+        if not data then return U.fail(404, "PRODUCT_NOT_FOUND", "Product not found") end
+        return U.ok(data)
     end))
 
     app:post(BASE .. "/price", public(function(_, ns_id)
