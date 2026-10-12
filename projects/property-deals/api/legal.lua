@@ -13,8 +13,8 @@ local sdk = require("helper.plugin-sdk")
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
-local PARTIES = { "seller", "buyer", "buyer_solicitor", "seller_solicitor", "lender", "freeholder",
-                  "managing_agent", "council", "other" }
+local PARTIES = { "seller", "buyer", "buyer_solicitor", "seller_solicitor", "lender", "broker", "surveyor",
+                  "estate_agent", "freeholder", "managing_agent", "council", "other" }
 
 return function(app)
     sdk.crud(app, "/enquiries", {

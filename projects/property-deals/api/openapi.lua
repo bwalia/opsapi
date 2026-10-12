@@ -30,8 +30,8 @@ local MONEY = function(d) return t("number", { description = d }) end
 
 local PD_STATUS = { "todo", "in_progress", "waiting_third_party", "agent_running", "awaiting_approval", "done", "cancelled" }
 local HEALTH = { "green", "amber", "red" }
-local PARTIES = { "seller", "buyer", "buyer_solicitor", "seller_solicitor", "lender", "freeholder", "managing_agent",
-                  "council", "other" }
+local PARTIES = { "seller", "buyer", "buyer_solicitor", "seller_solicitor", "lender", "broker", "surveyor",
+                  "estate_agent", "freeholder", "managing_agent", "council", "other" }
 
 return function(app)
     local function schema(name, s) return sdk.schema(app, name, s) end

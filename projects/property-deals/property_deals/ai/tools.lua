@@ -249,9 +249,9 @@ T.defs = {
 function T.nearest(ns, lat, lng, service, limit)
     service = tostring(service or ""):gsub("[^%w_]", "")
     limit = math.max(1, math.min(10, tonumber(limit) or 3))
-    local dist = (lat and lng) and string.format(
-        "CASE WHEN s.base_lat IS NULL THEN NULL ELSE earth_distance(ll_to_earth(s.base_lat, s.base_lng), ll_to_earth(%f, %f)) / 1609.344 END",
-        lat, lng) or "NULL"
+    -- Plain-SQL haversine: the earthdistance extension isn't guaranteed (property_deals/util.lua).
+    local dist = (lat and lng) and ("CASE WHEN s.base_lat IS NULL THEN NULL ELSE "
+        .. require("property_deals.util").miles_sql("s.base_lat", "s.base_lng", lat, lng) .. " END") or "NULL"
     return rows(db.query([[
         SELECT s.uuid AS supplier_uuid, a.name, ]] .. dist .. [[ AS distance_miles, s.radius_miles,
                s.avg_turnaround_hours, s.on_time_pct, s.rating, s.booking_method
