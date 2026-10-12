@@ -246,8 +246,8 @@ return function(app)
 
     local Me = schema("Me", OBJ({
         user_uuid = S(), namespace_uuid = S(), is_manager = BOOL(), setup_done = BOOL(),
-        permissions = OBJ({}, nil, "module (deals, properties, buyers, tasks, suppliers, compliance, approvals, ai, "
-            .. "settings, reports) -> allowed actions (read, create, update, delete, manage)"),
+        permissions = OBJ({}, nil, "module (deals, leads, properties, buyers, tasks, suppliers, compliance, approvals, "
+            .. "ai, settings, reports) -> allowed actions (read, create, update, delete, manage)"),
         settings = OBJ({ timezone = S(), jurisdiction = S(), currency = S(), digest_time = S(), due_time = S(),
             sla_warn_pct = INT(), sla_breach_pct = INT(), sla_reassign_pct = INT(), escalation_action = S(),
             red_min_working_days = INT() }),
@@ -363,10 +363,14 @@ return function(app)
         response = Setup, description = "Missing (null) until POST /setup ran." })
     sdk.doc(app, "POST /setup", { summary = "Set up the workspace (idempotent)", permission = "property_deals_settings.manage",
         status = 200, response = OBJ({ state = Setup, created = OBJ({ roles = ARR(S()), templates = ARR(S()), holidays = INT() }) }) })
-    local SignalRun = OBJ({ watch = OBJ({ leads = INT(), signals = INT(), errors = INT(),
-            followups = INT("Follow-up drafts started for leads with news") }),
-        new_companies = OBJ({ areas = INT(), companies = INT(), leads = INT() }) })
+    local SignalRun = OBJ({ watch = OBJ({ leads = INT(), signals = INT(), errors = INT("Failed Companies House calls"),
+            followups = INT("Follow-up drafts started for leads with news"),
+            rate_limited = BOOL("Companies House said slow down: the rest waits for the next run") }),
+        new_companies = OBJ({ areas = INT(), companies = INT(), leads = INT(), errors = INT(),
+            rate_limited = BOOL() }) })
     sdk.doc(app, "POST /engine/run", { summary = "Run engine checks now", permission = "property_deals_settings.manage",
+        description = "mail, signals and scout share a ~25 s budget here; what doesn't fit is done by the next "
+            .. "scheduled run.",
         status = 200, body = OBJ({ checks = ARR(ENUM({ "sla", "health", "compliance_expiry", "digest", "agents", "mail",
             "scout", "nightly", "signals" })) }),
         response = OBJ({ sla = OBJ({ warned = INT(), overdue = INT(), escalated = INT() }), health = OBJ({ deals = INT() }),
@@ -375,7 +379,8 @@ return function(app)
                          agents = OBJ({ resumed = INT(), timed_out = INT(), jobshout_polled = INT(), jobshout_decided = INT(),
                                         auto_started = INT() }),
                          mail = OBJ({ connectors = INT(), stored = INT(), errors = INT() }),
-                         scout = OBJ({ searches = INT(), alerts = INT(), synced = OBJ({ connectors = INT(),
+                         scout = OBJ({ searches = INT(), alerts = INT(), errors = INT("Saved searches skipped"),
+                             synced = OBJ({ connectors = INT(),
                              postcodes = INT(), stored = INT() }) }),
                          nightly = OBJ({ suppliers = INT(), inbound = INT(), agent_runs = INT(), market = INT() }),
                          signals = SignalRun }),
@@ -393,6 +398,7 @@ return function(app)
         from_address = S(), from_name = S(), subject = S(), received_at = DT(), body_text = S(),
         reply_temperature = ENUM({ "hot", "warm", "cold" }), reply_score = INT("0-100"), reply_reason = S("Why"),
         hot_task_uuid = S("The \"call now\" task a hot reply raised"), matched_by = S(), logged_by_user_uuid = S(),
+        sender_verified = BOOL("Email: the mail server verified the sender (DMARC pass)"),
         alerted = INT("People alerted (POST only)"), scored_by = ENUM({ "ai", "rules" }, "POST only"),
     }))
     local HotLead = schema("HotLead", OBJ({
@@ -401,22 +407,26 @@ return function(app)
         call_task_uuid = S(), call_due_at = DT(),
     }))
     local lid = { uuid = S("Lead uuid") }
-    sdk.doc(app, "GET /leads/:uuid/signals", { summary = "A lead's recent news", permission = "property_deals_deals.read",
+    sdk.doc(app, "GET /leads/:uuid/signals", { summary = "A lead's recent news", permission = "property_deals_leads.read",
         path = lid, response = ARR(LeadSignal), errors = E404, query = { limit = INT("Default 50, max 200") } })
     sdk.doc(app, "POST /leads/:uuid/signals", { summary = "Capture a post, page or note about a lead",
-        permission = "property_deals_deals.update", path = lid, response = LeadSignal, errors = E422,
+        permission = "property_deals_leads.update", path = lid, response = LeadSignal, errors = E422,
         description = "Paste what they posted (or its link). Social networks are never fetched by the server.",
         body = OBJ({ kind = ENUM({ "social_post", "website", "news", "note" }), text = S(), url = S(), title = S(),
             occurred_at = DT() }, { "kind" }) })
-    sdk.doc(app, "DELETE /signals/:id", { summary = "Delete a signal", permission = "property_deals_deals.update",
+    sdk.doc(app, "DELETE /signals/:id", { summary = "Delete a signal", permission = "property_deals_leads.update",
         path = { id = UUID() }, status = 200, response = OBJ({ deleted = BOOL() }), errors = E404 })
-    sdk.doc(app, "GET /leads/:uuid/replies", { summary = "A lead's replies, scored", permission = "property_deals_deals.read",
+    sdk.doc(app, "GET /leads/:uuid/replies", { summary = "A lead's replies, scored", permission = "property_deals_leads.read",
         path = lid, response = ARR(LeadReply), errors = E404 })
     sdk.doc(app, "POST /leads/:uuid/replies", { summary = "Log a reply (WhatsApp, SMS, call, DM): scored, hot -> call alert",
-        permission = "property_deals_deals.update", path = lid, response = LeadReply, errors = E422,
+        permission = "property_deals_leads.update", path = lid, response = LeadReply, errors = E422,
+        description = "All or nothing: if scoring or the call task fails nothing is kept (a retry can't log it twice). "
+            .. "The owner is alerted while they are an active member, else the managers (the call task then waits "
+            .. "unassigned). From the PA (X-OpsAPI-Agent) only messages the lead wrote: phone and other are 422, "
+            .. "a call the user made is a chase.",
         body = OBJ({ channel = ENUM({ "whatsapp", "sms", "phone", "social", "email", "other" }), text = S(),
             received_at = DT(), from_name = S(), subject = S() }, { "channel", "text" }) })
-    sdk.doc(app, "GET /hot-leads", { summary = "Leads whose last reply was hot (7 days)", permission = "property_deals_tasks.read",
+    sdk.doc(app, "GET /hot-leads", { summary = "Leads whose last reply was hot (7 days)", permission = "property_deals_leads.read",
         response = ARR(HotLead), query = { mine = BOOL("Only leads I own"), limit = INT() } })
     sdk.doc(app, "GET /companies-house/officers", { summary = "Find a Companies House officer to link to a lead",
         permission = "property_deals_deals.read", query = { q = S("Name, 3+ characters") }, errors = E422,
@@ -442,23 +452,25 @@ return function(app)
         path = { key = S() }, status = 200, response = OBJ({ deleted = BOOL() }), errors = E404 })
     sdk.doc(app, "GET /pa/briefing", { summary = "The PA's briefing: my day + the playbook in one call",
         permission = "property_deals_tasks.read",
+        description = "hot_leads and fresh_news are empty without property_deals_leads.read.",
         response = OBJ({ me = OBJ({ name = S(), is_manager = BOOL() }), today = DATE(),
             counts = OBJ({ open = INT(), overdue = INT(), due_today = INT() }), hot_leads = ARR(HotLead),
             my_tasks = ARR(ANY("Task: task_uuid, title, pd_status, due_at, overdue, urgency_score, deal/lead")),
             approvals_waiting = ARR(ANY("uuid, title, action, rule")), deals_at_risk = ARR(ANY("uuid, name, money_at_risk")),
             fresh_news = ARR(ANY("lead_uuid, lead_name, title, occurred_at")), playbook = S("Markdown") }) })
     sdk.doc(app, "POST /signals/run", { summary = "Run the Companies House watch now", permission = "property_deals_settings.manage",
+        description = "Up to ~20 s for each part; leads not reached are checked by the next run.",
         status = 200, response = SignalRun })
-    sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_deals.read",
+    sdk.doc(app, "GET /leads", { summary = "Leads with Property Deals fields", permission = "property_deals_leads.read",
         paginated = true, response = ARR(Lead), query = {
             lead_kind = S(), situation = S(), status = S(), source = S(), owner_user_uuid = S(),
             temperature = ENUM({ "hot", "warm", "cold" }, "From the last reply"),
             vulnerable = ENUM({ "true" }), deadline_before = DATE(), q = S("Name, email or phone"),
             sort = ENUM({ "created", "deadline", "last_reply" }) } })
-    sdk.doc(app, "GET /leads/:uuid", { summary = "A lead with its Property Deals fields", permission = "property_deals_deals.read",
+    sdk.doc(app, "GET /leads/:uuid", { summary = "A lead with its Property Deals fields", permission = "property_deals_leads.read",
         response = Lead, errors = E404, path = { uuid = S("CRM lead uuid") } })
     sdk.doc(app, "PUT /leads/:uuid/details", { summary = "Set a lead's Property Deals fields", status = 200,
-        permission = "property_deals_deals.update", body = LeadDetails, response = Lead, errors = { ["404"] = "Not found", ["422"] = E422["422"] } })
+        permission = "property_deals_leads.update", body = LeadDetails, response = Lead, errors = { ["404"] = "Not found", ["422"] = E422["422"] } })
 
     sdk.doc(app, "GET /deals", { summary = "List deals", permission = "property_deals_deals.read", paginated = true,
         response = ARR(Deal), query = { stage_key = S(), status = S(), health = ENUM(HEALTH), deal_type = S(),
@@ -501,11 +513,15 @@ return function(app)
             agent_key = S(), approval_rule = ENUM({ "none", "any_operator", "manager", "two_person" }) }, { "title" }),
         response = Task, errors = E422 })
     sdk.doc(app, "PUT /tasks/:id", { summary = "Update a task (do it, assign, snooze...)", permission = "property_deals_tasks.update",
-        path = tid, response = Task, errors = { ["404"] = "Not found", ["422"] = "Validation failed — compliance tasks need evidence to close; snoozing needs a reason" },
+        path = tid, response = Task, errors = { ["404"] = "Not found", ["422"] = "Validation failed — compliance tasks "
+            .. "need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid" },
         body = OBJ({ pd_status = ENUM(PD_STATUS), title = S(), description = S(), priority = S(), owner_user_uuid = UUID(),
             due_at = DT(), sla_minutes = INT(), blocking = BOOL(), compliance = BOOL(), agent_eligible = BOOL(), agent_key = S(),
             approval_rule = S(), snoozed_until = DT(), snooze_reason = S(), evidence = ANY("Object") }),
-        description = "Finishing a task starts its dependants, closes tasks whose condition now holds and repeats repeating tasks." })
+        description = "Finishing a task starts its dependants, closes tasks whose condition now holds and repeats "
+            .. "repeating tasks. From the PA (X-OpsAPI-Agent), a task on a lead closes only with evidence.chase_uuid: the chase (call / "
+            .. "message) logged for that lead that did the work; the chase is linked to the task, so it closes one "
+            .. "task." })
     local Dep = OBJ({ depends_on_task_uuid = UUID(), title = S(), pd_status = S() })
     sdk.doc(app, "GET /tasks/:id/dependencies", { summary = "What a task waits for", permission = "property_deals_tasks.read",
         path = tid, response = ARR(Dep), errors = E404 })
@@ -583,7 +599,7 @@ return function(app)
             lat = NUM(), lng = NUM(), radius_miles = NUM("1–100, default 25"),
             polygon = S("lat,lng;lat,lng;… (3–200 points) instead of lat/lng/radius"),
             layers = S("Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots "
-                .. "(default properties,deals)") } })
+                .. "(default properties,deals). leads needs property_deals_leads.read, else it is left out") } })
     sdk.doc(app, "GET /properties/:id/card", { summary = "Map property card", permission = "property_deals_properties.read",
         response = Card, path = { id = UUID() }, errors = E404 })
 
@@ -636,9 +652,11 @@ return function(app)
     local Inbound = schema("InboundMessage", OBJ({
         uuid = UUID(), connector_uuid = UUID(), from_address = S(), from_name = S(), subject = S(), received_at = DT(),
         body_text = S("Untrusted: shown as data, never acted on"), deal_uuid = UUID(),
-        matched_by = ENUM({ "reference", "sender" }), chase_uuid = UUID("The chase this replied to"),
+        matched_by = ENUM({ "reference", "sender", "lead", "logged", "error" },
+            "error: the message couldn't be stored; only who / what / when were kept"),
+        chase_uuid = UUID("The chase this replied to"),
         agent_run_uuid = UUID("Legal chaser run it started"), processed_at = DT(),
-    }, { "uuid", "from_address" }))
+    }, { "uuid" }))
     local Channel = OBJ({ push = BOOL("App push (WSLCRM iOS/Android) + in-app"), email = BOOL(),
         ntfy = BOOL("ntfy connector; off unless turned on"), telegram = BOOL("Telegram bot connector; off unless turned on"),
         sms = BOOL("Android SMS Gateway connector; off unless turned on") })
@@ -647,7 +665,8 @@ return function(app)
         compliance_expiring = Channel, agent_update = Channel, deal_scout = Channel,
         hot_lead = OBJ({ push = BOOL(), email = BOOL(), ntfy = BOOL(), telegram = BOOL(), sms = BOOL() }, nil,
             "A lead replied and looks keen: call them now. Every channel is on by default."),
-        ntfy_topic = S("My ntfy topic (default <topic_prefix>-<first 12 of my user uuid>)"),
+        ntfy_topic = S("My ntfy topic; send \"generate\" for a random private one. No topic, no ntfy alerts; they "
+            .. "only say \"open OpsAPI\" (anyone who knows a topic can read it)"),
         telegram_chat_id = S("My chat id with the workspace's Telegram bot"),
         quiet_hours = OBJ({ from = S("HH:MM"), to = S("HH:MM") }, { "from", "to" },
             "Workspace time; holds back push, ntfy, Telegram and SMS, not email or the digest"),
@@ -706,10 +725,15 @@ return function(app)
     sdk.doc(app, "DELETE /mail-connectors/:id", { summary = "Remove a mailbox", permission = "property_deals_settings.update",
         path = mc, response = OBJ({ deleted = BOOL() }), errors = E404 })
     sdk.doc(app, "POST /mail-connectors/:id/sync", { summary = "Fetch new mail now", permission = "property_deals_settings.update",
-        status = 200, path = mc, response = OBJ({ fetched = INT(), stored = INT(), matched = INT() }),
+        description = "Up to 20 s / 100 messages, oldest first; the scheduled sync carries on from there. A message "
+            .. "that can't be stored is skipped and kept with matched_by \"error\".",
+        status = 200, path = mc, response = OBJ({ fetched = INT(), stored = INT(), matched = INT(),
+            failed = INT("Messages that couldn't be stored"),
+            error = S("What went wrong, if anything (also last_error)") }),
         errors = { ["404"] = "Not found", ["502"] = "Mailbox sign-in or fetch failed (also in last_error)" } })
-    sdk.doc(app, "GET /inbound-messages", { summary = "Emails received about deals", permission = "property_deals_tasks.read",
-        response = ARR(Inbound), query = { deal_uuid = UUID(), unmatched = ENUM({ "true" }), per_page = INT("1–100") } })
+    sdk.doc(app, "GET /inbound-messages", { summary = "Emails received (the whole inbox)", permission = "property_deals_leads.read",
+        response = ARR(Inbound), description = "meta: { page, per_page }. matched_by \"error\": a message that couldn't be stored.",
+        query = { deal_uuid = UUID(), unmatched = ENUM({ "true" }), page = INT("From 1"), per_page = INT("1–100, default 25") } })
     sdk.doc(app, "POST /inbound-messages", { summary = "Log a received email by hand", permission = "property_deals_tasks.create",
         response = Inbound, errors = { ["409"] = "Already logged", ["422"] = E422["422"] },
         body = OBJ({ from_address = S(), from_name = S(), subject = S(), body_text = S(), received_at = DT(),
@@ -759,7 +783,9 @@ return function(app)
     sdk.doc(app, "GET /connectors", { summary = "Data connectors", permission = "property_deals_settings.read",
         response = ARR(Connector) })
     sdk.doc(app, "POST /connectors", { summary = "Add a data connector", permission = "property_deals_settings.update",
-        body = ConnectorWrite, response = Connector, errors = E422 })
+        body = ConnectorWrite, response = Connector,
+        errors = { ["422"] = "Validation failed; a paid feed (propertydata, searchland, streetdata, homedata) isn't "
+            .. "available yet and can only be saved with enabled: false" } })
     sdk.doc(app, "GET /connectors/:id", { summary = "A data connector", permission = "property_deals_settings.read",
         path = cid, response = Connector, errors = E404 })
     sdk.doc(app, "PUT /connectors/:id", { summary = "Update a data connector", permission = "property_deals_settings.update",
@@ -771,14 +797,18 @@ return function(app)
         errors = { ["404"] = "Not found", ["501"] = "Stub connector (no adapter yet)", ["502"] = "Source failed (also last_error)" } })
     sdk.doc(app, "GET /market-records", { summary = "Market data (sold prices, EPCs, listings, auction lots)",
         permission = "property_deals_properties.read", response = ARR(MarketRecord),
-        query = { record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }), postcode = S(), per_page = INT("1–200") } })
+        description = "meta: { page, per_page }.",
+        query = { record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }), postcode = S(),
+            page = INT("From 1"), per_page = INT("1–200, default 50") } })
     sdk.doc(app, "POST /market-records/import", { summary = "Import market data from CSV", status = 200,
         permission = "property_deals_properties.create",
         description = "Header row; columns used: external_id|id|lot|url, address, postcode, lat, lng, property_type, tenure, "
-            .. "bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded.",
+            .. "bedrooms, price, date, epc_rating, status, cash_only, url, guide_price, notes. Missing lat/lng are geocoded. "
+            .. "At most 5,000 rows, stored in one transaction (all or nothing).",
         body = OBJ({ record_type = ENUM({ "sold_price", "epc", "listing", "auction_lot", "other" }), csv = S(), source = S() },
             { "record_type", "csv" }),
-        response = OBJ({ rows = INT(), stored = INT(), skipped = INT() }), errors = { ["413"] = "Over 5 MB", ["422"] = E422["422"] } })
+        response = OBJ({ rows = INT(), stored = INT(), skipped = INT() }),
+        errors = { ["413"] = "Over 5 MB or 5,000 rows", ["422"] = E422["422"] } })
     sdk.doc(app, "POST /properties/:id/enrich", { summary = "EPC register + sold prices for a property", status = 200,
         permission = "property_deals_properties.update", path = { id = UUID() },
         response = OBJ({ epc = OBJ({ rating = S(), certificate_number = S(), expires_on = DATE(), address = S() }),
@@ -792,9 +822,12 @@ return function(app)
         response = CompanyCheck, errors = { ["404"] = "Not found", ["422"] = "No number / connector" } })
     sdk.doc(app, "POST /saved-searches/:id/run", { summary = "Run a saved search now", status = 200,
         permission = "property_deals_properties.read", path = { id = UUID() },
-        response = OBJ({ new = INT(), reduced = INT(), stale = INT(), cash_only = INT() }), errors = E404 })
+        response = OBJ({ new = INT(), reduced = INT(), stale = INT(), cash_only = INT() }),
+        errors = { ["404"] = "Not found", ["422"] = "No usable pin or polygon" } })
     sdk.doc(app, "GET /scout-alerts", { summary = "Deal scout alerts", permission = "property_deals_properties.read",
-        response = ARR(ScoutAlert), query = { saved_search_uuid = UUID(), unseen = ENUM({ "true" }) } })
+        response = ARR(ScoutAlert), description = "Newest first; meta: { page, per_page }.",
+        query = { saved_search_uuid = UUID(), unseen = ENUM({ "true" }), page = INT("From 1"),
+            per_page = INT("1–200, default 200") } })
     sdk.doc(app, "POST /scout-alerts/seen", { summary = "Mark alerts seen (all, or the uuids given)", status = 200,
         permission = "property_deals_properties.read", body = OBJ({ uuids = ARR(UUID()) }), response = OBJ({ updated = INT() }) })
     sdk.doc(app, "POST /matches/recompute", { summary = "Re-score matches", status = 200, permission = "property_deals_buyers.update",
@@ -844,12 +877,15 @@ return function(app)
     sdk.doc(app, "GET /export/:entity", { summary = "Export a workspace's data (CSV or JSON)", permission = "property_deals_reports.manage",
         path = { entity = ENUM({ "deals", "tasks", "properties", "buyer_profiles", "suppliers", "bookings", "enquiries", "chases",
             "compliance_checks", "documents", "approvals", "agent_runs", "matches", "market_records", "stage_history" }) },
-        query = { format = ENUM({ "csv", "json" }), from = DATE("created on/after"), to = DATE("created before") },
-        description = "At most 50,000 rows (header X-Truncated when cut). CSV cells that start with = + - @ are prefixed with ' "
-            .. "so spreadsheets don't run them.", response = ARR(ANY("A row")), errors = { ["404"] = "Unknown export" } })
+        query = { format = ENUM({ "csv", "json" }), from = DATE("created on/after"), to = DATE("created before"),
+            page = INT("10,000 rows a page, oldest first (default 1)") },
+        description = "10,000 rows a page (headers X-Truncated and X-Next-Page when there is more). CSV cells that start "
+            .. "with = + - @ are prefixed with ' so spreadsheets don't run them.", response = ARR(ANY("A row")),
+        errors = { ["404"] = "Unknown export" } })
 
     sdk.doc(app, "GET /buyer-profiles/directory", { summary = "Buyers with names (Buyers page)", permission = "property_deals_buyers.read",
-        query = { q = S("Name or email"), pof_status = S() },
+        description = "Most recently updated first; meta: { page, per_page }.",
+        query = { q = S("Name or email"), pof_status = S(), page = INT("From 1"), per_page = INT("1–500, default 500") },
         response = ARR(OBJ({ uuid = UUID(), name = S(), email = S(), contact_uuid = S(), account_uuid = S(), entity_type = S(),
             pof_status = S(), pof_expires_on = DATE(), funding_route = S(), price_min = MONEY(), price_max = MONEY(),
             strategies = ANY(), areas = ANY(), deal_breakers = ANY(), min_yield_pct = NUM(), min_discount_pct = NUM(),
