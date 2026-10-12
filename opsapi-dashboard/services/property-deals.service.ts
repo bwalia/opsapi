@@ -172,26 +172,6 @@ export type SavedSearch = S['PropertyDealsSavedSearch'];
 export type ScoutAlert = S['PropertyDealsScoutAlert'];
 export type CompanyCheck = S['PropertyDealsCompanyCheck'];
 
-/** Core workspace AI provider (/api/v2/namespace/ai-providers). Keys never come back. */
-export interface AiProvider {
-  uuid: string;
-  name: string;
-  provider_type: 'anthropic' | 'openai' | 'gemini' | 'azure_openai' | 'mistral' | 'openai_compatible' | 'ollama' | 'jobshout';
-  base_url?: string;
-  default_model?: string;
-  models?: string[];
-  has_secret: boolean;
-  secret_hint?: string;
-  username?: string;
-  options?: Record<string, unknown>;
-  is_local?: boolean;
-  enabled?: boolean;
-  input_cost_per_mtok?: number;
-  output_cost_per_mtok?: number;
-  last_tested_at?: string;
-  last_error?: string;
-}
-
 export interface PluginSettingDef {
   name: string;
   label: string;
@@ -416,12 +396,6 @@ export const pdService = {
   routes: () => get<AiRoute[]>('/ai/routes'),
   saveRoute: (jobType: string, body: Record<string, unknown>) => send<AiRoute>('put', `/ai/routes/${jobType}`, body),
   aiUsage: (days = 30) => get<Record<string, unknown>>('/ai/usage', { days }),
-  aiProviders: () => core<AiProvider[]>('get', '/api/v2/namespace/ai-providers'),
-  saveAiProvider: (body: Record<string, unknown>, uuid?: string) =>
-    uuid ? core<AiProvider>('put', `/api/v2/namespace/ai-providers/${uuid}`, body) : core<AiProvider>('post', '/api/v2/namespace/ai-providers', body),
-  deleteAiProvider: (uuid: string) => core<unknown>('delete', `/api/v2/namespace/ai-providers/${uuid}`),
-  testAiProvider: (uuid: string) => core<Record<string, unknown>>('post', `/api/v2/namespace/ai-providers/${uuid}/test`),
-  jobshoutAgents: (uuid: string) => core<{ id: string; name: string }[]>('get', `/api/v2/namespace/ai-providers/${uuid}/agents`),
 
   // Data + mail connectors
   connectors: () => get<Connector[]>('/connectors'),

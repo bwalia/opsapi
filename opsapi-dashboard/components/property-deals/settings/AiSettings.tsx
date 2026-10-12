@@ -1,160 +1,31 @@
 'use client';
 
 /**
- * AI settings: the workspace's providers (cloud, local, JobShout link — keys go in, never out:
- * "••••1234" + Replace), test connection, the model chain per job type (fallback order,
- * local-only), and each agent (on/off, built-in or a JobShout agent, approval rule, auto pickup).
+ * AI settings for Property Deals: the workspace's AI providers (the core component, also under
+ * Workspace → AI models), the model chain per job type (fallback order, local-only), and each agent
+ * (on/off, built-in or a JobShout agent, approval rule, auto pickup).
  */
 import React, { useState } from 'react';
-import { Plus, Plug, Trash2, ArrowUp, ArrowDown, KeyRound } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Badge, Button, Card, Input, Modal, Select, Switch } from '@/components/ui';
-import { pdService, pdErrorText, type AiProvider, type Agent, type AiRoute } from '@/services/property-deals.service';
-import { ErrorNote, Spinner, label, dateText } from '../ui';
+import { pdService, pdErrorText, type Agent, type AiRoute } from '@/services/property-deals.service';
+import { aiProvidersService, type AiProvider } from '@/services/ai-providers.service';
+import AiProviders from '@/components/ai/AiProviders';
+import { ErrorNote, label } from '../ui';
 import { usePdData } from '../usePd';
 
-const TYPES: { value: AiProvider['provider_type']; label: string; url?: string; local?: boolean }[] = [
-  // The deployment's own self-hosted model (the one the chat assistant uses): no key, data stays on our servers.
-  { value: 'platform' as AiProvider['provider_type'], label: 'Platform model (self-hosted — same as the chat assistant)', local: true },
-  { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'azure_openai', label: 'Azure OpenAI' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'openai_compatible', label: 'OpenAI-compatible (LM Studio, vLLM, llama.cpp, LocalAI…)', local: true },
-  { value: 'ollama', label: 'Ollama', url: 'http://localhost:11434/v1', local: true },
-  { value: 'jobshout', label: 'JobShout link' },
-];
 const JOB_TYPES = ['draft', 'plan', 'classify', 'extract', 'summarise', 'chat'];
 
+/** canEditProviders = core namespace.update (what the providers API checks); canEditPlugin = this plugin's settings.update. */
 export default function AiSettings({ canEditProviders, canEditPlugin }: { canEditProviders: boolean; canEditPlugin: boolean }) {
-  const providers = usePdData(async () => (await pdService.aiProviders()).data, []);
-  const [editing, setEditing] = useState<Partial<AiProvider> | null>(null);
-  const [testing, setTesting] = useState<string | null>(null);
-
+  const [providers, setProviders] = useState<AiProvider[]>([]);
   return (
     <div className="space-y-6">
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="font-semibold text-secondary-900">AI providers</h3>
-            <p className="text-sm text-secondary-500">Your own keys, local models and the JobShout link. Keys are stored encrypted and never shown again.</p>
-          </div>
-          {canEditProviders && <Button leftIcon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ provider_type: 'anthropic', enabled: true })}>Add provider</Button>}
-        </div>
-        <ErrorNote error={providers.error} />
-        {providers.loading && !providers.data ? <Spinner /> : (
-          <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
-            {(providers.data || []).length === 0 && <li className="p-4 text-sm text-secondary-500">No providers yet. Add one so agents can draft.</li>}
-            {(providers.data || []).map((p) => (
-              <li key={p.uuid} className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-secondary-900">{p.name}</span>
-                    <Badge size="sm">{TYPES.find((t) => t.value === p.provider_type)?.label || p.provider_type}</Badge>
-                    {p.is_local && <Badge size="sm" variant="success">local</Badge>}
-                    {!p.enabled && <Badge size="sm" variant="secondary">off</Badge>}
-                  </div>
-                  <div className="mt-0.5 text-secondary-500">
-                    {p.default_model || p.username || ''}{p.base_url ? ` · ${p.base_url}` : ''}
-                    {p.has_secret ? ` · key ${p.secret_hint ? p.secret_hint.replace('…', '••••') : '••••'}` : ' · no key'}
-                  </div>
-                  {p.last_tested_at && <div className={p.last_error ? 'text-xs text-error-600' : 'text-xs text-success-600'}>{p.last_error ? `Last test failed: ${p.last_error}` : `Tested OK ${dateText(p.last_tested_at, true)}`}</div>}
-                </div>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="outline" leftIcon={<Plug className="h-4 w-4" />} isLoading={testing === p.uuid} onClick={async () => {
-                    setTesting(p.uuid);
-                    try {
-                      const r = (await pdService.testAiProvider(p.uuid)).data;
-                      toast.success(p.provider_type === 'jobshout' ? `Connected — ${r.agents} agent(s)` : `Works: ${r.model} answered in ${r.latency_ms} ms`);
-                    } catch (e) { toast.error(pdErrorText(e)); } finally { setTesting(null); providers.refresh(); }
-                  }}>Test connection</Button>
-                  {canEditProviders && <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>Edit</Button>}
-                  {canEditProviders && <Button size="sm" variant="ghost" aria-label={`Delete ${p.name}`} onClick={async () => {
-                    if (!window.confirm(`Delete ${p.name}?`)) return;
-                    try { await pdService.deleteAiProvider(p.uuid); providers.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
-                  }}><Trash2 className="h-4 w-4" /></Button>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-      <Routes providers={providers.data || []} canEdit={canEditPlugin} />
-      <Agents providers={providers.data || []} canEdit={canEditPlugin} />
-      {editing && <ProviderModal p={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); providers.refresh(); }} />}
+      <AiProviders canEdit={canEditProviders} onLoaded={setProviders} />
+      <Routes providers={providers} canEdit={canEditPlugin} />
+      <Agents providers={providers} canEdit={canEditPlugin} />
     </div>
-  );
-}
-
-function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState<Record<string, unknown>>({
-    name: p.name || '', provider_type: p.provider_type, base_url: p.base_url || '', default_model: p.default_model || '',
-    username: p.username || '', is_local: p.is_local ?? false, enabled: p.enabled ?? true,
-    input_cost_per_mtok: p.input_cost_per_mtok ?? '', output_cost_per_mtok: p.output_cost_per_mtok ?? '',
-    deployment: (p.options as { deployment?: string } | undefined)?.deployment || '',
-  });
-  const [replacing, setReplacing] = useState(!p.has_secret);
-  const [secret, setSecret] = useState('');
-  const [busy, setBusy] = useState(false);
-  const type = f.provider_type as AiProvider['provider_type'];
-  const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
-  return (
-    <Modal isOpen onClose={onClose} title={p.uuid ? `Edit ${p.name}` : 'Add an AI provider'} size="lg">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="Name" value={String(f.name)} onChange={s('name')} />
-        <Select label="Type" value={type} onChange={(e) => { const t = TYPES.find((x) => x.value === e.target.value); setF({ ...f, provider_type: e.target.value, is_local: t?.local ?? false, base_url: f.base_url || t?.url || '' }); }} disabled={!!p.uuid}>
-          {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </Select>
-        {['azure_openai', 'openai_compatible', 'ollama', 'jobshout'].includes(type) || f.base_url ? (
-          <Input label={type === 'jobshout' ? 'JobShout API URL (…/api/v1)' : type === 'azure_openai' ? 'Azure endpoint (https://<resource>.openai.azure.com)' : 'Base URL'} value={String(f.base_url)} onChange={s('base_url')} />
-        ) : null}
-        {type === 'jobshout' ? (
-          <Input label="JobShout service user (email)" value={String(f.username)} onChange={s('username')} />
-        ) : (
-          <Input label={type === 'azure_openai' ? 'Model / deployment name' : 'Default model'} value={String(f.default_model)} onChange={s('default_model')} placeholder={type === 'anthropic' ? 'claude-sonnet-5-5' : type === 'ollama' ? 'qwen3:8b' : ''} />
-        )}
-        {type === 'azure_openai' && <Input label="Deployment" value={String(f.deployment)} onChange={s('deployment')} />}
-        {type !== 'jobshout' && (
-          <>
-            <Input label="Input cost (USD per million tokens)" type="number" step="any" min={0} value={String(f.input_cost_per_mtok)} onChange={s('input_cost_per_mtok')} />
-            <Input label="Output cost (USD per million tokens)" type="number" step="any" min={0} value={String(f.output_cost_per_mtok)} onChange={s('output_cost_per_mtok')} />
-          </>
-        )}
-        {String(type) !== 'platform' && <div className="sm:col-span-2">
-          {replacing ? (
-            <Input label={type === 'jobshout' ? 'Password' : 'API key'} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} helperText={p.has_secret ? 'Leave empty to keep the saved one.' : type === 'ollama' || type === 'openai_compatible' ? 'Optional for local servers.' : undefined} />
-          ) : (
-            <div className="flex items-center justify-between rounded-lg border border-secondary-200 p-3 text-sm">
-              <span className="inline-flex items-center gap-2"><KeyRound className="h-4 w-4 text-secondary-400" aria-hidden /> Saved key {p.secret_hint ? p.secret_hint.replace('…', '••••') : '••••'}</span>
-              <Button size="sm" variant="outline" onClick={() => setReplacing(true)}>Replace</Button>
-            </div>
-          )}
-        </div>}
-        <label className="flex items-center gap-2 text-sm"><Switch checked={Boolean(f.is_local)} onChange={(v) => setF({ ...f, is_local: v })} /> Local (on your own servers: allowed for local-only jobs)</label>
-        <label className="flex items-center gap-2 text-sm"><Switch checked={Boolean(f.enabled)} onChange={(v) => setF({ ...f, enabled: v })} /> Enabled</label>
-      </div>
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button isLoading={busy} disabled={!f.name} onClick={async () => {
-          setBusy(true);
-          try {
-            const body: Record<string, unknown> = {
-              name: f.name, base_url: f.base_url || undefined, default_model: f.default_model || undefined,
-              username: f.username || undefined, is_local: f.is_local, enabled: f.enabled,
-              input_cost_per_mtok: f.input_cost_per_mtok === '' ? undefined : Number(f.input_cost_per_mtok),
-              output_cost_per_mtok: f.output_cost_per_mtok === '' ? undefined : Number(f.output_cost_per_mtok),
-            };
-            if (!p.uuid) body.provider_type = f.provider_type;
-            if (type === 'azure_openai') body.options = { deployment: f.deployment || f.default_model };
-            if (secret) body.secret = secret;
-            await pdService.saveAiProvider(body, p.uuid);
-            toast.success('Saved');
-            onSaved();
-          } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(false); }
-        }}>Save</Button>
-      </div>
-    </Modal>
   );
 }
 
@@ -253,7 +124,7 @@ function AgentModal({ agent, providers, onClose, onSaved }: { agent: Agent; prov
     jobshout_agent_id: c.jobshout_agent_id || '', fallback_to_builtin: c.fallback_to_builtin ?? true, local_only: c.local_only ?? false,
     approval_rule: c.approval_rule || '', auto_pickup: c.auto_pickup ?? false, auto_pickup_at: c.auto_pickup_at || '08:00',
   });
-  const jsAgents = usePdData(async () => (f.route === 'jobshout' && f.jobshout_provider_uuid ? (await pdService.jobshoutAgents(f.jobshout_provider_uuid)).data : []), [f.route, f.jobshout_provider_uuid]);
+  const jsAgents = usePdData(async () => (f.route === 'jobshout' && f.jobshout_provider_uuid ? await aiProvidersService.jobshoutAgents(f.jobshout_provider_uuid) : []), [f.route, f.jobshout_provider_uuid]);
   return (
     <Modal isOpen onClose={onClose} title={agent.name} description={`Prompt ${agent.version}`} size="lg">
       <div className="space-y-3">

@@ -15,6 +15,7 @@ import {
   Key,
   Activity,
   Mail,
+  Bot,
 } from "lucide-react";
 import { Card, Badge, Button } from "@/components/ui";
 import { useNamespace } from "@/contexts/NamespaceContext";
@@ -331,6 +332,27 @@ export default function NamespacePage() {
                     <h3 className="font-semibold text-secondary-900">Email</h3>
                     <p className="text-sm text-secondary-500">
                       Your email server and email templates
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
+              </div>
+            </Card>
+          </Link>
+        )}
+
+        {canViewEmail && (
+          <Link href="/dashboard/namespace/ai">
+            <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+                    <Bot className="w-5 h-5 text-primary-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-secondary-900">AI models</h3>
+                    <p className="text-sm text-secondary-500">
+                      Your AI keys and local models, and the AI assistant&apos;s model
                     </p>
                   </div>
                 </div>
