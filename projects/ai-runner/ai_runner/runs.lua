@@ -1,5 +1,6 @@
 -- Runs: who may start one, the prompt, conflicts, the run lifecycle (start, approve, claim, status, cancel, retry,
--- sweep), who decides what. docs/AI_RUNNER.md §9 (conflicts), §12 + §22.1 (RBAC), §22.2-22.4 + §23 (contract).
+-- sweep), who decides what, who hears about it, retention. docs/AI_RUNNER.md §9 (conflicts), §12 + §22.1 (RBAC),
+-- §22.2-22.4 + §23 + §24 (contract).
 local cjson = require("cjson")
 local db = require("lapis.db")
 local sdk = require("helper.plugin-sdk")
@@ -26,7 +27,7 @@ local function sql_list(list)
     for i, v in ipairs(list) do out[i] = "'" .. v .. "'" end
     return "(" .. table.concat(out, ", ") .. ")"
 end
-R.OPEN_SQL, R.ACTIVE_SQL = sql_list(OPEN), sql_list(ACTIVE)
+R.OPEN, R.OPEN_SQL, R.ACTIVE_SQL = OPEN, sql_list(OPEN), sql_list(ACTIVE)
 
 -- What a runner may report from each status (§22.2, §23.1). The same status again (higher seq) updates its fields.
 -- cancelling stays cancelling whatever working state comes in (the runner hadn't seen the cancel yet); a lost run
@@ -159,6 +160,9 @@ R.SETTINGS_DEFAULTS = {
     task_automation = { in_progress_on_start = false, review_on_success = false },
     approval_policy = { deciders = "managers", require_start_approval = false, permission_timeout_minutes = 30,
         input_timeout_minutes = 60 },
+    -- §24.1. Caps and the token limit: 0 = none.
+    guards = { similar_threshold = 0.45, max_open_runs_per_user = 3, max_open_runs_per_workspace = 10,
+        daily_token_limit = 0, retention_days = 365 },
 }
 
 function R.settings(ns)
@@ -177,6 +181,7 @@ function R.settings(ns)
         max_run_minutes = row.max_run_minutes or d.max_run_minutes,
         task_automation = merged(U.json(row.task_automation), d.task_automation),
         approval_policy = merged(U.json(row.approval_policy), d.approval_policy),
+        guards = merged(U.json(row.guards), d.guards),
         updated_at = U.null(row.updated_at),
         updated_by = U.null(row.updated_by),
     }
@@ -332,6 +337,7 @@ end
 
 -- Sessions in these states are not working on anything.
 local IDLE = "('idle', 'done', 'finished', 'stopped', 'exited', 'ended', 'completed', 'closed', 'inactive')"
+R.IDLE_SQL = IDLE
 
 --- A session on the runner's machine that is busy in the folder (or a folder inside it).
 function R.busy_session(ns, runner_uuid, repo_path)
@@ -378,14 +384,18 @@ function R.move_task(task_uuid, status, column_name)
     if not ok then ngx.log(ngx.ERR, "[ai_runner] task automation failed: ", tostring(err)) end
 end
 
---- Tell the requester's open dashboards (any pod) that a run changed. Best effort.
-function R.notify(run)
-    if not run or not run.requested_by then return end
+--- Tell a user's open dashboards (any pod) that a run changed. Best effort.
+local function push(user_uuid, run)
     local ok, WS = pcall(require, "lib.chat-ws")
     if ok and type(WS) == "table" and WS.push_user then
-        pcall(WS.push_user, run.requested_by, "ai_run:update", { uuid = run.uuid, status = run.status,
+        pcall(WS.push_user, user_uuid, "ai_run:update", { uuid = run.uuid, status = run.status,
             task_uuid = run.task_uuid, namespace_id = run.namespace_id })
     end
+end
+
+--- Tell the requester's open dashboards that a run changed.
+function R.notify(run)
+    if run and run.requested_by then push(run.requested_by, run) end
 end
 
 --- Must a manager approve this run before it is queued (§23.3)? Always for a profile whose permission prompts
@@ -420,6 +430,13 @@ function R.create(ns, user_uuid, task, inp)
         local known = false
         for _, m in ipairs(profile.models) do if m == inp.model then known = true end end
         if not known then U.invalid({ model = "is not a model of this profile" }) end
+    end
+    -- §24.3: the runner's health check says this agent can't work right now (logged out, keychain locked, ...).
+    if profile.available == false then
+        local why = type(profile.unavailable_reason) == "string" and profile.unavailable_reason or nil
+        conflict("profile_unavailable", "The " .. tostring(profile.label or profile.key) .. " profile on "
+            .. runner.name .. " is unavailable" .. (why and (": " .. why) or ""),
+            { runner_uuid = runner.uuid, profile = profile.key, reason = U.null(why) })
     end
     local busy = R.busy_session(ns, runner.uuid, inp.repo_path)
     if busy then
@@ -461,7 +478,7 @@ function R.create(ns, user_uuid, task, inp)
     end
 
     -- After the commit: none of these may undo the start.
-    if status == "queued" then R.on_queued(res) end
+    if status == "queued" then R.on_queued(res) else R.alert(res, "approval", user_uuid) end
     pcall(function()
         require("queries.KanbanTaskQueries").addComment({ task_id = task.id, user_uuid = user_uuid,
             content = "AI run " .. (status == "queued" and "started" or "requested") .. " by "
@@ -569,6 +586,12 @@ function R.wait_s(v)
     return v and v == v and math.max(0, math.min(R.CLAIM_WAIT_S, v)) or R.CLAIM_WAIT_S
 end
 
+-- Profile keys runner row `alias` last reported unavailable (§24.3): their queued runs wait until it recovers.
+local function unavailable_sql(alias)
+    return "(SELECT p->>'key' FROM jsonb_array_elements(COALESCE(" .. alias
+        .. ".capabilities->'profiles', '[]'::jsonb)) p WHERE p->>'available' = 'false')"
+end
+
 -- The run token (§23.2) is minted with the claim: only its hash is stored, the raw token rides on the returned row.
 local function try_claim(runner)
     local raw, hash = U.new_token("oprt_")
@@ -583,8 +606,10 @@ local function try_claim(runner)
         return U.one([[
             UPDATE ar_runs r SET status = 'claimed', claimed_at = NOW(), heartbeat_at = NOW(), updated_at = NOW(),
                 run_token_hash = ?, lease_until = NOW() + interval ']] .. R.LEASE_S .. [[ seconds'
-            FROM (SELECT q.id FROM ar_runs q LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
+            FROM (SELECT q.id FROM ar_runs q JOIN ar_runners rn ON rn.uuid = q.runner_uuid
+                  LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
                   WHERE q.namespace_id = ? AND q.runner_uuid = ? AND q.status = 'queued'
+                    AND q.profile NOT IN ]] .. unavailable_sql("rn") .. [[
                   ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
                                            WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
                   LIMIT 1 FOR UPDATE OF q SKIP LOCKED) pick
@@ -599,8 +624,8 @@ end
 function R.claim(runner, wait_s)
     return R.long_poll(wait_s, function()
         local st = U.one([[SELECT r.status, EXISTS (SELECT 1 FROM ar_runs q WHERE q.runner_uuid = r.uuid
-            AND q.namespace_id = r.namespace_id AND q.status = 'queued') AS waiting FROM ar_runners r WHERE r.id = ?]],
-            runner.id)
+            AND q.namespace_id = r.namespace_id AND q.status = 'queued' AND q.profile NOT IN ]] .. unavailable_sql("r")
+            .. [[) AS waiting FROM ar_runners r WHERE r.id = ?]], runner.id)
         if not st or st.status == "revoked" then U.fail(401, "Unauthorized") end
         if st.status == "active" and st.waiting then
             local run = try_claim(runner)
@@ -684,6 +709,11 @@ function R.report(runner, run_uuid, b)
                 R.move_task(updated.task_uuid, "review", "review")
             end
             if updated.status ~= run.status then R.notify(updated) end
+            -- A new question for the requester (a replayed report of the same one isn't).
+            local asked = updated.status == "needs_input"
+            if asked and (run.status ~= "needs_input" or run.question ~= updated.question) then
+                R.alert(updated, "input", nil, updated.question)
+            end
             return { status = updated.status, cancel = updated.status == "cancelling" }
         end
     end
@@ -770,6 +800,205 @@ function R.cancel(run, user_uuid)
     local now = U.one("SELECT * FROM ar_runs WHERE id = ?", run.id)
     if now.status == "cancelling" then return now end
     U.fail(409, "This run has already ended (" .. now.status .. ")", { status = now.status })
+end
+
+-- ---------------------------------------------------------------------------
+-- Guards at start (§24.2): caps, the daily token limit, similar work
+-- ---------------------------------------------------------------------------
+
+--- Agent-run tokens (in + out) the workspace used today, UTC (from ai_usage, like every other model call).
+function R.tokens_today(ns)
+    return tonumber(U.one([[SELECT COALESCE(SUM(input_tokens::bigint + output_tokens), 0) AS n FROM ai_usage
+        WHERE namespace_id = ? AND feature = 'agent_run'
+          AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC']], ns).n) or 0
+end
+
+--- Open runs (the user's, the workspace's) and today's tokens, against the workspace guards.
+function R.limits(ns, user_uuid, guards)
+    local open = U.one("SELECT COUNT(*) FILTER (WHERE requested_by = ?)::int AS mine, COUNT(*)::int AS n "
+        .. "FROM ar_runs WHERE namespace_id = ? AND status IN " .. R.OPEN_SQL, user_uuid, ns)
+    return { user_open = open.mine, user_max = guards.max_open_runs_per_user, workspace_open = open.n,
+        workspace_max = guards.max_open_runs_per_workspace, tokens_today = R.tokens_today(ns),
+        daily_token_limit = guards.daily_token_limit }
+end
+
+local trgm_warned = false
+
+--- Other open runs whose task title is like this task's (layer 5 of §9), most similar first, at most 5. Only runs
+-- of projects the caller is a member of, or their own (all for those who see every run): the warning never shows
+-- a task the caller couldn't read already. Without pg_trgm the check is skipped (logged once per worker).
+function R.similar(self, ns, task, threshold)
+    local scope, args = "TRUE", { task.title or "", ns, task.uuid }
+    if not R.sees_all(self) then
+        local me = sdk.user(self).uuid
+        scope = [[(r.requested_by = ? OR r.project_uuid IN (SELECT p.uuid FROM kanban_project_members m
+            JOIN kanban_projects p ON p.id = m.project_id
+            WHERE p.namespace_id = ? AND m.user_uuid = ? AND m.left_at IS NULL))]]
+        for _, v in ipairs({ me, ns, me }) do args[#args + 1] = v end
+    end
+    args[#args + 1] = threshold
+    -- ponytail: compares against every open run of the workspace (the caps keep that list short); a trigram index
+    -- on the titles and the % operator if open runs ever number in the thousands.
+    local ok, rows = pcall(db.query, [[
+        SELECT run_uuid, task_uuid, task_number, task_title, status, requested_by_name,
+               round(sim::numeric, 3) AS similarity
+        FROM (SELECT r.uuid AS run_uuid, r.task_uuid, t.task_number, COALESCE(t.title, r.task_snapshot->>'title')
+                     AS task_title, r.status, ]] .. R.name_sql("u") .. [[ AS requested_by_name, r.created_at,
+                     similarity(lower(COALESCE(t.title, r.task_snapshot->>'title', '')), lower(?)) AS sim
+              FROM ar_runs r
+              LEFT JOIN kanban_tasks t ON t.uuid = r.task_uuid
+              LEFT JOIN users u ON u.uuid = r.requested_by
+              WHERE r.namespace_id = ? AND r.status IN ]] .. R.OPEN_SQL .. [[ AND r.task_uuid <> ? AND ]] .. scope
+        .. [[) x
+        WHERE sim >= ? ORDER BY sim DESC, created_at, run_uuid LIMIT 5]], unpack(args))
+    if ok then
+        for i, r in ipairs(rows) do
+            rows[i] = { run_uuid = r.run_uuid, task_uuid = r.task_uuid, task_number = U.null(r.task_number),
+                task_title = U.null(r.task_title), status = r.status, requested_by_name = U.null(r.requested_by_name),
+                similarity = tonumber(r.similarity) }
+        end
+        return U.array(rows)
+    end
+    -- Only "function similarity(text, text) does not exist" (the error text quotes the query, so match the message).
+    if not tostring(rows):find("function similarity(", 1, true) then error(rows, 0) end
+    if not trgm_warned then
+        trgm_warned = true
+        ngx.log(ngx.WARN, "[ai_runner] similar-work check skipped (is pg_trgm installed?): ", tostring(rows))
+    end
+    return U.array()
+end
+
+--- Refuse a start or retry (409) at a cap, at the token limit, then on unconfirmed similar work, in that order.
+-- ponytail: counted before the insert, so two starts in the same instant can both pass a cap; take a
+-- per-workspace advisory lock around the count and the insert if caps must be exact.
+function R.check_guards(self, ns, task, confirm_similar)
+    local g = R.settings(ns).guards
+    local l = R.limits(ns, sdk.user(self).uuid, g)
+    if g.max_open_runs_per_user > 0 and l.user_open >= g.max_open_runs_per_user then
+        conflict("cap_reached", "You already have " .. l.user_open .. " open AI runs (the limit is "
+            .. g.max_open_runs_per_user .. ")", { scope = "user", limit = g.max_open_runs_per_user,
+            open = l.user_open })
+    end
+    if g.max_open_runs_per_workspace > 0 and l.workspace_open >= g.max_open_runs_per_workspace then
+        conflict("cap_reached", "This workspace already has " .. l.workspace_open .. " open AI runs (the limit is "
+            .. g.max_open_runs_per_workspace .. ")", { scope = "workspace", limit = g.max_open_runs_per_workspace,
+            open = l.workspace_open })
+    end
+    if g.daily_token_limit > 0 and l.tokens_today >= g.daily_token_limit then
+        conflict("token_limit", "This workspace has used its AI run tokens for today", {
+            limit = g.daily_token_limit, used = l.tokens_today })
+    end
+    if confirm_similar ~= true then
+        local runs = R.similar(self, ns, task, g.similar_threshold)
+        if #runs > 0 then
+            conflict("similar_work", "Similar work is already running; start anyway to confirm", { runs = runs })
+        end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Notifications to deciders (§24.6)
+-- ---------------------------------------------------------------------------
+
+local ALERTS = {
+    permission = { type = "ai_run_permission", title = "An AI run asks for permission" },
+    approval = { type = "ai_run_approval", title = "An AI run is waiting for approval" },
+    input = { type = "ai_run_input", title = "An AI run has a question" },
+}
+
+local function grants_manage(actions)
+    for _, a in ipairs(type(actions) == "table" and actions or {}) do
+        if a == "manage" then return true end
+    end
+    return false
+end
+
+--- Who hears about a run event: its requester and/or its managers (members whose roles grant ai_runs.manage or
+-- ai_runs_approvals.manage, the workspace owners, the owners and admins of the run's project). Active members of
+-- the run's workspace only, never the actor, at most 20.
+local function recipients(run, requester, managers, actor)
+    local cond, args = {}, { run.namespace_id, actor or "" }
+    if requester then
+        cond[#cond + 1] = "u.uuid = ?"
+        args[#args + 1] = run.requested_by
+    end
+    if managers then
+        local roles = {}
+        for _, r in ipairs(db.query("SELECT id, permissions FROM namespace_roles WHERE namespace_id = ?",
+            run.namespace_id)) do
+            local p = require("cjson.safe").decode(r.permissions or "") -- a TEXT column
+            if type(p) == "table" and (grants_manage(p.ai_runs) or grants_manage(p.ai_runs_approvals)) then
+                roles[#roles + 1] = r.id
+            end
+        end
+        cond[#cond + 1] = "nm.is_owner"
+        if #roles > 0 then
+            cond[#cond + 1] = [[EXISTS (SELECT 1 FROM namespace_user_roles nur WHERE nur.namespace_member_id = nm.id
+                AND nur.namespace_role_id IN ?)]]
+            args[#args + 1] = db.list(roles)
+        end
+        cond[#cond + 1] = [[u.uuid IN (SELECT m.user_uuid FROM kanban_project_members m
+            JOIN kanban_projects p ON p.id = m.project_id
+            WHERE p.uuid = ? AND p.namespace_id = ? AND m.left_at IS NULL AND m.role IN ('owner', 'admin'))]]
+        args[#args + 1] = run.project_uuid or ""
+        args[#args + 1] = run.namespace_id
+    end
+    return db.query([[SELECT u.uuid FROM namespace_members nm JOIN users u ON u.id = nm.user_id
+        WHERE nm.namespace_id = ? AND nm.status = 'active' AND u.uuid <> ? AND (]] .. table.concat(cond, " OR ")
+        .. ") ORDER BY u.id LIMIT 20", unpack(args))
+end
+
+--- Tell the people who must act on a run, through the notification center (which honours their preferences),
+-- and refresh their open dashboards. kind: permission (the approval policy's deciders), approval (managers),
+-- input (the requester). actor: the user who caused it (nil = the runner). Never fails the caller.
+function R.alert(run, kind, actor, detail)
+    local ok, err = pcall(function()
+        local who = kind == "input" and "requester" or kind == "approval" and "managers"
+            or R.settings(run.namespace_id).approval_policy.deciders
+        local users = recipients(run, who ~= "managers", who ~= "requester", actor)
+        if #users == 0 then return end
+        local task = R.task(run.namespace_id, run.task_uuid) or {}
+        if kind == "approval" then
+            detail = display_name(run.requested_by) .. " wants to start " .. tostring(run.profile)
+        end
+        local message = "#" .. tostring(task.task_number or "?") .. " " .. tostring(task.title or "")
+            .. (detail and (": " .. detail) or "")
+        local N = require("queries.KanbanNotificationQueries")
+        for _, u in ipairs(users) do
+            local sent, e = pcall(N.create, { namespace_id = run.namespace_id, recipient_user_uuid = u.uuid,
+                actor_user_uuid = actor, type = ALERTS[kind].type, title = ALERTS[kind].title,
+                message = U.clean(message, 1000), action_url = "/dashboard/ai-runner/runs/" .. run.uuid,
+                project_id = task.project_id, task_id = task.id, priority = "high", group_key = "ai_run:" .. run.uuid,
+                metadata = cjson.encode({ run_uuid = run.uuid, kind = kind }) })
+            if not sent then ngx.log(ngx.ERR, "[ai_runner] notification not stored: ", tostring(e)) end
+            push(u.uuid, run)
+        end
+    end)
+    if not ok then ngx.log(ngx.ERR, "[ai_runner] notifying deciders failed: ", tostring(err)) end
+end
+
+-- ---------------------------------------------------------------------------
+-- Retention (job, daily, per workspace, §24.7)
+-- ---------------------------------------------------------------------------
+
+--- Runs finished more than retention_days ago lose their log events, turn texts and request inputs (the run row,
+-- its summary and usage stay); sessions of revoked runners go. One statement, safe to repeat. @return counts
+-- ponytail: one statement per workspace; batch it by run if a first prune of a huge history ever runs too long.
+function R.retention(ns)
+    local days = math.floor(tonumber(R.settings(ns).guards.retention_days) or R.SETTINGS_DEFAULTS.guards.retention_days)
+    return U.one([[
+        WITH old AS (SELECT uuid FROM ar_runs
+                     WHERE namespace_id = ? AND finished_at < NOW() - make_interval(days => ?)),
+        ev AS (DELETE FROM ar_run_events e USING old WHERE e.run_uuid = old.uuid RETURNING 1),
+        tu AS (UPDATE ar_run_turns t SET text = NULL FROM old WHERE t.run_uuid = old.uuid AND t.text IS NOT NULL
+               RETURNING 1),
+        rq AS (UPDATE ar_run_requests q SET input = NULL FROM old WHERE q.run_uuid = old.uuid AND q.input IS NOT NULL
+               RETURNING 1),
+        se AS (DELETE FROM ar_sessions s USING ar_runners r
+               WHERE r.uuid = s.runner_uuid AND r.status = 'revoked' AND s.namespace_id = ? RETURNING 1)
+        SELECT (SELECT COUNT(*) FROM ev)::int AS events, (SELECT COUNT(*) FROM tu)::int AS turns,
+               (SELECT COUNT(*) FROM rq)::int AS requests, (SELECT COUNT(*) FROM se)::int AS sessions
+    ]], ns, days, ns)
 end
 
 -- ---------------------------------------------------------------------------
