@@ -1,24 +1,34 @@
 -- Outbound HTTP for connectors: the same SSRF rule as AI providers (public
 -- https hosts only, unless OPSAPI_AI_ALLOW_PRIVATE=true), JSON in and out.
+-- The host is resolved once and the connection goes to the address that was
+-- checked (lib/outbound-webhooks), so DNS can't be swapped in between.
+-- Errors are short and safe to show ("HTTP 401", "could not reach the server");
+-- what the provider said goes to the log only.
 local H = {}
+
+--- request_uri-like call through the IP-pinning client. @return res | nil, error (raw: log it, don't show it)
+function H.request(url, params, timeout_ms)
+    return require("lib.outbound-webhooks").request(url, params, {
+        allow_private = os.getenv("OPSAPI_AI_ALLOW_PRIVATE") == "true", timeout_ms = timeout_ms or 20000 })
+end
 
 --- @return decoded body (table) | nil, error, status
 function H.json(url, opts)
     opts = opts or {}
-    local ok, err = require("lib.ai-providers").url_ok(url)
-    if not ok then return nil, err end
-    local httpc = require("resty.http").new()
-    httpc:set_timeout(opts.timeout_ms or 20000)
     local headers = { Accept = "application/json" }
     for k, v in pairs(opts.headers or {}) do headers[k] = v end
-    local res, rerr = httpc:request_uri(url, { method = opts.method or "GET", headers = headers, body = opts.body,
-        ssl_verify = true })
-    if not res then return nil, "request failed: " .. tostring(rerr) end
+    local host = tostring(url):match("^%a+://([^/?#]+)") or "?"
+    local res, rerr = H.request(url, { method = opts.method or "GET", headers = headers, body = opts.body,
+        ssl_verify = opts.ssl_verify }, opts.timeout_ms)
+    if not res then
+        ngx.log(ngx.WARN, "[property_deals] ", host, ": ", tostring(rerr))
+        return nil, "could not reach the server"
+    end
     local data = require("cjson.safe").decode(res.body or "")
     if res.status >= 300 then
-        local msg = type(data) == "table" and (data.error_description or data.error or data.message) or res.body
-        if type(msg) == "table" then msg = msg.message or require("cjson").encode(msg) end
-        return nil, "HTTP " .. res.status .. ": " .. tostring(msg):sub(1, 200), res.status
+        ngx.log(ngx.WARN, "[property_deals] ", host, " answered HTTP ", res.status, ": ",
+            tostring(res.body):sub(1, 300))
+        return nil, "HTTP " .. res.status, res.status
     end
     return data or {}, nil, res.status
 end
