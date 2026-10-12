@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, ConfirmDialog, Input, Modal, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
-import { AiRunnerPage, BASE, PRODUCT, RunnerStatusBadge, ago, useAiData } from '@/components/ai-runner/ui';
+import { AiRunnerPage, BASE, PRODUCT, RunnerStatusBadge, ago, rateLimitText, useAiData } from '@/components/ai-runner/ui';
 import apiClient from '@/lib/api-client';
 import { aiRunner, aiErrorText, type Runner } from '@/services/ai-runner.service';
 
@@ -197,7 +197,23 @@ function Runners() {
     { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => ago(r.last_heartbeat_at) },
     {
       key: 'profiles', header: 'Profiles',
-      render: (r: Runner) => (r.capabilities?.profiles || []).map((p) => p.label || p.key).join(', ') || '—',
+      render: (r: Runner) => {
+        const profiles = r.capabilities?.profiles || [];
+        if (!profiles.length) return '—';
+        return (
+          <ul className="space-y-0.5">
+            {profiles.map((p) => {
+              const limit = rateLimitText(p.rate_limit);
+              return (
+                <li key={p.key}>
+                  {p.label || p.key}
+                  {limit && <span className="block text-xs text-secondary-500">{limit}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        );
+      },
     },
     { key: 'repos', header: 'Repos', render: (r: Runner) => (r.repos || []).length },
     {

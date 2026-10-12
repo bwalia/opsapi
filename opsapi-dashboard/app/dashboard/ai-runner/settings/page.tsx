@@ -29,7 +29,7 @@ const DEFAULTS: Settings = {
   pr_base: 'main',
   max_run_minutes: 60,
   task_automation: { in_progress_on_start: false, review_on_success: false },
-  approval_policy: { deciders: 'managers', require_start_approval: false },
+  approval_policy: { deciders: 'managers', require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60 },
 };
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -102,7 +102,9 @@ function RunSettings() {
 
         <div className="space-y-3 border-t border-secondary-200 pt-4">
           <h3 className="text-sm font-semibold text-secondary-800">Approval policy</h3>
-          <p className="text-xs text-secondary-500">Stored now; used from Phase 3, when agents ask before risky steps. Until then a run may only read and edit files in its folder.</p>
+          <p className="text-xs text-secondary-500">
+            An agent asks before risky steps, such as running a command. Profiles that can&apos;t ask (Cursor) always need a manager&apos;s approval to start.
+          </p>
           <div className="max-w-sm">
             <Select id="air-s-deciders" label="Who decides permission requests" value={s.approval_policy.deciders}
               onChange={(e) => set({ approval_policy: { ...s.approval_policy, deciders: e.target.value as Settings['approval_policy']['deciders'] } })}>
@@ -113,6 +115,16 @@ function RunSettings() {
           </div>
           <Toggle label="Runs started by an assignee need a manager's approval first" checked={s.approval_policy.require_start_approval}
             onChange={(v) => set({ approval_policy: { ...s.approval_policy, require_start_approval: v } })} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input id="air-s-perm-timeout" label="Permission timeout (minutes)" type="number" min={1} max={1440} required
+              value={s.approval_policy.permission_timeout_minutes || ''}
+              onChange={(e) => set({ approval_policy: { ...s.approval_policy, permission_timeout_minutes: Number(e.target.value) || 0 } })}
+              helperText="A request nobody answers in time is denied; the agent carries on without it." />
+            <Input id="air-s-input-timeout" label="Input timeout (minutes)" type="number" min={1} max={1440} required
+              value={s.approval_policy.input_timeout_minutes || ''}
+              onChange={(e) => set({ approval_policy: { ...s.approval_policy, input_timeout_minutes: Number(e.target.value) || 0 } })}
+              helperText="A run waiting for an answer longer than this fails." />
+          </div>
         </div>
 
         <div className="flex justify-end">

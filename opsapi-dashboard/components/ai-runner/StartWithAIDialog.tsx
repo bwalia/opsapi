@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot } from 'lucide-react';
+import { AlertTriangle, Bot, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -162,7 +162,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
         repo_path: repo.trim(),
         prompt: edited ? prompt : undefined,
       });
-      toast.success('AI run started');
+      toast.success(run.status === 'pending_approval' ? 'Sent to a manager for approval' : 'AI run started');
       onClose();
       router.push(`${BASE}/runs/${run.uuid}`);
     } catch (e) {
@@ -249,6 +249,12 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
                 ))}
               </ul>
             </div>
+          )}
+
+          {preview?.needs_approval && !stale && (
+            <p className="flex items-start gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700" role="status">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> A manager must approve this run before it starts.
+            </p>
           )}
 
           {preview && (
