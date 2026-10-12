@@ -46,8 +46,8 @@ interface AgentTaskCardsProps {
   tasks: AgentTask[];
   today: string;
   /**
-   * Phase 3 (AI Task Runner, docs/AI_RUNNER.md §16): the "Start with AI" action for a task.
-   * Not passed yet, so nothing renders — no dead button.
+   * The "Start with AI" action for a task (AI Task Runner, docs/AI_RUNNER.md §16). AgentPane passes
+   * StartWithAIButton, which renders nothing unless AI Runs is on here and the user may start runs.
    */
   renderStartWithAI?: (task: AgentTask) => React.ReactNode;
 }
