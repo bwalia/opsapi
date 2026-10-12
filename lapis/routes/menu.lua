@@ -93,6 +93,8 @@ return function(app)
                 menu = menu_items,
                 main_menu = main_menu,
                 secondary_menu = secondary_menu,
+                -- Collapsible sidebar groups used by main_menu, in order (each item carries `group`).
+                groups = MenuQueries.groupsFor(main_menu),
                 namespace = {
                     id = self.namespace.id,
                     uuid = self.namespace.uuid,

@@ -2605,6 +2605,13 @@ local _migrations = {
     ['zzmn1_chat_menu_is_ai_navigator'] = function()
         db.query("UPDATE menu_items SET name = 'AI Navigator', updated_at = NOW() WHERE key = 'chat' AND name = 'Chat'")
     end,
+    -- The "Reports" item opens the Audit Logs page: say so (renamed workspaces keep theirs). "Delivery"
+    -- links to /dashboard/delivery, which the dashboard has no page for: hidden until one ships.
+    ['zzmn2_audit_logs_label_delivery_hidden'] = function()
+        db.query("UPDATE menu_items SET name = 'Audit Logs', updated_at = NOW()"
+            .. " WHERE key = 'reports' AND name = 'Reports'")
+        db.query("UPDATE menu_items SET is_active = false, updated_at = NOW() WHERE key = 'delivery' AND is_active")
+    end,
     -- A workspace may opt in to the deployment's own (self-hosted) model as an AI provider.
     ['zzai2_platform_model_provider'] = function()
         db.query([[

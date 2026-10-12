@@ -142,6 +142,90 @@ function MenuQueries.destroy(id)
 end
 
 -- ============================================================
+-- SIDEBAR GROUPS
+-- ============================================================
+-- The sidebar shows items in collapsible groups, in this order. Each plugin
+-- gets its own group ("plugin:<code>", named after the plugin) just before
+-- Administration. Items in no group (Dashboard, AI Navigator) sit at the top.
+-- A new module's menu key goes in GROUP_OF (or matches a PREFIX_GROUPS rule);
+-- one item can also pick a group with menu_items.settings = {"group": "<key>"}.
+MenuQueries.GROUPS = {
+    { key = "sales", name = "Sales & CRM", icon = "Contact" },
+    { key = "finance", name = "Finance", icon = "Wallet" },
+    { key = "commerce", name = "Shop & Orders", icon = "ShoppingCart" },
+    { key = "work", name = "Projects & Team", icon = "Kanban" },
+    { key = "field_service", name = "Field Service", icon = "Wrench" },
+    { key = "healthcare", name = "Healthcare", icon = "Heart" },
+    { key = "tax", name = "Tax", icon = "Calculator" },
+    { key = "content", name = "Content & Learning", icon = "BookOpen" },
+    { key = "admin", name = "Administration", icon = "Building2" },
+    { key = "developer", name = "Developer", icon = "Code" },
+}
+
+MenuQueries.GROUP_OF = {
+    crm = "sales", crm_leads = "sales", customers = "sales", forms = "sales",
+    invoices = "finance", purchase_orders = "finance", accounting = "finance", document_templates = "finance",
+    billing = "finance",
+    shop = "commerce", orders = "commerce", products = "commerce", stores = "commerce", delivery = "commerce",
+    projects = "work", timesheets = "work", employees = "work",
+    hospitals = "healthcare", patients = "healthcare", care_home = "healthcare",
+    tax = "tax",
+    cms = "content", academy = "content",
+    namespace = "admin", users = "admin", roles = "admin", activity = "admin", reports = "admin",
+    plugins = "admin", namespaces = "admin",
+    ["api-keys"] = "developer", webhooks = "developer", vault = "developer", domains = "developer",
+    services = "developer",
+}
+
+local PREFIX_GROUPS = {
+    { "field_service_", "field_service" }, { "tax_", "tax" }, { "billing_", "finance" }, { "crm_", "sales" },
+}
+
+local KNOWN_GROUP = {}
+for _, g in ipairs(MenuQueries.GROUPS) do KNOWN_GROUP[g.key] = true end
+
+--- The sidebar group of a menu_items row (nil = top level, ungrouped).
+function MenuQueries.groupOf(item)
+    local key = item.key or ""
+    local settings = item.settings
+    if type(settings) == "string" then
+        local ok, decoded = pcall(cjson.decode, settings)
+        settings = ok and decoded or nil
+    end
+    local chosen = type(settings) == "table" and settings.group
+    if type(chosen) == "string" and (KNOWN_GROUP[chosen] or chosen:match("^plugin:[%w_]+$")) then
+        return chosen
+    end
+    if MenuQueries.GROUP_OF[key] then return MenuQueries.GROUP_OF[key] end
+    for _, rule in ipairs(PREFIX_GROUPS) do
+        if key:sub(1, #rule[1]) == rule[1] then return rule[2] end
+    end
+    local plugin = key:match("^plugin:([^:]+):")
+    return plugin and ("plugin:" .. plugin) or nil
+end
+
+--- The groups these (already filtered) items use, in sidebar order: { key, name, icon }.
+function MenuQueries.groupsFor(items)
+    local used = {}
+    for _, item in ipairs(items) do
+        if item.group then used[item.group] = true end
+    end
+    local out = {}
+    local function add(g)
+        if used[g.key] then out[#out + 1] = g end
+    end
+    for _, g in ipairs(MenuQueries.GROUPS) do
+        if g.key == "admin" then
+            for _, m in ipairs(require("helper.project-loader").getRegistered()) do
+                add({ key = "plugin:" .. m.code, name = m.name or m.code, icon = m.icon or "Puzzle" })
+            end
+        end
+        add(g)
+    end
+    return out
+end
+
+-- ============================================================
 -- NAMESPACE-SPECIFIC MENU QUERIES
 -- ============================================================
 
@@ -335,7 +419,8 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
                 priority = item.custom_priority or item.priority,
                 badge_key = item.badge_key,
                 always_show = item.always_show,
-                is_admin_only = item.is_admin_only
+                is_admin_only = item.is_admin_only,
+                group = MenuQueries.groupOf(item)
             })
         end
 
