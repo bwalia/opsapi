@@ -332,7 +332,8 @@ export const pdService = {
   updateCheck: (id: string, body: Record<string, unknown>) => send<ComplianceCheck>('put', `/compliance-checks/${id}`, body),
 
   // Approvals
-  inbox: (all = false) => get<Approval[]>('/approvals/inbox', all ? { all: 'true' } : undefined),
+  inbox: (all = false, page = 1) =>
+    get<Approval[]>('/approvals/inbox', { ...(all ? { all: 'true' } : {}), page, per_page: 50 }),
   approvals: (params?: Record<string, unknown>) => get<Approval[]>('/approvals', params),
   decide: (id: string, body: ApprovalDecision) => send<Approval>('post', `/approvals/${id}/decide`, body),
   retryApproval: (id: string) => send<Approval>('post', `/approvals/${id}/retry`),

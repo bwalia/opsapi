@@ -27,9 +27,14 @@ export default function ApprovalsPage() {
 
 function Inbox() {
   const [all, setAll] = useState(false);
-  const inbox = usePdData(async () => (await pdService.inbox(all)).data, [all], 30_000);
+  const [page, setPage] = useState(1);
+  const inbox = usePdData(async () => {
+    const res = await pdService.inbox(all, page);
+    return { items: res.data, pages: Number(res.meta?.total_pages) || 1, total: Number(res.meta?.total) || res.data.length };
+  }, [all, page], 30_000);
   const [selected, setSelected] = useState<string | null>(null);
-  const items = useMemo(() => inbox.data || [], [inbox.data]);
+  const items = useMemo(() => inbox.data?.items || [], [inbox.data]);
+  const pages = inbox.data?.pages || 1;
   const current = items.find((a) => a.uuid === selected) || items[0];
 
   return (
@@ -41,7 +46,7 @@ function Inbox() {
         actions={
           <>
             <label className="flex items-center gap-2 text-sm text-secondary-600">
-              <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show ones I can&apos;t decide
+              <input type="checkbox" checked={all} onChange={(e) => { setAll(e.target.checked); setPage(1); }} /> Show ones I can&apos;t decide
             </label>
             <Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={inbox.refresh}>Refresh</Button>
           </>
@@ -76,6 +81,15 @@ function Inbox() {
                 </li>
               ))}
             </ul>
+            {pages > 1 && (
+              <div className="flex items-center justify-between border-t border-secondary-100 p-3 text-xs text-secondary-600">
+                <span>Page {page} of {pages} · {inbox.data?.total} waiting</span>
+                <span className="flex gap-2">
+                  <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+                  <Button size="sm" variant="ghost" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button>
+                </span>
+              </div>
+            )}
           </Card>
           {current && <Detail key={current.uuid + ':' + current.payload_version} a={current} onDone={() => { setSelected(null); inbox.refresh(); }} />}
         </div>

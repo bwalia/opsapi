@@ -104,25 +104,6 @@ return function(app)
         end
     end
 
-    -- Same rule as helper/namespace-mail.lua's host_ok (local there): a
-    -- workspace's SMTP host must still resolve to public addresses when used.
-    local function smtp_host_ok(host)
-        if os.getenv("OPSAPI_MAIL_ALLOW_PRIVATE") == "true" or os.getenv("OPSAPI_WEBHOOKS_ALLOW_PRIVATE") == "true" then
-            return true
-        end
-        if type(host) ~= "string" or host == "localhost" or host:match("%.local$") or host:match("%.internal$")
-            or host:match("%.svc$") or not host:find(".", 1, true) then
-            return false
-        end
-        local Webhooks = require("lib.outbound-webhooks")
-        local ips = Webhooks.resolve(host)
-        if not ips then return false end
-        for _, ip in ipairs(ips) do
-            if not Webhooks.isPublicIPv4(ip) then return false end
-        end
-        return true
-    end
-
     -- Header-safe text: no control characters (CR/LF would start a new header).
     local function one_line(v) return (tostring(v):gsub("%c", " ")) end
 
@@ -324,7 +305,7 @@ return function(app)
                 from_name = company, reply_to = user_email }
             local smtp = NamespaceMail.smtp(self.namespace.id)
             if smtp then
-                if not smtp_host_ok(smtp.host) then
+                if not NamespaceMail.hostOk(smtp.host) then
                     return fail("This workspace's mail server address isn't allowed - check Settings > Email",
                         "invalid", 422)
                 end
