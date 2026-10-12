@@ -46,7 +46,7 @@ return function(app)
         if ok then
             pa = { run_uuid = run.uuid, status = run.status }
         elseif type(run) == "table" and run.pd_error then
-            pa = { error = run.message }
+            pa = { error = run.message } -- our own words: B.ask logs JobShout's and never passes them on
         else
             ngx.log(ngx.ERR, "[property_pa] capture run: ", tostring(run))
             pa = { error = "The PA couldn't be asked" }

@@ -56,8 +56,11 @@ local function ghl_get(token, path)
     end
     local res, err = http:request_uri(url, { method = "GET", ssl_verify = true,
         headers = { Authorization = "Bearer " .. token, Version = "2021-07-28", Accept = "application/json" } })
-    if not res then return nil, "GoHighLevel unreachable: " .. tostring(err) end
-    if res.status >= 300 then return nil, "GoHighLevel HTTP " .. res.status end
+    if not res then
+        ngx.log(ngx.WARN, "[property_pa] GoHighLevel: ", tostring(err))
+        return nil, "GoHighLevel couldn't be reached"
+    end
+    if res.status >= 300 then return nil, "GoHighLevel refused the request (HTTP " .. res.status .. ")" end
     local ok, data = pcall(cjson.decode, res.body or "")
     if not ok or type(data) ~= "table" then return nil, "GoHighLevel returned something that isn't JSON" end
     return data

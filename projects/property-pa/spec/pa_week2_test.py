@@ -73,6 +73,18 @@ expect("PA settings", call("PUT", API + "/api/v2/namespace/plugins/property_pa",
     "jobshout_provider_uuid": js["uuid"], "jobshout_seller_agent_id": "seller-agent-1",
     "jobshout_manager_agent_id": "manager-agent-1", "jobshout_webhook_secret": "s3cret"}}), 200)
 
+# JobShout down: the note is saved, and nobody sees JobShout's own error text.
+mock("POST", "/_ctl", {"jobshout_down": True})
+r = data(call("POST", PA + "/captures/start", SOPHIE, S, {"text": "Michael called about comparables.",
+         "opportunity_uuid": fx["michael"]["opportunity_uuid"]}), 201, "a note while JobShout is down")
+check("note saved; the PA couldn't be reached, said plainly (no upstream text)",
+      r["pa"].get("error") == "The PA couldn't be reached. Try again in a minute."
+      and "maintenance" not in json.dumps(r) and "503" not in json.dumps(r), r)
+res = call("POST", PA + "/ask", SOPHIE, S, {"message": "Morning"})
+check("asking while JobShout is down: 502, plain words only", res[0] == 502
+      and "maintenance" not in json.dumps(res[1]) and "503" not in json.dumps(res[1]), res)
+mock("POST", "/_ctl", {"jobshout_down": False})
+
 # --- Scene 3: Sophie's voice note -----------------------------------------------------------------------------------
 summary = {"contract": "property-pa.output.v1", "mode": "capture", "answer": "I've proposed 5 updates for Sarah.",
            "sources": [{"type": "opportunity", "id": SARAH}], "unknowns": [], "inferences": ["£225k is Sophie's judgement"],

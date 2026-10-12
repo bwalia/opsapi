@@ -91,7 +91,9 @@ function B.ask(ns, user_uuid, settings, req)
         run_id = res and res.run_id
     end
     if not res or not run_id then
-        U.fail(502, "The PA couldn't be reached: " .. tostring(err or "JobShout returned no run id"):sub(1, 200))
+        -- JobShout's own words stay in the log: they can carry its internals.
+        ngx.log(ngx.ERR, "[property_pa] JobShout run not started: ", tostring(err or "no run id"):sub(1, 500))
+        U.fail(502, "The PA couldn't be reached. Try again in a minute.")
     end
     local r = db.insert("property_deals_agent_runs", {
         namespace_id = ns, agent_key = agent_key, provider = B.PROVIDER, provider_uuid = row.uuid,
@@ -175,7 +177,8 @@ function B.finish(ns, run, data)
     if nz(data.model_name) then upd.model = (nz(data.model_provider) and (data.model_provider .. ":") or "") .. data.model_name end
     if nz(data.prompt_version) then upd.prompt_version = tostring(data.prompt_version):sub(1, 40) end
     if status == "failed" then
-        upd.status, upd.error = "failed", tostring(nz(data.error_message) or "the PA run failed"):sub(1, 1000)
+        ngx.log(ngx.WARN, "[property_pa] run ", run.uuid, " failed: ", tostring(nz(data.error_message)):sub(1, 500))
+        upd.status, upd.error = "failed", "The PA couldn't finish this one. Try asking again."
     else
         local raw = nz(data.output) or ""
         local out, perr = B.parse_output(raw)
