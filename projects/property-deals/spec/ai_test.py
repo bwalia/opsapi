@@ -190,7 +190,7 @@ tampered = sealed.split(":")
 tampered[2] = "AAAAAAAAAAAAAAAAAAAAAA=="
 sql(f"UPDATE namespace_ai_providers SET secret_sealed = '{':'.join(tampered)}' WHERE uuid = '{cloud_ok['uuid']}'")
 res = call("POST", NSP + f"/{cloud_ok['uuid']}/test", "owner_s", S)
-check("a tampered key fails the GCM check and is never sent", res[0] == 422 and "decrypted" in res[1].get("error", ""), res)
+check("a tampered key fails the GCM check and is never sent", res[0] == 422 and "can't be opened" in res[1].get("error", ""), res)
 sql(f"UPDATE namespace_ai_providers SET secret_sealed = '{other_seal}' WHERE uuid = '{cloud_ok['uuid']}'")
 
 # --- Routes: fallback order -----------------------------------------------------------------------------------------
