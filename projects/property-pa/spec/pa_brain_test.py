@@ -471,6 +471,9 @@ check("openapi: PA schemas present", all(k in spec["components"]["schemas"] for 
       ("PropertyPaOpportunity", "PropertyPaProposedUpdate", "PropertyPaChange", "PropertyPaRun")),
       [k for k in spec["components"]["schemas"] if k.startswith("PropertyPa")])
 
+check("the unused pa_risks / pa_outcomes tables are gone (risks are computed live; both return in month 3)",
+      sql("SELECT to_regclass('pa_risks') IS NULL AND to_regclass('pa_outcomes') IS NULL") == ["t"])
+
 # --- A demo reset never takes real work with it ------------------------------------------------------------------
 again = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
              "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset after real work on Sarah")

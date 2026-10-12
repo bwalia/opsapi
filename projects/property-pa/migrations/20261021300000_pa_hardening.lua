@@ -3,6 +3,7 @@
 --   * pa_external_refs: each inbound email / GoHighLevel contact is imported once (a unique claim, not a lookup)
 --   * pa_sync_state: where a GoHighLevel pull got to, so a big location carries on next run
 --   * pa_consent: consent basis and opt-out per person (PRD §6), outside the core contacts table
+--   * pa_risks / pa_outcomes dropped while empty: created in Week 1, never written or read
 return function(_, db)
     -- Today / Prepare / Manager Today read next actions, waiting changes and runs per opportunity; the JobShout
     -- webhook finds its run by JobShout's id before it knows the workspace. The task and run tables are Property
@@ -73,4 +74,13 @@ return function(_, db)
     db.query("DROP TRIGGER IF EXISTS pa_consent_same_ns ON pa_consent")
     db.query([[CREATE TRIGGER pa_consent_same_ns BEFORE INSERT OR UPDATE ON pa_consent
         FOR EACH ROW EXECUTE FUNCTION property_pa_same_namespace('person_uuid', 'crm_contacts')]])
+
+    -- The PoC computes risks live (Manager Today) and nothing records outcomes yet; unused tables invite guesses.
+    -- They come back with risk detection and learning (PRD roadmap, month 3). Only dropped while empty.
+    for _, t in ipairs({ "pa_outcomes", "pa_risks" }) do
+        if db.query("SELECT to_regclass(?) IS NOT NULL AS e", t)[1].e
+            and db.query("SELECT NOT EXISTS (SELECT 1 FROM " .. t .. ") AS empty")[1].empty then
+            db.query("DROP TABLE " .. t)
+        end
+    end
 end
