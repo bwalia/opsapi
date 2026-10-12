@@ -20,6 +20,7 @@ local Mail = require("helper.mail")
 -- explicitly where the user is known.
 local UserActivity = require("lib.user-activity")
 local Throttle = require("helper.auth-throttle")
+local AppleSignIn = require("helper.apple-signin")
 
 -- 429 with Retry-After, for per-account limits (helper/auth-throttle.lua).
 local function locked_response(message, retry_after)
@@ -250,6 +251,151 @@ local function build_login_response(self, userWithRoles, user_id, device_info)
             slug = default_namespace.slug,
             is_owner = default_namespace.is_owner
         } or nil
+    }
+end
+
+--- Find or create a user for an OAuth provider that keys off `sub`.
+--- Apple omits email on returning visits, so oauth_id lookup is first.
+--- Returns: user, created(boolean), err_code, err_detail
+local function find_or_create_oauth_identity(opts)
+    local provider = opts.provider
+    local oauth_id = opts.oauth_id
+    local email = opts.email
+    local first_name = opts.first_name or ""
+    local last_name = opts.last_name or ""
+    local project_code = opts.project_code
+
+    if not provider or not oauth_id or oauth_id == "" then
+        return nil, false, "invalid_claims", "Missing OAuth subject"
+    end
+
+    local user = UserQueries.findByOAuth(provider, oauth_id)
+    if user then
+        return user, false, nil, nil
+    end
+
+    if email and email ~= "" then
+        user = UserQueries.findByEmail(email)
+        if user then
+            -- Link this provider identity. Google login still works via
+            -- findByEmail, so overwriting oauth_* is safe and lets Apple
+            -- return visits (no email claim) resolve via findByOAuth.
+            pcall(function()
+                user:update({
+                    oauth_provider = provider,
+                    oauth_id = oauth_id,
+                })
+            end)
+            return user, false, nil, nil
+        end
+    end
+
+    if not email or email == "" then
+        return nil, false, "email_required",
+            "Apple did not provide an email. Share your email on first Sign in with Apple, or use another sign-in method."
+    end
+
+    user = UserQueries.createOAuthUser({
+        uuid = Global.generateUUID(),
+        email = email,
+        username = email,
+        first_name = first_name,
+        last_name = last_name,
+        password = Global.generateRandomPassword(),
+        role = "buyer",
+        oauth_provider = provider,
+        oauth_id = oauth_id,
+        active = true,
+    })
+
+    if not user then
+        return nil, false, "create_failed", "Failed to create user"
+    end
+
+    local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
+        user.id, user.uuid, project_code
+    )
+    if not ns_id then
+        ngx.log(ngx.ERR, "[OAuth/", provider, "] Namespace resolution failed for ",
+            tostring(user.uuid), " project_code=", tostring(project_code),
+            " reason=", tostring(ns_reason))
+        pcall(db.query, "DELETE FROM users WHERE id = ?", user.id)
+        return nil, false, "oauth_namespace_unresolvable", ns_reason
+    end
+
+    return user, true, nil, nil
+end
+
+--- Mint JWT (+ optional refresh) for an OAuth user. Returns table or nil, err.
+local function mint_oauth_session(self, user, opts)
+    opts = opts or {}
+    local userWithRoles = UserQueries.show(user.uuid)
+    if not userWithRoles then
+        return nil, "Failed to load user data"
+    end
+
+    local rolesArray = {}
+    if userWithRoles.roles then
+        for _, role in ipairs(userWithRoles.roles) do
+            table.insert(rolesArray, {
+                id = role.id,
+                role_id = role.role_id,
+                role_name = role.name or role.role_name,
+                name = role.name or role.role_name
+            })
+        end
+    end
+
+    local user_int_id = userWithRoles.internal_id or user.id
+    local default_namespace = NamespaceQueries.getUserDefaultNamespace(user_int_id)
+    local namespace_membership = nil
+    if default_namespace then
+        namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
+            userWithRoles.uuid,
+            default_namespace.id
+        )
+        pcall(NamespaceQueries.updateLastActiveNamespace,
+            user_int_id, default_namespace.id)
+    end
+
+    local token
+    if default_namespace and namespace_membership then
+        local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
+        token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
+            user_roles = rolesArray,
+            namespace_permissions = namespace_permissions
+        })
+    else
+        token = JWTHelper.generateToken(userWithRoles, {
+            roles = rolesArray
+        })
+    end
+
+    local device_info = ngx.req.get_headers()["user-agent"]
+    if device_info and #device_info > 255 then
+        device_info = device_info:sub(1, 255)
+    end
+
+    local refresh_token_raw
+    if user.id then
+        local ok_rt, rt_or_err, rt_err = pcall(RefreshToken.create, user.id, device_info)
+        if ok_rt and rt_or_err then
+            refresh_token_raw = rt_or_err
+            if opts.set_cookie then
+                pcall(AuthCookies.set, self, rt_or_err)
+            end
+        else
+            ngx.log(ngx.WARN, "[AUTH] OAuth refresh token creation skipped: ",
+                tostring(ok_rt and rt_err or rt_or_err))
+        end
+    end
+
+    return {
+        userWithRoles = userWithRoles,
+        rolesArray = rolesArray,
+        token = token,
+        refresh_token = refresh_token_raw,
+        user_id = user.id,
     }
 end
 
@@ -1188,6 +1334,143 @@ return function(app)
         }
     end)))
 
+    -- ── Sign in with Apple (web redirect) ──────────────────────────────
+    -- Apple posts the callback (response_mode=form_post), so the callback
+    -- is registered for both POST and GET. Native iOS uses
+    -- POST /auth/oauth/validate with the identity token instead.
+    app:get("/auth/apple", RateLimit.wrap(OAUTH_LIMIT, function(self)
+        if not AppleSignIn.is_configured_for_web() then
+            return {
+                status = 500,
+                json = { error = "Apple Sign In not configured" }
+            }
+        end
+
+        local redirect_from = self.params.from or "/"
+        local frontend_url = self.params.frontend_url
+        local project_code = self.params.project_code
+
+        local state
+        if frontend_url or project_code then
+            state = cJson.encode({
+                from = redirect_from,
+                frontend_url = frontend_url,
+                project_code = project_code,
+            })
+        else
+            state = redirect_from
+        end
+
+        local auth_url, url_err = AppleSignIn.build_authorize_url(state)
+        if not auth_url then
+            return {
+                status = 500,
+                json = { error = url_err or "Failed to build Apple authorize URL" }
+            }
+        end
+
+        return { redirect_to = auth_url }
+    end))
+
+    local apple_callback = UserActivity.guardAuth("login", "apple", RateLimit.wrap(OAUTH_LIMIT, function(self)
+        local code = self.params.code
+        local id_token = self.params.id_token
+        local raw_state = self.params.state or "/"
+        local user_form = AppleSignIn.parse_user_form(self.params.user)
+
+        local redirect_from = "/"
+        local state_frontend_url = nil
+        local state_project_code = nil
+        local ok_state, state_data = pcall(cJson.decode, raw_state)
+        if ok_state and type(state_data) == "table" then
+            redirect_from = state_data.from or "/"
+            state_frontend_url = state_data.frontend_url
+            state_project_code = state_data.project_code
+        else
+            redirect_from = raw_state
+        end
+
+        local err_frontend = state_frontend_url
+            or Global.getEnvVar("FRONTEND_URL")
+            or "http://127.0.0.1:3033"
+
+        local function apple_error_redirect(code_name)
+            return {
+                redirect_to = string.format(
+                    "%s/login?error=%s&provider=apple",
+                    err_frontend, ngx.escape_uri(code_name)
+                )
+            }
+        end
+
+        if self.params.error then
+            ngx.log(ngx.WARN, "[OAuth/Apple] authorize error: ",
+                tostring(self.params.error), " ", tostring(self.params.error_description))
+            return apple_error_redirect(self.params.error)
+        end
+
+        if not code and not id_token then
+            return apple_error_redirect("missing_code")
+        end
+
+        -- Prefer exchanging the code (gives a fresh id_token). Fall back to
+        -- the form_post id_token when Apple included it directly.
+        local claims, claims_err
+        if code then
+            local token_data, exchange_err = AppleSignIn.exchange_code(code)
+            if not token_data then
+                ngx.log(ngx.ERR, "[OAuth/Apple] code exchange failed: ", tostring(exchange_err))
+                return apple_error_redirect("token_exchange_failed")
+            end
+            id_token = token_data.id_token or id_token
+        end
+
+        claims, claims_err = AppleSignIn.verify_identity_token(id_token)
+        if not claims then
+            ngx.log(ngx.ERR, "[OAuth/Apple] id_token verify failed: ", tostring(claims_err))
+            return apple_error_redirect("invalid_token")
+        end
+
+        local email = claims.email
+        if (not email or email == "") and user_form and user_form.email then
+            email = user_form.email
+        end
+
+        local first_name = (user_form and user_form.first_name) or ""
+        local last_name = (user_form and user_form.last_name) or ""
+
+        local user, _, err_code, err_detail = find_or_create_oauth_identity({
+            provider = "apple",
+            oauth_id = claims.sub,
+            email = email,
+            first_name = first_name,
+            last_name = last_name,
+            project_code = state_project_code,
+        })
+        if not user then
+            ngx.log(ngx.ERR, "[OAuth/Apple] user resolve failed: ",
+                tostring(err_code), " ", tostring(err_detail))
+            return apple_error_redirect(err_code or "user_resolve_failed")
+        end
+
+        local session, session_err = mint_oauth_session(self, user, { set_cookie = true })
+        if not session then
+            ngx.log(ngx.ERR, "[OAuth/Apple] session mint failed: ", tostring(session_err))
+            return apple_error_redirect("session_failed")
+        end
+
+        local final_url = string.format("%s/auth/callback?token=%s&redirect=%s",
+            err_frontend,
+            ngx.escape_uri(session.token),
+            ngx.escape_uri(redirect_from))
+
+        UserActivity.auth("login", { method = "apple", user = session.userWithRoles })
+        return { redirect_to = final_url }
+    end))
+
+    app:get("/auth/apple/callback", apple_callback)
+    app:post("/auth/apple/callback", apple_callback)
+
 
     -- Helper function to check if token is a Google ID token
     local function is_google_id_token(token)
@@ -1260,7 +1543,7 @@ return function(app)
         return token_info, nil
     end
 
-    -- OAuth token validation endpoint (handles both Google ID tokens and app JWTs)
+    -- OAuth token validation endpoint (Google / Apple ID tokens and app JWTs)
     app:post("/auth/oauth/validate", UserActivity.guardAuth("login", "oauth", RateLimit.wrap(VALIDATE_LIMIT, function(self)
         local token = self.params.token
         if not token then
@@ -1268,6 +1551,86 @@ return function(app)
                 status = 400,
                 json = {
                     error = "Token is required"
+                }
+            }
+        end
+
+        -- Sign in with Apple (native iOS identity token)
+        if AppleSignIn.is_apple_id_token(token) then
+            if not AppleSignIn.is_configured_for_native() then
+                return {
+                    status = 500,
+                    json = { error = "Apple Sign In not configured" }
+                }
+            end
+
+            local claims, err = AppleSignIn.verify_identity_token(token)
+            if not claims then
+                return {
+                    status = 401,
+                    json = { error = err or "Invalid Apple token" }
+                }
+            end
+
+            local hdrs = self.req.headers or {}
+            local pc = hdrs["x-project-code"] or hdrs["X-Project-Code"]
+            if pc then
+                pc = tostring(pc):gsub("^%s+", ""):gsub("%s+$", "")
+                if pc == "" then pc = nil end
+            end
+
+            -- Optional first-name / last-name from native client (Apple only
+            -- supplies these once; the Flutter SDK forwards them when present).
+            local first_name = self.params.first_name or self.params.given_name or ""
+            local last_name = self.params.last_name or self.params.family_name or ""
+            local email = claims.email or self.params.email
+
+            local user, _, err_code, err_detail = find_or_create_oauth_identity({
+                provider = "apple",
+                oauth_id = claims.sub,
+                email = email,
+                first_name = first_name,
+                last_name = last_name,
+                project_code = pc,
+            })
+            if not user then
+                local status = (err_code == "email_required" or err_code == "oauth_namespace_unresolvable")
+                    and 400 or 401
+                return {
+                    status = status,
+                    json = {
+                        error = err_code or "Invalid Apple token",
+                        reason = err_detail,
+                    }
+                }
+            end
+
+            local session, session_err = mint_oauth_session(self, user, { set_cookie = false })
+            if not session then
+                return {
+                    status = 500,
+                    json = { error = session_err or "Failed to create session" }
+                }
+            end
+
+            local u = session.userWithRoles
+            UserActivity.auth("login", { method = "apple", user = u })
+            return {
+                status = 200,
+                json = {
+                    user = {
+                        id = u.internal_id,
+                        uuid = u.uuid,
+                        email = u.email,
+                        username = u.username,
+                        name = (u.first_name or "") .. " " .. (u.last_name or ""),
+                        first_name = u.first_name or "",
+                        last_name = u.last_name or "",
+                        active = u.active,
+                        roles = session.rolesArray
+                    },
+                    token = session.token,
+                    refresh_token = session.refresh_token,
                 }
             }
         end
@@ -1404,7 +1767,24 @@ return function(app)
                 })
             end
 
+            -- Issue refresh token for native Google (same as /auth/login + Apple).
+            local refresh_token_raw
+            local device_info = ngx.req.get_headers()["user-agent"]
+            if device_info and #device_info > 255 then
+                device_info = device_info:sub(1, 255)
+            end
+            if user.id then
+                local ok_rt, rt_or_err, rt_err = pcall(RefreshToken.create, user.id, device_info)
+                if ok_rt and rt_or_err then
+                    refresh_token_raw = rt_or_err
+                else
+                    ngx.log(ngx.WARN, "[AUTH] Google validate refresh token skipped: ",
+                        tostring(ok_rt and rt_err or rt_or_err))
+                end
+            end
+
             UserActivity.auth("login", { method = "oauth", user = userWithRoles })
+
             -- Return user data and token (matching login response format)
             return {
                 status = 200,
@@ -1420,7 +1800,8 @@ return function(app)
                         active = userWithRoles.active,
                         roles = rolesArray
                     },
-                    token = app_token
+                    token = app_token,
+                    refresh_token = refresh_token_raw,
                 }
             }
         end
