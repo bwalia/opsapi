@@ -432,9 +432,18 @@ end
 -- `offset = (page-1)*perPage` and produce a negative Postgres OFFSET (→ 500).
 -- @param value any Raw page value from the query string
 -- @return number Page >= 1
+-- A finite number from a query-string value, or nil ("nan", "inf" and "1e400" are numbers to tonumber).
+local function finite(value)
+    local n = tonumber(value)
+    if not n or n ~= n or n == math.huge or n == -math.huge then return nil end
+    return n
+end
+
 function Global.pageParam(value)
-    local n = math.floor(tonumber(value) or 1)
+    local n = math.floor(finite(value) or 1)
     if n < 1 then return 1 end
+    -- Past this a Postgres OFFSET (page * perPage) could overflow bigint; no real list is this deep.
+    if n > 1000000 then return 1000000 end
     return n
 end
 
@@ -448,7 +457,7 @@ end
 function Global.perPageParam(value, default, max)
     default = default or 20
     max = max or 200
-    local n = tonumber(value)
+    local n = finite(value)
     if not n then return default end
     n = math.floor(n)
     if n < 1 then return 1 end

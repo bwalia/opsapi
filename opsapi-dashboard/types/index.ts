@@ -1621,13 +1621,6 @@ export interface KanbanProjectStats {
   time_spent_minutes: number;
 }
 
-export interface KanbanMyTasksResponse {
-  data: KanbanTask[];
-  total: number;
-  page: number;
-  per_page: number;
-}
-
 // Drag and Drop types
 export interface DragItem {
   type: 'task' | 'column';

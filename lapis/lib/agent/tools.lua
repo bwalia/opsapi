@@ -270,7 +270,7 @@ register({
             task = a.task,
             task_uuid = a.task_uuid,
             customer_uuid = a.customer_uuid,
-            work_date = a.work_date or today(),
+            work_date = a.work_date or ctx.local_date or today(),
             total_hours = hours,
             notes = a.notes,
             is_billable = a.is_billable ~= false,
@@ -282,7 +282,7 @@ register({
             uuid = rec.uuid,
             task = a.task,
             hours = hours,
-            work_date = a.work_date or today(),
+            work_date = a.work_date or ctx.local_date or today(),
             status = rec.status,
         }
     end,
@@ -645,7 +645,7 @@ register({
         local project = type(a.project) == "string" and a.project or nil
         local by_uuid = project and project:match("^%x+%-%x+%-%x+%-%x+%-%x+$") ~= nil
         local filters, ferr = Tasks.parseMyTaskFilters({
-            due = a.due, date = a.date, priority = a.priority,
+            due = a.due, date = a.date or ctx.local_date, priority = a.priority,
             project_uuid = by_uuid and project or nil,
             project_name = (not by_uuid) and project or nil,
         })
