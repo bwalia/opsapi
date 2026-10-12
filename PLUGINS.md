@@ -314,7 +314,7 @@ Doc fields: `summary`, `description`, `permission`, `query` (name → schema), `
 
 ### 5.3 Public (anonymous) routes
 
-Routes under `/api/v2/<code>/public/` skip login. For example, `/api/v2/helpdesk/public/status` or `/api/v2/helpdesk/public/forms/:id`. This only works with the default `api_prefix`: a nested custom prefix doesn't match OpsAPI's public-route rule. With `sdk.handler({}, fn)` the namespace then comes from the `X-Namespace-Id` / `X-Namespace-Slug` header (inactive namespaces are refused). Validate everything, and rate-limit or add CAPTCHAs where abuse matters.
+Routes under `/api/v2/<code>/public/` skip login. For example, `/api/v2/helpdesk/public/status` or `/api/v2/helpdesk/public/forms/:id`. This only works with the default `api_prefix`: a nested custom prefix doesn't match OpsAPI's public-route rule. Guard them with `sdk.handler({ namespace = false }, fn)` and work out the workspace yourself, e.g. from a slug or uuid in the path, then check the plugin is on there (`PluginWorkspaces.isEnabled`): the default `sdk.handler({}, fn)` needs a signed-in member, so it answers anonymous callers with 401. Property PA's GoHighLevel webhook (`POST /public/ghl/:workspace/contacts`) is a worked example. Validate everything, and rate-limit or add CAPTCHAs where abuse matters.
 
 ### 5.4 Request helpers
 

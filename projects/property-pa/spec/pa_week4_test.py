@@ -321,6 +321,16 @@ opp = data(call("GET", PA + f"/opportunities/{RICK}", SOPHIE, S), 200, "back on"
 check("P12: switching back on loses nothing", opp["temperature"] == "hot" and any(a["title"] == "Call Rick"
       for a in opp["next_actions"]), opp)
 
+# The PA builds on Property Deals: it can't be switched on while Property Deals is off in the workspace.
+call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabled": False})
+call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S, {"enabled": False})
+res = call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabled": True})
+check("the PA can't be turned on while Property Deals is off (422 naming it)",
+      res[0] == 422 and "property_deals" in json.dumps(res[1]), res)
+call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_s", S, {"enabled": True})
+check("and turns on once Property Deals is on",
+      call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_s", S, {"enabled": True})[0] == 200)
+
 codes = [hook(OLU, "wrong")[0] for _ in range(125)]
 check("the GHL webhook is rate limited per caller (429 after 120 a minute)", 429 in codes and codes[0] == 401, codes[-3:])
 
