@@ -359,14 +359,15 @@ services:
       - prometheus
   # Voice for the assistant (optional): open-source speech-to-text (faster-whisper) and text-to-speech
   # (Kokoro / Piper), OpenAI-compatible. Start with `docker compose --profile voice up -d speaches`, then set
-  # VOICE_URL=http://speaches:8000 and OPSAPI_AI_ALLOW_PRIVATE=true in .env. Audio stays on this machine.
+  # VOICE_URL=http://speaches:8000 in .env (operator config: no OPSAPI_AI_* setting needed). Audio stays on
+  # this machine. Pinned (0.8.3-cpu = latest-cpu on 2026-10-12); the host port is loopback-only.
   speaches:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
     container_name: opsapi-speaches
     profiles: ["voice"]
     restart: unless-stopped
     ports:
-      - "8015:8000"
+      - "127.0.0.1:8015:8000"
     environment:
       - PRELOAD_MODELS=["Systran/faster-whisper-small","speaches-ai/Kokoro-82M-v1.0-ONNX"]
     volumes:
