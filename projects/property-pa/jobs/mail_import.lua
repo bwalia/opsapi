@@ -8,6 +8,8 @@ end
 return {
     every = "5m",
     run = function(job)
+        -- The mail comes from Property Deals' connectors: nothing to import while it is off here.
+        if not require("property_pa.setup").deals_on(job.namespace_id) then return end
         require("property_pa.integrations").mail_import(job.namespace_id, 14)
     end,
 }

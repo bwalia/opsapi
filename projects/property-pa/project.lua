@@ -10,6 +10,16 @@
 -- and the property_deals plugin (properties, deals, tasks with urgency), whose migrations run first.
 local ProjectConfig = require("helper.project-config")
 
+-- Every PA file requires property_deals.* (from the sibling projects/property-deals) and the PA's tables reference
+-- Property Deals tables: without that plugin the PA switches itself off instead of failing to load.
+local function deals_present()
+    local here = debug.getinfo(1, "S").source:match("^@(.+)/[^/]+/project%.lua$")
+    if not here then return true end -- loaded from somewhere unusual: let the route loader report it
+    local f = io.open(here .. "/property-deals/project.lua", "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
 local function module(machine_name, name, description)
     return { machine_name = machine_name, name = name, category = "Property PA", description = description }
 end
@@ -20,9 +30,9 @@ return {
     version = "0.1.0",
     description = "AI PA for property professionals: talk to your PA, the CRM updates underneath.",
     sdk_version = 1,
-    depends = { "core", "crm", "kanban" },
-    enabled = ProjectConfig.isCrmEnabled() and ProjectConfig.isKanbanEnabled(),
-    default_enabled = false,       -- opt-in per workspace (Workspace -> Plugins), with property_deals
+    depends = { "core", "crm", "kanban", "property_deals" },
+    enabled = ProjectConfig.isCrmEnabled() and ProjectConfig.isKanbanEnabled() and deals_present(),
+    default_enabled = false,       -- opt-in per workspace (Workspace -> Plugins); needs property_deals on there too
 
     modules = {
         module("property_pa_records", "PA records", "People, properties, opportunities, interactions, offers and events"),

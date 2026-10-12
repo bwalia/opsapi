@@ -23,6 +23,7 @@ function A.create(ns, value, actor_uuid, _settings, source_interaction_uuid)
         if not opp then U.fail(422, "Validation failed", { opportunity_uuid = "not found in this workspace" }) end
     end
     local owner = value.owner_user_uuid or (opp and opp.owner_user_uuid ~= db.NULL and opp.owner_user_uuid) or actor_uuid
+    require("property_pa.setup").require_deals(ns) -- next actions are Property Deals tasks
     require("property_deals.workspace").ensure(ns, actor_uuid, require("helper.plugin-sdk").settings("property_deals", ns))
     local Tasks = require("property_deals.tasks")
     local task = Tasks.create(ns, {

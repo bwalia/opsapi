@@ -43,6 +43,11 @@ check("setup seeds the seller playbook and grants the PD roles",
       st["knowledge_added"] == 10 and {"pd_operator", "pd_manager", "pd_agent"} <= set(st["roles_updated"]), st)
 st2 = data(call("POST", PA + "/setup", "owner_s", S), 200, "PA setup again")
 check("setup is idempotent", st2["knowledge_added"] == 0 and st2["roles_updated"] == [], st2)
+NSID = sql(f"SELECT id FROM namespaces WHERE uuid = '{S}'")[0]
+n = sql(f"SELECT COUNT(*) FROM namespace_audit_logs WHERE namespace_id = {NSID} AND action = 'role.permissions_updated' "
+        f"AND entity_type = 'namespace_role' AND new_values::text LIKE '%property_pa_records%'")
+check("setup's role grants are in the workspace's RBAC audit log, one per role changed",
+      n == [str(len(st["roles_updated"]))], n)
 
 SOPHIE, ASHLEY = "operator_s", "manager_s"
 
@@ -416,6 +421,18 @@ expect("enable deals in B", call("PUT", API + "/api/v2/namespace/plugins/propert
 expect("enable PA in B", call("PUT", API + "/api/v2/namespace/plugins/property_pa", "owner_b", B, {"enabled": True}), 200)
 res = call("GET", PA + f"/opportunities/{SARAH}", "owner_b", B)
 check("another workspace can't read Sarah (404)", res[0] == 404, res)
+expect("turn Property Deals off in B", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_b", B,
+       {"enabled": False}), 200)
+res = call("POST", PA + "/setup", "owner_b", B)
+check("PA setup needs Property Deals on in the workspace (409, says so)", res[0] == 409
+      and "Property Deals" in res[1]["error"], res)
+res = call("POST", PA + "/next-actions", "owner_b", B, {"title": "Call", "due_at": "2030-01-01T10:00:00Z", "reason": "x"})
+check("no Property Deals tasks are made while it is off (409)", res[0] == 409 and "Property Deals" in res[1]["error"], res)
+chk = data(call("GET", PA + "/status", "owner_b", B), 200, "B's go-live checklist")
+check("the checklist says Property Deals is off", chk["ready"] is False
+      and [c["ok"] for c in chk["checks"] if c["key"] == "property_deals"] == [False], chk["checks"])
+expect("Property Deals back on in B", call("PUT", API + "/api/v2/namespace/plugins/property_deals", "owner_b", B,
+       {"enabled": True}), 200)
 res = call("GET", PA + f"/history/pa_opportunities/{SARAH}", "owner_b", B)
 check("nor her history", res[0] == 200 and res[1]["data"] == [], res)
 r = data(call("POST", PA + "/grounding/check", "owner_b", B, good), 200, "cross-tenant grounding")

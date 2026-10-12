@@ -40,6 +40,7 @@ return function(app)
     end)))
 
     app:post("/integrations/mail/import", sdk.handler({ permission = "property_pa_records.create" }, U.guard(function(self)
+        require("property_pa.setup").require_deals(sdk.namespace_id(self))
         return sdk.ok(I.mail_import(sdk.namespace_id(self), 14))
     end)))
 
@@ -68,6 +69,8 @@ return function(app)
         local mail = U.one([[SELECT COUNT(*)::int AS n FROM property_deals_mail_connectors WHERE namespace_id = ?]], ns)
         local knowledge = U.one("SELECT COUNT(*)::int AS n FROM pa_knowledge WHERE namespace_id = ? AND status = 'approved'", ns)
         local checks = {
+            { key = "property_deals", ok = require("property_pa.setup").deals_on(ns),
+              text = "Property Deals is on in this workspace (the PA builds on it)", fix = "Workspace -> Plugins" },
             { key = "playbook", ok = knowledge.n > 0, text = knowledge.n .. " approved rules", fix = "POST /setup" },
             { key = "jobshout_link", ok = link and link.enabled == true or false,
               text = link and "JobShout link set" or "No JobShout link", fix = "Workspace -> AI providers, then the PA settings" },
