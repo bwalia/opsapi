@@ -165,6 +165,10 @@ function D.run(ns, settings, force)
     if not force and now_local < time then return 0 end
     local today = Days.today(cal)
     local sent = 0
+    -- The writer's prose is a nice-to-have: after 5 minutes of it the rest get the plain digest, so the
+    -- job stays well inside its lease.
+    ngx.update_time()
+    local writer_until = ngx.now() + 300
     for _, user in ipairs(recipients(ns)) do
         local d = D.build(ns, user, settings)
         local logged = db.query([[
@@ -173,7 +177,11 @@ function D.run(ns, settings, force)
         ]], ns, user, today, cjson.encode(d), D.is_empty(d))[1]
         if logged and not D.is_empty(d) then
             -- The digest writer agent may turn the lists into prose; the lists stay as they are.
-            local ok, prose = pcall(require("property_deals.ai.runner").write_digest, ns, user, d)
+            ngx.update_time()
+            local ok, prose = true, nil
+            if ngx.now() < writer_until then
+                ok, prose = pcall(require("property_deals.ai.runner").write_digest, ns, user, d)
+            end
             if not ok then ngx.log(ngx.WARN, "[property_deals] digest writer: ", tostring(prose)); prose = nil end
             if prose then
                 d.prose = prose
