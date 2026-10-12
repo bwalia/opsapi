@@ -12,6 +12,7 @@ local function arr(t) return setmetatable(t or {}, cjson.array_mt) end
 
 M.QUIET_DAYS = 14
 M.GAP_PCT = 10 -- our position this far below their stated minimum is an "unusual negotiation"
+M.LIMIT = 20   -- per exception list: a manager's day shows the first 20 of each, oldest / biggest first
 
 function M.today(ns, me)
     local handoffs = db.query([[
@@ -19,16 +20,16 @@ function M.today(ns, me)
                COALESCE(NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), ''), u.email) AS from_name
         FROM pa_handoffs h LEFT JOIN users u ON u.uuid = h.from_user_uuid
         LEFT JOIN pa_opportunities o ON o.uuid = h.opportunity_uuid
-        WHERE h.namespace_id = ? AND h.to_user_uuid = ? AND h.status = 'open' ORDER BY h.created_at
-    ]], ns, me)
+        WHERE h.namespace_id = ? AND h.to_user_uuid = ? AND h.status = 'open' ORDER BY h.created_at LIMIT ?
+    ]], ns, me, M.LIMIT)
     for _, h in ipairs(handoffs) do h.ref = "pa_handoffs:" .. h.uuid end
     -- Unusual negotiations: an offer waiting, or our position well below their stated minimum.
     local negotiations = {}
     for _, r in ipairs(db.query([[
         SELECT o.uuid, o.title, o.owner_user_uuid, f.amount, 'offer_waiting' AS why
         FROM pa_opportunities o JOIN pa_offers f ON f.opportunity_uuid = o.uuid AND f.response = 'pending'
-        WHERE o.namespace_id = ? AND o.status = 'open'
-    ]], ns)) do
+        WHERE o.namespace_id = ? AND o.status = 'open' ORDER BY f.made_at LIMIT ?
+    ]], ns, M.LIMIT)) do
         negotiations[#negotiations + 1] = { opportunity_uuid = r.uuid, title = r.title, owner_user_uuid = r.owner_user_uuid,
             text = string.format("Offer of £%d waiting for an answer", math.floor(tonumber(r.amount) or 0)),
             ref = "pa_opportunities:" .. r.uuid }
@@ -36,7 +37,8 @@ function M.today(ns, me)
     for _, r in ipairs(db.query([[
         SELECT o.uuid, o.title, o.owner_user_uuid, o.expectation_price, o.our_position FROM pa_opportunities o
         WHERE o.namespace_id = ? AND o.status = 'open' AND o.expectation_price IS NOT NULL AND o.our_position IS NOT NULL
-    ]], ns)) do
+        ORDER BY o.updated_at DESC LIMIT 200
+    ]], ns)) do -- ponytail: our_position is free text parsed here; the 200 most recently changed are checked
         local ours = tonumber((tostring(r.our_position):match("£?(%d[%d,]*%.?%d*)%s*[kK]") or ""):gsub(",", ""), 10)
         if ours then ours = ours * 1000 else
             ours = tonumber((tostring(r.our_position):match("£(%d[%d,]+)") or ""):gsub(",", ""), 10)
@@ -75,21 +77,14 @@ function M.today(ns, me)
         JOIN crm_deals cd ON cd.uuid = dl.crm_deal_uuid
         WHERE dl.namespace_id = ? AND dl.status = 'active' AND dl.health = 'red' ORDER BY dl.money_at_risk DESC LIMIT 5
     ]], ns)
-    -- Top opportunities: the highest Today scores across the team.
+    -- Top opportunities: the highest Today scores across the team (ranked in the database).
     local R = require("property_pa.priority")
     local top = {}
-    for _, o in ipairs(db.query([[
-        SELECT o.uuid, o.title, o.kind, o.temperature, o.last_meaningful_contact_at, o.owner_user_uuid,
-               NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), '') AS person_name
-        FROM pa_opportunities o LEFT JOIN crm_contacts c ON c.uuid = o.person_uuid
-        WHERE o.namespace_id = ? AND o.status = 'open' AND o.temperature = 'hot'
-    ]], ns)) do
-        local s = R.score(ns, o)
+    for _, o in ipairs(R.top(ns, "o.status = 'open' AND o.temperature = 'hot'", 3)) do
+        local s = R.card(o)
         top[#top + 1] = { opportunity_uuid = o.uuid, title = o.title, owner_user_uuid = o.owner_user_uuid, score = s.score,
             why_now = s.signals[1] and s.signals[1].text or cjson.null, ref = "pa_opportunities:" .. o.uuid }
     end
-    table.sort(top, function(a, b) return a.score > b.score end)
-    while #top > 3 do table.remove(top) end
     local total = U.one("SELECT COUNT(*)::int AS n FROM pa_opportunities WHERE namespace_id = ? AND status = 'open'", ns).n
     local flagged = {}
     for _, list in ipairs({ negotiations, quiet, overdue }) do
