@@ -169,6 +169,25 @@ function outboxHeaders(config: InternalAxiosRequestConfig): Record<string, strin
   return out;
 }
 
+// Another tab switched workspace: the header and token below come from localStorage, which that
+// tab just rewrote, so this tab's next requests (polls included) would fetch the other workspace's
+// data under this page. Reload so the whole tab follows the switch instead of mixing the two.
+if (typeof window !== 'undefined') {
+  const uuidOf = (raw: string | null): string | undefined => {
+    try {
+      return raw ? (JSON.parse(raw) as { uuid?: string } | null)?.uuid : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  window.addEventListener('storage', (e) => {
+    if (e.key !== NAMESPACE_KEY) return;
+    const before = uuidOf(e.oldValue);
+    const after = uuidOf(e.newValue);
+    if (before && after && before !== after) window.location.reload();
+  });
+}
+
 /**
  * Request interceptor to add auth token and namespace header
  */
