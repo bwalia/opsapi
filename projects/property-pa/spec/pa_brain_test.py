@@ -384,7 +384,7 @@ check("the webhook's answer was checked and stored", got["output"]["grounded"] i
 use = sql(f"SELECT feature || '|' || scope || '|' || provider || '|' || model || '|' || (input_tokens + output_tokens) || '|' || ok "
           f"FROM ai_usage WHERE run_uuid = '{run['uuid']}'")
 check("AI use is metered: one ai_usage row per run (who, feature, mode, model, tokens), polled twice or not",
-      use == ["property_pa|today|jobshout|openai_compatible:qwen3.8:latest|1200|t"], use)
+      use == ["property_pa|today|jobshout|openai_compatible:qwen3.8:latest|1200|true"], use)
 check("a run finished by webhook (delivered twice) is metered once",
       sql(f"SELECT COUNT(*) || '|' || SUM(input_tokens + output_tokens) || '|' || MIN(user_uuid) FROM ai_usage "
           f"WHERE run_uuid = '{run5['uuid']}'") == [f"1|1500|{USERS[SOPHIE][0]}"])
