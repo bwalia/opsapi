@@ -1911,6 +1911,9 @@ local _migrations = {
     ['zzpo3_purchase_orders_module'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 3),
     ['zzpo4_purchase_orders_grants'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 4),
     ['zzpo5_purchase_orders_enable_menu'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 5),
+    -- Several bills per PO (billed_quantity, old single bills -> metadata.bills) + module category.
+    ['zzpo6_purchase_orders_billed_quantity'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 6),
+    ['zzpo7_purchase_orders_module_category'] = conditional_array(ProjectConfig.FEATURES.INVOICING, purchase_order_migrations, 7),
 
     -- =========================================================================
     -- KAFKA / AUDIT SYSTEM (560-561)
