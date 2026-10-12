@@ -6,7 +6,10 @@ events (idempotent, redacted), cancel, the lease sweep, conflicts (open run, fol
 idempotent start, retry, pause / rotate / revoke, plugin off, and cross-workspace isolation. Then §23.6 (Phase 3):
 permission requests (allow / deny / remember / expire, long polls), the three decider policies, turns, follow-ups
 and needs_input, usage totals and ai_usage rows, pending_approval approve / reject and its RBAC, the run-token API
-(scope, expiry at run end), and isolation between the workspaces.
+(scope, expiry at run end), and isolation between the workspaces. Then §24.10 (Phase 4): similar-work warning and
+confirm, user and workspace caps, the daily token limit, profile health (start refused, claim skipped), the sessions
+API and its RBAC, the overview numbers, notifications to the right people, the retention job, migration 3 and
+isolation between the workspaces.
 """
 import base64
 import hashlib
@@ -284,7 +287,7 @@ check("prompt has the task, checklist, folder, branch, link and guardrails",
       and f"https://dash.example.invalid/dashboard/projects/{PROJ}/tasks/{T1['uuid']}" in prompt, prompt)
 check("task text can't close the data fence", prompt.count("</task-data>") == 1, prompt)
 check("preview: template v0, no conflicts, can't edit prompt",
-      pv["template_version"] == 0 and pv["conflicts"] == {"open_run": None, "folder_lock": None, "busy_session": None}
+      pv["template_version"] == 0 and pv["conflicts"] == {"open_run": None, "folder_lock": None, "busy_session": None, "similar": []}
       and pv["can_edit_prompt"] is False and pv["work_branch"] == branch, pv)
 check("preview has no side effects", one(f"SELECT COUNT(*) FROM ar_runs r JOIN namespaces n ON n.id = r.namespace_id "
                                          f"WHERE n.uuid = '{A}'") == "0"
@@ -609,8 +612,8 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # =====================================================================================================================
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
-check("migration 2 is tracked once", one("SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'")
-      == "2")
+check("plugin migrations are tracked once each", one(
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "3")
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -1061,6 +1064,411 @@ expect("Q1's token stops at the run's end (401)", call("GET", P + "/public/run/t
 expect("Q1's pending request can't be decided any more (409)", decide("mgr", Q1R, q8, "allow"), 409)
 d = detail("dev", Q1R)
 check("an ended run: no messages", d["can_message"] is False, d)
+
+# =====================================================================================================================
+# Phase 4 (§24.10): guards (similar work, caps, token limit), profile health, sessions, overview, notifications,
+# retention, migration 3, isolation between the workspaces
+# =====================================================================================================================
+A_ID, B_ID = (one(f"SELECT id FROM namespaces WHERE uuid = '{ns}'") for ns in (A, B))
+OPEN = ["pending_approval", "queued", "claimed", "starting", "running", "waiting_permission", "needs_input",
+        "cancelling"]
+OPEN_SQL = "(" + ", ".join(f"'{s}'" for s in OPEN) + ")"
+TODAY = "date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+
+
+def tokens_today(ns_id):
+    return int(one(f"SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM ai_usage WHERE namespace_id = {ns_id} "
+                   f"AND feature = 'agent_run' AND created_at >= {TODAY}"))
+
+
+def notified(kind, run):
+    """Recipients of the run's notifications of one kind, sorted (one entry per notification)."""
+    return sorted(sql(f"SELECT recipient_user_uuid FROM kanban_notifications WHERE type = 'ai_run_{kind}' "
+                      f"AND action_url = '/dashboard/ai-runner/runs/{run['uuid']}'"))
+
+
+check("migration 3: tracked, guards column, pg_trgm installed", one(
+    "SELECT data_type FROM information_schema.columns WHERE table_name = 'ar_settings' AND column_name = 'guards'")
+      == "jsonb" and one("SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'") == "pg_trgm")
+cdef = one("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'kanban_notifications_type_check'") or ""
+check("migration 3 widened the notification types once (re-run from scratch), kanban's kept",
+      cdef.count("ai_run_permission") == 1 and "ai_run_approval" in cdef and "ai_run_input" in cdef
+      and "task_assigned" in cdef and "general" in cdef, cdef)
+check("no open runs left in A before Phase 4", one(
+    f"SELECT COUNT(*) FROM ar_runs WHERE namespace_id = {A_ID} AND status IN {OPEN_SQL}") == "0")
+
+# --- Settings: guards ------------------------------------------------------------------------------------------------
+G0 = {"similar_threshold": 0.45, "max_open_runs_per_user": 3, "max_open_runs_per_workspace": 10,
+      "daily_token_limit": 0, "retention_days": 365}
+s = expect("settings with guards", call("GET", P + "/settings", "mgr", A), 200)
+check("guards: the defaults", s.get("guards") == G0, s.get("guards"))
+for bad in ({"similar_threshold": 0.05}, {"similar_threshold": 1.5}, {"max_open_runs_per_user": 101},
+            {"max_open_runs_per_user": -1}, {"max_open_runs_per_user": 2.5}, {"max_open_runs_per_workspace": 1001},
+            {"daily_token_limit": 1000000001}, {"retention_days": 29}, {"retention_days": 3651}, "x"):
+    expect(f"bad guards {bad} (422)", call("PUT", P + "/settings", "mgr", A, {"guards": bad}), 422)
+expect("a developer can't change the guards", call("PUT", P + "/settings", "dev", A,
+                                                  {"guards": {"daily_token_limit": 1}}), 403)
+s = expect("cap: 2 open runs per user", call("PUT", P + "/settings", "mgr", A, {"guards": {"max_open_runs_per_user": 2}}),
+           200)
+check("guards saved, the rest kept", s["guards"] == dict(G0, max_open_runs_per_user=2)
+      and s["approval_policy"]["deciders"] == "managers" and s["output_mode"] == "pull_request", s)
+
+# Runners only (ai_runners.manage): sees machines and the overview, nothing else.
+USERS["ops"] = ("c9999999-0000-4000-8000-000000000009", "ops.a@ar.invalid")
+sql("INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) "
+    "SELECT 'c9999999-0000-4000-8000-000000000009', 'AR', 'Ops', 'ops.a@ar.invalid', 'ops.a', 'x', true, now(), now() "
+    "WHERE NOT EXISTS (SELECT 1 FROM users WHERE uuid = 'c9999999-0000-4000-8000-000000000009')")
+body = expect("create role ai_ops", call("POST", API + "/api/v2/namespace/roles", "owner_a", A,
+                                         {"role_name": "ai_ops_" + TAG, "display_name": "ai_ops_" + TAG,
+                                          "permissions": {"ai_runners": ["manage"]}}), 201)
+expect("add ops to A", call("POST", API + "/api/v2/namespace/members", "owner_a", A,
+                            {"email": USERS["ops"][1], "role_ids": [body.get("role", body)["id"]]}), 201)
+
+# --- Workspace B: on again, a run whose title matches A's work (it must never count as A's similar work) ---------------
+expect("owner B turns AI Runs on", call("PUT", API + "/api/v2/namespace/plugins/ai_runner", "owner_b", B,
+                                        {"enabled": True}), 200)
+expect("runner B heartbeats", run_b.hb(**heartbeat_body([{"key": "b-manual", "tool": "claude", "status": "busy",
+                                                          "cwd": "/repos/eps"}])), 200)
+for old_run, end in ((RB, "failed"), (RB2, "succeeded")):  # B's earlier runs end (their slots free up)
+    expect(f"B's earlier run ends ({end})", run_b.status(old_run["uuid"], end), 200)
+tb3 = expect("B task: billing", call("POST", API + f"/api/v2/kanban/boards/{boardb}/tasks", "owner_b", B,
+                                     {"title": "Refactor the billing invoice export", "priority": "critical"}), 201)
+RB3 = expect("B starts it", call("POST", P + f"/tasks/{tb3['uuid']}/runs", "owner_b", B,
+                                 {"runner_uuid": regb["runner"]["uuid"], "profile": "claude",
+                                  "repo_path": "/repos/delta"}), 201)
+check("B's run claimed", expect("runner B claims", run_b.claim(), 200).get("run", {}).get("uuid") == RB3["uuid"])
+expect("B's run running", run_b.status(RB3["uuid"], "running"), 200)
+
+# --- Profile health (§24.3) -----------------------------------------------------------------------------------------
+reg4 = expect("manager registers a Phase 4 runner", call("POST", P + "/runners", "mgr", A, {"name": "p4-" + TAG}), 201)
+RUNNER4, r4 = reg4["runner"]["uuid"], Runner(reg4["token"])
+
+
+def hb4(claude=True, inventory=None):
+    profiles = [{"key": "claude", "label": "Claude Code", "approval": "bridge", "models": []},
+                {"key": "locked", "label": "Locked Mac", "approval": "bridge", "models": [], "available": False,
+                 "unavailable_reason": "keychain locked\u0000 " + "x" * 300},
+                {"key": "cursor", "label": "Cursor", "approval": "unsupported", "models": []}]
+    if not claude:
+        profiles[0] = dict(profiles[0], available=False, unavailable_reason="not logged in")
+    return expect("p4 runner heartbeats" + ("" if claude else " (claude logged out)"), r4.hb(
+        version="1.1.0-test", host="mac-p4", os="darwin", load={"running": 0},
+        capabilities={"max_concurrency": 8, "profiles": profiles}, inventory=inventory or [],
+        repos=[{"path": f"/p4/{i}", "branch": "main", "dirty": False} for i in range(1, 11)]), 200)
+
+
+def start4(user, t, repo, **kw):
+    return call("POST", P + f"/tasks/{t['uuid']}/runs", user, A,
+                dict({"runner_uuid": RUNNER4, "profile": "claude", "repo_path": repo}, **kw))
+
+
+def preview4(user, t, ns=None):
+    return expect(f"{user} previews {t['title']}", call("POST", P + f"/tasks/{t['uuid']}/runs/preview", user, ns or A,
+                                                        {"runner_uuid": RUNNER4, "profile": "claude"}), 200)
+
+
+hb4()
+pr = {p["key"]: p for p in expect("p4 runner detail", call("GET", P + f"/runners/{RUNNER4}", "mgr", A),
+                                  200)["capabilities"]["profiles"]}
+check("heartbeat stores each profile's health, the reason cleaned and cut to 120",
+      pr["claude"]["available"] is True and "unavailable_reason" not in pr["claude"]
+      and pr["locked"]["available"] is False and pr["locked"]["unavailable_reason"].startswith("keychain locked x")
+      and len(pr["locked"]["unavailable_reason"]) == 120 and "\u0000" not in pr["locked"]["unavailable_reason"], pr)
+
+S1 = task("Refactor the billing invoice export", "medium", "dev")
+S2 = task("Refactor billing invoice exports", "medium", "dev2")
+S3 = task("Write onboarding emails", "low", "dev")
+S4 = task("Refactor the billing invoice export again", "low", "dev")
+S5 = task("Translate the help pages", "low", "dev2")
+res = start4("dev", S3, "/p4/3", profile="locked")
+check("an unavailable profile can't start (409 profile_unavailable)", res[0] == 409
+      and res[1]["conflict"]["type"] == "profile_unavailable" and res[1]["conflict"]["profile"] == "locked"
+      and res[1]["conflict"]["runner_uuid"] == RUNNER4 and res[1]["conflict"]["reason"].startswith("keychain locked")
+      and "unavailable" in res[1]["error"], res[:2])
+
+# --- Similar work (§24.2) -------------------------------------------------------------------------------------------
+SS1 = expect("dev starts S1", start4("dev", S1, "/p4/1"), 201)
+pv = preview4("dev2", S2)
+sim = pv["conflicts"]["similar"]
+check("preview: the similar open run, with its task and who started it (not B's run of the same title)",
+      len(sim) == 1 and sim[0]["run_uuid"] == SS1["uuid"] and sim[0]["task_uuid"] == S1["uuid"]
+      and sim[0]["task_number"] == S1["task_number"] and sim[0]["task_title"] == S1["title"]
+      and sim[0]["status"] == "queued" and sim[0]["requested_by_name"] == "AR Test"
+      and 0.45 <= sim[0]["similarity"] <= 1, pv["conflicts"])
+TOK_A = tokens_today(A_ID)
+check("preview: limits", pv["limits"] == {"user_open": 0, "user_max": 2, "workspace_open": 1, "workspace_max": 10,
+                                          "tokens_today": TOK_A, "daily_token_limit": 0}, pv["limits"])
+res = start4("dev2", S2, "/p4/2")
+check("similar work needs confirming (409 similar_work)", res[0] == 409
+      and res[1]["conflict"]["type"] == "similar_work"
+      and [r["run_uuid"] for r in res[1]["conflict"]["runs"]] == [SS1["uuid"]], res[:2])
+expect("confirm_similar must be true or false (422)", start4("dev2", S2, "/p4/2", confirm_similar="yes"), 422)
+SS2 = expect("dev2 starts anyway (confirm_similar)", start4("dev2", S2, "/p4/2", confirm_similar=True), 201)
+check("a different title: no similar work", preview4("dev", S3)["conflicts"]["similar"] == [])
+
+p2 = expect("a second project", call("POST", API + "/api/v2/kanban/projects", "owner_a", A, {"name": "Beta app " + TAG}),
+            201)
+board2 = one(f"SELECT b.uuid FROM kanban_boards b JOIN kanban_projects p ON p.id = b.project_id "
+             f"WHERE p.uuid = '{p2['uuid']}' ORDER BY b.id LIMIT 1")
+expect("dev joins it (dev2 doesn't)", call("POST", API + f"/api/v2/kanban/projects/{p2['uuid']}/members", "owner_a", A,
+                                           {"user_uuid": USERS["dev"][0], "role": "member"}), 201)
+X1 = expect("task in the second project", call("POST", API + f"/api/v2/kanban/boards/{board2}/tasks", "owner_a", A,
+                                               {"title": "Refactor the billing invoice export (mobile)",
+                                                "priority": "medium"}), 201)
+expect("assign it to dev", call("POST", API + f"/api/v2/kanban/tasks/{X1['uuid']}/assignees", "owner_a", A,
+                                {"user_uuid": USERS["dev"][0]}), 201)
+X1R = expect("dev starts the mobile twin (confirmed)", start4("dev", X1, "/p4/7", confirm_similar=True), 201)
+check("similar work only from projects the caller is in", [r["run_uuid"] for r in preview4(
+    "dev2", S2)["conflicts"]["similar"]] == [SS1["uuid"]])
+check("... every project for a manager, most similar first", [r["run_uuid"] for r in preview4(
+    "mgr", S2)["conflicts"]["similar"]] == [SS1["uuid"], X1R["uuid"]])
+tb4 = expect("B task: billing exports", call("POST", API + f"/api/v2/kanban/boards/{boardb}/tasks", "owner_b", B,
+                                             {"title": "Refactor billing invoice exports", "priority": "low"}), 201)
+pvb = expect("B previews its own similar task", call("POST", P + f"/tasks/{tb4['uuid']}/runs/preview", "owner_b", B,
+                                                     {}), 200)
+check("B's similar work: B's run only", [r["run_uuid"] for r in pvb["conflicts"]["similar"]] == [RB3["uuid"]],
+      pvb["conflicts"])
+check("B's limits count B only", pvb["limits"]["workspace_open"] == int(one(
+    f"SELECT COUNT(*) FROM ar_runs WHERE namespace_id = {B_ID} AND status IN {OPEN_SQL}"))
+      and pvb["limits"]["user_max"] == 3, pvb["limits"])
+sql("ALTER FUNCTION similarity(text, text) RENAME TO ar_similarity_off")
+try:
+    check("without pg_trgm the similar-work check is skipped, not an error",
+          preview4("dev2", S2)["conflicts"]["similar"] == [])
+finally:
+    sql("ALTER FUNCTION ar_similarity_off(text, text) RENAME TO similarity")
+check("... and back once it is there", len(preview4("dev2", S2)["conflicts"]["similar"]) == 1)
+
+# --- Caps -------------------------------------------------------------------------------------------------------------
+res = start4("dev", S3, "/p4/3")
+check("user cap (409 cap_reached, user)", res[0] == 409
+      and res[1]["conflict"] == {"type": "cap_reached", "scope": "user", "limit": 2, "open": 2}, res[:2])
+res = start4("dev", S4, "/p4/4")
+check("caps are checked before similar work", res[0] == 409 and res[1]["conflict"]["type"] == "cap_reached", res[:2])
+expect("workspace cap: 4", call("PUT", P + "/settings", "mgr", A, {"guards": {"max_open_runs_per_workspace": 4}}), 200)
+SS5 = expect("dev2 asks to start S5 on Cursor", start4("dev2", S5, "/p4/5", profile="cursor"), 201)
+check("pending approval (it counts as open)", SS5.get("status") == "pending_approval", SS5)
+res = start4("mgr", S3, "/p4/3")
+check("workspace cap (409 cap_reached, workspace)", res[0] == 409
+      and res[1]["conflict"] == {"type": "cap_reached", "scope": "workspace", "limit": 4, "open": 4}, res[:2])
+ap = expect("a manager approves at the cap", call("POST", P + f"/runs/{SS5['uuid']}/approve", "mgr", A, {}), 200)
+check("approving isn't blocked by the caps", ap.get("status") == "queued", ap)
+
+# --- Notifications: start approvals (§24.6) ---------------------------------------------------------------------------
+MANAGERS = sorted(USERS[u][0] for u in ("owner_a", "mgr", "appr", "padmin"))
+check("a run waiting for approval notifies the managers (not the requester, nor ops, nor members)",
+      notified("approval", SS5) == MANAGERS, notified("approval", SS5))
+PROJ_ID = one(f"SELECT id FROM kanban_projects WHERE uuid = '{PROJ}'")
+S5_ID = one(f"SELECT id FROM kanban_tasks WHERE uuid = '{S5['uuid']}'")
+check("... linked to the run page, the task and the project", one(
+    f"SELECT namespace_id || '|' || project_id || '|' || task_id || '|' || title || '|' || message || '|' || priority "
+    f"FROM kanban_notifications WHERE type = 'ai_run_approval' AND action_url = '/dashboard/ai-runner/runs/"
+    f"{SS5['uuid']}' LIMIT 1") == f"{A_ID}|{PROJ_ID}|{S5_ID}|An AI run is waiting for approval|"
+                                  f"#{S5['task_number']} Translate the help pages: AR Test wants to start cursor|high")
+
+# --- Token limit --------------------------------------------------------------------------------------------------------
+expect("caps off, a daily token limit", call("PUT", P + "/settings", "mgr", A, {"guards": {
+    "max_open_runs_per_user": 0, "max_open_runs_per_workspace": 0, "daily_token_limit": TOK_A + 1000}}), 200)
+pv = preview4("mgr", S3)
+check("preview: limits with no caps and the token limit", pv["limits"] == {
+    "user_open": 0, "user_max": 0, "workspace_open": 4, "workspace_max": 0, "tokens_today": TOK_A,
+    "daily_token_limit": TOK_A + 1000}, pv["limits"])
+sql(f"""INSERT INTO ai_usage (namespace_id, user_uuid, feature, scope, provider, model, input_tokens, output_tokens, ok,
+        created_at) VALUES
+    ({A_ID}, '{USERS['dev'][0]}', 'agent_run', 'claude', 'claude', 'opus', 600, 400, true, NOW()),
+    ({A_ID}, '{USERS['dev'][0]}', 'agent_run', 'claude', 'claude', 'opus', 90000, 0, true, {TODAY} - interval '1 minute'),
+    ({A_ID}, '{USERS['dev'][0]}', 'assistant', 'page', 'ollama', 'llama', 90000, 0, true, NOW()),
+    ({B_ID}, '{USERS['owner_b'][0]}', 'agent_run', 'claude', 'claude', 'opus', 90000, 0, true, NOW())""")
+check("tokens today: this workspace's agent runs since midnight UTC only", tokens_today(A_ID) == TOK_A + 1000)
+res = start4("mgr", S3, "/p4/3")
+check("token limit reached (409 token_limit)", res[0] == 409 and res[1]["conflict"] == {
+    "type": "token_limit", "limit": TOK_A + 1000, "used": TOK_A + 1000}, res[:2])
+res = call("POST", P + f"/runs/{Q3R['uuid']}/retry", "dev", A, {})
+check("a retry is held to the guards too", res[0] == 409 and res[1]["conflict"]["type"] == "token_limit", res[:2])
+expect("token limit off", call("PUT", P + "/settings", "mgr", A, {"guards": {"daily_token_limit": 0}}), 200)
+MR = expect("a manager asks to start S3 on Cursor", start4("mgr", S3, "/p4/3", profile="cursor"), 201)
+check("the actor isn't notified of their own request", notified("approval", MR)
+      == sorted(USERS[u][0] for u in ("owner_a", "appr", "padmin")), notified("approval", MR))
+expect("... and rejects it", call("POST", P + f"/runs/{MR['uuid']}/reject", "mgr", A, {}), 200)
+
+# --- Claim skips a profile the runner reports unavailable ---------------------------------------------------------------
+hb4(claude=False)
+c = expect("claim while Claude is logged out", r4.claim(), 200).get("run", {})
+check("only the Cursor run is claimed", c.get("uuid") == SS5["uuid"], c.get("uuid"))
+res = r4.claim(wait=1)
+check("Claude's runs are skipped (204)", res[0] == 204, res[:2])
+check("... and stay queued", sql(f"SELECT status FROM ar_runs WHERE uuid IN ('{SS1['uuid']}', '{SS2['uuid']}', "
+                                 f"'{X1R['uuid']}')") == ["queued"] * 3)
+hb4()
+c = expect("claim once Claude is back", r4.claim(), 200).get("run", {})
+check("the oldest Claude run is claimed", c.get("uuid") == SS1["uuid"], c.get("uuid"))
+expect("SS1 running", r4.status(SS1["uuid"], "running"), 200)
+expect("SS5 running", r4.status(SS5["uuid"], "running"), 200)
+expect("SS5 posts a turn", r4.turn(SS5["uuid"], {"turn": 1, "text": "Done.", "usage": {"input_tokens": 10,
+                                                                                    "output_tokens": 5},
+                                                 "cost_estimate": 0.25}), 200)
+expect("SS5 succeeds", r4.status(SS5["uuid"], "succeeded", summary="Translated"), 200)
+
+# --- Notifications: permission requests and questions ---------------------------------------------------------------------
+ask = lambda rid, rule, cmd: r4.perm(SS1["uuid"], {"request_id": rid, "tool": "Bash", "rule_key": rule,
+                                                   "input": {"command": cmd}})
+p1 = expect("SS1 asks: npm test", ask("p4-1", "npm test", "npm test"), 201)["request"]
+check("a pending request notifies the deciders (managers)", notified("permission", SS1) == MANAGERS,
+      notified("permission", SS1))
+check("... saying what it wants", one(
+    f"SELECT message FROM kanban_notifications WHERE type = 'ai_run_permission' AND action_url = "
+    f"'/dashboard/ai-runner/runs/{SS1['uuid']}' LIMIT 1") == f"#{S1['task_number']} {S1['title']}: Bash: npm test")
+expect("a manager allows it for this run", decide("mgr", SS1, p1, "allow", remember=True), 200)
+p2r = expect("SS1 asks: npm test again", ask("p4-2", "npm test", "npm test -- auth"), 201)["request"]
+check("allowed at once: nobody is notified", p2r["status"] == "allowed" and notified("permission", SS1) == MANAGERS)
+expect("policy: the requester decides", call("PUT", P + "/settings", "mgr", A,
+                                             {"approval_policy": {"deciders": "requester"}}), 200)
+expect("SS1 asks: git status", ask("p4-3", "git st", "git status"), 201)
+check("policy requester: only the requester is notified", notified("permission", SS1)
+      == sorted(MANAGERS + [USERS["dev"][0]]), notified("permission", SS1))
+expect("policy: requester or managers", call("PUT", P + "/settings", "mgr", A,
+                                             {"approval_policy": {"deciders": "requester_or_managers"}}), 200)
+expect("SS1 asks: make", ask("p4-4", "make", "make"), 201)
+check("policy requester_or_managers: both", notified("permission", SS1)
+      == sorted(MANAGERS * 2 + [USERS["dev"][0]] * 2), notified("permission", SS1))
+expect("policy back to managers", call("PUT", P + "/settings", "mgr", A, {"approval_policy": {"deciders": "managers"}}),
+       200)
+expect("SS1 needs input", r4.status(SS1["uuid"], "needs_input", question="Which invoice format?"), 200)
+check("a question notifies the requester only", notified("input", SS1) == [USERS["dev"][0]], notified("input", SS1))
+expect("the same question again", r4.status(SS1["uuid"], "needs_input", question="Which invoice format?"), 200)
+expect("running", r4.status(SS1["uuid"], "running"), 200)
+expect("a new question", r4.status(SS1["uuid"], "needs_input", question="PDF or CSV?"), 200)
+check("one notification per question", notified("input", SS1) == [USERS["dev"][0]] * 2, notified("input", SS1))
+expect("SS1 running", r4.status(SS1["uuid"], "running"), 200)
+expect("B's run asks", run_b.perm(RB3["uuid"], {"request_id": "b-p4", "tool": "Bash", "input": {"command": "ls"}}), 201)
+check("B's request notifies B's owner only", notified("permission", RB3) == [USERS["owner_b"][0]]
+      and one(f"SELECT COUNT(*) FROM kanban_notifications WHERE namespace_id = {B_ID} AND type LIKE 'ai_run_%' "
+              f"AND recipient_user_uuid <> '{USERS['owner_b'][0]}'") == "0"
+      and one(f"SELECT COUNT(*) FROM kanban_notifications WHERE namespace_id = {A_ID} AND type LIKE 'ai_run_%' "
+              f"AND recipient_user_uuid = '{USERS['owner_b'][0]}'") == "0", notified("permission", RB3))
+
+# --- Sessions (§24.4) ---------------------------------------------------------------------------------------------------
+K1 = "pp-" + SS1["uuid"][:8]
+hb4(inventory=[{"key": K1, "tool": "claude", "status": "running", "cwd": "/p4/1", "branch": "ai/x",
+                "session_id": SS1["uuid"], "labels": {"opsapi_run": SS1["uuid"]}},
+               {"key": "manual-p4", "tool": "cursor", "status": "busy", "cwd": "/p4/9", "prompt_preview": "by hand"},
+               {"key": "idle-p4", "tool": "claude", "status": "idle", "cwd": "/p4/10"}])
+ss = call("GET", P + "/sessions", "mgr", A)
+mine = {s["key"]: s for s in (ss[1] or {}).get("data", []) if s["runner"]["uuid"] == RUNNER4}
+check("sessions: every session of the workspace's runners", ss[0] == 200 and set(mine) == {K1, "manual-p4", "idle-p4"}
+      and ss[1]["meta"]["total"] == len(ss[1]["data"]) == 3, ss[:2])
+check("a managed session names its runner and its run", mine.get(K1, {}).get("managed") is True
+      and mine[K1]["run"] == {"uuid": SS1["uuid"], "task_title": S1["title"], "task_number": S1["task_number"]}
+      and mine[K1]["runner"] == {"uuid": RUNNER4, "name": "p4-" + TAG, "status": "online"}
+      and mine[K1]["tool"] == "claude" and mine[K1]["status"] == "running" and mine[K1]["cwd"] == "/p4/1"
+      and mine[K1]["branch"] == "ai/x" and mine[K1]["seen_at"], mine.get(K1))
+check("a session started by hand has no run", mine.get("manual-p4", {}).get("managed") is False
+      and mine["manual-p4"]["run"] is None and mine["manual-p4"]["prompt_preview"] == "by hand", mine.get("manual-p4"))
+bz = expect("busy sessions only", call("GET", P + "/sessions?busy=1", "mgr", A), 200)
+check("busy=1 hides idle sessions", sorted(s["key"] for s in bz) == sorted([K1, "manual-p4"]), bz)
+pg = call("GET", P + f"/sessions?runner_uuid={RUNNER4}&per_page=1&page=2", "ops", A)
+check("ai_runners.manage may list them, by runner and paged", pg[0] == 200 and len(pg[1]["data"]) == 1
+      and pg[1]["meta"]["total"] == 3 and pg[1]["meta"]["total_pages"] == 3 and pg[1]["meta"]["page"] == 2, pg[:2])
+check("another runner's filter: none of these", expect("sessions of the p3 runner", call(
+    "GET", P + f"/sessions?runner_uuid={RUNNER3}", "mgr", A), 200) == [])
+expect("runner_uuid must be a uuid (400)", call("GET", P + "/sessions?runner_uuid=nope", "mgr", A), 400)
+expect("a developer can't list sessions (403)", call("GET", P + "/sessions", "dev", A), 403)
+expect("nor an approver (403)", call("GET", P + "/sessions", "appr", A), 403)
+expect("nor someone outside the workspace (403)", call("GET", P + "/sessions", "owner_b", A), 403)
+sb = expect("B lists its sessions", call("GET", P + "/sessions", "owner_b", B), 200)
+check("B sees only its own runner's sessions", [s["key"] for s in sb] == ["b-manual"]
+      and sb[0]["runner"]["uuid"] == regb["runner"]["uuid"], sb)
+
+# --- Overview (§24.5) ---------------------------------------------------------------------------------------------------
+expect("pause the p3 runner", call("POST", P + f"/runners/{RUNNER3}/pause", "mgr", A), 200)
+expect("a runner that never heartbeats", call("POST", P + "/runners", "mgr", A, {"name": "never-" + TAG}), 201)
+hb4(inventory=[{"key": K1, "tool": "claude", "status": "running", "cwd": "/p4/1", "session_id": SS1["uuid"]}])
+expect("a developer can't see the overview (403)", call("GET", P + "/overview", "dev", A), 403)
+for u in ("appr", "ops"):
+    expect(f"{u} sees the overview", call("GET", P + "/overview", u, A), 200)
+ov = expect("manager sees the overview", call("GET", P + "/overview", "mgr", A), 200)
+
+
+def overview_sql(ns_id):
+    by = {s: 0 for s in OPEN}
+    for line in sql(f"SELECT status || '|' || COUNT(*) FROM ar_runs WHERE namespace_id = {ns_id} "
+                    f"AND status IN {OPEN_SQL} GROUP BY status"):
+        st, n = line.split("|")
+        by[st] = int(n)
+    week = dict(zip(("succeeded", "failed", "cancelled", "lost"), map(int, one(
+        f"SELECT COUNT(*) FILTER (WHERE status = 'succeeded') || '|' || COUNT(*) FILTER (WHERE status = 'failed') "
+        f"|| '|' || COUNT(*) FILTER (WHERE status = 'cancelled') || '|' || COUNT(*) FILTER (WHERE status = 'lost') "
+        f"FROM ar_runs WHERE namespace_id = {ns_id} AND finished_at > NOW() - interval '7 days'").split("|"))))
+    cost = float(one(f"SELECT COALESCE(SUM(cost_estimate), 0) FROM ar_run_turns WHERE namespace_id = {ns_id} "
+                     f"AND role = 'assistant' AND at >= {TODAY}"))
+    wait = one(f"SELECT round(AVG(EXTRACT(EPOCH FROM decided_at - created_at))::numeric, 1) FROM ar_run_requests "
+               f"WHERE namespace_id = {ns_id} AND status IN ('allowed', 'denied') "
+               f"AND decided_at > NOW() - interval '7 days' AND decided_at > created_at")
+    return by, week, cost, (float(wait) if wait else None)
+
+
+by, week, cost, wait = overview_sql(A_ID)
+check("overview: open runs by status and the queue", ov["runs_by_status"] == by and ov["queue_depth"] == by["queued"]
+      and by["queued"] == 2 and by["running"] == 1, (ov.get("runs_by_status"), by))
+check("overview: runners online / offline / paused (revoked left out)",
+      ov["runners"] == {"online": 1, "offline": 1, "paused": 1}, ov.get("runners"))
+check("overview: today's tokens and cost", ov["tokens_today"] == tokens_today(A_ID)
+      and abs(ov["cost_today"] - cost) < 1e-6 and cost >= 0.25, (ov.get("tokens_today"), ov.get("cost_today"), cost))
+check("overview: the last 7 days", ov["runs_7d"] == week and week["succeeded"] >= 3 and week["cancelled"] >= 1,
+      (ov.get("runs_7d"), week))
+check("overview: average wait for a person's decision (repeats allowed at once don't count)",
+      wait is not None and wait > 0 and abs(ov["avg_permission_wait_s_7d"] - wait) < 0.05,
+      (ov.get("avg_permission_wait_s_7d"), wait))
+expect("runner B heartbeats", run_b.hb(**heartbeat_body([{"key": "b-manual", "tool": "claude", "status": "busy",
+                                                          "cwd": "/repos/eps"}])), 200)
+ob = expect("owner B sees B's overview", call("GET", P + "/overview", "owner_b", B), 200)
+by_b, week_b, cost_b, wait_b = overview_sql(B_ID)
+check("B's overview counts B only", ob["runs_by_status"] == by_b and ob["tokens_today"] == tokens_today(B_ID)
+      and ob["tokens_today"] >= 90000 and ob["runs_7d"] == week_b and ob["avg_permission_wait_s_7d"] == wait_b
+      and ob["runners"]["online"] == 1 and ob["runners"]["paused"] == 0, ob)
+expect("resume the p3 runner", call("POST", P + f"/runners/{RUNNER3}/resume", "mgr", A), 200)
+
+# --- Retention (§24.7) ----------------------------------------------------------------------------------------------------
+check("B keeps the default guards", expect("B settings", call("GET", P + "/settings", "owner_b", B), 200)["guards"] == G0)
+expect("A keeps 30 days", call("PUT", P + "/settings", "mgr", A, {"guards": {"retention_days": 30}}), 200)
+expect("B's run logs", run_b.events(RB3["uuid"], [{"seq": 1, "type": "log", "text": "b log"}]), 200)
+expect("B's run succeeds", run_b.status(RB3["uuid"], "succeeded"), 200)
+expect("SS1 logs (open run)", r4.events(SS1["uuid"], [{"seq": 1, "type": "log", "text": "still working"}]), 200)
+sql(f"UPDATE ar_runs SET finished_at = NOW() - interval '40 days' WHERE uuid IN ('{R1['uuid']}', '{Q1R['uuid']}', "
+    f"'{RB3['uuid']}')")
+sql(f"INSERT INTO ar_sessions (runner_uuid, namespace_id, session_key, tool, status) SELECT uuid, namespace_id, "
+    f"'stale-{TAG}', 'claude', 'busy' FROM ar_runners WHERE uuid = '{RUNNER}'")
+check("before: the old runs have logs, texts and inputs", one(
+    f"SELECT COUNT(*) FROM ar_run_events WHERE run_uuid = '{R1['uuid']}'") == "4" and int(one(
+    f"SELECT COUNT(*) FROM ar_run_turns WHERE run_uuid = '{Q1R['uuid']}' AND text IS NOT NULL")) > 0 and int(one(
+    f"SELECT COUNT(*) FROM ar_run_requests WHERE run_uuid = '{Q1R['uuid']}' AND input IS NOT NULL")) > 0)
+t0 = one("SELECT NOW()")
+q = expect("platform admin runs the retention job now", call(
+    "POST", API + "/api/v2/plugins/ai_runner/jobs/retention/run", "platform"), 200)
+check("queued for both workspaces", q.get("queued", 0) >= 2, q)
+ran = wait_for("retention ran in A and B", lambda: one(
+    f"SELECT COUNT(*) FROM plugin_jobs WHERE job = 'ai_runner.retention' AND namespace_id IN ({A_ID}, {B_ID}) "
+    f"AND last_run_at > '{t0}'") == "2")
+check("the job succeeded in both", ran and one(
+    f"SELECT string_agg(COALESCE(last_status, '-') || ':' || COALESCE(last_error, ''), ',') FROM plugin_jobs "
+    f"WHERE job = 'ai_runner.retention' AND namespace_id IN ({A_ID}, {B_ID})") == "ok:,ok:")
+check("old runs: log events deleted", one(f"SELECT COUNT(*) FROM ar_run_events WHERE run_uuid = '{R1['uuid']}'") == "0")
+check("old runs: turn texts and request inputs cleared", one(
+    f"SELECT COUNT(*) FROM ar_run_turns WHERE run_uuid = '{Q1R['uuid']}' AND text IS NOT NULL") == "0" and one(
+    f"SELECT COUNT(*) FROM ar_run_requests WHERE run_uuid = '{Q1R['uuid']}' AND input IS NOT NULL") == "0")
+d = detail("dev", Q1R)
+check("old runs keep the run, its summary, usage, turns and requests", d["status"] == "succeeded"
+      and d["summary"] == "Done" and d["usage"]["tokens_in"] == 600 and len(d["turns"]) == 5
+      and all(t["text"] is None for t in d["turns"]) and d["requests"] and d["requests"][-1]["input_summary"]
+      and all(x["input"] is None for x in d["requests"]), d)
+check("recent runs keep everything", one(
+    f"SELECT COUNT(*) FROM ar_run_requests WHERE run_uuid = '{Q5R['uuid']}' AND input IS NOT NULL") == "1" and one(
+    f"SELECT COUNT(*) FROM ar_run_events WHERE run_uuid = '{SS1['uuid']}'") == "1")
+check("B prunes by B's own setting (365 days): its 40-day-old log stays", one(
+    f"SELECT COUNT(*) FROM ar_run_events WHERE run_uuid = '{RB3['uuid']}'") == "1")
+check("sessions of revoked runners deleted, live ones kept", one(
+    f"SELECT COUNT(*) FROM ar_sessions WHERE session_key = 'stale-{TAG}'") == "0" and one(
+    f"SELECT COUNT(*) FROM ar_sessions WHERE runner_uuid = '{RUNNER4}'") == "1")
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")
