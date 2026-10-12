@@ -32,7 +32,7 @@ local M = require("queries.MenuQueries")
 
 -- Every menu key seeded today (int runs PROJECT_CODE=all), with the group it must land in.
 local expected = {
-    dashboard = false, chat = false, settings = false,
+    dashboard = false, chat = false, settings = false, my_tasks = false,
     crm = "sales", crm_leads = "sales", customers = "sales", forms = "sales",
     invoices = "finance", purchase_orders = "finance", accounting = "finance", document_templates = "finance",
     billing = "finance", billing_subscriptions = "finance", billing_licenses = "finance",
