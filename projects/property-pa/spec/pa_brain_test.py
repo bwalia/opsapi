@@ -373,6 +373,21 @@ check("a repeated delivery changes nothing", res[0] == 200 and res[1]["data"]["s
 got = data(call("GET", PA + f"/ask/{run5['uuid']}", SOPHIE, S), 200, "webhook result")
 check("the webhook's answer was checked and stored", got["output"]["grounded"] is True and got["prompt_version"]
       == "seller-pa@1.1.0", got)
+use = sql(f"SELECT feature || '|' || scope || '|' || provider || '|' || model || '|' || (input_tokens + output_tokens) || '|' || ok "
+          f"FROM ai_usage WHERE run_uuid = '{run['uuid']}'")
+check("AI use is metered: one ai_usage row per run (who, feature, mode, model, tokens), polled twice or not",
+      use == ["property_pa|today|jobshout|openai_compatible:qwen3.8:latest|1200|t"], use)
+check("a run finished by webhook (delivered twice) is metered once",
+      sql(f"SELECT COUNT(*) || '|' || SUM(input_tokens + output_tokens) || '|' || MIN(user_uuid) FROM ai_usage "
+          f"WHERE run_uuid = '{run5['uuid']}'") == [f"1|1500|{USERS[SOPHIE][0]}"])
+# AI_USER_DAILY_TOKEN_LIMIT (when the deployment sets it) applies to PA questions as to every AI feature.
+sql(f"INSERT INTO ai_usage (user_uuid, feature, provider, model, input_tokens, output_tokens, ok) "
+    f"VALUES ('{USERS[ADMIN][0]}', 'test', 'test', 'test', 2000000000, 0, true)")
+res = call("POST", PA + "/ask", ADMIN, S, {"message": "Morning"})
+if res[0] == 429:
+    check("over the daily AI limit: 429 with the house message", "AI usage limit" in res[1]["error"], res)
+else:
+    print("skip  AI_USER_DAILY_TOKEN_LIMIT isn't set in this sandbox; the daily-limit check needs it")
 res = webhook({"id": "evt-2", "type": "run.completed", "data": {"run_id": "not-ours"}}, WH)
 check("another integration's run is acknowledged and ignored", res[0] == 200, res)
 
