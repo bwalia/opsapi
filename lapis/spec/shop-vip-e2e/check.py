@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """VIP price-lock membership end-to-end checks (driven by run.sh in a throwaway sandbox).
 
-Usage: check.py <api_url> <shop_bff_key> <webhook_secret> <postgres_container> <smtp_sink_container>
+Usage: check.py <api_url> <shop_bff_key> <webhook_secret> <postgres_container> <smtp_sink_container> <admin_jwt>
 Calls the public shop API as the shop BFF does, sends Stripe webhooks signed with the sandbox secret,
 reads the sign-in email from the SMTP sink and checks the database with psql in the sandbox Postgres.
 """
 import email, hashlib, hmac, json, re, subprocess, sys, time, urllib.request, urllib.error, secrets
 from email import policy
 
-API, KEY, WHSEC, PG, SMTP = sys.argv[1:6]
+API, KEY, WHSEC, PG, SMTP, ADMIN = sys.argv[1:7]
 BASE = API + "/api/v2/public/shop/workstation"
 HOOK = API + "/api/v2/public/shop/stripe/webhook"
 RUN = secrets.token_hex(3)
@@ -38,6 +38,18 @@ def call(method, path, body=None, member=None, cart=None, base=BASE):
     if member: h["X-Member-Token"] = member
     if cart: h["X-Cart-Token"] = cart
     req = urllib.request.Request(base + path, method=method, headers=h,
+                                 data=None if body is None else json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def admin(method, path, body=None):
+    """Shop admin API as the namespace owner (JWT + namespace slug)."""
+    h = {"Authorization": "Bearer " + ADMIN, "X-Namespace-Slug": "workstation", "Content-Type": "application/json"}
+    req = urllib.request.Request(API + "/api/v2/shop/admin" + path, method=method, headers=h,
                                  data=None if body is None else json.dumps(body).encode())
     try:
         with urllib.request.urlopen(req) as r:
@@ -84,8 +96,10 @@ A, B, C, D, X = (f"{n}.{RUN}@vip-test.example" for n in ("alice", "bob", "carol"
 st, r = join(A)
 check("closed: checkout refused until enabled", st == 409 and r.get("code") == "MEMBERSHIP_CLOSED", r)
 
-sql("INSERT INTO shop_membership_settings (namespace_id, enabled, founding_cap) SELECT id, true, 2 FROM namespaces "
-    "WHERE slug='workstation' ON CONFLICT (namespace_id) DO UPDATE SET enabled=true, founding_cap=2;")
+st, r = admin("PUT", "/membership/settings", {"lock_days": 45})
+check("admin settings: lock must be 90 or 120", st == 400, r)
+st, r = admin("PUT", "/membership/settings", {"enabled": True, "founding_cap": 2})
+check("admin settings: opened with a cap of 2", st == 200 and r["data"]["enabled"] is True and r["data"]["founding_cap"] == 2, r)
 
 # --- validation ----------------------------------------------------------------------------
 st, r = call("POST", "/membership/checkout", {"email": A, "interval": "month", "accept_terms": False, "terms_version": "2026-10",
@@ -195,10 +209,10 @@ st, q2 = quote(B)
 check("lock: same email without sign-in → normal 30 days", q2["price_locked"] is False and days_valid(q2) == 30)
 st, q3 = quote(X, member=session)
 check("lock: member signed in, someone else's email → 30 days", q3["price_locked"] is False and days_valid(q3) == 30)
-sql("UPDATE shop_membership_settings SET lock_days = 120;")
+check("admin settings: lock set to 120", admin("PUT", "/membership/settings", {"lock_days": 120})[0] == 200)
 st, q4 = quote(B, member=session)
 check("lock: 120-day setting honoured", days_valid(q4) == 120)
-sql("UPDATE shop_membership_settings SET lock_days = 90;")
+admin("PUT", "/membership/settings", {"lock_days": 90})
 # price change after the quote: checkout still uses the quote's price
 before = int(sql(f"select subtotal_minor from shop_quotes where uuid='{q1['uuid']}'")[0])
 sql("UPDATE shop_products SET base_price_minor = base_price_minor + 100000 WHERE slug='rtx-pro-6000-blackwell-workstation';")
@@ -294,6 +308,62 @@ check("cancel: once ended, no member benefits", st == 200 and me["data"]["active
 check("billing: mirror shows canceled", sql(f"select status from billing_subscriptions where stripe_subscription_id='sub_b_{RUN}'") == ["canceled"])
 st, q5 = quote(B, member=session)
 check("lock: ex-member's new quotes are normal 30 days", q5["price_locked"] is False and days_valid(q5) == 30)
+
+# --- loyalty credit (phase 4): admin gives "£X off your next order over £Y" ----------------------------------
+L = f"loyal.{RUN}@vip-test.example"
+st, r = admin("POST", "/credits", {"email": L, "amount_minor": 0, "reason": "thanks"})
+check("loyalty: invalid amount refused", st == 400, r)
+st, r = admin("POST", "/credits", {"email": L, "amount_minor": 25000, "min_order_minor": 500000,
+                                    "reason": "Thank you for the lab fit-out", "notify": True})
+check("loyalty: £250 off orders over £5,000 created", st == 201 and r["data"]["source"] == "loyalty"
+      and r["data"]["amount_minor"] == 25000 and r["data"]["min_order_minor"] == 500000 and r["data"]["status"] == "available", r)
+check("loyalty: reports the customer email as sent", r["data"].get("notified") is True, r["data"].get("notified"))
+check("loyalty: recorded who gave it", r["data"].get("created_by") == "admin@e2e.invalid", r["data"].get("created_by"))
+check("loyalty: linked to the CRM lead", r["data"].get("crm_lead_uuid") not in (None, ""), r["data"])
+lead = sql(f"select notes from crm_leads where lower(email) = '{L}'")
+check("loyalty: CRM note says what and why", lead and "Loyalty credit given: £250.00 off your next order over £5,000.00" in lead[0]
+      and "lab fit-out" in lead[0], lead)
+st, big_only = admin("POST", "/credits", {"email": L, "amount_minor": 10000, "min_order_minor": 2000000, "reason": "Big order bonus"})
+st, gone = admin("POST", "/credits", {"email": L, "amount_minor": 5000, "reason": "Will be cancelled"})
+st, v = admin("POST", f"/credits/{gone['data']['uuid']}/void", {"reason": "Given by mistake"})
+check("loyalty: unused credit can be cancelled", st == 200 and v["data"]["status"] == "void", v)
+st, v = admin("POST", f"/credits/{gone['data']['uuid']}/void", {})
+check("loyalty: can't cancel twice", st == 409, v)
+st, lst = admin("GET", f"/credits?q={L}")
+check("loyalty: admin list shows all three", st == 200 and lst["meta"]["total"] == 3, lst.get("meta"))
+st, lst = admin("GET", "/credits?status=void")
+check("loyalty: filter by status", all(c["status"] == "void" for c in lst["data"]) and len(lst["data"]) >= 1)
+
+def mail_to(to, needle):
+    for _ in range(40):
+        for m in mails():
+            if to in str(m.get("To", "")) and needle in m.get_body(preferencelist=("html", "plain")).get_content():
+                return m
+        time.sleep(0.25)
+    return None
+check("loyalty: customer emailed about the credit", mail_to(L, "£250.00 off your next order over £5,000.00") is not None)
+
+# a non-member with credit can sign in and redeem it
+call("POST", "/member/login", {"email": L})
+_, ltok = sign_in_link(L)
+st, lv = call("POST", "/member/verify", {"token": ltok})
+check("loyalty: credit holder (not a member) can sign in", st == 200, lv)
+lsess = lv["data"]["session_token"]
+st, lme = call("GET", "/member", member=lsess)
+check("loyalty: member page lists the two live credits", lme["data"]["active"] is False and len(lme["data"]["credits"]) == 2, lme["data"])
+tok, _ = cart_with(1, member=lsess)  # £12,999 ex VAT: over £5,000, under £20,000
+st, co = call("POST", "/checkout", {"from": "cart", "email": L, "success_url": "https://shop.e2e.test/ok",
+                                     "cancel_url": "https://shop.e2e.test/no"}, cart=tok, member=lsess)
+row = sql(f"select subtotal_minor, credit_minor from shop_orders where uuid='{co['data']['order_uuid']}'")[0].split("|")
+check("loyalty: £250 credit taken off a £12,999 order", row == [str(1299900 - 25000), "25000"], row)
+check("loyalty: credit with a £20,000 minimum not used", sql(
+    f"select status from shop_credits where uuid='{big_only['data']['uuid']}'") == ["available"])
+hook("checkout.session.completed", {"id": "cs_loy", "object": "checkout.session", "mode": "payment", "payment_status": "paid",
+                                    "metadata": {"order_uuid": co["data"]["order_uuid"]}, "customer_details": {"email": L}})
+st, used = admin("GET", f"/credits?q={L}&status=used")
+check("loyalty: shows as used on the order", used["meta"]["total"] == 1 and used["data"][0]["used_order_number"] is not None, used)
+st, v = admin("POST", f"/credits/{used['data'][0]['uuid']}/void", {})
+check("loyalty: used credit can't be cancelled", st == 409, v)
 
 # --- webhook security ----------------------------------------------------------------------------------------------
 bad = urllib.request.Request(HOOK, method="POST", data=b'{"id":"evt_x","type":"invoice.paid","data":{"object":{}}}',

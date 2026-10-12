@@ -13,6 +13,7 @@ import {
   MessageSquare,
   BookOpen,
   LineChart,
+  Gift,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +26,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/shop/quotes', label: 'Quotes', icon: FileText },
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
+  { href: '/dashboard/shop/credits', label: 'Credits', icon: Gift },
   { href: '/dashboard/shop/knowledge', label: 'Knowledge', icon: BookOpen },
 ] as const;
 

@@ -525,6 +525,40 @@ export interface ShopChatMessage {
   tools?: string[];
 }
 
+/** Order credit (loyalty, VIP fee refunds, admin). Money in pence, applied before VAT. */
+export type ShopCreditStatus = 'available' | 'reserved' | 'used' | 'void';
+export type ShopCreditSource = 'loyalty' | 'vip_refund' | 'admin';
+export const SHOP_CREDIT_STATUSES: ShopCreditStatus[] = ['available', 'reserved', 'used', 'void'];
+
+export interface ShopCredit {
+  uuid: string;
+  email: string;
+  amount_minor: number;
+  min_order_minor: number;
+  source: ShopCreditSource;
+  reason: string | null;
+  status: ShopCreditStatus;
+  expires_at: string | null;
+  expired: boolean;
+  created_by: string | null;
+  created_at: string;
+  earned_order_number: string | null;
+  used_order_number: string | null;
+  reserved_order_number: string | null;
+  crm_lead_uuid: string | null;
+  /** Only on create: whether the customer email was queued. */
+  notified?: boolean;
+}
+
+export interface ShopCreditGrant {
+  email: string;
+  amount_minor: number;
+  min_order_minor?: number;
+  reason: string;
+  expires_in_days?: number;
+  notify?: boolean;
+}
+
 export interface ShopChatSession {
   uuid: string;
   email?: string | null;

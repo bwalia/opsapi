@@ -441,6 +441,37 @@ local function html_escape(s)
     return (tostring(s):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#39;" }))
 end
 
+--- Send one email: through the workspace's own mail server when it has one (Workstation's sender), else the
+-- deployment's. Sent from our own timer with sync = true, because Mail.send's built-in async mode drops
+-- opts.smtp (a workspace's mail would go through the deployment's server). Returns true when queued.
+local function send_mail(ns_id, to, subject, html)
+    local Mail = require("helper.mail")
+    local NamespaceMail = require("helper.namespace-mail")
+    local smtp = NamespaceMail.smtp(ns_id)
+    if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
+    if not smtp and not Mail.isConfigured() then
+        ngx.log(ngx.ERR, "[shop-vip] no SMTP configured (workspace or deployment) — email to ", to, " not sent")
+        return false
+    end
+    local msg = {
+        to = to, subject = subject, html = html, smtp = smtp, sync = true, wrap_in_layout = true,
+        from_email = smtp and smtp.from_email or nil,
+        from_name = smtp and smtp.from_name or "Workstation",
+        reply_to = smtp and smtp.reply_to or nil,
+        data = { app_name = "Workstation" },
+    }
+    local ok, terr = ngx.timer.at(0, function(premature)
+        if premature then return end
+        local sent, err = Mail.send(msg)
+        if not sent then ngx.log(ngx.ERR, "[shop-vip] email to ", to, " failed: ", tostring(err)) end
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[shop-vip] could not queue email: ", tostring(terr))
+        return false
+    end
+    return true -- ngx.timer.at returns a handle, not true, on success
+end
+
 --- Anyone with a membership record (any status but pending/abandoned) or a credit can sign in.
 local function may_sign_in(ns_id, email)
     local r = db.query([[
@@ -472,40 +503,11 @@ function Q.requestLogin(ns_id, body)
                VALUES (?, ?, 'link', ?, NOW() + (? || ' minutes')::interval)]],
         ns_id, email, U.sha256_hex(token), tostring(LINK_MINUTES))
     local link = base:gsub("/+$", "") .. "/members/verify?t=" .. token
-    -- The workspace's own mail server when it has one (Workstation's sender), else the deployment's.
-    local Mail = require("helper.mail")
-    local NamespaceMail = require("helper.namespace-mail")
-    local smtp = NamespaceMail.smtp(ns_id)
-    if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
-    if not smtp and not Mail.isConfigured() then
-        ngx.log(ngx.ERR, "[shop-vip] no SMTP configured (workspace or deployment) — sign-in link not sent")
-        return { sent = false }
-    end
-    local msg = {
-        to = email,
-        subject = "Your Workstation members sign-in link",
-        smtp = smtp,
-        from_email = smtp and smtp.from_email or nil,
-        from_name = smtp and smtp.from_name or "Workstation",
-        reply_to = smtp and smtp.reply_to or nil,
-        wrap_in_layout = true,
-        sync = true,
-        html = "<p>Use this link to sign in to your Workstation VIP membership. It works once and expires in "
+    local ok = send_mail(ns_id, email, "Your Workstation members sign-in link",
+        "<p>Use this link to sign in to your Workstation VIP membership. It works once and expires in "
             .. LINK_MINUTES .. " minutes.</p><p><a href=\"" .. html_escape(link) .. "\">Sign in to Workstation</a></p>"
-            .. "<p>If you didn't ask for this, you can ignore this email.</p>",
-        data = { app_name = "Workstation" },
-    }
-    -- Send in our own timer with sync = true: Mail.send's built-in async mode drops opts.smtp,
-    -- which would route a workspace's mail through the deployment's server instead.
-    local ok, terr = ngx.timer.at(0, function(premature)
-        if premature then return end
-        local sent, err = Mail.send(msg)
-        if not sent then ngx.log(ngx.ERR, "[shop-vip] sign-in email to ", email, " failed: ", tostring(err)) end
-    end)
-    if not ok then
-        ngx.log(ngx.ERR, "[shop-vip] could not queue sign-in email: ", tostring(terr))
-        return { sent = false }
-    end
+            .. "<p>If you didn't ask for this, you can ignore this email.</p>")
+    if not ok then return { sent = false } end
     return { sent = true }
 end
 
@@ -720,6 +722,124 @@ function Q.joinWaitlist(ns_id, slug, body, member)
         ON CONFLICT (product_id, lower(email)) DO UPDATE SET is_member = shop_waitlist.is_member OR EXCLUDED.is_member
     ]], ns_id, p.id, email, is_member)
     return { joined = true, priority = is_member }
+end
+
+-- ---------------------------------------------------------------------------
+-- admin: loyalty credits ("£X off your next order over £Y")
+-- ---------------------------------------------------------------------------
+
+local CREDIT_COLS = [[
+    c.uuid, c.email, c.amount_minor, c.min_order_minor, c.source, c.reason, c.status, c.expires_at,
+    c.created_by, c.created_at, c.updated_at, (c.expires_at IS NOT NULL AND c.expires_at <= NOW()) AS expired,
+    eo.order_number AS earned_order_number, uo.order_number AS used_order_number, ro.order_number AS reserved_order_number,
+    l.uuid AS crm_lead_uuid
+]]
+local CREDIT_FROM = [[
+      FROM shop_credits c
+      LEFT JOIN shop_orders eo ON eo.id = c.earned_order_id
+      LEFT JOIN shop_orders uo ON uo.id = c.used_order_id
+      LEFT JOIN shop_orders ro ON ro.id = c.reserved_order_id
+      LEFT JOIN crm_leads l ON l.id = c.crm_lead_id
+]]
+
+local function credit_view(r)
+    local out = {}
+    for k, v in pairs(r) do out[k] = v end
+    out.amount_minor = tonumber(r.amount_minor)
+    out.min_order_minor = tonumber(r.min_order_minor)
+    out.expired = r.expired == true
+    out.total = nil
+    for _, k in ipairs({ "reason", "expires_at", "created_by", "earned_order_number", "used_order_number",
+                         "reserved_order_number", "crm_lead_uuid" }) do
+        if out[k] == nil then out[k] = U.null end
+    end
+    return out
+end
+
+function Q.adminCredits(ns_id, params)
+    params = params or {}
+    local limit = U.clamp(U.int(params.limit, 25), 1, 200)
+    local offset = math.max(0, U.int(params.offset, 0))
+    local where, vals = { "c.namespace_id = ?" }, { ns_id }
+    if nz(params.q) then
+        where[#where + 1] = "(c.email ILIKE ? OR c.reason ILIKE ?)"
+        local like = "%" .. tostring(params.q):sub(1, 200):gsub("[%%_\\]", "\\%0") .. "%"
+        vals[#vals + 1] = like
+        vals[#vals + 1] = like
+    end
+    if nz(params.status) then
+        where[#where + 1] = "c.status = ?"
+        vals[#vals + 1] = params.status
+    end
+    if nz(params.source) then
+        where[#where + 1] = "c.source = ?"
+        vals[#vals + 1] = params.source
+    end
+    vals[#vals + 1] = limit
+    vals[#vals + 1] = offset
+    local rows = db.query("SELECT " .. CREDIT_COLS .. ", COUNT(*) OVER() AS total " .. CREDIT_FROM .. " WHERE "
+        .. table.concat(where, " AND ") .. " ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?", unpack(vals))
+    local total = rows[1] and tonumber(rows[1].total) or 0
+    local out = {}
+    for i, r in ipairs(rows) do out[i] = credit_view(r) end
+    return U.arr(out), { total = total, limit = limit, offset = offset }
+end
+
+local function credit_by_uuid(ns_id, uuid)
+    local r = db.query("SELECT " .. CREDIT_COLS .. CREDIT_FROM .. " WHERE c.namespace_id = ? AND c.uuid = ?", ns_id, uuid)[1]
+    return r and credit_view(r) or nil
+end
+
+--- Give a customer credit towards their next order. It is linked to their CRM lead (one per email), noted
+-- there, and optionally emailed to them. They redeem it by signing in (emailed link) and paying with that email.
+function Q.grantCredit(ns_id, body, actor)
+    local s = Q.settings(ns_id)
+    local c, err = R.validate_credit(body, s)
+    if not c then return nil, U.err(400, "VALIDATION_ERROR", err) end
+    local label = R.credit_label(c.amount_minor, c.min_order_minor, U.money)
+    local lead = require("queries.ShopLeadQueries").safeUpsert(ns_id, {
+        email = c.email, source = "shop_loyalty",
+        note = "Loyalty credit given: " .. label .. " — " .. c.reason .. (actor and (" (by " .. actor .. ")") or ""),
+    })
+    local uuid = Global.generateUUID()
+    db.query([[
+        INSERT INTO shop_credits (uuid, namespace_id, email, amount_minor, min_order_minor, source, reason, status,
+                                  crm_lead_id, expires_at, created_by)
+        VALUES (?, ?, ?, ?, ?, 'loyalty', ?, 'available', ?, NOW() + (? || ' days')::interval, ?)
+    ]], uuid, ns_id, c.email, c.amount_minor, c.min_order_minor, c.reason, lead and lead.id or db.NULL,
+        tostring(c.expires_in_days), actor or db.NULL)
+    local out = credit_by_uuid(ns_id, uuid)
+    out.notified = false
+    if c.notify then
+        local base = U.env("SHOP_PUBLIC_URL")
+        local members = base and (base:gsub("/+$", "") .. "/members") or nil
+        out.notified = send_mail(ns_id, c.email, "You have credit with Workstation",
+            "<p>Thank you for ordering with Workstation. We've added credit to your account: <strong>"
+            .. html_escape(label) .. "</strong>.</p>"
+            .. "<p>It's for orders paid with this email address and lasts until "
+            .. html_escape(tostring(out.expires_at):sub(1, 10)) .. ".</p>"
+            .. (members and ("<p>To use it, <a href=\"" .. html_escape(members) .. "\">sign in</a> with this email "
+                .. "before you check out. It comes off your order automatically.</p>") or "")
+            .. "<p>Credit can't be exchanged for cash.</p>")
+    end
+    return out
+end
+
+--- Cancel an unused credit. Reserved (mid-checkout) and used credits can't be voided.
+function Q.voidCredit(ns_id, uuid, body, actor)
+    local c = db.query("SELECT * FROM shop_credits WHERE namespace_id = ? AND uuid = ? FOR UPDATE", ns_id, uuid)[1]
+    if not c then return nil, U.err(404, "NOT_FOUND", "Credit not found") end
+    if c.status ~= "available" then
+        return nil, U.err(409, "CREDIT_NOT_AVAILABLE", "Only unused credit can be cancelled (this one is " .. c.status .. ")")
+    end
+    local why = type(body) == "table" and type(body.reason) == "string" and body.reason:sub(1, 300) or nil
+    db.query("UPDATE shop_credits SET status = 'void', updated_at = NOW() WHERE id = ?", c.id)
+    require("queries.ShopLeadQueries").safeUpsert(ns_id, {
+        email = c.email, source = "shop_loyalty",
+        note = "Credit cancelled: " .. R.credit_label(c.amount_minor, c.min_order_minor, U.money)
+            .. (why and (" — " .. why) or "") .. (actor and (" (by " .. actor .. ")") or ""),
+    })
+    return credit_by_uuid(ns_id, uuid)
 end
 
 function Q.adminWaitlist(ns_id, params)

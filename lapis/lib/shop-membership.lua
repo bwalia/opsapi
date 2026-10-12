@@ -179,6 +179,43 @@ function M.apply_credits(subtotal_net, vat_rate, shipping_minor, credits)
     }
 end
 
+M.MAX_CREDIT_MINOR = 100000000   -- £1,000,000: a typo guard, not a business limit
+
+--- Validate an admin "give credit" request. s = settings (for the default expiry).
+-- body: { email, amount_minor, min_order_minor?, reason, expires_in_days?, notify? }
+-- Returns (clean) or (nil, message).
+function M.validate_credit(body, s)
+    if type(body) ~= "table" then return nil, "body must be an object" end
+    local email = M.email(body.email)
+    if not email then return nil, "email must be a valid email address" end
+    local amount = tonumber(body.amount_minor)
+    if not amount or amount ~= math.floor(amount) or amount < 1 or amount > M.MAX_CREDIT_MINOR then
+        return nil, "amount_minor must be a whole number of pence between 1 and " .. M.MAX_CREDIT_MINOR
+    end
+    local min_order = body.min_order_minor == nil and 0 or tonumber(body.min_order_minor)
+    if not min_order or min_order ~= math.floor(min_order) or min_order < 0 or min_order > 10000000000 then
+        return nil, "min_order_minor must be a whole number of pence, 0 or more"
+    end
+    local reason = type(body.reason) == "string" and body.reason:gsub("%c", " "):match("^%s*(.-)%s*$") or ""
+    if #reason < 3 or #reason > 500 then return nil, "reason is required (3–500 characters)" end
+    local days = body.expires_in_days == nil and (s and s.credit_expiry_days or M.DEFAULTS.credit_expiry_days)
+        or tonumber(body.expires_in_days)
+    if not days or days ~= math.floor(days) or days < 1 or days > 3650 then
+        return nil, "expires_in_days must be a whole number between 1 and 3650"
+    end
+    return {
+        email = email, amount_minor = amount, min_order_minor = min_order, reason = reason,
+        expires_in_days = days, notify = body.notify == true,
+    }
+end
+
+--- Plain description used in emails, CRM notes and the member page: "£250.00 off your next order over £5,000.00".
+function M.credit_label(amount_minor, min_order_minor, money)
+    local label = money(amount_minor) .. " off your next order"
+    if (tonumber(min_order_minor) or 0) > 0 then label = label .. " over " .. money(min_order_minor) end
+    return label .. " (before VAT)"
+end
+
 --- Normalised email or nil.
 function M.email(v)
     if type(v) ~= "string" then return nil end

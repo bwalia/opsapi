@@ -11,6 +11,9 @@ import type {
   ShopCategory,
   ShopCategoryInput,
   ShopChatSession,
+  ShopCredit,
+  ShopCreditGrant,
+  ShopCreditStatus,
   ShopDashboardKpis,
   ShopImportResult,
   ShopKnowledgeDoc,
@@ -272,6 +275,23 @@ export const shopService = {
   },
 
   // ---------------- Chats ----------------
+  // ---------------- Credits (loyalty) ----------------
+  async getCredits(params: ShopPageParams & { q?: string; status?: ShopCreditStatus | '' } = {}): Promise<ShopList<ShopCredit>> {
+    const qs = buildQueryString({ q: params.q, status: params.status, limit: params.limit, offset: params.offset });
+    const res = await apiClient.get(`${BASE}/credits${qs}`);
+    return unwrapList<ShopCredit>(res, params.limit, params.offset);
+  },
+
+  async grantCredit(body: ShopCreditGrant): Promise<ShopCredit> {
+    const res = await apiClient.post(`${BASE}/credits`, body, JSON_BODY);
+    return unwrap<ShopCredit>(res);
+  },
+
+  async voidCredit(uuid: string, reason?: string): Promise<ShopCredit> {
+    const res = await apiClient.post(`${BASE}/credits/${uuid}/void`, { reason }, JSON_BODY);
+    return unwrap<ShopCredit>(res);
+  },
+
   async getChats(params: ShopPageParams & { q?: string } = {}): Promise<ShopList<ShopChatSession>> {
     const qs = buildQueryString({ q: params.q, limit: params.limit, offset: params.offset });
     const res = await apiClient.get(`${BASE}/chats${qs}`);
