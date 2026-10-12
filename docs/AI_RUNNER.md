@@ -6,7 +6,7 @@
 
 A user asks the OpsAPI assistant for today's tasks, opens one and presses **Start with AI**. OpsAPI writes the prompt and hands
 the task to an AI coding agent (Claude Code or Cursor) running on a machine of that workspace — the Mac Studio or any server
-— through **PromptPilot**. The agent works in its own git worktree, asks OpsAPI before every risky step, and reports back.
+— through **PromptPilot**. The agent works in the chosen repo folder on a new branch (never `main`), asks OpsAPI before every risky step, and ends with a PR to `main`.
 Managers watch every run live (prompt, turns, tokens, requests, machine) and the system refuses to start the same work twice.
 Any MCP-capable agent can list, create and update OpsAPI tasks by URL with a personal key.
 
@@ -88,7 +88,8 @@ and are verified in Phase 3 from the LaunchAgent context.
  ┌───────┴─────────── machine (Mac Studio / Linux) ──┴──────┐
  │ PromptPilot (LaunchAgent / systemd user unit)            │
  │  observer: every Claude / Cursor session (existing)      │
- │  runner:   per-workspace registrations → git worktree →  │
+ │  runner:   per-workspace registrations → repo folder,     │
+ │            new branch →                                  │
  │            claude -p … / cursor-agent -p … (agent profile)│
  └──────────────────────────────────────────────────────────┘
 ```
@@ -125,8 +126,8 @@ User        Dashboard          OpsAPI (ai_runner)                 Runner (Prompt
  │ Confirm ───────▶ POST /runs (Idempotency-Key) ─▶ INSERT run queued; take locks; task → In Progress (setting)
  │                                                   push run:queued to requester + managers
  │                                      ◀── POST /runner/claim (long-poll, SKIP LOCKED) ─┤
- │                                      ── run{prompt, repo_path, profile, run token} ──▶ validate folder,
- │                                                                                         git worktree add
+ │                                      ── run{prompt, repo_path, profile, run token} ──▶ validate folder (clean),
+ │                                                                                         git switch -c ai/<task#>-<slug>
  │                                                                                         write mcp.json (run token)
  │                                      ◀── status: starting → running (pid, session=run uuid) ─ claude -p … ──▶
  │                                                                                    agent works; risky step:
@@ -158,7 +159,7 @@ a grace period, notifies requester and managers. Retry creates a new attempt.
 | `ar_runners` | uuid, namespace_id, name, host, os, status `online\|offline\|paused\|revoked`, labels jsonb, capabilities jsonb (profiles, models, max_concurrency, cli_versions), allowed_roots jsonb, repos jsonb (git repos found under the allowed roots: path, remote, current branch — refreshed by heartbeat), token_hash, token_hint, last_heartbeat_at, version, created_by, timestamps | unique (namespace_id, name); index (namespace_id, status) |
 | `ar_project_settings` | uuid, namespace_id, project_uuid (kanban), default_repo_paths jsonb `{runner_uuid: path}` (suggestion only; also remembered from the last run), base_branch (optional; default = the repo's current branch), output_mode, pr_options jsonb (draft, base, reviewers, labels), approval_policy jsonb, allowed_profiles jsonb, lock_scope `repo\|branch\|paths`, lock_paths jsonb, template_uuid, updated_by | unique (namespace_id, project_uuid) |
 | `ar_settings` | namespace_id (PK), default output_mode, default approval_policy, caps jsonb (max concurrent runs per user / workspace, max run minutes, tokens per user per day, tokens per workspace per day), retention_days, price_table jsonb, task_automation jsonb (move to In Progress / Review, start timer, log time) | — |
-| `ar_runs` | uuid, namespace_id, task_uuid, task_snapshot jsonb, project_uuid, requested_by, assignee_uuid, runner_uuid, profile, model, repo_path (given by the user), repo_remote (reported by the runner), base_branch, work_branch, worktree_path, output_mode, prompt text, template_uuid, template_version, prompt_sha256, status, status_seq int, lease_until, heartbeat_at, pid, agent_session_id, started_at, finished_at, exit_code, error_category, summary, pr_url, commit_sha, tokens_in, tokens_out, cache_read, cache_write, cost_estimate, attempt, idempotency_key, approved_by (when pre-approval is required) | **partial unique (task_uuid) where status in open states**; index (namespace_id, status, created_at desc); index (runner_uuid, status); index (lease_until) where open |
+| `ar_runs` | uuid, namespace_id, task_uuid, task_snapshot jsonb, project_uuid, requested_by, assignee_uuid, runner_uuid, profile, model, repo_path (given by the user), repo_remote (reported by the runner), base_branch, work_branch, previous_branch, output_mode, prompt text, template_uuid, template_version, prompt_sha256, status, status_seq int, lease_until, heartbeat_at, pid, agent_session_id, started_at, finished_at, exit_code, error_category, summary, pr_url, commit_sha, tokens_in, tokens_out, cache_read, cache_write, cost_estimate, attempt, idempotency_key, approved_by (when pre-approval is required) | **partial unique (task_uuid) where status in open states**; index (namespace_id, status, created_at desc); index (runner_uuid, status); index (lease_until) where open |
 | `ar_run_turns` | uuid, run_uuid, namespace_id, seq, role `user\|assistant`, author_user_uuid (for user turns), text (redacted), model, tokens_in, tokens_out, cache_read, cache_write, at | unique (run_uuid, seq) |
 | `ar_run_requests` | uuid, run_uuid, namespace_id, kind `permission\|tool_call`, tool, input_summary (redacted), tool_use_id, status `pending\|allowed\|denied\|expired`, decided_by, decided_at, reason, expires_at | index (run_uuid); partial index (namespace_id) where pending |
 | `ar_run_events` | id bigserial, run_uuid, namespace_id, seq, type, data jsonb (small), log_object (MinIO key), at | unique (run_uuid, seq); retention job |
@@ -267,7 +268,7 @@ profile only through a CLI on the machine that supports it, configured like any 
 | 1 | Partial unique index: one open run per task | double clicks, two users, two pods → 409 "already running" |
 | 2 | Locks: `lock_key = ns + runner + repo folder (real path) + (branch \| path glob)` per `lock_scope`; taken atomically with the run insert | second run on the same area is queued (`waiting_lock`) or refused, naming holder and since |
 | 3 | Machine inventory from heartbeats (managed **and manual** sessions) | before claim and at start: a busy session in the target checkout → refuse / requeue |
-| 4 | Own git worktree + branch per run (`ai/<task_number>-<slug>`) | two agents never share a working tree |
+| 4 | The agent works **in the user's folder on a new branch** (`ai/<task_number>-<slug>`, never `main`); the folder is locked to one run, must be clean before the switch, and no manual session may be busy in it | two agents never edit the same folder; nobody's uncommitted work is touched |
 | 5 | Similar work: `pg_trgm` similarity of title + prompt against open runs (threshold setting); embeddings (`nomic-embed-text`) later | warning in the preview, with links; starting anyway needs confirmation |
 
 ---
@@ -276,7 +277,7 @@ profile only through a CLI on the machine that supports it, configured like any 
 
 Template (workspace default, project override, versioned) filled with: task title, description, checklist, latest comments,
 attachment links, project repo / branch / conventions (the repo's CLAUDE.md is read by the agent itself), definition of done,
-output mode, and fixed guardrails: stay in the worktree; never print or commit secrets; report progress, PR and time through
+output mode, and fixed guardrails: stay in the repo folder and on the run's branch; never print or commit secrets; report progress, PR and time through
 the MCP tools; call `ask_user` when unsure. Optional "Refine with AI" via `Llm.chat` (workspace provider; off by default).
 The final prompt is frozen on the run with `template_uuid`, `template_version` and `prompt_sha256`; users with
 `ai_runs_settings.manage` or the per-project "edit prompt" right may edit it in the preview.
@@ -287,9 +288,9 @@ The final prompt is frozen on the run with `template_uuid`, `template_version` a
 
 | Mode | Runner action at the end | Never |
 |---|---|---|
-| `pull_request` (draft / ready) | commit, push `work_branch`, `gh pr create` against `base` with the task link and summary | merge |
+| `pull_request` (draft / ready) — **default, PR to `main`** | commit, push `work_branch`, `gh pr create` against `base` (default `main`) with the task link and summary | merge |
 | `branch` | commit, push `work_branch` | open PR, merge |
-| `local` | commit in the worktree; path reported | push |
+| `local` | commit on the branch in the folder; folder and branch reported | push |
 
 Git and GitHub credentials stay on the machine. Workspace default + project override; the value is frozen on the run.
 
@@ -322,7 +323,7 @@ Approval policy (workspace default set in the admin dashboard, per-project overr
 - **Project** (`ar_project_settings`): suggested repo folder per runner, base branch, output mode, PR options, approval
   policy, allowed profiles, lock scope, template.
 - **Runner** (PromptPilot `runner.json` on the machine): registrations `[{opsapi_url, token_file, allowed_roots[],
-  worktree_root, max_concurrency}]`, agent profiles `{name, command[], approval: bridge|unsupported, models[],
+  max_concurrency}]`, agent profiles `{name, command[], approval: bridge|unsupported, models[],
   allowed_tools[]}`, price table (optional), labels.
 - **OpsAPI env:** none new required; optional `AI_RUNNER_CLAIM_WAIT_S` (25), `AI_RUNNER_LEASE_S` (60).
 
@@ -334,12 +335,14 @@ Approval policy (workspace default set in the admin dashboard, per-project overr
 2. Per registration: heartbeat every 15 s with jitter (inventory from the existing scanner, filtered to the registration's
    allowed roots; the list of git repos found there, for the folder picker); claim loop with long-poll; up to `max_concurrency` runs.
 3. Run: resolve the folder the user gave (real path, must be inside an allowed root of this registration, must be a git
-   repo; otherwise the run fails with `bad_repo_path`); `git worktree add <worktree_root>/<run>` on a new branch from it, so
-   the user's own checkout and any other run are untouched; write `mcp.json` (OpsAPI MCP URL + run token);
+   repo, must have no uncommitted changes, and no busy manual session in it; otherwise the run fails with `bad_repo_path`,
+   `dirty_folder` or `folder_busy`); fetch, then `git switch -c ai/<task#>-<slug> origin/<base>` in that folder — never
+   work on `main`; write `mcp.json` (OpsAPI MCP URL + run token);
    start the profile command in its **own process group** with `--session-id <run uuid>`; parse stream-json; send status,
    events (batched) and usage with sequence numbers; label the observer session `opsapi_run`, `opsapi_task`.
 4. Cancel → kill the process group; timeout per run; on restart, report orphaned runs (`lost` or resumable).
-5. End: apply the output mode; remove the worktree after push (configurable keep).
+5. End: apply the output mode (default: push the branch and open a PR to `main`); switch the folder back to the branch it
+   was on before the run (configurable), so the next run or a person finds it as they left it.
 6. Service files: a **LaunchAgent** (`~/Library/LaunchAgents/com.promptpilot.runner.plist`, `gui/<uid>` domain — needed
    for the keychain) and a systemd **user** unit for Linux.
 7. Isolation (D5): one registration = one workspace token, its own work root, concurrency and inventory filter; no
@@ -389,7 +392,7 @@ Approval policy (workspace default set in the admin dashboard, per-project overr
 |---|---|
 | Stolen runner token | hashed at rest, one workspace, revocable, rotate; claims limited to that workspace |
 | Agent acting outside its task | run token scoped to one task, expires at run end; MCP tools check it |
-| Agent running destructive commands | permission bridge for every risky step, `--restricted`, never bypass; worktree only; no merge |
+| Agent running destructive commands | permission bridge for every risky step, `--restricted`, never bypass; the run's branch only (never `main`); no merge |
 | Secrets leaking into prompts / logs | guardrail in prompt; redaction of tool inputs and outputs before storage; secrets never sent by OpsAPI |
 | A folder outside what the machine owner allowed | the runner resolves the real path and refuses anything outside its allowed roots or not a git repo; OpsAPI also checks against the runner's reported repos |
 | Accidental API-key billing | the runner strips API-key variables and settings from the agent's environment; `--bare` never used |
@@ -438,8 +441,7 @@ configurable in the admin dashboard; the user gives the repo folder on the Mac S
 stays at `https://promptpilot.workstation.co.uk/` behind basic auth.
 
 Open:
-1. Each run works in a **new git worktree created from the folder the user gives** (on branch `ai/<task#>-<slug>`), so the
-   user's own checkout and parallel runs are never disturbed. Confirm, or should the agent edit that folder directly
-   (then only one run per folder at a time, enforced by a lock)?
+1. Decided: the agent works in the folder the user gives, on a new branch (never `main`), and the output is a PR to
+   `main` by default. One run per folder at a time; the folder must be clean.
 2. Phase 2 changes PromptPilot on the Mac Studio (new runner code, a LaunchAgent, a one-time `claude setup-token` run by the
    account owner). Each of these is done only after you approve it at that time.
