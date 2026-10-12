@@ -999,3 +999,4 @@ A fresh review of the whole feature (plugin, runner, dashboard, MCP) confirmed t
 - **Past 500 requests in a run:** the reply is `{ request: { uuid: null, status: "denied" } }`, and nothing is stored.
 - **Past 20,000 events in a run:** further events are dropped, after one "Log truncated" event with seq 2147483647.
 - **MCP HTTP:** allowed hosts come from `MCP_HOST` (default: localhost and the listen address). A request carrying an Origin needs that Origin in `MCP_ALLOWED_ORIGINS`.
+- **Tampered folder:** after `git_tampered`, the runner runs no more git in that folder (a tampered config could define filters). The folder is left on the run's branch, with the agent's changes uncommitted, for a person to check `.git`. `gh` also gets the hook and fsmonitor overrides, through `GIT_CONFIG_COUNT`, because it runs git itself.
