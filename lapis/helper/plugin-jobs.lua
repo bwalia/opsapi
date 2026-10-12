@@ -22,8 +22,10 @@
         and how the last run went. Worker 0 of each pod adds rows for
         workspaces that have the plugin on and drops the rest, every minute.
       * Every worker with jobs claims due rows FOR UPDATE SKIP LOCKED with a
-        LEASE_SECONDS lease, so a run happens on one worker of one pod. If
-        that worker dies, the run starts again when the lease ends.
+        LEASE_SECONDS lease, so a run happens on one worker of one pod. While
+        the worker holds them it renews the lease every LEASE_SECONDS / 3, so
+        a long run is never claimed twice. If that worker dies, the run starts
+        again when the lease ends.
       * A failed run (error raised, or `return false, "why"`) is recorded in
         last_error and the job waits for its next slot: no retries, like
         cron. Make runs safe to repeat.
@@ -156,6 +158,8 @@ local _jobs = {}       -- { [job name] = def }
 local _manifests = {}  -- { [plugin code] = manifest } (job.settings)
 local _failures = {}   -- { { code, errors } } jobs files that failed to load
 local _busy, _last_seed = false, 0
+local _held = {}       -- { [plugin_jobs.id] = locked_until we set } runs claimed here and not finished
+local _beating = false
 
 --- jobs/*.lua files that failed to load in this worker (for /ready).
 function PluginJobs.failures()
@@ -197,6 +201,33 @@ local function finish(id, ok, err, ms, next_at)
     ]], ok and "ok" or "failed", ok and db().NULL or tostring(err):sub(1, 2000), ms, ok, next_at, id)
 end
 
+-- Renew the leases this worker holds. Only a lease that is still the one we set (compare-and-set on
+-- locked_until) is renewed: if it lapsed and another worker took the row, it is theirs.
+local function heartbeat(premature)
+    if premature or not next(_held) then
+        _beating = false
+        return
+    end
+    local held = {} -- a copy: runs finish and new ones are claimed while the queries below wait
+    for id, mine in pairs(_held) do held[#held + 1] = { id = id, mine = mine } end
+    for _, h in ipairs(held) do
+        local ok, rows = pcall(db().query, "UPDATE plugin_jobs SET locked_until = NOW() + interval '"
+            .. PluginJobs.LEASE_SECONDS .. " seconds' WHERE id = ? AND locked_until = ?::timestamptz"
+            .. " RETURNING locked_until", h.id, h.mine)
+        if ok and _held[h.id] then _held[h.id] = rows[1] and rows[1].locked_until or nil end
+    end
+    require("helper.plugin-events").releaseConnection()
+    local ok = ngx.timer.at(PluginJobs.LEASE_SECONDS / 3, heartbeat)
+    _beating = ok and true or false
+end
+
+local function hold(claimed)
+    for _, c in ipairs(claimed) do _held[c.id] = c.locked_until end
+    if next(_held) and not _beating then
+        _beating = ngx.timer.at(PluginJobs.LEASE_SECONDS / 3, heartbeat) and true or false
+    end
+end
+
 local function run_one(c)
     local def = _jobs[c.job]
     local d = db()
@@ -225,6 +256,7 @@ local function run_one(c)
         ngx.log(ngx.WARN, "[plugin-jobs] ", c.job, " (namespace ", tostring(job.namespace_id), ") failed: ",
             tostring(result))
     end
+    _held[c.id] = nil
     finish(c.id, ok, result, math.floor((ngx.now() - started) * 1000), PluginJobs.nextRun(def, ngx.time()))
 end
 
@@ -244,7 +276,7 @@ local function claim()
             LIMIT ]] .. BATCH .. [[
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, job, namespace_id, last_run_at
+        RETURNING id, job, namespace_id, last_run_at, locked_until
     ]])
 end
 
@@ -260,11 +292,13 @@ local function tick(premature)
         local stop = ngx.now() + DRAIN_SECONDS
         repeat
             local claimed = claim()
+            hold(claimed)
             for _, c in ipairs(claimed) do run_one(c) end
             ngx.update_time()
         until #claimed < BATCH or ngx.now() > stop
     end)
     require("helper.plugin-events").releaseConnection()
+    _held = {} -- a run that raised out of the loop isn't ours any more: its lease just runs out
     _busy = false
     if not ok then ngx.log(ngx.ERR, "[plugin-jobs] scheduler failed: ", tostring(err)) end
 end
