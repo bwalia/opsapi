@@ -47,6 +47,8 @@ local USED_OPP = [[
 --- Remove the fixtures: only rows tagged as fixtures. Fixtures that real work points at are kept (untagged).
 -- @return { removed, kept } opportunities
 function FX.clear(ns)
+    -- The sample story first: its rows aren't fixtures in themselves, so they'd otherwise count as real work.
+    require("property_pa.story").clear(ns)
     local kept = db.query([[UPDATE pa_opportunities o SET metadata = o.metadata - 'fixture', updated_at = NOW()
         WHERE o.namespace_id = ? AND o.metadata ->> 'fixture' = ? AND (]] .. USED_OPP .. [[) RETURNING o.uuid]],
         ns, TAG)
@@ -110,8 +112,9 @@ local function interaction(ns, owner, opp, person, days, channel, summary)
 end
 
 --- Seed the fixtures (clearing old ones first). sophie / ashley = user uuids (members of the workspace).
--- @return { opportunities, sarah = { opportunity_uuid, person_uuid, property_uuid }, ... }
-function FX.reset(ns, sophie, ashley)
+-- story = true adds the sample history (property_pa.story) on top. settings = the PA's plugin settings.
+-- @return { opportunities, sarah = { opportunity_uuid, person_uuid, property_uuid }, story?, ... }
+function FX.reset(ns, sophie, ashley, story, settings)
     require("property_pa.setup").run(ns, ashley or sophie)
     local out = { cleared = 0, kept = 0, opportunities = 0 }
     U.tx(function()
@@ -167,6 +170,7 @@ function FX.reset(ns, sophie, ashley)
         out.opportunities = out.opportunities + 1
     end)
     out.users = { sophie = sophie, ashley = ashley }
+    if story then out.story = require("property_pa.story").add(ns, sophie, ashley or sophie, settings) end
     return out
 end
 
