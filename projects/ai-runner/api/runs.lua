@@ -1,0 +1,251 @@
+-- AI runs for users (docs/AI_RUNNER.md §22.3). Who may start: ai_runs.create and (the task's assignee,
+-- ai_runs.manage or owner/admin of its kanban project). Who sees: own runs (requested, or on a task assigned to
+-- them), project owners/admins their project's runs, ai_runs.manage all. Cancel / retry: requester or manager.
+--   POST /tasks/:task_uuid/runs/preview     prompt, runners, suggested folder, conflicts — no side effects
+--   POST /tasks/:task_uuid/runs             start (Idempotency-Key) -> 201 run | 409 { conflict } | 422
+--   GET  /tasks/:task_uuid/runs             the task's run history
+--   GET  /runs                              ?status&task_uuid&runner_uuid&mine&page&per_page, newest first
+--   GET  /runs/:uuid                        run + last 500 events + task + runner
+--   POST /runs/:uuid/cancel                 queued -> cancelled; running -> cancelling (runner kills it)
+--   POST /runs/:uuid/retry                  a new run (attempt + 1) with the same inputs
+local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
+if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
+
+local cjson = require("cjson")
+local db = require("lapis.db")
+local sdk = require("helper.plugin-sdk")
+local U = require("ai_runner.util")
+local R = require("ai_runner.runs")
+
+-- Run fields in the API (all real columns; the list leaves out the prompt, the detail adds it).
+local FIELDS = { "uuid", "task_uuid", "project_uuid", "requested_by", "assignee_uuid", "runner_uuid", "profile",
+    "model", "repo_path", "repo_remote", "base_branch", "work_branch", "previous_branch", "output_mode", "pr_draft",
+    "pr_base", "template_uuid", "template_version", "prompt_sha256", "status", "status_seq", "attempt", "retry_of",
+    "timeout_s", "lease_until", "heartbeat_at", "claimed_at", "started_at", "finished_at", "cancel_requested_at",
+    "cancel_requested_by", "pid", "agent_session_id", "exit_code", "error_category", "error", "summary",
+    "commit_sha", "pr_url", "created_at", "updated_at" }
+local COLS = {}
+for i, f in ipairs(FIELDS) do COLS[i] = "r." .. f end
+COLS = table.concat(COLS, ", ") .. ", r.task_snapshot"
+
+local NOT_ALLOWED = "Only the task's assignee, an owner or admin of its project, or an AI runs manager can start "
+    .. "an AI run on this task"
+
+local function view(r)
+    local v = {}
+    for _, f in ipairs(FIELDS) do v[f] = U.null(r[f]) end
+    v.task_snapshot = U.json(r.task_snapshot) or cjson.null
+    if r.prompt then v.prompt = r.prompt end
+    for _, f in ipairs({ "prompt_preview", "task_title", "task_number", "runner_name", "requested_by_name" }) do
+        if r[f] ~= nil then v[f] = r[f] end
+    end
+    return v
+end
+
+local function body(self)
+    local b, err = sdk.body(self)
+    if not b then U.fail(400, err) end
+    return b
+end
+
+local function task_or_404(ns, task_uuid)
+    local task = R.task(ns, task_uuid)
+    if not task then U.fail(404, "Task not found") end
+    return task
+end
+
+local function list(self, ns, params)
+    local cond, vals = R.visible_sql(self, ns)
+    local where, args = { "r.namespace_id = ?", cond }, { ns }
+    for _, v in ipairs(vals) do args[#args + 1] = v end
+    local function add(sql, v)
+        where[#where + 1] = sql
+        args[#args + 1] = v
+    end
+    if type(params.status) == "string" and params.status ~= "" then
+        local wanted = {}
+        for s in params.status:gmatch("[^,%s]+") do
+            local known = false
+            for _, k in ipairs(R.STATUSES) do if k == s then known = true end end
+            if not known then U.fail(400, "Unknown status: " .. U.clean(s, 40)) end
+            wanted[#wanted + 1] = s
+        end
+        if #wanted > 0 then add("r.status IN ?", db.list(wanted)) end
+    end
+    if type(params.task_uuid) == "string" and params.task_uuid ~= "" then
+        add("r.task_uuid = ?", params.task_uuid:sub(1, 255))
+    end
+    if type(params.runner_uuid) == "string" and params.runner_uuid ~= "" then
+        if not U.is_uuid(params.runner_uuid) then U.fail(400, "runner_uuid must be a uuid") end
+        add("r.runner_uuid = ?", params.runner_uuid)
+    end
+    if params.mine == "1" or params.mine == "true" or params.mine == true then
+        add("r.requested_by = ?", sdk.user(self).uuid)
+    end
+    local page, per_page, offset = sdk.page(params)
+    local w = table.concat(where, " AND ")
+    local q_args = { unpack(args) }
+    q_args[#q_args + 1] = per_page
+    q_args[#q_args + 1] = offset
+    local rows = db.query("SELECT " .. COLS .. [[, left(r.prompt, 300) AS prompt_preview, t.title AS task_title,
+            t.task_number, ru.name AS runner_name,
+            NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS requested_by_name
+        FROM ar_runs r
+        LEFT JOIN kanban_tasks t ON t.uuid = r.task_uuid
+        LEFT JOIN ar_runners ru ON ru.uuid = r.runner_uuid
+        LEFT JOIN users u ON u.uuid = r.requested_by
+        WHERE ]] .. w .. " ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?", unpack(q_args))
+    local total = db.query("SELECT COUNT(*)::int AS n FROM ar_runs r WHERE " .. w, unpack(args))[1].n
+    local out = {}
+    for i, r in ipairs(rows) do out[i] = view(r) end
+    return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
+end
+
+local function runners(ns)
+    local out = {}
+    for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. [[ FROM ar_runners r
+        WHERE r.namespace_id = ? AND r.status <> 'revoked' ORDER BY lower(r.name), r.id LIMIT 100]], ns)) do
+        out[i] = R.runner_view(r)
+    end
+    return out
+end
+
+return function(app)
+    app:post("/tasks/:task_uuid/runs/preview", sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local task = task_or_404(ns, self.params.task_uuid)
+        local allowed, privileged = R.can_start(self, task)
+        if not allowed then return sdk.error(403, NOT_ALLOWED) end
+        local d, errors = sdk.validate(body(self), {
+            runner_uuid = { type = "uuid" }, profile = { max = 80 }, repo_path = { max = 1024 },
+        })
+        if not d then U.invalid(errors) end
+        local list_ = runners(ns)
+        local runner_uuid = type(d.runner_uuid) == "string" and d.runner_uuid:lower() or nil
+        if not runner_uuid then
+            for _, r in ipairs(list_) do
+                if r.status == "online" then runner_uuid = r.uuid break end
+            end
+        end
+        local defaults = R.defaults(ns, task)
+        local suggested = R.default_repo_path(ns, task, runner_uuid, defaults.project_settings)
+        local repo_path = type(d.repo_path) == "string" and U.path(d.repo_path) or suggested
+        local tpl = R.template(ns)
+        local busy = runner_uuid and repo_path and R.busy_session(ns, runner_uuid, repo_path)
+        local lock = runner_uuid and repo_path and R.folder_lock(ns, runner_uuid, repo_path)
+        return sdk.ok({
+            prompt = R.render(tpl.body, task, { repo_path = repo_path, base_branch = defaults.base_branch,
+                output_mode = defaults.output_mode }),
+            template_version = tpl.version, template_uuid = U.null(tpl.uuid), can_edit_prompt = privileged,
+            runners = U.array(list_), runner_uuid = U.null(runner_uuid), default_repo_path = U.null(suggested),
+            repo_path = U.null(repo_path), work_branch = R.work_branch(task), output_mode = defaults.output_mode,
+            conflicts = { open_run = R.open_run(ns, task.uuid) or cjson.null, folder_lock = lock or cjson.null,
+                busy_session = busy or cjson.null },
+        })
+    end)))
+
+    app:post("/tasks/:task_uuid/runs", sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
+        return sdk.idempotent(self, function()
+            local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+            local task = task_or_404(ns, self.params.task_uuid)
+            local allowed, privileged, assignee = R.can_start(self, task)
+            if not allowed then return sdk.error(403, NOT_ALLOWED) end
+            local d, errors = sdk.validate(body(self), {
+                runner_uuid = { type = "uuid", required = true }, profile = { required = true, max = 80 },
+                model = { max = 120 }, repo_path = { required = true, max = 1024 },
+                prompt = { type = "text", max = 100000 }, output_mode = { enum = R.OUTPUT_MODES },
+            })
+            if not d then U.invalid(errors) end
+            for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
+            local path = U.path(d.repo_path)
+            if not path then U.invalid({ repo_path = "must be an absolute folder path" }) end
+            if d.prompt and not privileged then
+                return sdk.error(403, "Only an AI runs manager or an owner or admin of the project can edit the prompt")
+            end
+            local defaults = R.defaults(ns, task)
+            local output_mode = d.output_mode or defaults.output_mode
+            local tpl = R.template(ns)
+            local prompt = d.prompt and U.clean(d.prompt) or R.render(tpl.body, task, { repo_path = path,
+                base_branch = defaults.base_branch, output_mode = output_mode })
+            local key = ngx.req.get_headers()["Idempotency-Key"]
+            local run = R.create(ns, me, task, {
+                runner_uuid = d.runner_uuid:lower(), profile = d.profile, model = d.model, repo_path = path,
+                prompt = prompt, template_uuid = tpl.uuid, template_version = tpl.version, output_mode = output_mode,
+                pr_draft = defaults.pr_draft, pr_base = defaults.pr_base, base_branch = defaults.base_branch,
+                timeout_s = defaults.timeout_s, assignee_uuid = assignee,
+                idempotency_key = type(key) == "string" and key:sub(1, 255) or nil,
+            })
+            return sdk.created(view(run))
+        end)
+    end)))
+
+    app:get("/tasks/:task_uuid/runs", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local task = task_or_404(ns, self.params.task_uuid)
+        local params = {}
+        for k, v in pairs(self.params) do params[k] = v end
+        params.task_uuid = task.uuid
+        return sdk.ok(list(self, ns, params))
+    end)))
+
+    app:get("/runs", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        return sdk.ok(list(self, sdk.namespace_id(self), self.params))
+    end)))
+
+    app:get("/runs/:uuid", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local run = R.find_visible(self, ns, self.params.uuid)
+        if not run then return sdk.not_found("Run") end
+        local v = view(run)
+        local events = db.query([[SELECT seq, type, text, data, at FROM (SELECT seq, type, text, data, at
+            FROM ar_run_events WHERE run_uuid = ? ORDER BY seq DESC LIMIT 500) e ORDER BY seq]], run.uuid)
+        for i, e in ipairs(events) do
+            events[i] = { seq = e.seq, type = e.type, text = U.null(e.text), data = U.null(U.json(e.data)), at = e.at }
+        end
+        v.events = U.array(events)
+        local task = R.task(ns, run.task_uuid)
+        v.task = task and { uuid = task.uuid, task_number = U.null(task.task_number), title = task.title,
+            status = task.status, priority = U.null(task.priority), url = R.task_url(task.project_uuid, task.uuid),
+            project = { uuid = task.project_uuid, name = task.project_name } } or cjson.null
+        local runner = R.runner(ns, run.runner_uuid)
+        v.runner = runner and { uuid = runner.uuid, name = runner.name, status = R.runner_status(runner),
+            host = U.null(runner.host) } or cjson.null
+        return sdk.ok(v)
+    end)))
+
+    app:post("/runs/:uuid/cancel", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local run = R.find_visible(self, ns, self.params.uuid)
+        if not run then return sdk.not_found("Run") end
+        if not R.may_control(self, run) then
+            return sdk.error(403, "Only the person who started this run or an AI runs manager can cancel it")
+        end
+        return sdk.ok(view(R.cancel(run, sdk.user(self).uuid)))
+    end)))
+
+    app:post("/runs/:uuid/retry", sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
+        return sdk.idempotent(self, function()
+            local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+            local run = R.find_visible(self, ns, self.params.uuid)
+            if not run then return sdk.not_found("Run") end
+            if not R.may_control(self, run) then
+                return sdk.error(403, "Only the person who started this run or an AI runs manager can retry it")
+            end
+            if not R.TERMINAL[run.status] then
+                return sdk.error(409, "This run is still open (" .. run.status .. ")")
+            end
+            local task = task_or_404(ns, run.task_uuid)
+            if not R.can_start(self, task) then return sdk.error(403, NOT_ALLOWED) end
+            local key = ngx.req.get_headers()["Idempotency-Key"]
+            local new = R.create(ns, me, task, {
+                runner_uuid = run.runner_uuid, profile = run.profile, model = run.model, repo_path = run.repo_path,
+                prompt = run.prompt, template_uuid = run.template_uuid, template_version = run.template_version,
+                output_mode = run.output_mode, pr_draft = run.pr_draft, pr_base = run.pr_base,
+                base_branch = run.base_branch, timeout_s = run.timeout_s, assignee_uuid = run.assignee_uuid,
+                attempt = run.attempt + 1, retry_of = run.uuid,
+                idempotency_key = type(key) == "string" and key:sub(1, 255) or nil,
+            })
+            return sdk.created(view(new))
+        end)
+    end)))
+end
