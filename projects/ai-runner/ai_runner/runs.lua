@@ -10,6 +10,8 @@ local R = {}
 
 R.HEARTBEAT_S, R.CLAIM_WAIT_S, R.LEASE_S, R.ONLINE_S = 15, 25, 60, 45
 R.QUEUE_HOURS, R.APPROVAL_HOURS = 24, 72
+-- Per-run limits (§25.7): log events kept, follow-ups waiting for the runner, permission requests asked.
+R.MAX_RUN_EVENTS, R.MAX_QUEUED_TURNS, R.MAX_RUN_REQUESTS = 20000, 50, 500
 
 -- pending_approval is open (one run per task, holds the folder lock) but not active: no runner may claim it.
 local OPEN = { "pending_approval", "queued", "claimed", "starting", "running", "waiting_permission", "needs_input",
@@ -73,20 +75,23 @@ local function assignees(task_id)
     return out
 end
 
-local function project_admin(project_id, user_uuid)
-    return project_id ~= nil and require("queries.KanbanProjectQueries").isAdmin(project_id, user_uuid) == true
+--- An owner or admin of the kanban project, by its own member list. (Not KanbanProjectQueries.isAdmin, which also
+-- counts projects.manage: that gives no AI-run power beyond seeing runs, §25.1.)
+function R.project_admin(project_id, user_uuid)
+    return project_id ~= nil and U.one([[SELECT 1 AS x FROM kanban_project_members WHERE project_id = ?
+        AND user_uuid = ? AND left_at IS NULL AND role IN ('owner', 'admin') LIMIT 1]], project_id, user_uuid) ~= nil
 end
 
 --- May the caller start (or retry) a run on this task? (§22.1: ai_runs.create — checked by the route — and the
 -- task's assignee, ai_runs.manage, or owner/admin of its kanban project.)
--- @return allowed, privileged (may edit the prompt), assignee_uuid to record
+-- @return allowed, privileged (may edit the prompt: ai_runs.manage only, §25.1), assignee_uuid to record
 function R.can_start(self, task)
     local me = sdk.user(self).uuid
     local list = assignees(task.id)
     local mine = false
     for _, u in ipairs(list) do if u == me then mine = true end end
-    local privileged = sdk.can(self, "ai_runs", "manage") or project_admin(task.project_id, me)
-    return mine or privileged, privileged, mine and me or list[1]
+    local privileged = sdk.can(self, "ai_runs", "manage")
+    return mine or privileged or R.project_admin(task.project_id, me), privileged, mine and me or list[1]
 end
 
 --- Every run visible to the caller? (ai_runs.manage; ai_runs_approvals.manage, who decide for any run; or
@@ -127,28 +132,43 @@ function R.may_control(self, run)
     return run.requested_by == sdk.user(self).uuid or sdk.can(self, "ai_runs", "manage")
 end
 
---- A manager of the project's runs (§23.3): ai_runs_approvals.manage, ai_runs.manage, or an owner or admin of the
--- project. Managers decide start approvals always, permission requests when the policy names them.
+--- The workspace approval policy, read once per request (/waiting asks for many runs).
+function R.policy_of(self)
+    self._ar_policy = self._ar_policy or R.settings(sdk.namespace_id(self)).approval_policy
+    return self._ar_policy
+end
+
+--- A manager of the project's runs (§25.1): ai_runs_approvals.manage or ai_runs.manage; an owner or admin of the
+-- project only when the workspace's approval_policy.project_admins_decide is on. Managers decide start approvals
+-- always, permission requests when the policy names them.
 function R.is_manager(self, project_uuid)
     if sdk.can(self, "ai_runs_approvals", "manage") or sdk.can(self, "ai_runs", "manage") then return true end
-    if not project_uuid then return false end
+    if not project_uuid or R.policy_of(self).project_admins_decide ~= true then return false end
     self._ar_admin_of = self._ar_admin_of or {} -- /waiting asks for many runs of a few projects
     local known = self._ar_admin_of[project_uuid]
     if known == nil then
         local p = U.one("SELECT id FROM kanban_projects WHERE uuid = ? AND namespace_id = ?", project_uuid,
             sdk.namespace_id(self))
-        known = p ~= nil and project_admin(p.id, sdk.user(self).uuid)
+        known = p ~= nil and R.project_admin(p.id, sdk.user(self).uuid)
         self._ar_admin_of[project_uuid] = known
     end
     return known
 end
 
---- May the caller decide this run's permission requests? Per the workspace approval_policy.deciders.
-function R.can_decide(self, run, deciders)
+--- May the caller decide this run's permission requests? Per the workspace approval_policy.deciders; under
+-- "managers" the requester never decides their own run's requests, even as a manager (§25.1).
+function R.can_decide(self, run)
     local requester = run.requested_by == sdk.user(self).uuid
+    local deciders = R.policy_of(self).deciders
     if deciders == "requester" then return requester end
     if deciders == "requester_or_managers" and requester then return true end
-    return R.is_manager(self, run.project_uuid)
+    return not requester and R.is_manager(self, run.project_uuid)
+end
+
+--- May the caller approve (or reject) this pending run? A manager, never the one who asked for it (§25.1).
+function R.can_approve(self, run)
+    return run.status == "pending_approval" and run.requested_by ~= sdk.user(self).uuid
+        and R.is_manager(self, run.project_uuid)
 end
 
 -- ---------------------------------------------------------------------------
@@ -159,7 +179,7 @@ R.SETTINGS_DEFAULTS = {
     output_mode = "pull_request", pr_draft = true, pr_base = "main", max_run_minutes = 60,
     task_automation = { in_progress_on_start = false, review_on_success = false },
     approval_policy = { deciders = "managers", require_start_approval = false, permission_timeout_minutes = 30,
-        input_timeout_minutes = 60 },
+        input_timeout_minutes = 60, project_admins_decide = false },
     -- §24.1. Caps and the token limit: 0 = none.
     guards = { similar_threshold = 0.45, max_open_runs_per_user = 3, max_open_runs_per_workspace = 10,
         daily_token_limit = 0, retention_days = 365 },
@@ -255,6 +275,11 @@ local function fenced(s)
     return (U.clean(s or "", 20000):gsub("<%s*/?%s*[Tt][Aa][Ss][Kk]%-[Dd][Aa][Tt][Aa]%s*>", "[task-data]"))
 end
 
+-- A title or name is one line (§25.7): a newline in it can't start a line of its own in the prompt.
+local function one_line(s)
+    return (fenced(s):gsub("[\r\n\v\f]+", " "):gsub("\226\128[\168\169]", " "))
+end
+
 function R.checklist(task_id)
     local lines = {}
     for _, i in ipairs(db.query([[
@@ -272,12 +297,12 @@ end
 function R.render(body, task, opts)
     local vars = {
         ["task.number"] = tostring(task.task_number or ""),
-        ["task.title"] = fenced(task.title),
+        ["task.title"] = one_line(task.title),
         ["task.url"] = R.task_url(task.project_uuid, task.uuid),
         ["task.description"] = fenced(task.description ~= nil and task.description ~= "" and task.description
             or "(none)"),
         ["task.checklist"] = fenced(R.checklist(task.id)),
-        ["project.name"] = fenced(task.project_name),
+        ["project.name"] = one_line(task.project_name),
         repo_path = opts.repo_path or "(the folder chosen when the run starts)",
         work_branch = R.work_branch(task),
         base_branch = opts.base_branch ~= nil and opts.base_branch ~= "" and opts.base_branch
@@ -292,7 +317,7 @@ end
 -- ---------------------------------------------------------------------------
 
 R.RUNNER_COLS = [[r.id, r.uuid, r.namespace_id, r.name, r.status, r.labels, r.capabilities, r.repos, r.host, r.os,
-    r.version, r.token_hint, r.last_heartbeat_at, r.created_by, r.revoked_at, r.created_at, r.updated_at,
+    r.version, r.token_hint, r.last_heartbeat_at, r.created_by, r.revoked_at, r.created_at, r.updated_at, r.access,
     (r.last_heartbeat_at IS NOT NULL AND r.last_heartbeat_at > NOW() - interval ']] .. R.ONLINE_S .. [[ seconds')
     AS online]]
 
@@ -307,9 +332,10 @@ function R.runner_status(r)
     return r.online and "online" or "offline"
 end
 
-function R.runner_view(r)
+--- show_access: the caller holds ai_runners.manage (who may use the runner is theirs to see, §25.1).
+function R.runner_view(r, show_access)
     local labels, caps, repos = U.json(r.labels), U.json(r.capabilities), U.json(r.repos)
-    return {
+    local v = {
         uuid = r.uuid, name = r.name, status = R.runner_status(r),
         host = U.null(r.host), os = U.null(r.os), version = U.null(r.version),
         labels = U.array(type(labels) == "table" and labels or {}),
@@ -318,7 +344,47 @@ function R.runner_view(r)
         token_hint = r.token_hint, last_heartbeat_at = U.null(r.last_heartbeat_at),
         created_by = U.null(r.created_by), created_at = r.created_at, revoked_at = U.null(r.revoked_at),
     }
+    if show_access then
+        local a = U.json(r.access)
+        a = type(a) == "table" and a or {}
+        v.access = { mode = a.mode or "owner", users = U.array(type(a.users) == "table" and a.users or {}),
+            projects = U.array(type(a.projects) == "table" and a.projects or {}) }
+    end
+    return v
 end
+
+--- Who may use a runner (§25.1), as an SQL condition (+ values) on ar_runners `r`, the one rule behind the runners
+-- list, preview, start and retry. AI-run managers (ai_runs.manage, ai_runners.manage) may use every runner; others
+-- the ones they registered, those open to everyone, and listed ones that name them or the task's project (with no
+-- task, the runners list: a project they are a member of).
+function R.runner_access_sql(self, ns, project_uuid)
+    if sdk.can(self, "ai_runs", "manage") or sdk.can(self, "ai_runners", "manage") then return "TRUE", {} end
+    local me = sdk.user(self).uuid
+    local project, vals
+    if project_uuid then
+        project, vals = "r.access->'projects' @> jsonb_build_array(?::text)", { project_uuid }
+    else
+        project = [[EXISTS (SELECT 1 FROM kanban_project_members m JOIN kanban_projects p ON p.id = m.project_id
+            WHERE p.namespace_id = ? AND m.user_uuid = ? AND m.left_at IS NULL AND p.deleted_at IS NULL
+              AND r.access->'projects' @> jsonb_build_array(p.uuid::text))]]
+        vals = { ns, me }
+    end
+    return [[(r.created_by = ? OR r.access->>'mode' = 'everyone' OR (r.access->>'mode' = 'listed'
+        AND (r.access->'users' @> jsonb_build_array(?::text) OR ]] .. project .. ")))", { me, me, unpack(vals) }
+end
+
+--- The workspace's runner (nil when it isn't one) and whether the caller may use it for a task of this project.
+function R.usable_runner(self, ns, runner_uuid, project_uuid)
+    if not U.is_uuid(runner_uuid) then return nil end
+    local cond, args = R.runner_access_sql(self, ns, project_uuid)
+    args[#args + 1] = ns
+    args[#args + 1] = runner_uuid
+    local r = U.one("SELECT " .. R.RUNNER_COLS .. ", (" .. cond .. [[) AS usable FROM ar_runners r
+        WHERE r.namespace_id = ? AND r.uuid = ?]], unpack(args))
+    return r, r ~= nil and r.usable == true
+end
+
+R.CANT_USE_RUNNER = "You can't use this runner"
 
 function R.lock_key(ns, runner_uuid, repo_path)
     return "repo:" .. tostring(ns) .. ":" .. tostring(runner_uuid) .. ":" .. repo_path
@@ -405,14 +471,8 @@ function R.needs_approval(ns, profile, requester_is_manager)
     return R.settings(ns).approval_policy.require_start_approval == true and not requester_is_manager
 end
 
---- Create a queued (or pending_approval) run and take its folder lock in one transaction (§9 layers 1-3).
--- inp: runner_uuid, profile, model, repo_path, prompt, template_uuid, template_version, output_mode,
---      pr_draft, pr_base, base_branch, timeout_s, attempt, retry_of, idempotency_key, assignee_uuid,
---      requester_is_manager
--- @return run row
-function R.create(ns, user_uuid, task, inp)
-    local runner = R.runner(ns, inp.runner_uuid)
-    if not runner then U.invalid({ runner_uuid = "is not a runner of this workspace" }) end
+-- The runner, its repo and its profile must be able to take this run now (§22.3, §24.3). @return repo, profile
+local function check_runner(ns, runner, inp)
     if runner.status == "revoked" then
         conflict("runner_revoked", "This runner was revoked", { runner_uuid = runner.uuid })
     elseif runner.status == "paused" then
@@ -442,10 +502,29 @@ function R.create(ns, user_uuid, task, inp)
     if busy then
         conflict("busy_session", "A session on " .. runner.name .. " is busy in this folder", { session = busy })
     end
+    return repo, profile
+end
 
-    local prompt = inp.prompt
-    local status = R.needs_approval(ns, profile, inp.requester_is_manager) and "pending_approval" or "queued"
+--- Start (or retry) a run for the caller: the runner must be one they may use (403), then — counted and inserted
+-- in one transaction under a per-workspace lock, so parallel starts can't both pass a cap (§25.7) — the guards
+-- (§24.2), the runner's checks, and the queued (or pending_approval) run with its folder lock (§9 layers 1-3).
+-- inp: runner_uuid, profile, model, repo_path, prompt, template_uuid, template_version, output_mode,
+--      pr_draft, pr_base, base_branch, timeout_s, attempt, retry_of, idempotency_key, assignee_uuid,
+--      confirm_similar
+-- @return run row
+function R.create(self, ns, task, inp)
+    local user_uuid = sdk.user(self).uuid
+    local runner, usable = R.usable_runner(self, ns, inp.runner_uuid, task.project_uuid)
+    if not runner then U.invalid({ runner_uuid = "is not a runner of this workspace" }) end
+    if not usable then U.fail(403, R.CANT_USE_RUNNER) end
+    local requester_is_manager = R.is_manager(self, task.project_uuid)
+
+    local prompt, status = inp.prompt, nil
     local ok, res = pcall(U.tx, function()
+        db.query("SELECT pg_advisory_xact_lock(hashtext('ai_runner:start:' || ?::text))", ns)
+        R.check_guards(self, ns, task, inp.confirm_similar)
+        local repo, profile = check_runner(ns, runner, inp)
+        status = R.needs_approval(ns, profile, requester_is_manager) and "pending_approval" or "queued"
         local run = db.insert("ar_runs", {
             namespace_id = ns, task_uuid = task.uuid, project_uuid = task.project_uuid,
             task_snapshot = cjson.encode({ uuid = task.uuid, task_number = task.task_number, title = task.title,
@@ -741,6 +820,7 @@ function R.request_view(q)
     for _, k in ipairs(REQUEST_FIELDS) do v[k] = U.null(q[k]) end
     v.input = U.json(q.input) or cjson.null
     v.remember = q.remember == true
+    v.rememberable = q.rememberable == true -- §25.2: may "allow for this run" cover it?
     return v
 end
 
@@ -839,7 +919,8 @@ function R.similar(self, ns, task, threshold)
     args[#args + 1] = threshold
     -- ponytail: compares against every open run of the workspace (the caps keep that list short); a trigram index
     -- on the titles and the % operator if open runs ever number in the thousands.
-    local ok, rows = pcall(db.query, [[
+    -- In a savepoint: a start runs this inside its transaction, which a failed query would otherwise abort.
+    local ok, rows = pcall(U.tx, function() return db.query([[
         SELECT run_uuid, task_uuid, task_number, task_title, status, requested_by_name,
                round(sim::numeric, 3) AS similarity
         FROM (SELECT r.uuid AS run_uuid, r.task_uuid, t.task_number, COALESCE(t.title, r.task_snapshot->>'title')
@@ -850,7 +931,7 @@ function R.similar(self, ns, task, threshold)
               LEFT JOIN users u ON u.uuid = r.requested_by
               WHERE r.namespace_id = ? AND r.status IN ]] .. R.OPEN_SQL .. [[ AND r.task_uuid <> ? AND ]] .. scope
         .. [[) x
-        WHERE sim >= ? ORDER BY sim DESC, created_at, run_uuid LIMIT 5]], unpack(args))
+        WHERE sim >= ? ORDER BY sim DESC, created_at, run_uuid LIMIT 5]], unpack(args)) end)
     if ok then
         for i, r in ipairs(rows) do
             rows[i] = { run_uuid = r.run_uuid, task_uuid = r.task_uuid, task_number = U.null(r.task_number),
@@ -869,8 +950,7 @@ function R.similar(self, ns, task, threshold)
 end
 
 --- Refuse a start or retry (409) at a cap, at the token limit, then on unconfirmed similar work, in that order.
--- ponytail: counted before the insert, so two starts in the same instant can both pass a cap; take a
--- per-workspace advisory lock around the count and the insert if caps must be exact.
+-- R.create calls it under its per-workspace lock, in the transaction that inserts the run.
 function R.check_guards(self, ns, task, confirm_similar)
     local g = R.settings(ns).guards
     local l = R.limits(ns, sdk.user(self).uuid, g)
@@ -914,10 +994,11 @@ local function grants_manage(actions)
 end
 
 --- Who hears about a run event: its requester and/or its managers (members whose roles grant ai_runs.manage or
--- ai_runs_approvals.manage, the workspace owners, the owners and admins of the run's project). Active members of
--- the run's workspace only, never the actor, at most 20.
-local function recipients(run, requester, managers, actor)
-    local cond, args = {}, { run.namespace_id, actor or "" }
+-- ai_runs_approvals.manage, the workspace owners, and — when the policy lets project admins decide — the owners and
+-- admins of the run's project, §25.1). Active members of the run's workspace only, never the actor, never the
+-- requester when only managers are told (they can't decide their own run), at most 20.
+local function recipients(run, requester, managers, actor, project_admins)
+    local cond, args = {}, { run.namespace_id, db.list({ actor or "", not requester and run.requested_by or "" }) }
     if requester then
         cond[#cond + 1] = "u.uuid = ?"
         args[#args + 1] = run.requested_by
@@ -937,14 +1018,16 @@ local function recipients(run, requester, managers, actor)
                 AND nur.namespace_role_id IN ?)]]
             args[#args + 1] = db.list(roles)
         end
-        cond[#cond + 1] = [[u.uuid IN (SELECT m.user_uuid FROM kanban_project_members m
-            JOIN kanban_projects p ON p.id = m.project_id
-            WHERE p.uuid = ? AND p.namespace_id = ? AND m.left_at IS NULL AND m.role IN ('owner', 'admin'))]]
-        args[#args + 1] = run.project_uuid or ""
-        args[#args + 1] = run.namespace_id
+        if project_admins then
+            cond[#cond + 1] = [[u.uuid IN (SELECT m.user_uuid FROM kanban_project_members m
+                JOIN kanban_projects p ON p.id = m.project_id
+                WHERE p.uuid = ? AND p.namespace_id = ? AND m.left_at IS NULL AND m.role IN ('owner', 'admin'))]]
+            args[#args + 1] = run.project_uuid or ""
+            args[#args + 1] = run.namespace_id
+        end
     end
     return db.query([[SELECT u.uuid FROM namespace_members nm JOIN users u ON u.id = nm.user_id
-        WHERE nm.namespace_id = ? AND nm.status = 'active' AND u.uuid <> ? AND (]] .. table.concat(cond, " OR ")
+        WHERE nm.namespace_id = ? AND nm.status = 'active' AND u.uuid NOT IN ? AND (]] .. table.concat(cond, " OR ")
         .. ") ORDER BY u.id LIMIT 20", unpack(args))
 end
 
@@ -953,9 +1036,10 @@ end
 -- input (the requester). actor: the user who caused it (nil = the runner). Never fails the caller.
 function R.alert(run, kind, actor, detail)
     local ok, err = pcall(function()
-        local who = kind == "input" and "requester" or kind == "approval" and "managers"
-            or R.settings(run.namespace_id).approval_policy.deciders
-        local users = recipients(run, who ~= "managers", who ~= "requester", actor)
+        local policy = R.settings(run.namespace_id).approval_policy
+        local who = kind == "input" and "requester" or kind == "approval" and "managers" or policy.deciders
+        local users = recipients(run, who ~= "managers", who ~= "requester", actor,
+            policy.project_admins_decide == true)
         if #users == 0 then return end
         local task = R.task(run.namespace_id, run.task_uuid) or {}
         if kind == "approval" then

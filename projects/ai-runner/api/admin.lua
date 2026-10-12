@@ -1,8 +1,10 @@
--- Runners, machines, the overview, settings and the prompt template (docs/AI_RUNNER.md §22.3, §24).
---   GET    /runners                         ai_runs.create or ai_runners.manage (?include_revoked=true)
---   GET    /runners/:uuid                   same
+-- Runners, machines, the overview, settings and the prompt template (docs/AI_RUNNER.md §22.3, §24, §25.1).
+--   GET    /runners                         ai_runs.create or ai_runners.manage (?include_revoked=true): the runners
+--                                           the caller may use; `access` shown to ai_runners.manage
+--   GET    /runners/:uuid                   same (404 for a runner the caller may not use)
 --   POST   /runners { name, labels? }       ai_runners.manage -> 201 { runner, token } (the token is shown once)
 --   PUT    /runners/:uuid { name?, labels? } ai_runners.manage
+--   PUT    /runners/:uuid/access { mode: owner|everyone|listed, users?, projects? }  ai_runners.manage
 --   POST   /runners/:uuid/rotate-token      ai_runners.manage -> { runner, token }; the old token stops working
 --   POST   /runners/:uuid/pause | /resume   ai_runners.manage (a paused runner heartbeats but claims nothing)
 --   DELETE /runners/:uuid                   ai_runners.manage: revoke (its queued runs are cancelled)
@@ -21,8 +23,6 @@ local db = require("lapis.db")
 local sdk = require("helper.plugin-sdk")
 local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
-
-local BRANCH = "^[%w%._/%-]+$"
 
 local function body(self)
     local b, err = sdk.body(self)
@@ -59,11 +59,38 @@ local function project_or_403(self, ns)
         "SELECT id, uuid, name FROM kanban_projects WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL",
         self.params.project_uuid, ns)
     if not p then U.fail(404, "Project not found") end
-    if not sdk.can(self, "ai_runs_settings", "manage")
-        and not require("queries.KanbanProjectQueries").isAdmin(p.id, sdk.user(self).uuid) then
+    if not sdk.can(self, "ai_runs_settings", "manage") and not R.project_admin(p.id, sdk.user(self).uuid) then
         U.fail(403, "Only an owner or admin of this project, or an AI run settings manager, can do this")
     end
     return p
+end
+
+-- users / projects of a runner's access: up to 200 uuids, each one of this workspace's (a member, a project).
+-- @return the list as stored (the workspace's own spelling of each uuid)
+local function access_list(v, field, ns)
+    if v == nil or v == cjson.null then return U.array() end
+    if type(v) ~= "table" or (next(v) ~= nil and v[1] == nil) or #v > 200 then
+        U.invalid({ [field] = "must be a list of up to 200 uuids" })
+    end
+    local seen = {}
+    for _, id in ipairs(v) do
+        if not U.is_uuid(id) then U.invalid({ [field] = "must be a list of up to 200 uuids" }) end
+        seen[id] = true
+    end
+    local wanted = {}
+    for id in pairs(seen) do wanted[#wanted + 1] = id end
+    if #wanted == 0 then return U.array() end
+    local rows = field == "users" and db.query([[SELECT u.uuid FROM namespace_members nm
+            JOIN users u ON u.id = nm.user_id
+            WHERE nm.namespace_id = ? AND nm.status = 'active' AND u.uuid IN ? ORDER BY u.uuid]], ns, db.list(wanted))
+        or db.query([[SELECT uuid FROM kanban_projects WHERE namespace_id = ? AND deleted_at IS NULL AND uuid IN ?
+            ORDER BY uuid]], ns, db.list(wanted))
+    if #rows ~= #wanted then
+        U.invalid({ [field] = field == "users" and "must be members of this workspace"
+            or "must be projects of this workspace" })
+    end
+    for i, r in ipairs(rows) do rows[i] = r.uuid end
+    return U.array(rows)
 end
 
 local function template_view(t)
@@ -74,25 +101,33 @@ end
 
 return function(app)
     -- Runners --------------------------------------------------------------------------------------------------
+    -- Only the runners the caller may use (§25.1): the Start dialog offers nothing it would refuse.
     app:get("/runners", sdk.handler({}, U.guard(function(self)
         if not may_list_runners(self) then return sdk.error(403, "Permission denied") end
         local ns = sdk.namespace_id(self)
         local page, per_page, offset = sdk.page(self.params)
         local all = self.params.include_revoked == "true" or self.params.include_revoked == "1"
-        local w = "r.namespace_id = ?" .. (all and "" or " AND r.status <> 'revoked'")
-        local out = {}
+        local cond, args = R.runner_access_sql(self, ns)
+        local w = cond .. " AND r.namespace_id = ?" .. (all and "" or " AND r.status <> 'revoked'")
+        args[#args + 1] = ns
+        local q_args = { unpack(args) }
+        q_args[#q_args + 1] = per_page
+        q_args[#q_args + 1] = offset
+        local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
         for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. " FROM ar_runners r WHERE " .. w
-            .. " ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?", ns, per_page, offset)) do
-            out[i] = R.runner_view(r)
+            .. " ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?", unpack(q_args))) do
+            out[i] = R.runner_view(r, show_access)
         end
-        local total = db.query("SELECT COUNT(*)::int AS n FROM ar_runners r WHERE " .. w, ns)[1].n
+        local total = db.query("SELECT COUNT(*)::int AS n FROM ar_runners r WHERE " .. w, unpack(args))[1].n
         return sdk.ok(U.array(out), { page = page, per_page = per_page, total = total,
             total_pages = math.ceil(total / per_page) })
     end)))
 
     app:get("/runners/:uuid", sdk.handler({}, U.guard(function(self)
         if not may_list_runners(self) then return sdk.error(403, "Permission denied") end
-        return sdk.ok(R.runner_view(runner_or_404(sdk.namespace_id(self), self.params.uuid)))
+        local r, usable = R.usable_runner(self, sdk.namespace_id(self), self.params.uuid)
+        if not usable then return sdk.not_found("Runner") end
+        return sdk.ok(R.runner_view(r, sdk.can(self, "ai_runners", "manage")))
     end)))
 
     -- No Idempotency-Key here: a replayed answer would have to keep the token.
@@ -105,7 +140,7 @@ return function(app)
         local row = db.insert("ar_runners", { namespace_id = ns, name = U.clean(d.name),
             labels = cjson.encode(labels_of(b.labels) or U.array()), token_hash = hash, token_hint = hint,
             created_by = sdk.user(self).uuid }, { returning = "*" })[1]
-        return sdk.created({ runner = R.runner_view(R.runner(ns, row.uuid)), token = raw })
+        return sdk.created({ runner = R.runner_view(R.runner(ns, row.uuid), true), token = raw })
     end)))
 
     app:put("/runners/:uuid", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
@@ -118,7 +153,22 @@ return function(app)
         local name, l = d.name and U.clean(d.name) or r.name, labels_of(b.labels)
         db.query("UPDATE ar_runners SET name = ?, labels = COALESCE(?::jsonb, labels), updated_at = NOW() WHERE id = ?",
             name, l and cjson.encode(l) or db.NULL, r.id)
-        return sdk.ok(R.runner_view(R.runner(ns, r.uuid)))
+        return sdk.ok(R.runner_view(R.runner(ns, r.uuid), true))
+    end)))
+
+    -- Who may use the runner (§25.1): its owner and AI-run managers always; `everyone` who may start a run;
+    -- `listed` also the users and the tasks of the projects named.
+    app:put("/runners/:uuid/access", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local r = runner_or_404(ns, self.params.uuid)
+        if r.status == "revoked" then U.fail(409, "This runner was revoked") end
+        local b = body(self)
+        local d, errors = sdk.validate(b, { mode = { required = true, enum = { "owner", "everyone", "listed" } } })
+        if not d then U.invalid(errors) end
+        local access = { mode = d.mode, users = access_list(b.users, "users", ns),
+            projects = access_list(b.projects, "projects", ns) }
+        db.query("UPDATE ar_runners SET access = ?::jsonb, updated_at = NOW() WHERE id = ?", cjson.encode(access), r.id)
+        return sdk.ok(R.runner_view(R.runner(ns, r.uuid), true))
     end)))
 
     app:post("/runners/:uuid/rotate-token", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
@@ -128,7 +178,7 @@ return function(app)
         local raw, hash, hint = U.new_token()
         db.query("UPDATE ar_runners SET token_hash = ?, token_hint = ?, updated_at = NOW() WHERE id = ?", hash, hint,
             r.id)
-        return sdk.ok({ runner = R.runner_view(R.runner(ns, r.uuid)), token = raw })
+        return sdk.ok({ runner = R.runner_view(R.runner(ns, r.uuid), true), token = raw })
     end)))
 
     for action, change in pairs({ pause = { "active", "paused" }, resume = { "paused", "active" } }) do
@@ -138,7 +188,7 @@ return function(app)
             if r.status == "revoked" then U.fail(409, "This runner was revoked") end
             db.query("UPDATE ar_runners SET status = ?, updated_at = NOW() WHERE id = ? AND status = ?", change[2],
                 r.id, change[1])
-            return sdk.ok(R.runner_view(R.runner(ns, r.uuid)))
+            return sdk.ok(R.runner_view(R.runner(ns, r.uuid), true))
         end)))
     end
 
@@ -157,7 +207,7 @@ return function(app)
                     AND x.status NOT IN ]] .. R.OPEN_SQL, r.uuid)
             end)
         end
-        return sdk.ok(R.runner_view(R.runner(ns, r.uuid)))
+        return sdk.ok(R.runner_view(R.runner(ns, r.uuid), true))
     end)))
 
     app:get("/runners/:uuid/sessions", sdk.handler({ permission = "ai_runs.manage" }, U.guard(function(self)
@@ -295,7 +345,7 @@ return function(app)
             end
         end
         put(s, R.SETTINGS_DEFAULTS, d)
-        if not tostring(s.pr_base):match(BRANCH) then U.invalid({ pr_base = "must be a branch name" }) end
+        if not U.is_branch(s.pr_base) then U.invalid({ pr_base = "must be a branch name" }) end
         local function merge(name, rules)
             local given = b[name]
             if given == nil then return end
@@ -311,7 +361,7 @@ return function(app)
         merge("task_automation", { in_progress_on_start = { type = "boolean" },
             review_on_success = { type = "boolean" } })
         merge("approval_policy", { deciders = { enum = { "requester", "managers", "requester_or_managers" } },
-            require_start_approval = { type = "boolean" },
+            require_start_approval = { type = "boolean" }, project_admins_decide = { type = "boolean" },
             permission_timeout_minutes = { type = "integer", min = 1, max = 1440 },
             input_timeout_minutes = { type = "integer", min = 1, max = 1440 } })
         merge("guards", { similar_threshold = { type = "number", min = 0.1, max = 1 },
@@ -345,7 +395,7 @@ return function(app)
         local d, errors = sdk.validate(b, { output_mode = { enum = R.OUTPUT_MODES }, base_branch = { max = 255 } },
             true)
         if not d then U.invalid(errors) end
-        if type(d.base_branch) == "string" and not d.base_branch:match(BRANCH) then
+        if type(d.base_branch) == "string" and not U.is_branch(d.base_branch) then
             U.invalid({ base_branch = "must be a branch name" })
         end
         local cur = R.project_settings(ns, p.uuid)

@@ -83,7 +83,8 @@ docker exec "ar-pg-$ID" psql -U postgres -d e2e -qc "INSERT INTO user__roles (uu
 
 PORT=$(docker port "ar-api-$ID" 80/tcp | head -1 | sed 's/.*://')
 AR_API="http://127.0.0.1:$PORT"
-export AR_API AR_JWT_SECRET="$JWT_SECRET" AR_PSQL="docker exec -i ar-pg-$ID psql -U postgres -d e2e -tA -c"
+export AR_API AR_JWT_SECRET="$JWT_SECRET" AR_PSQL="docker exec -i ar-pg-$ID psql -U postgres -d e2e -tA -c" \
+  AR_MIGRATE="docker exec -w /app ar-api-$ID lapis migrate"
 # PROMPTPILOT_BIN=/path/to/promptpilot PROMPTPILOT_DIR=/path/to/promptpilot-source adds the real runner suite.
 SUITES=${ONLY:-ai_runner_test${PROMPTPILOT_BIN:+ promptpilot_test}}
 ( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
