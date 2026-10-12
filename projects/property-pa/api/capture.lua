@@ -36,7 +36,11 @@ return function(app)
             transcript = channel == "voice" and d.text or nil, raw_text = channel ~= "voice" and d.text or nil,
             opportunity_uuid = d.opportunity_uuid, person_uuid = d.person_uuid,
             audio_document_uuid = d.audio_document_uuid, source = "human" }, me)
-        -- The PA proposes the changes; if it isn't connected the note is still saved.
+        -- The PA proposes the changes; if it isn't connected (or the person may not propose) the note is still saved.
+        if not sdk.can(self, "property_pa_updates", "create") then
+            return { status = 201, json = { success = true, data = { interaction = it,
+                pa = { error = "Your role can't ask the PA to propose changes; the note is saved" } } } }
+        end
         local ok, run = pcall(B.ask, ns, me, sdk.settings(self), {
             mode = "capture", role = "seller_agent", opportunity_uuid = d.opportunity_uuid, interaction_uuid = it.uuid,
             message = "Capture this " .. (channel == "voice" and "voice note" or "note") .. " (interaction "
@@ -46,7 +50,7 @@ return function(app)
         if ok then
             pa = { run_uuid = run.uuid, status = run.status }
         elseif type(run) == "table" and run.pd_error then
-            pa = { error = run.message }
+            pa = { error = run.message } -- our own words: B.ask logs JobShout's and never passes them on
         else
             ngx.log(ngx.ERR, "[property_pa] capture run: ", tostring(run))
             pa = { error = "The PA couldn't be asked" }

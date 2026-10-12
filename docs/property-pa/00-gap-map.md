@@ -44,7 +44,7 @@ R = reuse, E = extend, N = new.
 
 | Entity | Table(s) | | Columns / change |
 |---|---|---|---|
-| Person | `crm_contacts` (id, uuid, namespace_id, account_id, first_name, last_name, email, phone, mobile, job_title, owner_user_uuid, status, metadata) + `crm_leads` for unqualified people | E | Add `person_roles jsonb` (seller/buyer/agent/solicitor/broker/supplier), `preferred_channel`, `consent_basis`, `opted_out_at`. Leads already carry consent and opt-out in `property_deals_lead_details`; move them to the person at conversion. |
+| Person | `crm_contacts` (id, uuid, namespace_id, account_id, first_name, last_name, email, phone, mobile, job_title, owner_user_uuid, status, metadata) + `crm_leads` for unqualified people | E | Add `person_roles jsonb` (seller/buyer/agent/solicitor/broker/supplier), `preferred_channel`, `consent_basis`, `opted_out_at` (built: consent and opt-out live in the PA's `pa_consent`, not on `crm_contacts`). Leads already carry consent and opt-out in `property_deals_lead_details`; move them to the person at conversion. |
 | Organisation | `crm_accounts` (name, industry, phone, email, address…, metadata) | R/E | Add `company_number` (Companies House). Suppliers already extend accounts (`property_deals_suppliers`). |
 | Property | `property_deals_properties` (address, uprn, lat/lng, title_number, tenure, property_type, beds, condition, known_issues, est_market_value…) | E | Ownership: link owners through Person + a `property_owner` role. **Listing history:** `property_deals_market_records` already stores listings / sold prices (price, previous_price, status, event_date); add `property_uuid` to link records to our property, and derive days listed, price changes and SSTC/fall-through from it. |
 | Lead | `crm_leads` + `property_deals_lead_details` | R/E | `source` already exists; add values `ghl`, `agent`, `direct`; `external_id` for GHL de-dupe. |
@@ -55,10 +55,10 @@ R = reuse, E = extend, N = new.
 | Event | `property_deals_stage_history` covers deal milestones only | **N** `pa_events` | kind (valuation, price_reduction, promise, appointment, deadline), at, person/property/opportunity/deal, details, source. Justification: promises ("I'll decide after the second valuation") and valuations are the strongest priority signals and have no home today. |
 | Offer | `property_deals_deals.offer_amount` holds the current figure only | **N** `pa_offers` | amount, made_at, conditions, response, responded_at, authority_user_uuid, opportunity/deal. Justification: negotiation needs the full history and who approved each offer. |
 | Relationship | — | **N** `pa_relationships` | user ↔ person: strength, last_meaningful_contact_at, preferences jsonb. One row per pair. Could live in `crm_contacts.metadata`, but it is per agent, not per person. |
-| Risk | `property_deals_deals.health/health_reasons` (deal risk, rules), compliance checks | **N** `pa_risks` | kind (deal/relationship/compliance/operational), subject, severity, evidence jsonb (source ids), status. Generalises today's deal-only health reasons. |
+| Risk | `property_deals_deals.health/health_reasons` (deal risk, rules), compliance checks | **N** `pa_risks` | kind (deal/relationship/compliance/operational), subject, severity, evidence jsonb (source ids), status. Generalises today's deal-only health reasons. *Oct 2026: dropped unused; the PoC computes risks live in Manager Today. Comes back with risk detection (month 3).* |
 | Knowledge | `property_deals_playbooks` (key, title, body, no versions) | **E → N** `pa_knowledge` + `pa_knowledge_versions` | rule, rationale, domain, scope (personal/team/company), owner_user_uuid, triggers jsonb, version, status (draft/approved/retired), approved_by, approved_at, `embedding vector(384)`. Migrate playbook sections in as approved company rules. |
 | Decision | `property_deals_approvals` covers action approvals only | **N** `pa_decisions` | situation, pa_recommendation, human_decision, rationale, decided_by, links (opportunity/deal/handoff). |
-| Outcome | — | **N** `pa_outcomes` | what happened, at, links to decisions/actions. Small table, for learning and metrics. |
+| Outcome | — | **N** `pa_outcomes` | what happened, at, links to decisions/actions. Small table, for learning and metrics. *Oct 2026: dropped unused (nothing recorded outcomes yet); comes back with learning (month 3).* |
 | ProposedUpdate | `property_deals_approvals` (payload, original_payload, status) is close but per action, not per field | **N** `pa_proposed_updates` | capture_uuid, target_table, target_uuid, field, old_value, new_value, confidence, is_inferred, source_interaction_uuid, status (proposed/confirmed/corrected/rejected), decided_by. |
 | HandoffCard | — | **N** `pa_handoffs` | from_user, to_user, opportunity/deal, context jsonb, question, pa_recommendation, reply, replied_at, status. |
 
@@ -88,8 +88,11 @@ New tables: **11** `pa_*` (each justified above). All have `namespace_id` and th
 | Mic everywhere | Assistant panel: mic, face, TTS, speaker | Modify | A persistent Ask PA bar and mic on every screen; phone-friendly Today (cards + buttons). |
 
 **Integrations**
-- **GoHighLevel:** none today. New webhook `POST /pa/integrations/ghl` with a shared secret; upserts Lead + Person, de-duplicated on GHL contact id, then email or phone.
-- **Outlook:** `property_deals.mail` already reads Microsoft 365 through Graph (read-only, client credentials). Linking threads to a person/deal is partly there (sender match). **Draft replies** need `Mail.ReadWrite` and creating Graph drafts. Mocked in development (the existing mocks have Graph).
+- **GoHighLevel:** built (Week 4 + October 2026 review): an hourly pull, and the webhook
+  `POST /api/v2/property-pa/public/ghl/<workspace>/contacts` with a per-workspace secret, upserting the Person
+  de-duplicated on GHL contact id, then email, then E.164 phone. Leads are not created from GHL (Property Deals' lead
+  intake stays the way leads arrive).
+- **Outlook:** `property_deals.mail` already reads Microsoft 365 through Graph (read-only, client credentials). Linking threads to a person/deal is partly there (sender match). **Draft replies** need `Mail.ReadWrite` and creating Graph drafts: still open (needs the tenant's consent). Mocked in development (the existing mocks have Graph).
 
 ## 4. Speech-to-text path (built and live on int)
 

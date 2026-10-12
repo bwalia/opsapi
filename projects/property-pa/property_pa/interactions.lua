@@ -28,7 +28,8 @@ end
 
 --- d = { channel, direction, subject?, raw_text?, transcript?, summary?, person_uuid?, opportunity_uuid?, lead_uuid?,
 -- property_uuid?, at?, meaningful?, source?, audio_document_uuid? } @return row
-function I.log(ns, d, user_uuid)
+-- in_tx = the caller already opened a transaction (the writes join it).
+function I.log(ns, d, user_uuid, in_tx)
     local opp
     if d.opportunity_uuid then
         opp = U.one("SELECT uuid, person_uuid FROM pa_opportunities WHERE namespace_id = ? AND uuid = ?::uuid", ns,
@@ -37,11 +38,19 @@ function I.log(ns, d, user_uuid)
     end
     local person = d.person_uuid or (opp and opp.person_uuid ~= db.NULL and opp.person_uuid) or nil
     local cid = contact_id(ns, person)
+    -- Every other id a caller gives must be this workspace's too (they are stored as plain columns, no trigger).
+    for col, tbl in pairs({ property_uuid = "property_deals_properties", lead_uuid = "crm_leads",
+                            audio_document_uuid = "property_deals_documents" }) do
+        if d[col] and not U.one("SELECT 1 FROM " .. tbl .. " WHERE namespace_id = ? AND uuid = ?", ns, d[col]) then
+            U.fail(422, "Validation failed", { [col] = "not found in this workspace" })
+        end
+    end
     local text = d.summary or d.transcript or d.raw_text or ""
     local subject = d.subject or (d.channel .. ": " .. (text:gsub("%s+", " "):sub(1, 80)))
     local uuid = require("helper.global").generateUUID()
     local meaningful = d.meaningful ~= false
-    U.tx(function()
+    local tx = in_tx and function(fn) return fn() end or U.tx
+    tx(function()
         db.insert("crm_activities", {
             uuid = uuid, namespace_id = ns, activity_type = d.channel, subject = subject:sub(1, 255),
             description = d.summary or db.NULL, contact_id = cid or db.NULL, owner_user_uuid = user_uuid,
@@ -80,6 +89,17 @@ I.SELECT = [[
 
 function I.get(ns, uuid)
     return U.one(I.SELECT .. " WHERE a.namespace_id = ? AND a.uuid = ? AND a.deleted_at IS NULL", ns, uuid)
+end
+
+--- Retention: remove the words (note text, voice transcript, email body, and a subject made from them) of PA
+-- interactions older than `days`, keeping the row (who, when, channel, summary). Only PA rows (channel set).
+-- @return count
+function I.redact(ns, days)
+    return #db.query([[UPDATE crm_activities SET raw_text = NULL, transcript = NULL,
+            subject = CASE WHEN subject LIKE channel || ': %' THEN channel || ': (text removed)' ELSE subject END
+        WHERE namespace_id = ? AND channel IS NOT NULL AND (raw_text IS NOT NULL OR transcript IS NOT NULL)
+          AND activity_date < NOW() - make_interval(days => ?) RETURNING id]], ns,
+        math.max(30, math.floor(tonumber(days) or 365)))
 end
 
 --- The text of an interaction the PA may quote from (for grounding checks).

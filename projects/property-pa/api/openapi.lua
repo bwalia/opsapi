@@ -101,8 +101,19 @@ return function(app)
         permission = "property_pa_records.read", path = id, query = { limit = INT("max 300") }, response = ARR(TimelineItem) })
     doc("GET /people", { summary = "Find people by name, email, phone or property address",
         permission = "property_pa_records.read", query = { q = S("At least 2 characters") }, response = ARR(OBJ({})) })
-    doc("GET /people/:id", { summary = "A person: roles, relationship, opportunities", permission = "property_pa_records.read",
-        path = { id = S("Contact uuid") }, response = OBJ({}), errors = E404 })
+    local Bases = { "consent", "contract", "legitimate_interests", "legal_obligation" }
+    doc("GET /people/:id", { summary = "A person: roles, relationship, opportunities, consent",
+        permission = "property_pa_records.read", path = { id = S("Contact uuid") },
+        response = OBJ({ uuid = S(), first_name = S(), last_name = S(), email = S(), phone = S(), mobile = S(),
+            person_roles = ARR(S()), relationship = OBJ({}), opportunities = ARR(OBJ({})),
+            consent_basis = ENUM(Bases), opted_out_at = DT("Asked not to be contacted: the PA proposes no contact") }),
+        errors = E404 })
+    doc("PUT /people/:id/consent", { summary = "Record a consent basis or an opt-out",
+        description = "opted_out = true records an opt-out (the PA then refuses next actions for them and Today says "
+            .. "don't contact); false lifts it (only a person can: integrations never do).",
+        permission = "property_pa_records.update", path = { id = S("Contact uuid") },
+        body = OBJ({ consent_basis = ENUM(Bases), opted_out = BOOL() }),
+        response = OBJ({ person_uuid = S(), consent_basis = ENUM(Bases), opted_out_at = DT() }), errors = E404 })
     doc("GET /people/:id/timeline", { summary = "A person's timeline", permission = "property_pa_records.read",
         path = { id = S("Contact uuid") }, response = ARR(TimelineItem) })
     doc("POST /interactions", { summary = "Log a call, email, note or voice note", permission = "property_pa_records.create",
@@ -240,10 +251,30 @@ return function(app)
                 opportunities_gone_quiet = INT() }), handoffs = OBJ({ total = INT(), waiting = INT(),
                 median_seconds_to_reply = INT() }) })), errors = { ["403"] = "For managers" } })
     doc("POST /integrations/mail/import", { summary = "Inbound email (Outlook / Gmail / IMAP) onto timelines, once each",
-        permission = "property_pa_records.create", response = OBJ({ imported = INT(), considered = INT() }) })
-    doc("POST /integrations/ghl/sync", { summary = "Pull GoHighLevel contacts (read only; also hourly)",
-        permission = "property_pa_knowledge.manage", response = OBJ({ created = INT(), updated = INT(), unchanged = INT(),
-            pages = INT() }), errors = { ["409"] = "GHL not set up", ["502"] = "GHL unreachable or refused" } })
+        permission = "property_pa_records.create", response = OBJ({ imported = INT(),
+            skipped = INT("Marked as seen without importing: the opportunity has no owner"), considered = INT() }) })
+    local GhlResult = OBJ({ created = INT(), updated = INT(), unchanged = INT(), pages = INT(),
+        complete = BOOL("false = a big location; the next run carries on where this one stopped"),
+        error = S("Why the last pull stopped") })
+    doc("POST /integrations/ghl/sync", { summary = "Pull GoHighLevel contacts now (read only; in the background)",
+        description = "202: the ghl_sync job runs the pull within seconds (it also runs every 15 minutes: an hourly "
+            .. "pull, carried on across runs for big locations). last_result is the previous pull's summary.",
+        permission = "property_pa_knowledge.manage", status = 202,
+        response = OBJ({ queued = BOOL(), last_run_at = DT(), last_result = GhlResult }),
+        errors = { ["409"] = "GHL not set up" } })
+    doc("POST /public/ghl/:workspace/contacts", { summary = "GoHighLevel webhook: create or update a person",
+        description = "No login. :workspace is the workspace slug (or uuid); the caller sends the workspace's "
+            .. "ghl_webhook_secret as X-Webhook-Secret (or Authorization: Bearer). Refused while the secret is "
+            .. "unset or the PA is off there. Accepts a workflow webhook (contact_id, first_name, ...) or an app's "
+            .. "ContactCreate / ContactUpdate (id, firstName, ...), flat or under `contact`. Deduplicated on the GHL "
+            .. "id, then email, then phone (E.164; UK numbers without +44 are read as UK). dnd = true records an "
+            .. "opt-out; consent_basis is kept when valid. 120 calls a minute per IP.",
+        path = { workspace = S("Workspace slug or uuid") },
+        body = OBJ({ contact_id = S("Or id / contactId"), first_name = S(), last_name = S(), email = S(), phone = S(),
+            dnd = BOOL(), consent_basis = ENUM(Bases) }),
+        status = 200, response = OBJ({ result = ENUM({ "created", "updated", "unchanged" }) }),
+        errors = { ["401"] = "Missing or wrong secret (or none set)", ["404"] = "Unknown workspace, or the PA is off "
+            .. "there", ["422"] = "No contact id", ["429"] = "Too many calls" } })
     doc("POST /runs/sweep", { summary = "Poll PA runs without a webhook; fail ones past the timeout",
         permission = "property_pa_knowledge.manage", response = OBJ({ polled = INT(), finished = INT(), timed_out = INT() }) })
     doc("GET /status", { summary = "Go-live checklist", permission = "property_pa_records.read",
@@ -256,6 +287,8 @@ return function(app)
         permission = "property_pa_records.read", body = OBJ({ text = S(), claims = ARR(OBJ({ text = S(),
             refs = ARR(S("table:uuid or table:uuid:field")) })) }, { "text" }), response = Verdict })
     doc("GET /audit", { summary = "AI change history: source, model, prompt version, run, approver (P10)",
+        description = "Managers (property_pa_knowledge.manage) see the whole workspace; everyone else sees changes on "
+            .. "opportunities they own and changes they confirmed.",
         permission = "property_pa_records.read", paginated = true,
         query = { target_table = S(), target_uuid = S(), since = DT() }, response = ARR(Change) })
     doc("POST /handoffs", { summary = "Ask a manager (context, question, recommendation)",
@@ -272,13 +305,23 @@ return function(app)
         permission = "property_pa_records.read", status = 202, body = OBJ({ message = S(), mode = ENUM({ "today",
             "prepare", "capture", "coach", "ask", "handoff", "manager_today", "teach" }), role = ENUM({ "seller_agent",
             "manager" }), opportunity_uuid = UUID(), inputs = OBJ({}) }, { "message" }), response = Run,
-        errors = { ["403"] = "Manager PA for managers only", ["409"] = "The PA isn't connected", ["502"] = "JobShout unreachable" } })
+        description = "Modes in which the agent writes (capture, handoff, teach) need the caller's own .create on "
+            .. "property_pa_updates / _handoffs / _knowledge. mode and opportunity_uuid always win over inputs.",
+        errors = { ["403"] = "Manager PA for managers only, or a writing mode the caller can't use",
+            ["409"] = "The PA isn't connected", ["429"] = "Too many questions, or over the daily AI limit",
+            ["502"] = "JobShout unreachable" } })
     doc("GET /ask/:id", { summary = "My PA run: running, or the checked answer", permission = "property_pa_records.read",
         path = id, response = Run, errors = E404 })
     doc("POST /public/jobshout/events", { summary = "JobShout webhook (run.completed / run.failed)",
         description = "Signed: X-JobShout-Signature = sha256=HMAC(secret, X-JobShout-Timestamp + '.' + body).",
         body = OBJ({}), response = OBJ({}), errors = { ["401"] = "Bad or stale signature" } })
-    doc("POST /demo/reset", { summary = "Reset the How It Works fixtures", permission = "property_pa_knowledge.manage",
-        body = OBJ({ sophie_user_uuid = S(), ashley_user_uuid = S() }), response = OBJ({}) })
-    doc("DELETE /demo", { summary = "Remove the fixtures", permission = "property_pa_knowledge.manage", response = OBJ({}) })
+    local DEMO = "Platform admins only (404 for everyone else). Only fixture rows are deleted: a fixture that real "
+        .. "work points at (a note, task, offer, handoff, capture...) is kept as an ordinary record."
+    doc("POST /demo/reset", { summary = "Reset the How It Works fixtures", description = DEMO,
+        body = OBJ({ sophie_user_uuid = S(), ashley_user_uuid = S() }),
+        response = OBJ({ cleared = INT("Fixture opportunities removed"), kept = INT("Kept because real work uses them"),
+            opportunities = INT("Seeded") }), errors = { ["404"] = "Not a platform admin" } })
+    doc("DELETE /demo", { summary = "Remove the fixtures", description = DEMO,
+        response = OBJ({ removed_opportunities = INT(), kept_opportunities = INT() }),
+        errors = { ["404"] = "Not a platform admin" } })
 end

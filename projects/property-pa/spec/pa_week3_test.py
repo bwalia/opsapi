@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pa_common import ASHLEY, PA, SOPHIE, data, mock, pa_answer, setup  # noqa: E402
-from pdtest import USERS, call, check, finish  # noqa: E402
+from pdtest import USERS, call, check, finish, sql  # noqa: E402
 import scenes  # noqa: E402
 
 S, fx = setup("PA Think", "pa-think", jobshout=True)
@@ -38,11 +38,21 @@ check("the card says what to do and why", cards[0]["action"] == "Call Sarah"
       and "decision" in cards[0]["objective"], cards[0])
 check("all 11 opportunities ranked", len(cards) == 11 and [c["rank"] for c in cards] == list(range(1, 12)), len(cards))
 rick = next(c for c in cards if c["opportunity_uuid"] == RICK)
+rwhy = data(call("GET", PA + f"/today/why/{RICK}", SOPHIE, S), 200, "Why is Rick where he is?")
+check("Why for one card ranks it exactly where Today does", rwhy["rank"] == next(c["rank"] for c in cards
+      if c["opportunity_uuid"] == RICK) and rwhy["score"] == next(c["score"] for c in cards
+      if c["opportunity_uuid"] == RICK), rwhy)
+idx = sql("SELECT string_agg(indexname, ',' ORDER BY indexname) FROM pg_indexes WHERE indexname IN "
+          "('idx_pd_task_details_pa_opp', 'idx_pd_agent_runs_pa_run', 'idx_pd_agent_runs_pa_interaction', "
+          "'idx_pa_pu_target', 'idx_pa_pu_run', 'idx_pa_facts_run')")
+check("the PA's lookups are indexed (next actions per opportunity, runs by JobShout id / interaction, proposals)",
+      idx == ["idx_pa_facts_run,idx_pa_pu_run,idx_pa_pu_target,idx_pd_agent_runs_pa_interaction,"
+              "idx_pd_agent_runs_pa_run,idx_pd_task_details_pa_opp"], idx)
 check("Rick's silence is a signal (relationship risk)", any(s["key"] == "gone_quiet" for s in rick["signals"])
       and "follow-up" in rick["action"], rick)
 why = data(call("GET", PA + f"/today/why/{SARAH}", SOPHIE, S), 200, "Why #1?")
 check("P07: Why #1 lists every signal with its weight, and the score is their sum",
-      why["rank"] == 1 and why["score"] == sum(s["weight"] for s in why["signals"])
+      why["rank"] == 1 and why["of"] == 11 and why["score"] == sum(s["weight"] for s in why["signals"])
       and all(s["weight"] == why["weights"][s["key"]] for s in why["signals"]) and len(why["signals"]) >= 3, why)
 r = grounded([{"text": s["text"], "ref": s["ref"]} for s in why["signals"] if s.get("ref")], "signals ground")
 check("P07: each signal traces to a record in this workspace", r["ok"], r)

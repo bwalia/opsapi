@@ -29,9 +29,13 @@ P.SELECT = [[
 function P.propose(ns, items, meta, settings)
     meta = meta or {}
     local errors = {}
+    local Consent = require("property_pa.consent")
     for i, it in ipairs(items) do
         local ok, err = F.validate(it)
         if not ok then errors[tostring(i)] = err end
+        -- The PA never proposes contacting someone who opted out.
+        local no = ok and it.target_table == "next_action" and Consent.refusal(ns, it.new_value.opportunity_uuid)
+        if no then errors[tostring(i)] = no .. ": no next action" end
         if it.confidence ~= nil and (tonumber(it.confidence) == nil or tonumber(it.confidence) < 0
             or tonumber(it.confidence) > 1) then
             errors[tostring(i)] = "confidence must be between 0 and 1"
@@ -103,6 +107,8 @@ local function create(ns, p, value, user, settings)
         fact("pa_offers", r.uuid)
         return { table = "pa_offers", uuid = r.uuid }
     elseif p.target_table == "next_action" then
+        local no = require("property_pa.consent").refusal(ns, value.opportunity_uuid)
+        if no then U.fail(409, no .. " since this was proposed") end
         local task = require("property_pa.actions").create(ns, value, user, settings, p.source_interaction_uuid)
         fact("next_action", task.task_uuid)
         return { table = "next_action", uuid = task.task_uuid }
@@ -112,17 +118,20 @@ end
 
 --- Decide one proposal. action = confirm | correct | reject; value used for correct. @return row
 function P.decide(ns, id, action, value, user, settings)
-    local p = P.get(ns, id)
-    if not p then U.fail(404, "Proposed update not found") end
-    if p.status ~= "proposed" then U.fail(409, "Already " .. p.status) end
-    if action == "correct" then
-        local check = { target_table = p.target_table, target_uuid = p.target_uuid, field = p.field ~= "_create" and p.field or nil,
-            new_value = value }
-        local ok, err = F.validate(check)
-        if not ok then U.fail(422, "Validation failed", { value = err }) end
-    end
+    if not U.is_uuid(id) then U.fail(404, "Proposed update not found") end
     local created
     U.tx(function()
+        -- Locked, and checked inside the transaction: two people confirming at once can't both apply it.
+        local p = U.one(P.SELECT .. " WHERE namespace_id = ? AND uuid = ? FOR UPDATE", ns, id)
+        if not p then U.fail(404, "Proposed update not found") end
+        if p.status ~= "proposed" then U.fail(409, "Already " .. p.status) end
+        p.old_value, p.new_value = dec(p.old_value), dec(p.new_value)
+        if action == "correct" then
+            local check = { target_table = p.target_table, target_uuid = p.target_uuid,
+                field = p.field ~= "_create" and p.field or nil, new_value = value }
+            local ok, err = F.validate(check)
+            if not ok then U.fail(422, "Validation failed", { value = err }) end
+        end
         if action ~= "reject" then
             local v = action == "correct" and value or p.new_value
             if F.CREATES[p.target_table] then

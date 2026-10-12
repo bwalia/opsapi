@@ -26,24 +26,63 @@ local SELLERS = {
 local function tag() return db.raw("'{\"fixture\":\"" .. TAG .. "\"}'::jsonb") end
 local function ago(days, hours) return db.raw(string.format("NOW() - INTERVAL '%d days %d hours'", days, hours or 0)) end
 
---- Remove the fixtures (only rows tagged as fixtures, and what hangs off them).
+-- Something a person made (not a fixture row) that points at a fixture opportunity / person / property. Such a
+-- fixture is kept as an ordinary record (its tag is dropped) rather than deleted, so a reset never takes real work
+-- with it. Fixture interactions and events carry the tag; fixture facts have source 'import'.
+local USED_OPP = [[
+    EXISTS (SELECT 1 FROM crm_activities a WHERE a.namespace_id = o.namespace_id AND a.opportunity_uuid = o.uuid
+            AND a.metadata ->> 'fixture' IS NULL)
+    OR EXISTS (SELECT 1 FROM property_deals_task_details d WHERE d.namespace_id = o.namespace_id
+               AND d.opportunity_uuid = o.uuid)
+    OR EXISTS (SELECT 1 FROM pa_events e WHERE e.opportunity_uuid = o.uuid AND e.details ->> 'fixture' IS NULL)
+    OR EXISTS (SELECT 1 FROM pa_offers x WHERE x.opportunity_uuid = o.uuid)
+    OR EXISTS (SELECT 1 FROM pa_handoffs x WHERE x.opportunity_uuid = o.uuid)
+    OR EXISTS (SELECT 1 FROM pa_decisions x WHERE x.opportunity_uuid = o.uuid)
+    OR EXISTS (SELECT 1 FROM pa_proposed_updates x WHERE x.namespace_id = o.namespace_id
+               AND x.target_uuid = o.uuid::text)
+    OR EXISTS (SELECT 1 FROM pa_field_facts f WHERE f.namespace_id = o.namespace_id AND f.target_uuid = o.uuid::text
+               AND f.source <> 'import')
+]]
+
+--- Remove the fixtures: only rows tagged as fixtures. Fixtures that real work points at are kept (untagged).
+-- @return { removed, kept } opportunities
 function FX.clear(ns)
-    local opps = db.query("SELECT uuid FROM pa_opportunities WHERE namespace_id = ? AND metadata ->> 'fixture' = ?", ns, TAG)
+    local kept = db.query([[UPDATE pa_opportunities o SET metadata = o.metadata - 'fixture', updated_at = NOW()
+        WHERE o.namespace_id = ? AND o.metadata ->> 'fixture' = ? AND (]] .. USED_OPP .. [[) RETURNING o.uuid]],
+        ns, TAG)
+    local removed = db.query([[DELETE FROM pa_opportunities WHERE namespace_id = ? AND metadata ->> 'fixture' = ?
+        RETURNING uuid]], ns, TAG)
     local ids = {}
-    for _, o in ipairs(opps) do ids[#ids + 1] = db.escape_literal(o.uuid) end
+    for _, o in ipairs(removed) do ids[#ids + 1] = db.escape_literal(o.uuid) end
     if #ids > 0 then
         local list = table.concat(ids, ",")
-        db.query("DELETE FROM kanban_tasks WHERE uuid IN (SELECT task_uuid FROM property_deals_task_details WHERE namespace_id = ? AND opportunity_uuid::text IN (" .. list .. "))", ns)
-        db.query("DELETE FROM crm_activities WHERE namespace_id = ? AND opportunity_uuid::text IN (" .. list .. ")", ns)
-        db.query("DELETE FROM pa_field_facts WHERE namespace_id = ? AND target_uuid IN (" .. list .. ")", ns)
-        db.query("DELETE FROM pa_proposed_updates WHERE namespace_id = ? AND target_uuid IN (" .. list .. ")", ns)
-        db.query("DELETE FROM pa_handoffs WHERE namespace_id = ? AND opportunity_uuid::text IN (" .. list .. ")", ns)
+        db.query("DELETE FROM pa_field_facts WHERE namespace_id = ? AND source = 'import' AND target_uuid IN (" .. list
+            .. ")", ns)
+        db.query("DELETE FROM crm_activities WHERE namespace_id = ? AND metadata ->> 'fixture' = ? "
+            .. "AND opportunity_uuid::text IN (" .. list .. ")", ns, TAG)
     end
-    db.query("DELETE FROM pa_opportunities WHERE namespace_id = ? AND metadata ->> 'fixture' = ?", ns, TAG)
-    local n = #opps
+    -- A kept opportunity keeps its seeded history too.
+    db.query([[UPDATE crm_activities SET metadata = metadata - 'fixture'
+        WHERE namespace_id = ? AND metadata ->> 'fixture' = ?]], ns, TAG)
+    -- People and properties: kept while anything that isn't a fixture still uses them.
+    db.query([[UPDATE crm_contacts c SET metadata = c.metadata - 'fixture', updated_at = NOW()
+        WHERE c.namespace_id = ? AND c.metadata ->> 'fixture' = ? AND (
+            EXISTS (SELECT 1 FROM pa_opportunities o WHERE o.person_uuid = c.uuid)
+            OR EXISTS (SELECT 1 FROM crm_activities a WHERE a.contact_id = c.id)
+            OR EXISTS (SELECT 1 FROM pa_events e WHERE e.person_uuid = c.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_buyer_profiles b WHERE b.contact_uuid = c.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_deal_parties x WHERE x.contact_uuid = c.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_compliance_checks x WHERE x.contact_uuid = c.uuid))]], ns, TAG)
+    db.query([[UPDATE property_deals_properties p SET metadata = p.metadata - 'fixture', updated_at = NOW()
+        WHERE p.namespace_id = ? AND p.metadata ->> 'fixture' = ? AND (
+            EXISTS (SELECT 1 FROM pa_opportunities o WHERE o.property_uuid = p.uuid)
+            OR EXISTS (SELECT 1 FROM pa_events e WHERE e.property_uuid = p.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_deals x WHERE x.property_uuid = p.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_documents x WHERE x.property_uuid = p.uuid)
+            OR EXISTS (SELECT 1 FROM property_deals_compliance_checks x WHERE x.property_uuid = p.uuid))]], ns, TAG)
     db.query("DELETE FROM crm_contacts WHERE namespace_id = ? AND metadata ->> 'fixture' = ?", ns, TAG)
     db.query("DELETE FROM property_deals_properties WHERE namespace_id = ? AND metadata ->> 'fixture' = ?", ns, TAG)
-    return n
+    return { removed = #removed, kept = #kept }
 end
 
 local function contact(ns, owner, first, last, roles)
@@ -74,9 +113,10 @@ end
 -- @return { opportunities, sarah = { opportunity_uuid, person_uuid, property_uuid }, ... }
 function FX.reset(ns, sophie, ashley)
     require("property_pa.setup").run(ns, ashley or sophie)
-    local out = { cleared = 0, opportunities = 0 }
+    local out = { cleared = 0, kept = 0, opportunities = 0 }
     U.tx(function()
-        out.cleared = FX.clear(ns)
+        local c = FX.clear(ns)
+        out.cleared, out.kept = c.removed, c.kept
         for i, s in ipairs(SELLERS) do
             local first, last, address, postcode, temp, price, motivation, days = (table.unpack or unpack)(s, 1, 8)
             local person = contact(ns, sophie, first, last, { "seller" })
@@ -101,14 +141,16 @@ function FX.reset(ns, sophie, ashley)
                 interaction(ns, sophie, opp, person, 3, "call", "Sarah said she would decide after the second "
                     .. "valuation on " .. os.date("!%A", os.time() - 86400) .. ".")
                 db.insert("pa_events", { namespace_id = ns, kind = "valuation", at = ago(1), title = "Second agent's valuation",
-                    details = db.raw("'{\"by\":\"other agent\"}'::jsonb"), person_uuid = person, property_uuid = prop,
+                    details = tag(), person_uuid = person, property_uuid = prop,
                     opportunity_uuid = opp, done = true })
-                db.insert("pa_events", { namespace_id = ns, kind = "promise", at = ago(0, 2), title = "Sarah will decide after the second valuation",
-                    person_uuid = person, opportunity_uuid = opp })
+                db.insert("pa_events", { namespace_id = ns, kind = "promise", at = ago(0, 2),
+                    title = "Sarah will decide after the second valuation", details = tag(), person_uuid = person,
+                    opportunity_uuid = opp })
                 out.sarah = { opportunity_uuid = opp, person_uuid = person, property_uuid = prop }
             elseif i == 2 then
                 db.insert("pa_events", { namespace_id = ns, kind = "promise", at = db.raw("NOW() + INTERVAL '2 days'"),
-                    title = "We promised Michael a follow-up with comparables this week", person_uuid = person, opportunity_uuid = opp })
+                    title = "We promised Michael a follow-up with comparables this week", details = tag(),
+                    person_uuid = person, opportunity_uuid = opp })
                 out.michael = { opportunity_uuid = opp, person_uuid = person, property_uuid = prop }
             elseif i == 3 then
                 out.rick = { opportunity_uuid = opp, person_uuid = person, property_uuid = prop }

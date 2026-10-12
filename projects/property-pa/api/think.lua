@@ -32,17 +32,12 @@ return function(app)
     end)))
 
     app:get("/today/why/:opportunity_id", sdk.handler({ permission = "property_pa_records.read" }, U.guard(function(self)
-        local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
-        local day = R.today(ns, me)
-        for _, c in ipairs(day.cards) do
-            if c.opportunity_uuid == self.params.opportunity_id then
-                return sdk.ok({ rank = c.rank, of = #day.cards, score = c.score, signals = c.signals, weights = R.WEIGHTS,
-                    action = c.action, objective = c.objective,
-                    explanation = "Ranked by points from named signals (weights above), highest first. "
-                        .. "The order is decided by these rules, not by the AI." })
-            end
-        end
-        return sdk.not_found("Opportunity on your Today")
+        local c = R.why(sdk.namespace_id(self), sdk.user(self).uuid, self.params.opportunity_id)
+        if not c then return sdk.not_found("Opportunity on your Today") end
+        return sdk.ok({ rank = c.rank, of = c.of, score = c.score, signals = c.signals, weights = R.WEIGHTS,
+            action = c.action, objective = c.objective,
+            explanation = "Ranked by points from named signals (weights above), highest first. "
+                .. "The order is decided by these rules, not by the AI." })
     end)))
 
     app:get("/prepare/:opportunity_id", sdk.handler({ permission = "property_pa_records.read" }, U.guard(function(self)

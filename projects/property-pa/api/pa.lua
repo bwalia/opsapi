@@ -2,8 +2,9 @@
 --   GET  /briefing                   my day: opportunities, next actions, today's events, updates waiting, handoffs
 --   GET  /context/:opportunity_id    every fact the PA may use about one opportunity, each with a ref
 --   POST /grounding/check            { text, claims: [{ text, refs }] } -> { ok, violations } (P05)
---   GET  /audit                      AI change history for the workspace: what changed, source, model, prompt
---                                    version, run and who approved it (P10) ?target_table=&target_uuid=&since=
+--   GET  /audit                      AI change history: what changed, source, model, prompt version, run and who
+--                                    approved it (P10) ?target_table=&target_uuid=&since= (managers: the workspace;
+--                                    others: their own opportunities and what they confirmed)
 --   POST /handoffs                   { to_user_uuid, question, opportunity_uuid?, context?, pa_recommendation? }
 --   GET  /handoffs                   ?box=inbox|sent&status=open
 --   POST /handoffs/:id/reply         { reply, decision? } -> closes the loop on the opportunity (pa_decisions)
@@ -82,8 +83,17 @@ return function(app)
     end)))
 
     app:get("/audit", sdk.handler({ permission = "property_pa_records.read" }, U.guard(function(self)
-        local ns, p = sdk.namespace_id(self), self.params
-        local where = { "f.namespace_id = " .. db.escape_literal(ns), "(f.source = 'ai' OR f.model IS NOT NULL)" }
+        local ns, p, me = sdk.namespace_id(self), self.params, sdk.user(self).uuid
+        local L = db.escape_literal
+        local where = { "f.namespace_id = " .. L(ns), "(f.source = 'ai' OR f.model IS NOT NULL)" }
+        -- The whole workspace's history is for managers (like /metrics); everyone else sees their own: changes on
+        -- opportunities they own, and changes they confirmed.
+        if not sdk.can(self, "property_pa_knowledge", "manage") then
+            where[#where + 1] = "(f.confirmed_by_user_uuid = " .. L(me)
+                .. " OR (f.target_table = 'pa_opportunities' AND f.target_uuid IN (SELECT uuid::text"
+                .. " FROM pa_opportunities WHERE namespace_id = " .. L(ns)
+                .. " AND owner_user_uuid = " .. L(me) .. ")))"
+        end
         if p.target_table and p.target_table:match("^[a-z_]+$") then
             where[#where + 1] = "f.target_table = " .. db.escape_literal(p.target_table)
         end
@@ -149,8 +159,10 @@ return function(app)
             decision = { type = "text", max = 4000 } })
         if not d then return sdk.error(422, "Validation failed", errors) end
         U.tx(function()
-            db.update("pa_handoffs", { reply = d.reply, replied_at = db.raw("NOW()"), status = "replied",
-                updated_at = db.raw("NOW()") }, { id = h.id })
+            -- Only an open card is answered: a second reply at the same moment gets a 409, not a second decision.
+            local res = db.update("pa_handoffs", { reply = d.reply, replied_at = db.raw("NOW()"), status = "replied",
+                updated_at = db.raw("NOW()") }, { id = h.id, status = "open" })
+            if (res.affected_rows or 0) == 0 then U.fail(409, "Already replied") end
             -- The reply goes back onto the deal: a decision record and a note on the timeline.
             db.insert("pa_decisions", { namespace_id = ns, situation = h.question,
                 pa_recommendation = h.pa_recommendation or db.NULL, human_decision = d.decision or d.reply,

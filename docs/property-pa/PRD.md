@@ -29,7 +29,8 @@ People, properties and transactions are kept separate:
 - Relationship, Risk, Knowledge, Decision, Outcome, ProposedUpdate, HandoffCard.
 
 AI summaries are derived views. Every AI-writable field carries source, confidence, is_inferred and confirmed_by.
-(Mapping: `00-gap-map.md` §2.)
+(Mapping: `00-gap-map.md` §2. In the PoC, Risk is computed live for Manager Today and Outcome is not recorded yet;
+both get tables with risk detection and learning in month 3.)
 
 ## 7. Components
 - **Daily:** Today (time-aware), Why #1?, Prepare Me.

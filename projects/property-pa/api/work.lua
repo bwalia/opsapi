@@ -3,7 +3,8 @@
 --                                       risks, overdue actions, top opportunities (managers)
 --   GET  /metrics                       is the PA working? ?days=30 (managers)
 --   POST /integrations/mail/import      inbound email (Outlook / Gmail / IMAP connectors) onto timelines
---   POST /integrations/ghl/sync         pull GoHighLevel contacts now (managers; also hourly)
+--   POST /integrations/ghl/sync         202: pull GoHighLevel contacts now, in the background (managers; also hourly)
+--   POST /public/ghl/:workspace/contacts  GoHighLevel webhook: upsert the person (X-Webhook-Secret, rate limited)
 --   POST /runs/sweep                    poll PA runs whose webhook hasn't come, fail ones stuck past the timeout
 --                                       (managers; the pa_runs job does this every 2 minutes)
 --   GET  /status                        what is set up and what isn't, for going live with a real agent
@@ -12,10 +13,12 @@ for _, p in ipairs({ root, root and (root:match("^(.*)/[^/]+$") .. "/property-de
     if p and not package.path:find(p .. "/?.lua", 1, true) then package.path = p .. "/?.lua;" .. package.path end
 end
 
+local cjson = require("cjson")
 local sdk = require("helper.plugin-sdk")
 local U = require("property_deals.util")
 local M = require("property_pa.manager")
 local I = require("property_pa.integrations")
+local RateLimit = require("middleware.rate-limit")
 
 local function manager_only(self)
     if not sdk.can(self, "property_pa_knowledge", "manage") then return sdk.error(403, "For managers") end
@@ -39,14 +42,48 @@ return function(app)
     end)))
 
     app:post("/integrations/mail/import", sdk.handler({ permission = "property_pa_records.create" }, U.guard(function(self)
+        require("property_pa.setup").require_deals(sdk.namespace_id(self))
         return sdk.ok(I.mail_import(sdk.namespace_id(self), 14))
     end)))
 
+    -- The pull runs in the ghl_sync job (up to 20 pages of 20 s each would hold the request); this asks for it now.
     app:post("/integrations/ghl/sync", sdk.handler({ permission = "property_pa_knowledge.manage" }, U.guard(function(self)
-        local out, err = I.ghl_sync(sdk.namespace_id(self), sdk.settings(self), sdk.user(self).uuid)
-        if not out then return sdk.error(err and err:find("^Set the") and 409 or 502, err) end
-        return sdk.ok(out)
+        local st = sdk.settings(self)
+        if not set(st.ghl_location_id) or not set(st.ghl_token) then
+            return sdk.error(409, "Set the GoHighLevel location id and token in the Property PA settings")
+        end
+        local ns = sdk.namespace_id(self)
+        local queued = I.ghl_request(ns)
+        local last = U.one([[SELECT last_run_at, last_result FROM pa_sync_state
+            WHERE namespace_id = ? AND source = 'ghl']], ns) or {}
+        return { status = 202, json = { success = true, data = { queued = queued > 0,
+            last_run_at = last.last_run_at or cjson.null, last_result = U.json(last.last_result) or cjson.null } } }
     end)))
+
+    -- GoHighLevel webhook (a workflow's webhook action, or an app's ContactCreate / ContactUpdate event): upserts
+    -- the person, deduplicated on the GHL id, then email, then phone (E.164). No session: the workspace is in the
+    -- path, the caller proves itself with that workspace's ghl_webhook_secret, and it is rate limited per IP.
+    app:post("/public/ghl/:workspace/contacts", RateLimit.wrap({ rate = I.WEBHOOK_PER_MINUTE, window = 60,
+        prefix = "pa_ghl_webhook" }, sdk.handler({ namespace = false }, U.guard(function(self)
+        local ws = tostring(self.params.workspace or ""):sub(1, 100)
+        local n = U.one("SELECT id, owner_user_id FROM namespaces WHERE (slug = ? OR uuid = ?) AND status = 'active'",
+            ws, ws)
+        if not n or not require("helper.plugin-workspaces").isEnabled("property_pa", n.id) then
+            return sdk.error(404, "Not found") -- unknown, or the PA is off there
+        end
+        local secret = sdk.settings("property_pa", n.id).ghl_webhook_secret
+        local h = ngx.req.get_headers()
+        local given = h["x-webhook-secret"] or tostring(h["authorization"] or ""):match("^Bearer%s+(.+)$")
+        if not set(secret) or not require("lib.stripe")._secure_compare(secret, given) then
+            return sdk.error(401, "Unauthorized")
+        end
+        local body = sdk.body(self)
+        local c = body and I.ghl_webhook_contact(body)
+        if not c then return sdk.error(422, "Validation failed", { contact_id = "is required" }) end
+        local owner = U.one("SELECT uuid FROM users WHERE id = ?", n.owner_user_id)
+        local result = I.ghl_upsert(n.id, c, owner and owner.uuid)
+        return sdk.ok({ result = result })
+    end))))
 
     app:post("/runs/sweep", sdk.handler({ permission = "property_pa_knowledge.manage" }, U.guard(function(self)
         return sdk.ok(require("property_pa.bridge").sweep(sdk.namespace_id(self)))
@@ -60,6 +97,8 @@ return function(app)
         local mail = U.one([[SELECT COUNT(*)::int AS n FROM property_deals_mail_connectors WHERE namespace_id = ?]], ns)
         local knowledge = U.one("SELECT COUNT(*)::int AS n FROM pa_knowledge WHERE namespace_id = ? AND status = 'approved'", ns)
         local checks = {
+            { key = "property_deals", ok = require("property_pa.setup").deals_on(ns),
+              text = "Property Deals is on in this workspace (the PA builds on it)", fix = "Workspace -> Plugins" },
             { key = "playbook", ok = knowledge.n > 0, text = knowledge.n .. " approved rules", fix = "POST /setup" },
             { key = "jobshout_link", ok = link and link.enabled == true or false,
               text = link and "JobShout link set" or "No JobShout link", fix = "Workspace -> AI providers, then the PA settings" },
