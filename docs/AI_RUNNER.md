@@ -779,3 +779,138 @@ Each turn emits assistant messages with `usage` and a `result` with usage and co
   - Matching is on the command text, so it errs towards blocking.
 - **Agent environment:** Claude Code session variables are stripped (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, the messaging socket and token, …), so a runner started from inside a Claude Code terminal doesn't leak them. `CLAUDE_CODE_OAUTH_TOKEN` is kept.
 - **Args-mode turns:** agents in `args` mode (Claude without the bridge, Cursor) also post their turns, so their usage is metered too.
+
+---
+
+## 24. Phase 4 build contract (conflicts and hardening)
+
+Phase 4 gives managers a picture of everything that is running and stops work from piling up or clashing:
+- **Similar-work warnings:** layer 5 of §9.
+- **Caps:** limits on open runs and on daily tokens.
+- **Profile health:** a logged-out or locked agent takes no work (§19).
+- **Machines page:** every session on every machine.
+- **Overview:** numbers for managers.
+- **Notifications:** deciders hear about new requests.
+- **Retention:** old logs are pruned.
+- **Setup runbook.**
+- **Security review:** with its findings fixed.
+
+### 24.1 Settings (`ar_settings.guards JSONB`, plugin migration 3)
+
+| Setting | Default | Range | Meaning |
+|---|---|---|---|
+| `similar_threshold` | 0.45 | 0.1–1.0 | `pg_trgm` similarity of task titles above which open runs count as similar work |
+| `max_open_runs_per_user` | 3 | 0–100, 0 = no cap | open runs (any open status) one requester may have |
+| `max_open_runs_per_workspace` | 10 | 0–1000, 0 = no cap | open runs in the workspace |
+| `daily_token_limit` | 0 | 0–10⁹, 0 = none | agent-run tokens (in + out) of the workspace today (UTC, from `ai_usage` feature `agent_run`); at the limit no new run starts, and running ones finish |
+| `retention_days` | 365 | 30–3650 | after this, a finished run's log events are deleted and its turn texts and request inputs are cleared; the run row, summary and usage are kept |
+
+These are exposed in `GET/PUT /settings` as `guards`, which need `ai_runs_settings.manage`.
+
+### 24.2 Similar work and caps at start
+- **Preview** adds `conflicts.similar`: up to 5 `{ run_uuid, task_uuid, task_number, task_title, status, requested_by_name, similarity }`. These are other open runs in the workspace whose task title is similar (`similarity(lower(a), lower(b)) >= similar_threshold`). If `pg_trgm` is missing, the check is skipped and logged once.
+- **Preview** also adds `limits: { user_open, user_max, workspace_open, workspace_max, tokens_today, daily_token_limit }`.
+- **Start and retry:**
+  - If there is similar work and the body lacks `confirm_similar: true` → 409 `{ conflict: { type: "similar_work", runs: [...] } }`.
+  - A cap that is reached → 409 `{ conflict: { type: "cap_reached", scope: "user"|"workspace", limit, open } }`.
+  - The token limit reached → 409 `{ conflict: { type: "token_limit", limit, used } }`.
+  - **Order of checks:** caps and the token limit first, then similar work.
+  - **Approvals:** a manager approving a `pending_approval` run is not blocked by caps, because the run already counts as open.
+
+### 24.3 Profile health (runner + server)
+- **Runner profile** gains an optional `health: { command: [...], every_s: 300 }`.
+  - The runner runs it with a 20 s timeout, at start and then every `every_s`.
+  - The profile is available when the command exits 0 and its output, if it is JSON, has no `"loggedIn": false`.
+  - **The output is never sent or logged.** `claude auth status` prints the account email. Only a short reason is reported: `not logged in`, `exit <n>` or `timed out`.
+- **Heartbeat:** `capabilities.profiles[].available` (default true) and `unavailable_reason` (at most 120 characters).
+- **Server:**
+  - Start → 409 `profile_unavailable`.
+  - Claim skips queued runs whose profile the runner reports as unavailable; they stay queued.
+- **Example health commands:**
+  - Claude: `["claude", "auth", "status", "--json"]`
+  - Cursor: `["cursor-agent", "status"]`
+  - Fake agent: none.
+
+### 24.4 Machines page and sessions API
+- **`GET /sessions?runner_uuid&busy=1&page&per_page`** (`ai_runs.manage` or `ai_runners.manage`): every reported session of the workspace's runners.
+  - Fields: runner `{uuid, name, status}`, tool, status, cwd, branch, managed, run `{uuid, task_title, task_number}`, prompt_preview, updated_at, seen_at.
+  - `busy=1` hides idle sessions.
+- **Dashboard `/dashboard/ai-runner/machines`** (menu "Machines", module `ai_runners`):
+  - a section per runner: status, last heartbeat, and each profile's health and rate limit;
+  - the session table (managed runs link to their run; manual sessions are marked "Started by hand");
+  - a filter for busy sessions only;
+  - refreshes every 15 s.
+
+### 24.5 Overview
+- **`GET /overview`** (`ai_runs.manage`, `ai_runners.manage` or `ai_runs_approvals.manage`) returns:
+  - `runs_by_status` `{status: n}` for open runs, plus `queue_depth` (queued);
+  - `runners: { online, offline, paused }`;
+  - `tokens_today` and `cost_today`;
+  - `runs_7d: { succeeded, failed, cancelled, lost }`;
+  - `avg_permission_wait_s_7d`: the average time from request to decision, over decided requests in the last 7 days.
+- **Dashboard:** cards at the top of AI Runs for users who may see the overview.
+
+### 24.6 Notifications to deciders
+These use the existing notification center: `KanbanNotificationQueries.create` with `action_url` = the run page, plus the run's `task_id`/`project_id`.
+
+| Event | Type | Sent to |
+|---|---|---|
+| A permission request is created as pending | `ai_run_permission` | the deciders of §23.3 |
+| A run becomes `pending_approval` | `ai_run_approval` | managers |
+| A run reports `needs_input` | `ai_run_input` | the requester |
+
+- **Managers** are the workspace members whose roles grant `ai_runs.manage` or `ai_runs_approvals.manage`, the workspace owner(s), and the owners and admins of the run's project.
+- **Limits:** at most 20 recipients per event, and never the actor.
+- **Live push:** each recipient also gets a `ChatWS.push_user` of `ai_run:update`.
+- **Best effort:** a failure never fails the request.
+
+### 24.7 Retention
+- A plugin job `ai_runner.retention` runs daily, per workspace.
+- For runs finished more than `retention_days` ago, it deletes their `ar_run_events` and sets `ar_run_turns.text` and `ar_run_requests.input` to NULL.
+- It also deletes `ar_sessions` rows of revoked runners.
+- It returns the counts.
+
+### 24.8 Docs and review
+- **`docs/AI_RUNNER_SETUP.md`:** the runbook for a machine owner:
+  - install the runner;
+  - `claude setup-token`;
+  - register in OpsAPI;
+  - `runner.json` profiles;
+  - the LaunchAgent;
+  - test with the fake agent;
+  - troubleshooting.
+- **Security review:** a fresh review of the whole AI Runs change (plugin, runner, dashboard, MCP), with every confirmed finding fixed.
+
+### 24.9 A readable run log (runner)
+For a stream-json agent, the runner turns the agent's stdout into readable `log` events instead of forwarding raw JSON:
+
+| Agent message | Log event |
+|---|---|
+| `system`/`init` | `Session started · model <m>` |
+| assistant text | the text, one event per paragraph, at most 4 KB |
+| assistant `tool_use` | `→ <Tool>: <command \| file_path \| pattern \| url>`, at most 300 characters |
+| `user` `tool_result` | `← <first line of the result>`, at most 200 characters, or `← error: …` |
+| `result` | `Turn <n> finished · <in>/<out> tokens · <duration>`, with the full text in `summary` |
+| `rate_limit_event` | nothing (it goes to the heartbeat) |
+| unparseable lines and stderr | as today |
+
+Everything is redacted as before. For `args` agents (Claude without the bridge), the same rendering applies when their lines parse as Claude stream-json.
+
+### 24.10 Acceptance
+- **Plugin sandbox:**
+  - similar-work warning and confirm;
+  - the user and workspace caps;
+  - the token limit;
+  - profile unavailable (start refused, claim skipped);
+  - the sessions API with RBAC;
+  - the overview numbers;
+  - notifications created for the right people;
+  - the retention job;
+  - migration 3 run twice;
+  - isolation between workspaces.
+- **Real runner:** a profile whose health command fails is reported unavailable, and its runs are not claimed.
+- **Go tests:** health checks, that the output never leaves the runner, and the log rendering (§24.9).
+- **Cypress:**
+  - the Start dialog shows similar work and needs "Start anyway";
+  - the Machines page lists sessions;
+  - the overview cards render.
