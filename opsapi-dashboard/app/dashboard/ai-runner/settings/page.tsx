@@ -30,6 +30,9 @@ const DEFAULTS: Settings = {
   max_run_minutes: 60,
   task_automation: { in_progress_on_start: false, review_on_success: false },
   approval_policy: { deciders: 'managers', require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60 },
+  guards: {
+    similar_threshold: 0.45, max_open_runs_per_user: 3, max_open_runs_per_workspace: 10, daily_token_limit: 0, retention_days: 365,
+  },
 };
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -55,12 +58,18 @@ function RunSettings() {
         ...DEFAULTS, ...d,
         task_automation: { ...DEFAULTS.task_automation, ...d.task_automation },
         approval_policy: { ...DEFAULTS.approval_policy, ...d.approval_policy },
+        guards: { ...DEFAULTS.guards, ...d.guards },
       });
     }
   }, [loaded.data]);
 
   if (!s) return loaded.error ? <ErrorNote error={loaded.error} product={PRODUCT} /> : <Spinner />;
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
+  const g = s.guards;
+  const guard = (patch: Partial<Settings['guards']>) => set({ guards: { ...g, ...patch } });
+  // 0 is a valid limit, so an emptied field stays empty (NaN) rather than snapping to 0; `required` stops the save.
+  const typed = (v: string) => (v === '' ? NaN : Number(v));
+  const shown = (n: number) => (Number.isNaN(n) ? '' : n);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -68,7 +77,7 @@ function RunSettings() {
     setBusy(true);
     try {
       const saved = await aiRunner.saveSettings(s);
-      if (saved) setS({ ...s, ...saved });
+      if (saved) setS({ ...s, ...saved, guards: { ...s.guards, ...saved.guards } });
       toast.success('Settings saved');
     } catch (err) {
       toast.error(aiErrorText(err));
@@ -124,6 +133,29 @@ function RunSettings() {
               value={s.approval_policy.input_timeout_minutes || ''}
               onChange={(e) => set({ approval_policy: { ...s.approval_policy, input_timeout_minutes: Number(e.target.value) || 0 } })}
               helperText="A run waiting for an answer longer than this fails." />
+          </div>
+        </div>
+
+        {/* Ranges as the server checks them (docs/AI_RUNNER.md §24.1); the browser enforces them before saving. */}
+        <div className="space-y-3 border-t border-secondary-200 pt-4">
+          <h3 className="text-sm font-semibold text-secondary-800">Limits and safeguards</h3>
+          <p className="text-xs text-secondary-500">Stop AI work from piling up or clashing. For the limits, 0 means no limit.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input id="air-s-similar" label="Similar work threshold (%)" type="number" min={10} max={100} required
+              value={shown(Math.round(g.similar_threshold * 100))} onChange={(e) => guard({ similar_threshold: typed(e.target.value) / 100 })}
+              helperText="How alike two task titles must be (10–100) for an open run to count as similar work. Starting then needs Start anyway. Lower warns more often." />
+            <Input id="air-s-user-cap" label="Max open runs per person" type="number" min={0} max={100} required
+              value={shown(g.max_open_runs_per_user)} onChange={(e) => guard({ max_open_runs_per_user: typed(e.target.value) })}
+              helperText="Runs one person may have open at once (0–100)." />
+            <Input id="air-s-ws-cap" label="Max open runs in the workspace" type="number" min={0} max={1000} required
+              value={shown(g.max_open_runs_per_workspace)} onChange={(e) => guard({ max_open_runs_per_workspace: typed(e.target.value) })}
+              helperText="Runs open at once across the workspace (0–1000). Approving a waiting run is never blocked." />
+            <Input id="air-s-tokens" label="Daily token limit" type="number" min={0} max={1_000_000_000} required
+              value={shown(g.daily_token_limit)} onChange={(e) => guard({ daily_token_limit: typed(e.target.value) })}
+              helperText="Agent tokens (in + out) per day, UTC. At the limit no new run starts; running ones finish." />
+            <Input id="air-s-retention" label="Keep run logs (days)" type="number" min={30} max={3650} required
+              value={shown(g.retention_days)} onChange={(e) => guard({ retention_days: typed(e.target.value) })}
+              helperText="30–3650. After this, a finished run's log, conversation text and request details are deleted; the run, its summary and usage stay." />
           </div>
         </div>
 

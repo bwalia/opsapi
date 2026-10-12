@@ -3,6 +3,8 @@
 /**
  * Start with AI (docs/AI_RUNNER.md §16.2, §22.3): pick a runner, an agent profile (+ model) and the
  * repo folder on that machine, preview the prompt and the conflicts, then start the run and open it.
+ * Phase 4 (§24.2-24.3): similar open work needs "Start anyway"; open-run caps, the daily token limit and
+ * unavailable profiles stop the start, with a reason.
  * StartWithAIButton shows itself only when the plugin is on here and the user holds ai_runs.create;
  * the server still decides (assignee, ai_runs.manage or project owner/admin).
  */
@@ -10,15 +12,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Bot, CopyCheck, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { kanbanService } from '@/services/kanban.service';
 import {
-  aiRunner, aiError, type Conflicts, type Preview, type Runner,
+  aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun,
 } from '@/services/ai-runner.service';
-import { BASE, ago, outputModeLabel, runStatusLabel, useAiRunnerOn, when } from './ui';
+import { BASE, ago, compact, outputModeLabel, runStatusLabel, useAiRunnerOn, when } from './ui';
 
 interface TaskRef {
   taskUuid: string;
@@ -28,6 +30,8 @@ interface TaskRef {
 }
 
 const usable = (r: Runner) => r.status === 'online';
+/** The runner's first profile that can take work (§24.3: a logged-out agent reports available: false). */
+const firstProfile = (r?: Runner) => r?.capabilities?.profiles?.find((p) => p.available !== false)?.key || '';
 const byOnline = (a: Runner, b: Runner) => Number(usable(b)) - Number(usable(a));
 const inputsKey = (runner: string, profile: string, repo: string) => JSON.stringify([runner, profile, repo.trim()]);
 
@@ -53,6 +57,50 @@ function conflictLines(c?: Conflicts): { text: string; href?: string }[] {
   return out;
 }
 
+const capText = (scope: string | undefined, limit: number) => scope === 'workspace'
+  ? `The workspace already has ${limit} open AI runs, the most allowed. Wait for one to finish before starting another.`
+  : `You already have ${limit} open AI runs, the most allowed. Wait for one to finish, or cancel one, before starting another.`;
+const tokenText = (limit: number) =>
+  `The workspace has used its daily limit of ${compact(limit)} agent tokens. New runs can start after midnight UTC; running ones finish.`;
+
+/** What the caps and today's tokens allow (0 = no limit): lines to show, and what stops the start. */
+function limitLines(raw?: Limits | null): { info: string[]; blocks: string[] } {
+  const info: string[] = [];
+  const blocks: string[] = [];
+  if (!raw) return { info, blocks };
+  // Sums of BIGINT columns may arrive as strings.
+  const l = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Number(v) || 0])) as unknown as Limits;
+  if (l.user_max > 0) {
+    info.push(`You have ${l.user_open} of ${l.user_max} open runs.`);
+    if (l.user_open >= l.user_max) blocks.push(capText('user', l.user_max));
+  }
+  if (l.workspace_max > 0) {
+    info.push(`The workspace has ${l.workspace_open} of ${l.workspace_max} open runs.`);
+    if (l.workspace_open >= l.workspace_max) blocks.push(capText('workspace', l.workspace_max));
+  }
+  if (l.daily_token_limit > 0) {
+    info.push(`${compact(l.tokens_today)} of ${compact(l.daily_token_limit)} agent tokens used today.`);
+    if (l.tokens_today >= l.daily_token_limit) blocks.push(tokenText(l.daily_token_limit));
+  }
+  return { info, blocks };
+}
+
+/** A 409 from start in words (§24.2, §24.3); null = the server's own message says it. */
+function startConflictText(conflict: unknown): string | null {
+  const c = (conflict && typeof conflict === 'object' ? conflict : {}) as {
+    type?: string; scope?: string; limit?: number; used?: number; reason?: string; unavailable_reason?: string;
+  };
+  const reason = c.unavailable_reason || c.reason;
+  switch (c.type) {
+    case 'similar_work': return 'Similar work is already open. Check it above, then tick Start anyway.';
+    case 'cap_reached': return capText(c.scope, Number(c.limit) || 0);
+    case 'token_limit': return tokenText(Number(c.limit) || 0);
+    case 'profile_unavailable':
+      return `This agent profile can't take work on that runner${reason ? ` (${reason})` : ''}. Choose another profile, or fix it on the machine.`;
+    default: return null;
+  }
+}
+
 export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLabel }: TaskRef & { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const { hasPermission } = usePermissions();
@@ -72,11 +120,13 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
   const canEditPrompt = preview?.can_edit_prompt ?? (isManager || projectRole === 'owner' || projectRole === 'admin');
   const [previewFor, setPreviewFor] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [confirmSimilar, setConfirmSimilar] = useState(false);
   const live = useRef(0);
 
   const runner = runners.find((r) => r.uuid === runnerUuid);
   const profiles = runner?.capabilities?.profiles || [];
-  const models = profiles.find((p) => p.key === profile)?.models || [];
+  const chosen = profiles.find((p) => p.key === profile);
+  const models = chosen?.models || [];
   const repos = runner?.repos || [];
   const repoInfo = repos.find((r) => r.path === repo.trim());
 
@@ -93,6 +143,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
     setPreview(res);
     setPrompt(res.prompt || '');
     setPreviewFor(inputsKey(r, p, folder));
+    setConfirmSimilar(false);
   }
 
   useEffect(() => {
@@ -112,7 +163,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
         const list = [...(first.runners ?? (await aiRunner.listRunners()))].sort(byOnline);
         if (id !== live.current) return;
         const r = list.find(usable);
-        const p = r?.capabilities?.profiles?.[0]?.key || '';
+        const p = firstProfile(r);
         setRunners(list);
         setRunnerUuid(r?.uuid || '');
         setProfile(p);
@@ -133,9 +184,12 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
   }, [open, taskUuid]);
 
   const stale = !!preview && previewFor !== inputsKey(runnerUuid, profile, repo);
-  const conflicts = conflictLines(preview?.conflicts);
-  const blocked =
-    !runner || !usable(runner) || !profile || !repo.trim() || !preview || stale || conflicts.length > 0 || !prompt.trim();
+  const limits = limitLines(preview?.limits);
+  const conflicts = [...conflictLines(preview?.conflicts), ...limits.blocks.map((text) => ({ text, href: undefined }))];
+  const similar: SimilarRun[] = Array.isArray(preview?.conflicts?.similar) ? preview.conflicts.similar : [];
+  const profileDown = chosen?.available === false;
+  const blocked = !runner || !usable(runner) || !profile || profileDown || !repo.trim() || !preview || stale
+    || conflicts.length > 0 || (similar.length > 0 && !confirmSimilar) || !prompt.trim();
 
   async function doPreview() {
     setBusy('preview');
@@ -161,12 +215,20 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
         model: model || undefined,
         repo_path: repo.trim(),
         prompt: edited ? prompt : undefined,
+        confirm_similar: similar.length > 0 && confirmSimilar ? true : undefined,
       });
       toast.success(run.status === 'pending_approval' ? 'Sent to a manager for approval' : 'AI run started');
       onClose();
       router.push(`${BASE}/runs/${run.uuid}`);
     } catch (e) {
-      setError(aiError(e).message);
+      const err = aiError(e);
+      const c = err.conflict as { type?: string; runs?: SimilarRun[] } | undefined;
+      if (c?.type === 'similar_work' && Array.isArray(c.runs)) {
+        // Found since the preview: show it and ask again.
+        setPreview((p) => p && { ...p, conflicts: { ...p.conflicts, similar: c.runs } });
+        setConfirmSimilar(false);
+      }
+      setError((err.status === 409 && startConflictText(c)) || err.message);
     } finally {
       setBusy(null);
     }
@@ -198,7 +260,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
         <p className="py-8 text-center text-sm text-secondary-500" role="status">Loading runners and the prompt…</p>
       ) : (
         <div className="space-y-4">
-          <Select id="air-runner" label="Runner" value={runnerUuid} onChange={(e) => { const r = runners.find((x) => x.uuid === e.target.value); setRunnerUuid(e.target.value); setProfile(r?.capabilities?.profiles?.[0]?.key || ''); setModel(''); }}
+          <Select id="air-runner" label="Runner" value={runnerUuid} onChange={(e) => { const r = runners.find((x) => x.uuid === e.target.value); setRunnerUuid(e.target.value); setProfile(firstProfile(r)); setModel(''); }}
             helperText={runners.some(usable) ? undefined : 'No runner is online. Start PromptPilot on a machine registered under Runners.'} error={!runners.some(usable)}>
             {!runnerUuid && <option value="">Choose a runner</option>}
             {runners.map((r) => (
@@ -210,9 +272,16 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Select id="air-profile" label="Agent profile" value={profile} onChange={(e) => { setProfile(e.target.value); setModel(''); }} disabled={!profiles.length}
-              helperText={runner && !profiles.length ? 'This runner reports no agent profiles.' : undefined}>
+              error={profileDown}
+              helperText={runner && !profiles.length ? 'This runner reports no agent profiles.'
+                : profileDown ? `Unavailable on this runner${chosen?.unavailable_reason ? `: ${chosen.unavailable_reason}` : ''}. Choose another profile.`
+                : profiles.length && profiles.every((p) => p.available === false) ? 'No profile on this runner can take work right now.' : undefined}>
               {!profile && <option value="">Choose a profile</option>}
-              {profiles.map((p) => <option key={p.key} value={p.key}>{p.label || p.key}</option>)}
+              {profiles.map((p) => (
+                <option key={p.key} value={p.key} disabled={p.available === false}>
+                  {p.label || p.key}{p.available === false ? ` — unavailable${p.unavailable_reason ? `: ${p.unavailable_reason}` : ''}` : ''}
+                </option>
+              ))}
             </Select>
             <Select id="air-model" label="Model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>
               <option value="">{models.length ? "The profile's default" : 'No choice for this profile'}</option>
@@ -251,6 +320,28 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
             </div>
           )}
 
+          {similar.length > 0 && (
+            <div className="space-y-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-800" role="status" data-testid="air-similar">
+              <p className="flex items-start gap-2 font-semibold">
+                <CopyCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Similar work is already open
+              </p>
+              <p>These open runs are on tasks with a similar title. Make sure this isn&apos;t the same work.</p>
+              <ul className="list-disc space-y-1 pl-5">
+                {similar.map((w) => (
+                  <li key={w.run_uuid}>
+                    <Link className="font-medium underline" href={`${BASE}/runs/${w.run_uuid}`} onClick={onClose}>
+                      {w.task_number != null ? `#${w.task_number} ` : ''}{w.task_title || 'Task'}
+                    </Link>
+                    {' '}— {runStatusLabel(w.status || 'queued')}{w.requested_by_name ? `, started by ${w.requested_by_name}` : ''}
+                  </li>
+                ))}
+              </ul>
+              <label className="flex items-center gap-2 font-medium">
+                <input type="checkbox" checked={confirmSimilar} onChange={(e) => setConfirmSimilar(e.target.checked)} /> Start anyway
+              </label>
+            </div>
+          )}
+
           {preview?.needs_approval && !stale && (
             <p className="flex items-start gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700" role="status">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> A manager must approve this run before it starts.
@@ -263,6 +354,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, projectUuid, taskLa
                 <span className="font-medium text-secondary-800">Output:</span> {outputModeLabel(preview.output_mode)}
                 {preview.output_mode === 'pull_request' && ' — the agent commits on its branch and opens a pull request; nothing is merged.'}
               </p>
+              {limits.info.length > 0 && <p className="text-sm text-secondary-600" data-testid="air-limits">{limits.info.join(' ')}</p>}
               {canEditPrompt ? (
                 <Textarea id="air-prompt" label={`Prompt${preview.template_version ? ` (template v${preview.template_version})` : ''}`} rows={12}
                   value={prompt} onChange={(e) => setPrompt(e.target.value)} className="font-mono text-xs" spellCheck={false}

@@ -2,7 +2,8 @@
 
 /**
  * AI Runs — every run the user may see (own; all with ai_runs.manage), live: polls every 10 s while the tab is visible.
- * On top, "Waiting on you": permission requests and start approvals the user may decide, with quick actions.
+ * On top, "Waiting on you": permission requests and start approvals the user may decide, with quick actions,
+ * and for managers the overview cards (§24.5).
  */
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -12,10 +13,13 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, Pagination, Select, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import {
-  AiRunnerPage, useAiData, BASE, PRODUCT, RUN_STATUSES, RunResult, RunStatusBadge, ago, compact, duration, requestTarget,
-  runStatusLabel, runView, when,
+  AiRunnerPage, useAiData, BASE, PRODUCT, RUN_STATUSES, RunResult, RunStatusBadge, ago, compact, cost, duration, elapsed,
+  requestTarget, runStatusLabel, runView, when,
 } from '@/components/ai-runner/ui';
-import { aiRunner, aiErrorText, type Run, type Runner, type Waiting, type WaitingRequest } from '@/services/ai-runner.service';
+import { usePermissions } from '@/contexts/PermissionsContext';
+import {
+  aiRunner, aiErrorText, type Overview, type Run, type Runner, type Waiting, type WaitingRequest,
+} from '@/services/ai-runner.service';
 
 const PER_PAGE = 20;
 
@@ -115,6 +119,49 @@ function WaitingOnYou({ waiting, onChanged }: { waiting: Waiting; onChanged: () 
   );
 }
 
+const n = (v: unknown) => Number(v) || 0;
+
+/** Numbers for managers (GET /overview). Two columns on a phone, five on a wide screen. */
+function OverviewCards({ o }: { o: Overview }) {
+  const open = Object.entries(o.runs_by_status || {}).filter(([, v]) => n(v) > 0);
+  const r7 = o.runs_7d || {};
+  const wait = o.avg_permission_wait_s_7d;
+  const cards: { title: string; value: string; detail: string }[] = [
+    {
+      title: 'Open runs',
+      value: String(open.reduce((sum, [, v]) => sum + n(v), 0)),
+      detail: `${open.map(([s, v]) => `${n(v)} ${runStatusLabel(s).toLowerCase()}`).join(' · ') || 'None'} · queue ${n(o.queue_depth)}`,
+    },
+    {
+      title: 'Runners online',
+      value: String(n(o.runners?.online)),
+      detail: `${n(o.runners?.offline)} offline · ${n(o.runners?.paused)} paused`,
+    },
+    { title: 'Tokens today', value: compact(n(o.tokens_today)), detail: `${cost(o.cost_today)} estimated cost` },
+    {
+      title: 'Last 7 days',
+      value: `${n(r7.succeeded)} succeeded`,
+      detail: `${n(r7.failed)} failed · ${n(r7.cancelled)} cancelled · ${n(r7.lost)} lost`,
+    },
+    {
+      title: 'Avg permission wait',
+      value: wait == null ? '—' : elapsed(n(wait)),
+      detail: 'Request to decision, last 7 days',
+    },
+  ];
+  return (
+    <section aria-label="Overview" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      {cards.map((c) => (
+        <div key={c.title} className="min-w-0 rounded-xl border border-secondary-200 bg-surface p-3">
+          <p className="truncate text-xs font-medium text-secondary-500">{c.title}</p>
+          <p className="mt-1 break-words text-xl font-semibold text-secondary-900">{c.value}</p>
+          <p className="mt-0.5 break-words text-xs text-secondary-500">{c.detail}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function Runs() {
   const [status, setStatus] = useState('');
   const [mine, setMine] = useState(false);
@@ -133,7 +180,14 @@ function Runs() {
   const data = runs.data;
   // What waits on the user, refreshed with the list; an error here only hides the panel (the list says why).
   const waiting = useAiData(() => aiRunner.waiting(), [], 10_000);
-  const refreshAll = () => { runs.refresh(); waiting.refresh(); };
+  // Only for those who may see it; any error (403 included) just hides the cards.
+  const { hasPermission } = usePermissions();
+  const canOverview = hasPermission('ai_runs', 'manage') || hasPermission('ai_runners', 'manage')
+    || hasPermission('ai_runs_approvals', 'manage');
+  const overview = useAiData(
+    () => (canOverview ? aiRunner.overview() : Promise.resolve(undefined)), [canOverview], canOverview ? 30_000 : undefined,
+  );
+  const refreshAll = () => { runs.refresh(); waiting.refresh(); overview.refresh(); };
 
   // Kept to seven compact columns so the table fits a 1280 px screen next to the sidebar.
   const columns = [
@@ -204,6 +258,7 @@ function Runs() {
         icon={<Bot className="h-6 w-6" />}
         actions={<Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />} onClick={refreshAll}>Refresh</Button>}
       />
+      {overview.data && !overview.error && <OverviewCards o={overview.data} />}
       {waiting.data && <WaitingOnYou waiting={waiting.data} onChanged={refreshAll} />}
       <div className="flex flex-wrap items-end gap-4">
         <div className="w-48">

@@ -25,6 +25,9 @@ import {
   Loader2,
   WifiOff,
   Wifi,
+  ShieldQuestion,
+  ClipboardCheck,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNotificationStore } from "@/store/notification.store";
@@ -60,6 +63,9 @@ const NOTIFICATION_ICONS: Record<
   checklist_completed: CheckSquare,
   comment_reply: Reply,
   comment_mentioned: AtSign,
+  ai_run_permission: ShieldQuestion,
+  ai_run_approval: ClipboardCheck,
+  ai_run_input: MessageCircleQuestion,
   general: Bell,
 };
 

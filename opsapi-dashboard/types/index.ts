@@ -1773,6 +1773,10 @@ export type NotificationType =
   | 'checklist_completed'
   | 'comment_reply'
   | 'comment_mentioned'
+  // AI Runs (docs/AI_RUNNER.md §24.6): the action_url opens the run.
+  | 'ai_run_permission'
+  | 'ai_run_approval'
+  | 'ai_run_input'
   | 'general';
 
 export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent';
