@@ -10,7 +10,7 @@ import { useNamespaceStore } from '@/store/namespace.store';
 import { useAuthStore } from '@/store/auth.store';
 
 export type PdModule =
-  | 'deals' | 'properties' | 'buyers' | 'tasks' | 'suppliers' | 'compliance' | 'approvals' | 'ai' | 'settings' | 'reports';
+  | 'deals' | 'leads' | 'properties' | 'buyers' | 'tasks' | 'suppliers' | 'compliance' | 'approvals' | 'ai' | 'settings' | 'reports';
 export type PdAction = 'read' | 'create' | 'update' | 'delete' | 'manage';
 
 // Keyed by user + workspace: another account signing in on this tab must not see the last one's permissions.
