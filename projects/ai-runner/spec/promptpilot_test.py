@@ -128,7 +128,8 @@ cfg_file = os.path.join(tmp, "runner.json")
 with open(cfg_file, "w") as f:
     json.dump(cfg, f)
 log = open(os.path.join(tmp, "runner.log"), "w")
-proc = subprocess.Popen([BIN, "runner", "-config", cfg_file], stdout=log, stderr=subprocess.STDOUT)
+proc = subprocess.Popen([BIN, "runner", "-config", cfg_file], stdout=log, stderr=subprocess.STDOUT,
+                        env={**os.environ, "LABELS_FILE": os.path.join(tmp, "labels.json")})
 try:
     runner = wait_for("runner online with the repo", lambda: next(
         (r for r in (data(call("GET", P + "/runners", NS)) or [])
