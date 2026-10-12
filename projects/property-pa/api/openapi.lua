@@ -264,17 +264,17 @@ return function(app)
         errors = { ["409"] = "GHL not set up" } })
     doc("POST /public/ghl/:workspace/contacts", { summary = "GoHighLevel webhook: create or update a person",
         description = "No login. :workspace is the workspace slug (or uuid); the caller sends the workspace's "
-            .. "ghl_webhook_secret as X-Webhook-Secret (or Authorization: Bearer). Refused while the secret is unset or "
-            .. "the PA is off there. Accepts a workflow webhook (contact_id, first_name, ...) or an app's "
-            .. "ContactCreate / ContactUpdate (id, firstName, ...), flat or under `contact`. Deduplicated on the GHL id, "
-            .. "then email, then phone (E.164; UK numbers without +44 are read as UK). dnd = true records an opt-out; "
-            .. "consent_basis is kept when valid. 120 calls a minute per IP.",
+            .. "ghl_webhook_secret as X-Webhook-Secret (or Authorization: Bearer). Refused while the secret is "
+            .. "unset or the PA is off there. Accepts a workflow webhook (contact_id, first_name, ...) or an app's "
+            .. "ContactCreate / ContactUpdate (id, firstName, ...), flat or under `contact`. Deduplicated on the GHL "
+            .. "id, then email, then phone (E.164; UK numbers without +44 are read as UK). dnd = true records an "
+            .. "opt-out; consent_basis is kept when valid. 120 calls a minute per IP.",
         path = { workspace = S("Workspace slug or uuid") },
         body = OBJ({ contact_id = S("Or id / contactId"), first_name = S(), last_name = S(), email = S(), phone = S(),
             dnd = BOOL(), consent_basis = ENUM(Bases) }),
         status = 200, response = OBJ({ result = ENUM({ "created", "updated", "unchanged" }) }),
-        errors = { ["401"] = "Missing or wrong secret (or none set)", ["404"] = "Unknown workspace, or the PA is off there",
-            ["422"] = "No contact id", ["429"] = "Too many calls" } })
+        errors = { ["401"] = "Missing or wrong secret (or none set)", ["404"] = "Unknown workspace, or the PA is off "
+            .. "there", ["422"] = "No contact id", ["429"] = "Too many calls" } })
     doc("POST /runs/sweep", { summary = "Poll PA runs without a webhook; fail ones past the timeout",
         permission = "property_pa_knowledge.manage", response = OBJ({ polled = INT(), finished = INT(), timed_out = INT() }) })
     doc("GET /status", { summary = "Go-live checklist", permission = "property_pa_records.read",
@@ -315,12 +315,13 @@ return function(app)
     doc("POST /public/jobshout/events", { summary = "JobShout webhook (run.completed / run.failed)",
         description = "Signed: X-JobShout-Signature = sha256=HMAC(secret, X-JobShout-Timestamp + '.' + body).",
         body = OBJ({}), response = OBJ({}), errors = { ["401"] = "Bad or stale signature" } })
-    local DEMO = "Platform admins only (404 for everyone else). Only fixture rows are deleted: a fixture that real work "
-        .. "points at (a note, task, offer, handoff, capture...) is kept as an ordinary record."
+    local DEMO = "Platform admins only (404 for everyone else). Only fixture rows are deleted: a fixture that real "
+        .. "work points at (a note, task, offer, handoff, capture...) is kept as an ordinary record."
     doc("POST /demo/reset", { summary = "Reset the How It Works fixtures", description = DEMO,
         body = OBJ({ sophie_user_uuid = S(), ashley_user_uuid = S() }),
         response = OBJ({ cleared = INT("Fixture opportunities removed"), kept = INT("Kept because real work uses them"),
             opportunities = INT("Seeded") }), errors = { ["404"] = "Not a platform admin" } })
     doc("DELETE /demo", { summary = "Remove the fixtures", description = DEMO,
-        response = OBJ({ removed_opportunities = INT(), kept_opportunities = INT() }), errors = { ["404"] = "Not a platform admin" } })
+        response = OBJ({ removed_opportunities = INT(), kept_opportunities = INT() }),
+        errors = { ["404"] = "Not a platform admin" } })
 end

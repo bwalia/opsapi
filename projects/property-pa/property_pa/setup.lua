@@ -36,7 +36,8 @@ local function grant(ns, user_uuid)
             end
             if changed then
                 local updated = Roles.update(role.id, { permissions = perms })
-                pcall(require("queries.NamespaceAuditLogQueries").log, { namespace_id = ns, user_id = actor and actor.id,
+                local Audit = require("queries.NamespaceAuditLogQueries")
+                pcall(Audit.log, { namespace_id = ns, user_id = actor and actor.id,
                     action = "role.permissions_updated", entity_type = "namespace_role", entity_id = role.id,
                     old_values = { permissions = before, by = "property_pa setup" },
                     new_values = { permissions = updated and updated.permissions } })

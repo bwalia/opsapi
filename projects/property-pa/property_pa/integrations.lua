@@ -50,8 +50,8 @@ function I.mail_import(ns, days)
                 subject = "Email: " .. tostring(null(m.subject) and "(no subject)" or m.subject):sub(1, 200),
                 raw_text = null(m.body_text) and "" or m.body_text, opportunity_uuid = m.opportunity_uuid,
                 at = m.received_at, source = "integration" }, m.owner_user_uuid, true)
-            db.query("UPDATE pa_external_refs SET record_uuid = ? WHERE namespace_id = ? AND source = 'mail' AND external_id = ?",
-                it.uuid, ns, tostring(m.uuid))
+            db.query([[UPDATE pa_external_refs SET record_uuid = ?
+                WHERE namespace_id = ? AND source = 'mail' AND external_id = ?]], it.uuid, ns, tostring(m.uuid))
             out.imported = out.imported + 1
         end)
         if not ok then
@@ -144,7 +144,8 @@ function I.ghl_person(ns, c, owner_uuid)
                 return "unchanged", ref and ref.record_uuid
             end
             db.insert("crm_contacts", { uuid = uuid, namespace_id = ns, first_name = fields.first_name,
-                last_name = fields.last_name or db.NULL, email = fields.email or db.NULL, phone = fields.phone or db.NULL,
+                last_name = fields.last_name or db.NULL, email = fields.email or db.NULL,
+                phone = fields.phone or db.NULL,
                 owner_user_uuid = owner_uuid, status = "active",
                 metadata = db.raw(db.escape_literal(cjson.encode({ ghl_id = gid, source = "ghl" })) .. "::jsonb") })
             F.record(ns, { target_table = "crm_contacts", target_uuid = uuid, field = "_create",
@@ -159,8 +160,8 @@ function I.ghl_person(ns, c, owner_uuid)
             local now = not null(existing[f]) and existing[f] or nil
             local same = f == "phone" and now and I.e164(now) == fields.phone or fields[f] == now
             if fields[f] and not same then
-                db.query("UPDATE crm_contacts SET " .. f .. " = ?, updated_at = NOW() WHERE namespace_id = ? AND uuid = ?",
-                    fields[f], ns, existing.uuid)
+                db.query("UPDATE crm_contacts SET " .. f .. " = ?, updated_at = NOW() WHERE namespace_id = ? "
+                    .. "AND uuid = ?", fields[f], ns, existing.uuid)
                 F.record(ns, { target_table = "crm_contacts", target_uuid = existing.uuid, field = f, value = fields[f],
                     source = "integration", source_ref = "ghl:" .. gid })
                 changed = true
@@ -218,7 +219,8 @@ function I.ghl_webhook_contact(body)
     if not id or #id > 255 then return nil end
     local function cap(v, n) return v and v:sub(1, n) end
     return { id = id, first_name = cap(s(c.first_name) or s(c.firstName) or s(c.full_name) or s(c.name), 100),
-        last_name = cap(s(c.last_name) or s(c.lastName), 100), email = cap(s(c.email), 255), phone = cap(s(c.phone), 40),
+        last_name = cap(s(c.last_name) or s(c.lastName), 100), email = cap(s(c.email), 255),
+        phone = cap(s(c.phone), 40),
         dnd = c.dnd == true or c.dnd == "true" or c.opted_out == true, consent_basis = s(c.consent_basis) }
 end
 

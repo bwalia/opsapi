@@ -89,8 +89,9 @@ return function(app)
         -- The whole workspace's history is for managers (like /metrics); everyone else sees their own: changes on
         -- opportunities they own, and changes they confirmed.
         if not sdk.can(self, "property_pa_knowledge", "manage") then
-            where[#where + 1] = "(f.confirmed_by_user_uuid = " .. L(me) .. " OR (f.target_table = 'pa_opportunities' AND "
-                .. "f.target_uuid IN (SELECT uuid::text FROM pa_opportunities WHERE namespace_id = " .. L(ns)
+            where[#where + 1] = "(f.confirmed_by_user_uuid = " .. L(me)
+                .. " OR (f.target_table = 'pa_opportunities' AND f.target_uuid IN (SELECT uuid::text"
+                .. " FROM pa_opportunities WHERE namespace_id = " .. L(ns)
                 .. " AND owner_user_uuid = " .. L(me) .. ")))"
         end
         if p.target_table and p.target_table:match("^[a-z_]+$") then

@@ -54,9 +54,10 @@ return function(app)
         end
         local ns = sdk.namespace_id(self)
         local queued = I.ghl_request(ns)
-        local last = U.one("SELECT last_run_at, last_result FROM pa_sync_state WHERE namespace_id = ? AND source = 'ghl'", ns)
+        local last = U.one([[SELECT last_run_at, last_result FROM pa_sync_state
+            WHERE namespace_id = ? AND source = 'ghl']], ns) or {}
         return { status = 202, json = { success = true, data = { queued = queued > 0,
-            last_run_at = last and last.last_run_at or cjson.null, last_result = last and U.json(last.last_result) or cjson.null } } }
+            last_run_at = last.last_run_at or cjson.null, last_result = U.json(last.last_result) or cjson.null } } }
     end)))
 
     -- GoHighLevel webhook (a workflow's webhook action, or an app's ContactCreate / ContactUpdate event): upserts
@@ -65,7 +66,8 @@ return function(app)
     app:post("/public/ghl/:workspace/contacts", RateLimit.wrap({ rate = I.WEBHOOK_PER_MINUTE, window = 60,
         prefix = "pa_ghl_webhook" }, sdk.handler({ namespace = false }, U.guard(function(self)
         local ws = tostring(self.params.workspace or ""):sub(1, 100)
-        local n = U.one("SELECT id, owner_user_id FROM namespaces WHERE (slug = ? OR uuid = ?) AND status = 'active'", ws, ws)
+        local n = U.one("SELECT id, owner_user_id FROM namespaces WHERE (slug = ? OR uuid = ?) AND status = 'active'",
+            ws, ws)
         if not n or not require("helper.plugin-workspaces").isEnabled("property_pa", n.id) then
             return sdk.error(404, "Not found") -- unknown, or the PA is off there
         end

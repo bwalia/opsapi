@@ -48,7 +48,8 @@ local USED_OPP = [[
 -- @return { removed, kept } opportunities
 function FX.clear(ns)
     local kept = db.query([[UPDATE pa_opportunities o SET metadata = o.metadata - 'fixture', updated_at = NOW()
-        WHERE o.namespace_id = ? AND o.metadata ->> 'fixture' = ? AND (]] .. USED_OPP .. [[) RETURNING o.uuid]], ns, TAG)
+        WHERE o.namespace_id = ? AND o.metadata ->> 'fixture' = ? AND (]] .. USED_OPP .. [[) RETURNING o.uuid]],
+        ns, TAG)
     local removed = db.query([[DELETE FROM pa_opportunities WHERE namespace_id = ? AND metadata ->> 'fixture' = ?
         RETURNING uuid]], ns, TAG)
     local ids = {}
@@ -57,12 +58,12 @@ function FX.clear(ns)
         local list = table.concat(ids, ",")
         db.query("DELETE FROM pa_field_facts WHERE namespace_id = ? AND source = 'import' AND target_uuid IN (" .. list
             .. ")", ns)
-        db.query("DELETE FROM crm_activities WHERE namespace_id = ? AND metadata ->> 'fixture' = ? AND opportunity_uuid::text IN ("
-            .. list .. ")", ns, TAG)
+        db.query("DELETE FROM crm_activities WHERE namespace_id = ? AND metadata ->> 'fixture' = ? "
+            .. "AND opportunity_uuid::text IN (" .. list .. ")", ns, TAG)
     end
     -- A kept opportunity keeps its seeded history too.
-    db.query("UPDATE crm_activities SET metadata = metadata - 'fixture' WHERE namespace_id = ? AND metadata ->> 'fixture' = ?",
-        ns, TAG)
+    db.query([[UPDATE crm_activities SET metadata = metadata - 'fixture'
+        WHERE namespace_id = ? AND metadata ->> 'fixture' = ?]], ns, TAG)
     -- People and properties: kept while anything that isn't a fixture still uses them.
     db.query([[UPDATE crm_contacts c SET metadata = c.metadata - 'fixture', updated_at = NOW()
         WHERE c.namespace_id = ? AND c.metadata ->> 'fixture' = ? AND (

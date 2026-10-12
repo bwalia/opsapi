@@ -71,7 +71,8 @@ local function scored(where)
                 ORDER BY at LIMIT 1) pr ON TRUE
             LEFT JOIN LATERAL (SELECT uuid, kind, title, at FROM pa_events WHERE namespace_id = o.namespace_id
                 AND opportunity_uuid = o.uuid AND kind IN ('valuation', 'price_reduction', 'appointment', 'listing',
-                'sstc', 'fall_through') AND at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() ORDER BY at DESC LIMIT 1) ev ON TRUE
+                'sstc', 'fall_through') AND at BETWEEN NOW() - INTERVAL '48 hours' AND NOW()
+                ORDER BY at DESC LIMIT 1) ev ON TRUE
             LEFT JOIN LATERAL (SELECT d.task_uuid, t.title, d.due_at, d.reason
                 FROM property_deals_task_details d JOIN kanban_tasks t ON t.uuid = d.task_uuid
                 WHERE d.namespace_id = o.namespace_id AND d.opportunity_uuid = o.uuid
@@ -103,9 +104,11 @@ function R.card(o)
         "property_deals_task_details:" .. o.na_task_uuid)
     elseif yes(o.na_today) then add("next_action_today", "Next action due today: " .. o.na_title,
         "property_deals_task_details:" .. o.na_task_uuid) end
-    if not null(o.offer_uuid) then add("offer_awaiting", string.format("Offer of £%s waiting for an answer",
-        (tostring(math.floor(tonumber(o.offer_amount) or 0)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))),
-        "pa_offers:" .. o.offer_uuid) end
+    if not null(o.offer_uuid) then
+        local pounds = tostring(math.floor(tonumber(o.offer_amount) or 0)):reverse():gsub("(%d%d%d)", "%1,"):reverse()
+        add("offer_awaiting", "Offer of £" .. pounds:gsub("^,", "") .. " waiting for an answer",
+            "pa_offers:" .. o.offer_uuid)
+    end
     if o.temperature == "hot" or o.temperature == "warm" then
         add(o.temperature, (o.temperature == "hot" and "Hot" or "Warm") .. " opportunity",
             "pa_opportunities:" .. o.uuid .. ":temperature")
@@ -115,7 +118,9 @@ function R.card(o)
         "pa_opportunities:" .. o.uuid .. ":last_meaningful_contact_at")
     elseif d and d >= 7 then add("quiet", string.format("%d days since meaningful contact", math.floor(d)),
         "pa_opportunities:" .. o.uuid .. ":last_meaningful_contact_at") end
-    if (tonumber(o.waiting) or 0) > 0 then add("changes_waiting", o.waiting .. " change(s) from notes waiting for you") end
+    if (tonumber(o.waiting) or 0) > 0 then
+        add("changes_waiting", o.waiting .. " change(s) from notes waiting for you")
+    end
 
     table.sort(signals, function(a, b) return a.weight > b.weight end)
     local score = 0
@@ -145,7 +150,8 @@ function R.card(o)
     end
     -- They asked not to be contacted: the PA never recommends reaching out.
     if not null(o.opted_out_at) then
-        action, objective, minutes = "Don't contact " .. who .. ": they opted out", "Respect their opt-out", R.MINUTES.review
+        action, objective = "Don't contact " .. who .. ": they opted out", "Respect their opt-out"
+        minutes = R.MINUTES.review
     end
     return { score = score, signals = setmetatable(signals, cjson.array_mt), action = action or ("Check in with " .. who),
         objective = objective or "Keep it moving", minutes = minutes or R.MINUTES.call,
@@ -198,8 +204,9 @@ end
 --- One card of my day with its rank (ranked in the database; only this card is built). @return card | nil
 function R.why(ns, user_uuid, opp_uuid)
     if not U.is_uuid(opp_uuid) then return nil end
-    local o = U.one("SELECT * FROM (SELECT x.*, ROW_NUMBER() OVER (" .. ORDER .. ") AS rank, COUNT(*) OVER () AS total FROM ("
-        .. scored("o.owner_user_uuid = ? AND o.status = 'open'") .. ") x) y WHERE uuid = ?::uuid", ns, user_uuid, opp_uuid)
+    local o = U.one("SELECT * FROM (SELECT x.*, ROW_NUMBER() OVER (" .. ORDER .. ") AS rank, COUNT(*) OVER () AS total "
+        .. "FROM (" .. scored("o.owner_user_uuid = ? AND o.status = 'open'") .. ") x) y WHERE uuid = ?::uuid",
+        ns, user_uuid, opp_uuid)
     if not o then return nil end
     local c = card_of(o)
     c.rank, c.of = tonumber(o.rank), tonumber(o.total)

@@ -39,8 +39,10 @@ end
 --- Refuse a proposed contact with the person behind an opportunity who opted out. @return nil | message
 function K.refusal(ns, opportunity_uuid)
     if not U.is_uuid(opportunity_uuid) then return nil end
-    local r = U.one([[SELECT c.first_name FROM pa_opportunities o JOIN pa_consent k ON k.namespace_id = o.namespace_id
-        AND k.person_uuid = o.person_uuid AND k.opted_out_at IS NOT NULL LEFT JOIN crm_contacts c ON c.uuid = o.person_uuid
+    local r = U.one([[SELECT c.first_name FROM pa_opportunities o
+        JOIN pa_consent k ON k.namespace_id = o.namespace_id AND k.person_uuid = o.person_uuid
+            AND k.opted_out_at IS NOT NULL
+        LEFT JOIN crm_contacts c ON c.uuid = o.person_uuid
         WHERE o.namespace_id = ? AND o.uuid = ?::uuid]], ns, opportunity_uuid)
     if not r then return nil end
     return (r.first_name ~= db.NULL and r.first_name or "This person") .. " asked not to be contacted"

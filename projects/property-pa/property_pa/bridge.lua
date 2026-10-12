@@ -50,8 +50,9 @@ end
 -- and count towards AI_USER_DAILY_TOKEN_LIMIT. Never fails the caller: a lost row is logged.
 local function meter(ns, user, run_uuid, scope, model, input, output, ms, err)
     local ok, ierr = pcall(db.insert, "ai_usage", { namespace_id = ns, user_uuid = nz(user), feature = "property_pa",
-        scope = nz(scope), run_uuid = run_uuid, provider = "jobshout", model = tostring(model or "jobshout"):sub(1, 120),
-        input_tokens = input or 0, output_tokens = output or 0, latency_ms = ms or 0, ok = err == nil, error = err })
+        scope = nz(scope), run_uuid = run_uuid, provider = "jobshout",
+        model = tostring(model or "jobshout"):sub(1, 120), input_tokens = input or 0, output_tokens = output or 0,
+        latency_ms = ms or 0, ok = err == nil, error = err })
     if not ok then ngx.log(ngx.ERR, "[property_pa] usage not recorded: ", tostring(ierr)) end
 end
 
@@ -59,8 +60,8 @@ end
 local function over_daily_limit(user_uuid)
     local limit = tonumber(os.getenv("AI_USER_DAILY_TOKEN_LIMIT") or "")
     if not limit then return false end
-    local r = U.one([[SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM ai_usage
-        WHERE user_uuid = ? AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC']], user_uuid)
+    local r = U.one([[SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM ai_usage WHERE user_uuid = ?
+        AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC']], user_uuid)
     return tonumber(r.used) >= limit
 end
 
@@ -229,8 +230,9 @@ function B.finish(ns, run, data)
         local total = tonumber(data.total_tokens) or 0
         local input = math.min(total, tonumber(data.prompt_tokens or data.input_tokens) or 0)
         local snap = U.json(run.input_snapshot)
-        meter(ns, run.triggered_by_user_uuid, run.uuid, type(snap) == "table" and snap.mode or nil, upd.model or run.model,
-            input, total - input, tonumber(data.latency_ms) or 0, status == "failed" and "the PA run failed" or nil)
+        meter(ns, run.triggered_by_user_uuid, run.uuid, type(snap) == "table" and snap.mode or nil,
+            upd.model or run.model, input, total - input, tonumber(data.latency_ms) or 0,
+            status == "failed" and "the PA run failed" or nil)
     end
     -- What the run wrote while it was running (captures) gets the model and prompt version it really used (P10).
     if upd.model or upd.prompt_version then
