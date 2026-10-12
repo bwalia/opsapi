@@ -125,16 +125,27 @@ export const PurchaseOrderFormModal: React.FC<Props> = ({ isOpen, onClose, onSav
   const set = <K extends keyof PurchaseOrderPayload>(key: K, value: PurchaseOrderPayload[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // Picking a different company replaces the supplier details with its own
+  // (they can still be edited); the first pick only fills blanks.
   const pickCompany = (uuid: string) => {
     const c = (companies || []).find((x) => x.uuid === uuid);
-    setForm((prev) => ({
-      ...prev,
-      supplier_company_uuid: uuid,
-      supplier_name: c && !prev.supplier_name ? c.name : prev.supplier_name,
-      supplier_email: c && !prev.supplier_email ? c.email || '' : prev.supplier_email,
-      supplier_phone: c && !prev.supplier_phone ? c.phone || '' : prev.supplier_phone,
-    }));
+    setForm((prev) => {
+      if (!c) return { ...prev, supplier_company_uuid: uuid };
+      const replace = !!prev.supplier_company_uuid && prev.supplier_company_uuid !== uuid;
+      const address = [c.address_line1, c.address_line2, c.city, c.postal_code, c.country].filter(Boolean).join(', ');
+      const take = (current: string | undefined, value: string) => (replace || !current ? value : current);
+      return {
+        ...prev,
+        supplier_company_uuid: uuid,
+        supplier_name: take(prev.supplier_name, c.name),
+        supplier_email: take(prev.supplier_email, c.email || ''),
+        supplier_phone: take(prev.supplier_phone, c.phone || ''),
+        supplier_address: take(prev.supplier_address, address),
+      };
+    });
   };
+  // The currency is fixed once the order has gone to the supplier.
+  const currencyLocked = isEdit && purchaseOrder?.status !== 'draft';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -252,8 +263,14 @@ export const PurchaseOrderFormModal: React.FC<Props> = ({ isOpen, onClose, onSav
           </div>
           <div>
             <label className={labelClass}>Currency</label>
-            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className={inputClass}>
-              {CURRENCIES.map((c) => (
+            <select
+              value={form.currency}
+              onChange={(e) => set('currency', e.target.value)}
+              className={inputClass}
+              disabled={currencyLocked}
+              title={currencyLocked ? 'The currency is fixed once the order has been sent' : undefined}
+            >
+              {(CURRENCIES.includes(form.currency || '') ? CURRENCIES : [form.currency || 'GBP', ...CURRENCIES]).map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

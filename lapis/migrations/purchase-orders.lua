@@ -27,6 +27,11 @@
       [3] RBAC module registry row
       [4] grant owner/admin roles on purchase_orders
       [5] enable the menu item for every existing namespace
+      [6] several bills per PO: purchase_order_items.billed_quantity (+ the
+          billed_net / billed_tax pennies, so bills always add up); old
+          single-bill POs (metadata.bill / expense_uuid / expense_id) become
+          metadata.bills[1]; line amounts re-derived from the stored values
+      [7] RBAC module category = Finance (as in PROJECT_MODULES)
 ]]
 
 local db = require("lapis.db")
@@ -228,6 +233,95 @@ return {
                   SELECT 1 FROM namespace_menu_config c
                   WHERE c.namespace_id = n.id AND c.menu_item_id = mi.id
               )
+        ]])
+    end,
+
+    -- =========================================================================
+    -- [6] Several bills per PO
+    -- =========================================================================
+    [6] = function()
+        db.query([[
+            ALTER TABLE purchase_order_items
+            ADD COLUMN IF NOT EXISTS billed_quantity DECIMAL(15,3) NOT NULL DEFAULT 0 CHECK (billed_quantity >= 0),
+            ADD COLUMN IF NOT EXISTS billed_net DECIMAL(15,2) NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS billed_tax DECIMAL(15,2) NOT NULL DEFAULT 0
+        ]])
+        db.query([[
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                               WHERE conname = 'purchase_order_items_billed_le_received') THEN
+                    ALTER TABLE purchase_order_items ADD CONSTRAINT purchase_order_items_billed_le_received
+                        CHECK (billed_quantity <= received_quantity);
+                END IF;
+            END $$
+        ]])
+
+        -- A PO billed before this release was billed once, for everything received.
+        db.query([[
+            UPDATE purchase_order_items i
+            SET billed_quantity = i.received_quantity,
+                billed_net = ROUND(i.received_quantity * i.unit_price, 2),
+                billed_tax = ROUND(ROUND(i.received_quantity * i.unit_price, 2) * i.tax_rate / 100, 2)
+            FROM purchase_orders po
+            WHERE po.id = i.purchase_order_id AND po.namespace_id = i.namespace_id
+              AND po.status = 'billed' AND i.billed_quantity = 0
+        ]])
+        db.query([[
+            UPDATE purchase_orders po
+            SET metadata = (po.metadata - 'bill' - 'expense_id' - 'expense_uuid') || jsonb_build_object('bills',
+                jsonb_build_array(CASE WHEN jsonb_typeof(po.metadata->'bill') = 'object'
+                    THEN po.metadata->'bill' ELSE '{}'::jsonb END || jsonb_build_object(
+                    'uuid', gen_random_uuid()::text,
+                    'at', to_char(COALESCE(po.billed_at, po.updated_at), 'YYYY-MM-DD HH24:MI:SS'),
+                    'expense_uuid', COALESCE(po.metadata->'bill'->'expense_uuid', po.metadata->'expense_uuid',
+                        'null'::jsonb),
+                    'lines', COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object('item_uuid', i.uuid, 'quantity', i.received_quantity,
+                            'net', i.billed_net, 'tax', i.billed_tax))
+                        FROM purchase_order_items i
+                        WHERE i.purchase_order_id = po.id AND i.namespace_id = po.namespace_id
+                          AND i.received_quantity > 0), '[]'::jsonb))))
+            WHERE po.status = 'billed' AND NOT po.metadata ? 'bills'
+        ]])
+        -- Never billed: drop forged bill keys (metadata used to be client-writable).
+        db.query([[
+            UPDATE purchase_orders SET metadata = metadata - 'bill' - 'expense_id' - 'expense_uuid'
+            WHERE status <> 'billed' AND (metadata ? 'bill' OR metadata ? 'expense_id' OR metadata ? 'expense_uuid')
+        ]])
+
+        -- Line amounts used to be worked out from the unrounded unit price:
+        -- re-derive them from the stored values (the rule the queries now use).
+        db.query([[
+            UPDATE purchase_order_items
+            SET tax_amount = v.tax, line_total = v.net + v.tax
+            FROM (
+                SELECT id, ROUND(quantity * unit_price, 2) AS net,
+                       ROUND(ROUND(quantity * unit_price, 2) * tax_rate / 100, 2) AS tax
+                FROM purchase_order_items
+            ) v
+            WHERE purchase_order_items.id = v.id
+              AND (purchase_order_items.tax_amount <> v.tax OR purchase_order_items.line_total <> v.net + v.tax)
+        ]])
+        db.query([[
+            UPDATE purchase_orders po
+            SET subtotal = t.subtotal, tax_total = t.tax_total, total = t.total
+            FROM (
+                SELECT purchase_order_id, namespace_id, SUM(ROUND(quantity * unit_price, 2)) AS subtotal,
+                       SUM(tax_amount) AS tax_total, SUM(line_total) AS total
+                FROM purchase_order_items GROUP BY purchase_order_id, namespace_id
+            ) t
+            WHERE po.id = t.purchase_order_id AND po.namespace_id = t.namespace_id
+              AND (po.subtotal <> t.subtotal OR po.tax_total <> t.tax_total OR po.total <> t.total)
+        ]])
+    end,
+
+    -- =========================================================================
+    -- [7] RBAC module category (step 3 registered it without one)
+    -- =========================================================================
+    [7] = function()
+        db.query([[
+            UPDATE modules SET category = 'Finance', updated_at = NOW()
+            WHERE machine_name = 'purchase_orders' AND (category IS NULL OR category = '')
         ]])
     end,
 }

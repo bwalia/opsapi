@@ -43,6 +43,10 @@ export interface PurchaseOrderItem {
   tax_amount: number;
   line_total: number;
   received_quantity: number;
+  /** Quantity / pennies already on (non-voided) bills. */
+  billed_quantity: number;
+  billed_net: number;
+  billed_tax: number;
   sort_order?: number;
   created_at?: string;
   updated_at?: string;
@@ -52,23 +56,47 @@ export interface PurchaseOrderReceipt {
   at: string;
   by?: string;
   note?: string;
-  lines: { item_uuid: string; received_quantity: number }[];
+  /** quantity = received in this receipt; received_quantity = the line's running total after it. */
+  lines: { item_uuid: string; quantity?: number; received_quantity?: number }[];
+}
+
+export interface PurchaseOrderBillLine {
+  item_uuid: string;
+  quantity: number;
+  net: number;
+  tax: number;
 }
 
 export interface PurchaseOrderBill {
+  uuid: string;
+  at?: string;
   net: number;
   tax: number;
   gross: number;
   currency?: string;
   bill_date?: string;
-  expense_uuid?: string;
+  category?: string;
+  notes?: string;
+  /** Pending expense in the purchase ledger (Bookkeeping on, GBP orders). */
+  expense_uuid?: string | null;
+  /** Why nothing was posted to the ledger (e.g. a non-GBP order). */
+  ledger_note?: string;
+  lines: PurchaseOrderBillLine[];
+  voided_at?: string;
+  void_reason?: string;
+}
+
+export interface PurchaseOrderClosure {
+  at?: string;
+  reason?: string;
+  short?: { item_uuid: string; ordered: number; received: number }[];
 }
 
 export interface PurchaseOrderMetadata {
-  receipts?: PurchaseOrderReceipt[];
-  bill?: PurchaseOrderBill;
-  expense_id?: number;
-  expense_uuid?: string;
+  receipts: PurchaseOrderReceipt[];
+  bills: PurchaseOrderBill[];
+  /** Set when the order was closed short. */
+  closed?: PurchaseOrderClosure;
   cancelled_reason?: string;
   [key: string]: unknown;
 }
@@ -111,7 +139,9 @@ export interface PurchaseOrder {
   cancelled_at?: string | null;
   created_at: string;
   updated_at: string;
-  // Set on the convert-to-bill response: whether a purchase-ledger expense was created.
+  // Set on the convert-to-bill response: the bill just made, and whether a
+  // purchase-ledger expense was created for it.
+  bill?: PurchaseOrderBill;
   accounting_expense_created?: boolean;
 }
 
@@ -123,17 +153,26 @@ export interface PurchaseOrdersResponse {
   total_pages: number;
 }
 
-export interface PurchaseOrderStats {
+/** Money is never added across currencies: values come per currency. */
+export interface PurchaseOrderCurrencyStats {
+  currency: string;
   total_count: number;
   total_value: number;
-  draft_count: number;
   open_count: number;
   open_value: number;
-  overdue_count: number;
   to_bill_count: number;
   to_bill_value: number;
   billed_value: number;
-  by_status: { status: PurchaseOrderStatus; count: number; total: number }[];
+}
+
+export interface PurchaseOrderStats {
+  total_count: number;
+  draft_count: number;
+  open_count: number;
+  overdue_count: number;
+  to_bill_count: number;
+  by_currency: PurchaseOrderCurrencyStats[];
+  by_status: { status: PurchaseOrderStatus; count: number }[];
 }
 
 export interface PurchaseOrderItemPayload {
@@ -160,9 +199,10 @@ export interface PurchaseOrderPayload {
   items?: PurchaseOrderItemPayload[];
 }
 
+/** quantity = what arrived now (added to the line; never above what is outstanding). */
 export interface ReceiveLinePayload {
   item_uuid: string;
-  received_quantity: number;
+  quantity: number;
 }
 
 export interface ConvertToBillPayload {
@@ -176,6 +216,10 @@ const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
 
 const num = (v: unknown) => Number(v ?? 0) || 0;
 
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+/** Objects of an array; anything else (old or malformed metadata) -> []. */
+const objects = (v: unknown) => (Array.isArray(v) ? v.filter(isObj) : []);
+
 // Decimal columns arrive as strings/numbers; metadata `{}` may arrive as `[]`.
 function normalizeItem(raw: Record<string, unknown>): PurchaseOrderItem {
   return {
@@ -187,12 +231,43 @@ function normalizeItem(raw: Record<string, unknown>): PurchaseOrderItem {
     tax_amount: num(raw.tax_amount),
     line_total: num(raw.line_total),
     received_quantity: num(raw.received_quantity),
+    billed_quantity: num(raw.billed_quantity),
+    billed_net: num(raw.billed_net),
+    billed_tax: num(raw.billed_tax),
+  };
+}
+
+function normalizeBill(b: Record<string, unknown>): PurchaseOrderBill {
+  return {
+    ...(b as unknown as PurchaseOrderBill),
+    uuid: String(b.uuid ?? ''),
+    net: num(b.net),
+    tax: num(b.tax),
+    gross: num(b.gross),
+    lines: objects(b.lines).map((l) => ({
+      item_uuid: String(l.item_uuid ?? ''),
+      quantity: num(l.quantity),
+      net: num(l.net),
+      tax: num(l.tax),
+    })),
+  };
+}
+
+function normalizeMetadata(raw: unknown): PurchaseOrderMetadata {
+  const m = isObj(raw) ? raw : {};
+  return {
+    ...m,
+    receipts: objects(m.receipts).map((r) => ({
+      ...(r as unknown as PurchaseOrderReceipt),
+      lines: objects(r.lines) as PurchaseOrderReceipt['lines'],
+    })),
+    bills: objects(m.bills).map(normalizeBill),
+    closed: isObj(m.closed) ? (m.closed as PurchaseOrderClosure) : undefined,
   };
 }
 
 function normalizePurchaseOrder(raw: Record<string, unknown> | null | undefined): PurchaseOrder {
   const r = (raw ?? {}) as Record<string, unknown>;
-  const meta = r.metadata && !Array.isArray(r.metadata) && typeof r.metadata === 'object' ? r.metadata : {};
   return {
     ...(r as unknown as PurchaseOrder),
     uuid: (r.uuid ?? r.id) as string,
@@ -200,10 +275,30 @@ function normalizePurchaseOrder(raw: Record<string, unknown> | null | undefined)
     tax_total: num(r.tax_total),
     total: num(r.total),
     item_count: r.item_count != null ? num(r.item_count) : undefined,
-    metadata: meta as PurchaseOrderMetadata,
+    metadata: normalizeMetadata(r.metadata),
+    bill: isObj(r.bill) ? normalizeBill(r.bill) : undefined,
     project: (r.project as PurchaseOrderProjectLink | undefined) ?? null,
     items: Array.isArray(r.items) ? (r.items as Record<string, unknown>[]).map(normalizeItem) : [],
   };
+}
+
+// Idempotency-Key per attempt: a retry of the same request whose answer never
+// arrived (network error) reuses it, so the server replays instead of doing it
+// twice. Any answer from the server ends the attempt.
+const pendingKeys = new Map<string, { body: string; key: string }>();
+async function idempotent<T>(scope: string, body: unknown, send: (config: object) => Promise<T>): Promise<T> {
+  const sig = JSON.stringify(body ?? null);
+  const prev = pendingKeys.get(scope);
+  const key = prev && prev.body === sig ? prev.key : crypto.randomUUID();
+  pendingKeys.set(scope, { body: sig, key });
+  try {
+    const result = await send({ headers: { ...JSON_HEADERS.headers, 'Idempotency-Key': key } });
+    pendingKeys.delete(scope);
+    return result;
+  } catch (error) {
+    if ((error as { response?: unknown })?.response) pendingKeys.delete(scope);
+    throw error;
+  }
 }
 
 const unwrap = (body: { data?: unknown } | undefined) =>
@@ -241,21 +336,21 @@ export const purchaseOrdersService = {
     const r = unwrap(response.data);
     return {
       total_count: num(r.total_count),
-      total_value: num(r.total_value),
       draft_count: num(r.draft_count),
       open_count: num(r.open_count),
-      open_value: num(r.open_value),
       overdue_count: num(r.overdue_count),
       to_bill_count: num(r.to_bill_count),
-      to_bill_value: num(r.to_bill_value),
-      billed_value: num(r.billed_value),
-      by_status: Array.isArray(r.by_status)
-        ? (r.by_status as Record<string, unknown>[]).map((s) => ({
-            status: s.status as PurchaseOrderStatus,
-            count: num(s.count),
-            total: num(s.total),
-          }))
-        : [],
+      by_currency: objects(r.by_currency).map((c) => ({
+        currency: String(c.currency || 'GBP'),
+        total_count: num(c.total_count),
+        total_value: num(c.total_value),
+        open_count: num(c.open_count),
+        open_value: num(c.open_value),
+        to_bill_count: num(c.to_bill_count),
+        to_bill_value: num(c.to_bill_value),
+        billed_value: num(c.billed_value),
+      })),
+      by_status: objects(r.by_status).map((s) => ({ status: s.status as PurchaseOrderStatus, count: num(s.count) })),
     };
   },
 
@@ -265,7 +360,9 @@ export const purchaseOrdersService = {
   },
 
   async createPurchaseOrder(data: PurchaseOrderPayload): Promise<PurchaseOrder> {
-    const response = await apiClient.post('/api/v2/purchase-orders', data, JSON_HEADERS);
+    const response = await idempotent('create', data, (config) =>
+      apiClient.post('/api/v2/purchase-orders', data, config)
+    );
     return normalizePurchaseOrder(unwrap(response.data));
   },
 
@@ -284,13 +381,23 @@ export const purchaseOrdersService = {
     return normalizePurchaseOrder(unwrap(response.data));
   },
 
-  /** Email the PO (browser-built PDF as base64) to the supplier; marks a draft sent. */
+  /**
+   * Email the PO (browser-built PDF as base64) to the supplier; marks a draft sent.
+   * `message` says what happened: queued for sending, or handed to the workspace's mail server.
+   */
   async emailPurchaseOrder(
     uuid: string,
     data: { pdf_base64?: string; filename?: string; to?: string; message?: string }
-  ): Promise<{ message: string; to: string; status: PurchaseOrderStatus }> {
-    const response = await apiClient.post(`/api/v2/purchase-orders/${uuid}/email`, data, JSON_HEADERS);
-    return unwrap(response.data) as unknown as { message: string; to: string; status: PurchaseOrderStatus };
+  ): Promise<{ message: string; to: string; status: PurchaseOrderStatus; via: 'workspace' | 'platform' }> {
+    const response = await idempotent(`email:${uuid}`, data, (config) =>
+      apiClient.post(`/api/v2/purchase-orders/${uuid}/email`, data, config)
+    );
+    return unwrap(response.data) as unknown as {
+      message: string;
+      to: string;
+      status: PurchaseOrderStatus;
+      via: 'workspace' | 'platform';
+    };
   },
 
   async acknowledge(uuid: string): Promise<PurchaseOrder> {
@@ -298,17 +405,38 @@ export const purchaseOrdersService = {
     return normalizePurchaseOrder(unwrap(response.data));
   },
 
-  /** received_quantity is each line's running total received (not a delta). */
+  /** items[].quantity is what arrived now; receive_all takes in everything outstanding. */
   async receive(
     uuid: string,
     data: { items?: ReceiveLinePayload[]; receive_all?: boolean; note?: string }
   ): Promise<PurchaseOrder> {
-    const response = await apiClient.post(`/api/v2/purchase-orders/${uuid}/receive`, data, JSON_HEADERS);
+    const response = await idempotent(`receive:${uuid}`, data, (config) =>
+      apiClient.post(`/api/v2/purchase-orders/${uuid}/receive`, data, config)
+    );
     return normalizePurchaseOrder(unwrap(response.data));
   },
 
+  /** Bills what has been received and not billed yet (can be done again as more arrives). */
   async convertToBill(uuid: string, data: ConvertToBillPayload = {}): Promise<PurchaseOrder> {
-    const response = await apiClient.post(`/api/v2/purchase-orders/${uuid}/convert-to-bill`, data, JSON_HEADERS);
+    const response = await idempotent(`bill:${uuid}`, data, (config) =>
+      apiClient.post(`/api/v2/purchase-orders/${uuid}/convert-to-bill`, data, config)
+    );
+    return normalizePurchaseOrder(unwrap(response.data));
+  },
+
+  /** Void a bill whose ledger expense is still pending; its quantities can be billed again. */
+  async voidBill(uuid: string, billUuid: string, reason?: string): Promise<PurchaseOrder> {
+    const response = await apiClient.post(
+      `/api/v2/purchase-orders/${uuid}/bills/${billUuid}/void`,
+      { reason },
+      JSON_HEADERS
+    );
+    return normalizePurchaseOrder(unwrap(response.data));
+  },
+
+  /** Close a partially received PO short: no more goods are coming. */
+  async closeShort(uuid: string, reason: string): Promise<PurchaseOrder> {
+    const response = await apiClient.post(`/api/v2/purchase-orders/${uuid}/close`, { reason }, JSON_HEADERS);
     return normalizePurchaseOrder(unwrap(response.data));
   },
 
@@ -332,9 +460,10 @@ export const purchaseOrdersService = {
   },
 };
 
-/** Pull the backend's `{ error }` message out of an axios error. */
+/** Pull the backend's message out of an axios error: `{ error: "..." }` or `{ error: { message } }`. */
 export function purchaseOrderError(error: unknown, fallback: string): string {
-  const msg = (error as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
+  const err = (error as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
+  const msg = isObj(err) ? err.message : err;
   return typeof msg === 'string' && msg ? msg : fallback;
 }
 
