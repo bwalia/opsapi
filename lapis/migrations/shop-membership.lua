@@ -1,0 +1,145 @@
+--[[
+    Shop VIP price-lock membership (FEATURES.SHOP + FEATURES.BILLING)
+    ==================================================================
+
+    Members pay on the shop's Stripe account (mode=subscription). Each
+    membership is ALSO a billing_subscriptions row (customer_id → customers)
+    under a "workstation-vip" billing_apps row, so it shows in the existing
+    billing admin. These shop tables hold what billing has no place for:
+
+      shop_membership_settings  per-namespace prices, cap, lock days, thresholds
+      shop_memberships          tier (founding|standard), founding-spot
+                                reservation, price snapshot, fees paid
+      shop_member_tokens        emailed sign-in links + signed-in sessions
+                                (only sha256 hashes stored)
+      shop_credits              order credit ledger (VIP fee refunds; loyalty
+                                credits use the same table)
+      shop_waitlist             "tell me when it's back" with member priority
+
+    Plus: shop_products.public_launch_at (members see it early_access_hours
+    sooner), shop_quotes.price_locked, shop_orders.credit_minor.
+
+    Registered in migrations.lua as zzs19–zzs21. Idempotent.
+]]
+
+local db = require("lapis.db")
+
+return {
+    -- [1] settings + memberships ------------------------------------------------------
+    [1] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_membership_settings (
+                namespace_id integer PRIMARY KEY REFERENCES namespaces(id) ON DELETE CASCADE,
+                enabled boolean NOT NULL DEFAULT false,
+                monthly_price_minor integer NOT NULL DEFAULT 7500 CHECK (monthly_price_minor > 0),
+                yearly_months_charged integer NOT NULL DEFAULT 10 CHECK (yearly_months_charged BETWEEN 1 AND 12),
+                vat_rate numeric(5,4) NOT NULL DEFAULT 0.20,
+                founding_cap integer NOT NULL DEFAULT 100 CHECK (founding_cap >= 0),
+                uplift_pct numeric(6,2) NOT NULL DEFAULT 33,
+                lock_days integer NOT NULL DEFAULT 90 CHECK (lock_days IN (90, 120)),
+                refund_threshold_minor bigint NOT NULL DEFAULT 10000000,
+                credit_expiry_days integer NOT NULL DEFAULT 365,
+                early_access_hours integer NOT NULL DEFAULT 24,
+                long_lead_days integer NOT NULL DEFAULT 21,
+                terms_version varchar(32) NOT NULL DEFAULT '2026-10',
+                billing_app_id bigint,
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_memberships (
+                id serial PRIMARY KEY,
+                uuid varchar(64) NOT NULL UNIQUE,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                tier varchar(16) NOT NULL CHECK (tier IN ('founding', 'standard')),
+                billing_interval varchar(8) NOT NULL CHECK (billing_interval IN ('month', 'year')),
+                net_minor integer NOT NULL,
+                vat_minor integer NOT NULL,
+                status varchar(24) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'active', 'past_due', 'canceled', 'expired', 'abandoned')),
+                reserve_expires_at timestamptz,
+                stripe_session_id varchar(255),
+                stripe_subscription_id varchar(255),
+                stripe_customer_id varchar(255),
+                billing_subscription_id bigint,
+                customer_id integer,
+                joined_at timestamptz,
+                current_period_end timestamptz,
+                cancel_at_period_end boolean NOT NULL DEFAULT false,
+                canceled_at timestamptz,
+                fees_paid_net_minor bigint NOT NULL DEFAULT 0,
+                fees_credited_net_minor bigint NOT NULL DEFAULT 0,
+                last_invoice_id varchar(255),
+                terms_version varchar(32) NOT NULL,
+                terms_accepted_at timestamptz NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE INDEX IF NOT EXISTS shop_memberships_email_idx ON shop_memberships (namespace_id, lower(email))]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS shop_memberships_sub_uidx ON shop_memberships (stripe_subscription_id)
+                   WHERE stripe_subscription_id IS NOT NULL]])
+        db.query([[CREATE INDEX IF NOT EXISTS shop_memberships_tier_idx ON shop_memberships (namespace_id, tier, status)]])
+    end,
+
+    -- [2] sign-in tokens + credits + waitlist ----------------------------------------------
+    [2] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_member_tokens (
+                id serial PRIMARY KEY,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                kind varchar(8) NOT NULL CHECK (kind IN ('link', 'session')),
+                token_hash varchar(64) NOT NULL UNIQUE,
+                expires_at timestamptz NOT NULL,
+                used_at timestamptz,
+                created_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_credits (
+                id serial PRIMARY KEY,
+                uuid varchar(64) NOT NULL UNIQUE,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                amount_minor integer NOT NULL CHECK (amount_minor > 0),
+                min_order_minor bigint NOT NULL DEFAULT 0,
+                source varchar(16) NOT NULL CHECK (source IN ('vip_refund', 'loyalty', 'admin')),
+                reason text,
+                status varchar(16) NOT NULL DEFAULT 'available'
+                    CHECK (status IN ('available', 'reserved', 'used', 'void')),
+                reserved_order_id integer REFERENCES shop_orders(id) ON DELETE SET NULL,
+                used_order_id integer REFERENCES shop_orders(id) ON DELETE SET NULL,
+                earned_order_id integer REFERENCES shop_orders(id) ON DELETE SET NULL,
+                membership_id integer REFERENCES shop_memberships(id) ON DELETE SET NULL,
+                crm_lead_id bigint,
+                expires_at timestamptz,
+                created_by varchar(255),
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE INDEX IF NOT EXISTS shop_credits_email_idx ON shop_credits (namespace_id, lower(email), status)]])
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_waitlist (
+                id serial PRIMARY KEY,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                product_id integer NOT NULL REFERENCES shop_products(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                is_member boolean NOT NULL DEFAULT false,
+                notified_at timestamptz,
+                created_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS shop_waitlist_uidx ON shop_waitlist (product_id, lower(email))]])
+    end,
+
+    -- [3] columns on existing shop tables ------------------------------------------------
+    [3] = function()
+        db.query([[ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS public_launch_at timestamptz]])
+        db.query([[ALTER TABLE shop_quotes ADD COLUMN IF NOT EXISTS price_locked boolean NOT NULL DEFAULT false]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS credit_minor integer NOT NULL DEFAULT 0]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS stripe_coupon_id varchar(255)]])
+    end,
+}

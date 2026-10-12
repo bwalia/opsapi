@@ -37,9 +37,26 @@ local PRODUCT_COLS = [[
     p.images::text AS images, COALESCE(array_to_json(p.tags)::text, '[]') AS tags,
     p.base_price_minor, p.currency, p.vat_rate::float8 AS vat_rate, p.stock_qty, p.low_stock_threshold,
     p.lead_time_days, p.allow_backorder, p.price_verified, p.status, p.is_featured, p.sort_order,
-    p.created_at, p.updated_at
+    p.public_launch_at, COALESCE(p.public_launch_at > NOW(), false) AS prelaunch, p.created_at, p.updated_at
 ]]
 ShopCatalogQueries.PRODUCT_COLS = PRODUCT_COLS
+
+-- ---------------------------------------------------------------------------
+-- members' early access (shop_products.public_launch_at)
+-- ---------------------------------------------------------------------------
+
+--- SQL condition (alias p) for "visible to this request": launched products for everyone; a signed-in
+-- active member (ngx.ctx.shop_member, set by the public route) also sees products early_access_hours sooner.
+function ShopCatalogQueries.launchSql(alias)
+    alias = alias or "p"
+    local m = ngx and ngx.ctx and ngx.ctx.shop_member
+    local hours = m and m.active and tonumber(m.early_access_hours)
+    if hours and hours > 0 then
+        return ("(%s.public_launch_at IS NULL OR %s.public_launch_at - interval '%d hours' <= NOW())")
+            :format(alias, alias, math.floor(hours))
+    end
+    return ("(%s.public_launch_at IS NULL OR %s.public_launch_at <= NOW())"):format(alias, alias)
+end
 
 -- ---------------------------------------------------------------------------
 -- namespace
@@ -117,6 +134,8 @@ function ShopCatalogQueries.card(r, available)
         price_verified = r.price_verified == true,
         is_featured = r.is_featured == true,
         specs = r.specs,
+        -- set only while the product is in the members' early-access window
+        public_launch_at = r.prelaunch == true and r.public_launch_at or U.null,
     }
 end
 
@@ -136,7 +155,7 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
     local sql = "SELECT " .. PRODUCT_COLS .. [[, c.uuid AS category_uuid, c.slug AS category_slug, c.name AS category_name
           FROM shop_products p LEFT JOIN shop_categories c ON c.id = p.category_id
          WHERE p.namespace_id = ? AND ]] .. where
-    if opts.public then sql = sql .. " AND p.status = 'active'" end
+    if opts.public then sql = sql .. " AND p.status = 'active' AND " .. ShopCatalogQueries.launchSql("p") end
     local rows = db.query(sql .. " LIMIT 1", ns_id, val)
     local p = rows[1]
     if not p then return nil end
@@ -351,6 +370,7 @@ function ShopCatalogQueries.queryProducts(ns_id, params, opts)
     local where, vals = { "p.namespace_id = ?" }, { ns_id }
     if opts.public then
         where[#where + 1] = "p.status = 'active'"
+        where[#where + 1] = ShopCatalogQueries.launchSql("p")
     elseif U.nz(params.status) then
         where[#where + 1] = "p.status = ?"
         vals[#vals + 1] = params.status
@@ -449,7 +469,8 @@ function ShopCatalogQueries.cardsByIds(ns_id, ids)
                ]] .. FROM_PRICE_SQL .. [[ AS from_price_minor,
                p.stock_qty - ]] .. HELD_SQL .. [[ AS available
           FROM shop_products p LEFT JOIN shop_categories c ON c.id = p.category_id
-         WHERE p.namespace_id = ? AND p.status = 'active' AND p.id = ANY(?)
+         WHERE p.namespace_id = ? AND p.status = 'active' AND ]] .. ShopCatalogQueries.launchSql("p") .. [[
+           AND p.id = ANY(?)
     ]], ns_id, db.array(ids))
     for _, r in ipairs(rows) do
         norm_product(r)
@@ -585,6 +606,7 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
         low_stock_threshold = p.low_stock_threshold, lead_time_days = p.lead_time_days,
         allow_backorder = p.allow_backorder == true, price_verified = p.price_verified == true,
         status = p.status, is_featured = p.is_featured == true, sort_order = p.sort_order,
+        public_launch_at = p.public_launch_at or U.null,
         category = U.nz(p.category_uuid) and { uuid = p.category_uuid, slug = p.category_slug,
             name = p.category_name } or U.null,
         from_price_minor = Pricing.from_price(p, (function()
@@ -911,6 +933,10 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
         if doc.allow_backorder ~= nil then fields.allow_backorder = U.bool(doc.allow_backorder, true) end
         if doc.price_verified ~= nil then fields.price_verified = U.bool(doc.price_verified, false) end
         set("status", doc.status)
+        if doc.public_launch_at ~= nil then
+            -- null/"" = launched for everyone; otherwise an ISO timestamp (members see it early_access_hours sooner)
+            fields.public_launch_at = U.nz(doc.public_launch_at) and tostring(doc.public_launch_at) or db.NULL
+        end
         if doc.is_featured ~= nil then fields.is_featured = U.bool(doc.is_featured, false) end
         if doc.sort_order ~= nil then fields.sort_order = U.int(doc.sort_order, 0) end
         if doc.category_uuid ~= nil or doc.category_slug ~= nil or doc.category_id ~= nil

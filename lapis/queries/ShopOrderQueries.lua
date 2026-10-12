@@ -36,7 +36,7 @@ local ALLOWED_SHIP_COUNTRIES = { "GB", "IE", "FR", "DE", "NL", "BE", "ES", "IT" 
 local ORDER_COLS = [[
     o.id, o.uuid, o.namespace_id, o.order_number, o.access_token, o.status, o.email, o.customer::text AS customer,
     o.shipping_address::text AS shipping_address, o.billing_address::text AS billing_address,
-    o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.currency,
+    o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.credit_minor, o.currency,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at
 ]]
@@ -61,6 +61,7 @@ function ShopOrderQueries.shape(o, opts)
         vat_minor = o.vat_minor,
         shipping_minor = o.shipping_minor,
         total_minor = o.total_minor,
+        credit_minor = tonumber(o.credit_minor) or 0,
         currency = o.currency,
         paid_at = o.paid_at or U.null,
         created_at = o.created_at,
@@ -279,6 +280,32 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         return nil, U.err(409, "QUOTE_REQUIRED", "This order has no payable amount — please request a quote")
     end
 
+    -- Member credit: only for a signed-in member paying with their own email (ngx.ctx.shop_member is
+    -- set by the public route from X-Member-Token). Credit reduces the subtotal ex VAT; VAT is recomputed.
+    local credit
+    local member = ngx.ctx and ngx.ctx.shop_member
+    if member and (not email or tostring(email):lower() == member.email) then
+        local Membership = require("queries.ShopMembershipQueries")
+        local available = Membership.availableCredits(ns_id, member.email)
+        if #available > 0 then
+            local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+            local applied = require("lib.shop-membership").apply_credits(totals.subtotal_minor, vat_rate,
+                totals.shipping_minor, available)
+            if applied.credit_minor > 0 then
+                if applied.total_minor < 50 then
+                    return nil, U.err(409, "CREDIT_COVERS_ORDER",
+                        "Your credit covers this whole order — please request a quote and we'll arrange it for you")
+                end
+                credit = applied
+                credit.discount_minor = totals.total_minor - applied.total_minor
+                totals = { subtotal_minor = applied.subtotal_minor, vat_minor = applied.vat_minor,
+                           shipping_minor = applied.shipping_minor, total_minor = applied.total_minor }
+                email = email or member.email
+                customer.email = email
+            end
+        end
+    end
+
     local stripe, serr = PaymentProvider.get_stripe()
     if not stripe then
         ngx.log(ngx.ERR, "[shop] checkout: ", tostring(serr))
@@ -297,14 +324,16 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local token = U.token(24)
         local row = db.query([[
             INSERT INTO shop_orders (uuid, namespace_id, order_number, access_token, status, email, customer, lines,
-                                     subtotal_minor, vat_minor, shipping_minor, total_minor, currency, cart_id, quote_id,
-                                     created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, 'GBP', ?, ?, NOW(), NOW())
+                                     subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor, currency,
+                                     cart_id, quote_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, 'GBP', ?, ?, NOW(), NOW())
             RETURNING id, uuid, order_number, access_token
         ]], Global.generateUUID(), ns_id, next_number(), token, email or db.NULL, U.enc(customer),
             U.enc(U.arr(lines)), totals.subtotal_minor, totals.vat_minor, totals.shipping_minor,
-            totals.total_minor, cart and cart.id or db.NULL, quote and quote.id or db.NULL)[1]
+            totals.total_minor, credit and credit.credit_minor or 0, cart and cart.id or db.NULL,
+            quote and quote.id or db.NULL)[1]
         Stock.hold(ns_id, row.id, demand, RESERVATION_MINUTES)
+        if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
         return row
     end)
     if not order then return nil, terr end
@@ -327,6 +356,25 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         idempotency_key = "shop-order-" .. order.uuid,
     }
     if email then opts.customer_email = email end
+    if credit then
+        -- Stripe line items can't be negative: the credit (plus the VAT it saves) goes on as a one-off coupon.
+        local coupon, cerr = stripe:_request("POST", "/coupons", {
+            amount_off = credit.discount_minor, currency = "gbp", duration = "once", max_redemptions = 1,
+            name = "Workstation credit", metadata = { order_uuid = order.uuid },
+        }, "shop-credit-" .. order.uuid)
+        if not coupon or not coupon.id then
+            ngx.log(ngx.ERR, "[shop] credit coupon failed for ", order.order_number, ": ", tostring(cerr))
+            U.tx(function()
+                db.query("UPDATE shop_orders SET status = 'cancelled', updated_at = NOW() WHERE id = ?", order.id)
+                Stock.release(order.id)
+                require("queries.ShopMembershipQueries").releaseCredits(order.id)
+                return true
+            end)
+            return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Could not start checkout — please try again or request a quote")
+        end
+        opts.discounts = { { coupon = coupon.id } }
+        db.query("UPDATE shop_orders SET stripe_coupon_id = ? WHERE id = ?", coupon.id, order.id)
+    end
     local session, stripe_err = stripe:create_checkout_session(opts)
     if not session or not session.url then
         ngx.log(ngx.ERR, "[shop] Stripe checkout session failed for ", order.order_number, ": ", tostring(stripe_err))
@@ -335,13 +383,14 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
                        internal_notes = ? WHERE id = ?]], "Stripe session creation failed: "
                 .. tostring(stripe_err):sub(1, 500), order.id)
             Stock.release(order.id)
+            require("queries.ShopMembershipQueries").releaseCredits(order.id)
             return true
         end)
         return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Could not start checkout — please try again or request a quote")
     end
     db.query("UPDATE shop_orders SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, order.id)
     return { order_uuid = order.uuid, order_token = order.access_token, checkout_url = session.url,
-             order_number = order.order_number }
+             order_number = order.order_number, credit_minor = credit and credit.credit_minor or 0 }
 end
 
 -- ---------------------------------------------------------------------------
@@ -396,6 +445,10 @@ function ShopOrderQueries.applyPaid(order, session)
     end
     db.query([[UPDATE shop_chat_sessions SET order_id = ?, updated_at = NOW()
                 WHERE cart_id = ? AND order_id IS NULL]], order.id, order.cart_id or 0)
+    local Membership = require("queries.ShopMembershipQueries")
+    Membership.useCredits(order.id)
+    order.email = nz(cd.email) or order.email
+    Membership.maybeIssueRefundCredit(order)
     return true
 end
 
@@ -410,6 +463,7 @@ function ShopOrderQueries.applyUnpaid(order, status, note)
                                      ELSE COALESCE(internal_notes || E'\n', '') || ?::text END
                WHERE id = ?]], status, note or db.NULL, note or db.NULL, order.id)
     Stock.release(order.id)
+    require("queries.ShopMembershipQueries").releaseCredits(order.id)
     return true
 end
 

@@ -15,6 +15,8 @@
 
     Handled: checkout.session.completed | .async_payment_succeeded | .expired |
              .async_payment_failed, charge.refunded (see queries/ShopStripeQueries.lua)
+             VIP membership: the same session events (metadata.source = workstation-shop-vip),
+             invoice.paid, customer.subscription.updated | .deleted
 ]]
 
 local Stripe = require("lib.stripe")

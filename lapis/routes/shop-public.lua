@@ -30,6 +30,18 @@
       POST   /chat-sessions/:uuid/messages
       POST   /chat-sessions/:uuid/requirements   { requirements: {goal, models, budget_gbp, …} } (AI advisor)
       POST   /chat-sessions/:uuid/contact        { email, name?, company?, phone?, improve_consent } → CRM lead
+
+    VIP membership (X-Member-Token = a signed-in member's session; resolved for every route below,
+    so quotes lock, checkout applies credit and members see early-access products):
+      GET    /membership                         offer: real prices, founding spots left, settings
+      POST   /membership/checkout                { email, interval, accept_terms, terms_version, success_url, cancel_url }
+      POST   /member/login                       { email } → emails a one-time link (same answer either way)
+      POST   /member/verify                      { token } → { session_token, email }
+      GET    /member                             membership, credits (X-Member-Token)
+      POST   /member/cancel                      cancel at period end (X-Member-Token)
+      POST   /member/logout
+      GET    /member/early-access                products in the members-only window (X-Member-Token)
+      POST   /products/:slug/waitlist            { email } (members first)
 ]]
 
 local U = require("lib.shop-util")
@@ -42,6 +54,7 @@ local Search = require("queries.ShopSearchQueries")
 local Chat = require("queries.ShopChatQueries")
 local Market = require("queries.ShopMarketQueries")
 local Insights = require("queries.ShopInsightsQueries")
+local Membership = require("queries.ShopMembershipQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -67,6 +80,9 @@ local function public(handler)
         local ns = Catalog.namespaceBySlug(self.params.ns)
         if not ns then return U.fail(404, "NAMESPACE_NOT_FOUND", "Shop not found") end
         self.shop_ns = ns
+        -- Signed-in VIP member (BFF forwards the httpOnly ws_member cookie as X-Member-Token).
+        local mt = self.req.headers["x-member-token"]
+        if mt then ngx.ctx.shop_member = Membership.memberFromSession(ns.id, mt) end
         return handler(self, ns.id)
     end)
 end
@@ -268,5 +284,73 @@ return function(app)
         local res, err = Chat.saveContact(ns_id, self.params.uuid, body)
         if not res then return U.from_err(err) end
         return U.ok(res)
+    end))
+
+    -- VIP membership ------------------------------------------------------------------
+    app:get(BASE .. "/membership", public(function(_, ns_id)
+        return U.ok(Membership.offer(ns_id))
+    end))
+
+    app:post(BASE .. "/membership/checkout", public(function(_, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Membership.startCheckout(ns_id, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res, 201)
+    end))
+
+    app:post(BASE .. "/member/login", public(function(_, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Membership.requestLogin(ns_id, body)
+        if not res then return U.from_err(err) end
+        -- Same answer whether or not the email is a member.
+        return U.ok({ message = "If that email has a membership, we've sent a sign-in link. It expires in 15 minutes." })
+    end))
+
+    app:post(BASE .. "/member/verify", public(function(_, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Membership.verifyLink(ns_id, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    local function member_or_401()
+        local m = ngx.ctx.shop_member
+        if not m then return nil, U.fail(401, "NOT_SIGNED_IN", "Please sign in to your membership") end
+        return m
+    end
+
+    app:get(BASE .. "/member", public(function(_, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        return U.ok(Membership.me(ns_id, m))
+    end))
+
+    app:post(BASE .. "/member/cancel", public(function(_, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local res, err = Membership.cancel(ns_id, m)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/member/logout", public(function(self, ns_id)
+        return U.ok(Membership.logout(ns_id, self.req.headers["x-member-token"]))
+    end))
+
+    app:get(BASE .. "/member/early-access", public(function(_, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        return U.ok(Membership.earlyAccess(ns_id, m))
+    end))
+
+    app:post(BASE .. "/products/:slug/waitlist", public(function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Membership.joinWaitlist(ns_id, self.params.slug, body, ngx.ctx.shop_member)
+        if not res then return U.from_err(err) end
+        return U.ok(res, 201)
     end))
 end
