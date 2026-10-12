@@ -11,14 +11,17 @@ import copy
 import datetime
 import json
 import os
+import re
 import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "../../property-deals/spec"))
 sys.path.insert(0, os.path.join(HERE, "regression"))
+sys.path.insert(0, HERE)
 from pdtest import API, USERS, call, check, expect, finish, workspace  # noqa: E402
 import scenes  # noqa: E402
+from pa_common import platform_admin  # noqa: E402
 
 PA = API + "/api/v2/property-pa"
 PD = API + "/api/v2/property-deals"
@@ -54,7 +57,7 @@ for user, role in ((SOPHIE, "pd_operator"), (ASHLEY, "pd_manager"), ("agent", "p
     expect(f"add {user}", call("POST", API + "/api/v2/namespace/members", "owner_s", S,
            {"email": USERS[user][1], "role_ids": [role_id[role]]}), 201)
 data(call("POST", PA + "/setup", "owner_s", S), 200, "PA setup")
-fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+fx = data(call("POST", PA + "/demo/reset", platform_admin(), S, {"sophie_user_uuid": USERS[SOPHIE][0],
           "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "fixtures")
 SARAH = fx["sarah"]["opportunity_uuid"]
 
@@ -167,7 +170,8 @@ check("P09: our position stays inferred after confirming (a judgement, not a fac
       opp["facts"].get("our_position"))
 acts = data(call("GET", PA + f"/next-actions?opportunity_uuid={SARAH}", SOPHIE, S), 200, "Sarah's next actions")
 call_sarah = next((a for a in acts if a["title"] == "Call Sarah"), None)
-due_got = datetime.datetime.fromisoformat(call_sarah["due_at"].replace("Z", "+00:00")) if call_sarah else None
+due_got = datetime.datetime.fromisoformat(re.sub(r"([+-]\d\d)$", r"\1:00", call_sarah["due_at"].replace("Z", "+00:00"))) \
+    if call_sarah else None  # Postgres "+00" offsets: Python 3.9 wants "+00:00"
 check("P04: Call Sarah tomorrow 11:00 UK, owner Sophie, with the reason, from the voice note",
       call_sarah and call_sarah["owner_user_uuid"] == USERS[SOPHIE][0] and call_sarah["reason"]
       == "She'll decide after speaking to Tom" and call_sarah["created_from_interaction_uuid"] == IT

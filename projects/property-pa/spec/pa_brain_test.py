@@ -12,7 +12,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../property-deals/spec"))
-from pdtest import API, USERS, call, check, expect, finish, workspace  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pdtest import API, USERS, call, check, expect, finish, sql, workspace  # noqa: E402
+from pa_common import platform_admin  # noqa: E402
 
 PA = API + "/api/v2/property-pa"
 PD = API + "/api/v2/property-deals"
@@ -92,12 +94,15 @@ res = call("POST", PA + "/knowledge", SOPHIE, S, {"key": "Bad Key", "title": "x"
 check("bad key refused (422)", res[0] == 422, res)
 
 # --- Fixtures --------------------------------------------------------------------------------------------------------
-res = call("POST", PA + "/demo/reset", SOPHIE, S, {})
-check("agents can't reset demo data (403)", res[0] == 403, res)
-fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
-          "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset the How It Works fixtures")
+for who in (SOPHIE, ASHLEY, "owner_s"):
+    res = call("POST", PA + "/demo/reset", who, S, {})
+    check(f"demo reset is hidden from {who}, even a manager or the owner (404)", res[0] == 404, res)
+check("and so is removing the demo (404)", call("DELETE", PA + "/demo", "owner_s", S)[0] == 404)
+ADMIN = platform_admin()
+fx = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+          "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "a platform admin resets the How It Works fixtures")
 check("10 sellers + James", fx["opportunities"] == 11 and fx["sarah"]["opportunity_uuid"], fx)
-fx = data(call("POST", PA + "/demo/reset", ASHLEY, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+fx = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
           "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset again")
 check("reset replaces, never duplicates", fx["cleared"] == 11 and fx["opportunities"] == 11, fx)
 opps = data(call("GET", PA + "/opportunities?mine=true&per_page=50", SOPHIE, S), 200, "Sophie's opportunities")
@@ -405,5 +410,21 @@ check(f"openapi: {len(ops)} Property PA operations, all documented", len(ops) >=
 check("openapi: PA schemas present", all(k in spec["components"]["schemas"] for k in
       ("PropertyPaOpportunity", "PropertyPaProposedUpdate", "PropertyPaChange", "PropertyPaRun")),
       [k for k in spec["components"]["schemas"] if k.startswith("PropertyPa")])
+
+# --- A demo reset never takes real work with it ------------------------------------------------------------------
+again = data(call("POST", PA + "/demo/reset", ADMIN, S, {"sophie_user_uuid": USERS[SOPHIE][0],
+             "ashley_user_uuid": USERS[ASHLEY][0]}), 200, "reset after real work on Sarah")
+check("Sarah (real notes, captures, a handoff on her) is kept; the untouched fixtures are replaced",
+      again["kept"] == 1 and again["cleared"] == 10 and again["opportunities"] == 11, again)
+check("the real voice note, captures and handoff on Sarah survive the reset",
+      sql(f"SELECT COUNT(*) FROM crm_activities WHERE uuid = '{cap['interaction']['uuid']}'") == ["1"]
+      and sql(f"SELECT COUNT(*) FROM pa_handoffs WHERE uuid = '{h['uuid']}' AND opportunity_uuid = '{SARAH}'") == ["1"]
+      and sql(f"SELECT COUNT(*) FROM pa_proposed_updates WHERE target_uuid = '{SARAH}'") != ["0"], SARAH)
+check("the kept Sarah is an ordinary record now (no fixture tag)",
+      sql(f"SELECT metadata ->> 'fixture' IS NULL FROM pa_opportunities WHERE uuid = '{SARAH}'") == ["t"])
+gone = data(call("DELETE", PA + "/demo", ADMIN, S), 200, "remove the demo")
+check("removing the demo deletes only the fixtures", gone["removed_opportunities"] == 11
+      and gone["kept_opportunities"] == 0 and sql(f"SELECT COUNT(*) FROM pa_opportunities WHERE uuid = '{SARAH}'") == ["1"],
+      gone)
 
 sys.exit(finish())

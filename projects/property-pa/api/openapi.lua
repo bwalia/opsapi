@@ -278,7 +278,12 @@ return function(app)
     doc("POST /public/jobshout/events", { summary = "JobShout webhook (run.completed / run.failed)",
         description = "Signed: X-JobShout-Signature = sha256=HMAC(secret, X-JobShout-Timestamp + '.' + body).",
         body = OBJ({}), response = OBJ({}), errors = { ["401"] = "Bad or stale signature" } })
-    doc("POST /demo/reset", { summary = "Reset the How It Works fixtures", permission = "property_pa_knowledge.manage",
-        body = OBJ({ sophie_user_uuid = S(), ashley_user_uuid = S() }), response = OBJ({}) })
-    doc("DELETE /demo", { summary = "Remove the fixtures", permission = "property_pa_knowledge.manage", response = OBJ({}) })
+    local DEMO = "Platform admins only (404 for everyone else). Only fixture rows are deleted: a fixture that real work "
+        .. "points at (a note, task, offer, handoff, capture...) is kept as an ordinary record."
+    doc("POST /demo/reset", { summary = "Reset the How It Works fixtures", description = DEMO,
+        body = OBJ({ sophie_user_uuid = S(), ashley_user_uuid = S() }),
+        response = OBJ({ cleared = INT("Fixture opportunities removed"), kept = INT("Kept because real work uses them"),
+            opportunities = INT("Seeded") }), errors = { ["404"] = "Not a platform admin" } })
+    doc("DELETE /demo", { summary = "Remove the fixtures", description = DEMO,
+        response = OBJ({ removed_opportunities = INT(), kept_opportunities = INT() }), errors = { ["404"] = "Not a platform admin" } })
 end
