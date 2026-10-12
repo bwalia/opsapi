@@ -223,7 +223,9 @@ return function(app)
         merge("task_automation", { in_progress_on_start = { type = "boolean" },
             review_on_success = { type = "boolean" } })
         merge("approval_policy", { deciders = { enum = { "requester", "managers", "requester_or_managers" } },
-            require_start_approval = { type = "boolean" } })
+            require_start_approval = { type = "boolean" },
+            permission_timeout_minutes = { type = "integer", min = 1, max = 1440 },
+            input_timeout_minutes = { type = "integer", min = 1, max = 1440 } })
         db.query([[
             INSERT INTO ar_settings (namespace_id, output_mode, pr_draft, pr_base, max_run_minutes, task_automation,
                 approval_policy, updated_by)
