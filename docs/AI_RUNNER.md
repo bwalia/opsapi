@@ -448,3 +448,93 @@ Open:
    `main` by default. One run per folder at a time; the folder must be clean.
 2. Phase 2 changes PromptPilot on the Mac Studio (new runner code, a LaunchAgent, a one-time `claude setup-token` run by the
    account owner). Each of these is done only after you approve it at that time.
+
+---
+
+## 22. Phase 2 build contract (a slice testable from the dashboard)
+
+Phase 2 makes the whole loop work from the UI: register a runner → **Start with AI** on a task → the runner claims the
+run, works in the chosen folder on a new branch, applies the output mode → the run's status, log and result are visible
+on **AI Runs**, with cancel and retry. Deferred to Phase 3: the permission bridge (until then a Claude run may only read
+and edit files in the folder — anything that would prompt is **denied**, never auto-approved), per-turn session tracking
+and usage metering, the run-scoped MCP token, `needs_input`, the Cursor profile. Phase 4: similar-work detection, routing.
+
+### 22.1 Plugin
+
+`projects/ai-runner` (code `ai_runner`, name "AI Runs", icon `Bot`, `default_enabled = false`, depends on kanban).
+API prefix `/api/v2/ai-runner`. Native dashboard pages under `/dashboard/ai-runner/`.
+
+Modules: `ai_runs` (read, create, update, delete, manage), `ai_runs_approvals` (manage — used in Phase 3),
+`ai_runners` (manage), `ai_runs_settings` (manage). Menu: **AI Runs** (`/dashboard/ai-runner/runs`, `ai_runs`),
+**Runners** (`/dashboard/ai-runner/runners`, `ai_runners`), **AI run settings** (`/dashboard/ai-runner/settings`,
+`ai_runs_settings`).
+
+Who may start a run on a task: `ai_runs.create` **and** (assignee of the task **or** `ai_runs.manage` **or** owner/admin of
+the task's kanban project). Who sees runs: own runs with `ai_runs.read`; all with `ai_runs.manage`; project owners/admins
+see their project's runs. Cancel/retry: the requester or `ai_runs.manage`.
+
+### 22.2 Runner API (no user session: under the plugin's `public/` prefix, authenticated by the runner token)
+
+Header `Authorization: Bearer oprn_<48 hex>`. The token is stored hashed (SHA-256) on `ar_runners`, belongs to exactly one
+workspace, and is refused when the runner is revoked or the plugin is off in that workspace (404). A runner can only read
+or change runs it claimed. All bodies JSON; all responses `{ success, data }`.
+
+| Method & path | Body → response |
+|---|---|
+| `POST /api/v2/ai-runner/public/runner/heartbeat` | `{ version, host, os, capabilities: { max_concurrency, profiles: [{ key, label, approval: "none"\|"bridge"\|"unsupported", models: [] }] }, load: { running }, inventory: [{ key, tool, status, cwd, branch, session_id, started_at, updated_at, prompt_preview, labels }], repos: [{ path, remote, branch, dirty }] }` → `{ runner_uuid, cancel: [run_uuid], config: { heartbeat_s: 15, claim_wait_s: 25, lease_s: 60 } }` |
+| `POST /api/v2/ai-runner/public/runner/claim` | `{ wait_s?: ≤25 }` → **200** `{ run }` or **204** (nothing to do). Atomic (`FOR UPDATE SKIP LOCKED`), ordered by task priority then age, at most `max_concurrency` running per runner |
+| `POST /api/v2/ai-runner/public/runner/runs/:uuid/status` | `{ seq, status: "starting"\|"running"\|"succeeded"\|"failed"\|"cancelled", pid?, agent_session_id?, exit_code?, error_category?, error?, summary?, commit_sha?, pr_url?, work_branch?, previous_branch? }` → `{ status, cancel: bool }`. A `seq` not greater than the stored one is ignored (200). Terminal states release the folder lock |
+| `POST /api/v2/ai-runner/public/runner/runs/:uuid/events` | `{ events: [{ seq, type: "log"\|"progress"\|"tool"\|"usage", text?, data? }] }` (≤ 200 per call, text ≤ 4 KB each, idempotent on (run, seq)) → `{ stored }` |
+
+`run` (claim payload): `{ uuid, task: { uuid, task_number, title, url }, project: { uuid, name }, profile, model,
+repo_path, base_branch, work_branch, output_mode: "pull_request"|"branch"|"local", pr: { draft, base }, prompt,
+timeout_s }`. `work_branch` = `ai/<task_number>-<slug>`; `base_branch` empty = the folder's default branch.
+
+### 22.3 User API (session JWT, RBAC above)
+
+| Method & path | Notes |
+|---|---|
+| `GET /runners` | runners of the workspace: uuid, name, status (`online` if heartbeat < 45 s), host, os, version, capabilities, repos, last_heartbeat_at. Anyone with `ai_runs.create` (for the Start dialog) |
+| `POST /runners` `{ name, labels? }` | `ai_runners.manage` → 201 `{ runner, token }` (token shown once) |
+| `POST /runners/:uuid/rotate-token` · `/pause` · `/resume` · `DELETE /runners/:uuid` | `ai_runners.manage`; delete = revoke |
+| `GET /runners/:uuid/sessions` | `ai_runs.manage`; last inventory (managed sessions linked to their run) |
+| `POST /tasks/:task_uuid/runs/preview` `{ runner_uuid?, profile?, repo_path? }` | → `{ prompt, template_version, runners, default_repo_path, output_mode, conflicts: { open_run, folder_lock, busy_session } }` — no side effects |
+| `POST /tasks/:task_uuid/runs` `{ runner_uuid, profile, model?, repo_path, prompt?, output_mode? }` | `Idempotency-Key`. `prompt` only for `ai_runs.manage` or project owner/admin. → 201 run, 409 `{ error, conflict }` (open run on the task, folder locked, busy session in the folder, runner offline/paused), 422 (folder not among the runner's reported repos, profile unknown) |
+| `GET /runs` `?status&task_uuid&runner_uuid&mine&page&per_page` | paged, newest first |
+| `GET /runs/:uuid` | run + last 500 events + task + runner |
+| `POST /runs/:uuid/cancel` · `POST /runs/:uuid/retry` | cancel: queued → cancelled at once; running → `cancelling` (sent to the runner in the next heartbeat). Retry: a new run (attempt + 1) with the same inputs |
+| `GET /tasks/:task_uuid/runs` | the task's run history |
+| `GET/PUT /settings` | `ai_runs_settings.manage`: `{ output_mode, pr_draft, pr_base, max_run_minutes, task_automation: { in_progress_on_start, review_on_success }, approval_policy }` (approval_policy stored now, used in Phase 3) |
+| `GET/PUT /projects/:project_uuid/settings` | owner/admin of the project or `ai_runs_settings.manage`: `{ default_repo_paths: { runner_uuid: path }, output_mode?, base_branch? }` |
+| `GET/PUT /template` | `ai_runs_settings.manage`: the workspace prompt template `{ body, version }` (versioned on save) |
+
+Run statuses: `queued → claimed → starting → running → succeeded | failed | cancelled | lost`, plus `cancelling`.
+The lease sweep (plugin job every minute) marks `claimed/starting/running/cancelling` runs whose heartbeat is older than
+`lease_s` as `lost` and releases their locks; queued runs older than 24 h are cancelled.
+
+### 22.4 Prompt template (default; variables in `{{ }}`)
+
+Task `#{{task.number}} {{task.title}}` from project {{project.name}} ({{task.url}}), its description and checklist; the
+repo folder `{{repo_path}}` and branch `{{work_branch}}`; the output mode; fixed guardrails: work only in this folder on
+this branch, never on `main`; never print, commit or log secrets; don't merge; when done, summarise what changed in one
+short paragraph as the last message. Task text is fenced as data, not instructions.
+
+### 22.5 PromptPilot runner mode (Phase 2)
+
+`promptpilot runner -config runner.json` next to the existing observer (same binary, standard library only):
+- config: `registrations: [{ name, opsapi_url, token_file, allowed_roots: [], max_concurrency }]`, `profiles: [{ key,
+  label, approval, models, command: [...with {{prompt}} {{run_uuid}} {{model}}], env: {} }]`, `claude_oauth_token_file`
+  (optional), `restore_branch` (default true).
+- heartbeat every 15 s (inventory = the observer's sessions under the allowed roots; repos = git repos found up to 3
+  levels under the allowed roots); claim loop; per run: validate the folder (real path inside an allowed root, a git
+  repo, no uncommitted changes, no busy session in it), remember the current branch, `git fetch` (best effort),
+  `git switch -c <work_branch> <base>`; start the profile command in its own process group with the run uuid as the
+  Claude session id; stream stdout/stderr lines as `log` events (batched, every 1 s or 50 lines); parse Claude
+  stream-json `result` for summary/usage; cancel (from heartbeat or status reply) kills the group; per-run timeout;
+  on success apply the output mode (commit all changes "<task #> <title>"; `branch`/`pull_request`: push; `pull_request`:
+  `gh pr create --base <base> [--draft]` with the task link and summary); restore the previous branch; report status.
+- The agent's environment never contains `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`; `CLAUDE_CODE_OAUTH_TOKEN` comes
+  from `claude_oauth_token_file` when set. Default Claude profile:
+  `claude -p {{prompt}} --output-format stream-json --verbose --session-id {{run_uuid}} --restricted --permission-mode acceptEdits --permission-prompts none --allowedTools Read,Grep,Glob,Edit,MultiEdit,Write`.
+- A `fake` profile (`scripts/fake-agent.sh`) edits a file and prints realistic stream-json, for tests.
+- Service files: a LaunchAgent plist (macOS) and a systemd user unit (Linux), not installed by default.
