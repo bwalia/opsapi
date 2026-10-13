@@ -254,6 +254,13 @@ spec:
             # so Google sent other tenants' sign-ins to the diytaxreturn API.
             # ``googleRedirectUri`` points Google back at THIS release; it must
             # also be listed as an authorised redirect URI on the OAuth client.
+            # ``googleClientId`` pins this release's OAuth client the same way (a
+            # client id is public: it is in every Google sign-in URL). The Vault
+            # GOOGLE_CLIENT_SECRET must belong to the same client.
+            {{- if .Values.googleClientId }}
+            - name: GOOGLE_CLIENT_ID
+              value: {{ .Values.googleClientId | quote }}
+            {{- end }}
             {{- if .Values.googleRedirectUri }}
             - name: GOOGLE_REDIRECT_URI
               value: {{ .Values.googleRedirectUri | quote }}
