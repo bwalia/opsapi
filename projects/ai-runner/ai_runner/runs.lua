@@ -80,7 +80,21 @@ function R.platform()
         end
     end
     ngx.ctx.ar_platform = platform_values(stored, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
+    -- Where task links point (prompts, run details, the agent's get_task); "" = FRONTEND_URL.
+    ngx.ctx.ar_platform.dashboard_url = R.base_url(type(stored) == "table" and stored.dashboard_url) or ""
     return ngx.ctx.ar_platform
+end
+
+--- A dashboard's base address: http(s), a host and an optional port, no path (a trailing / is dropped); else nil.
+function R.base_url(v)
+    if type(v) ~= "string" or #v > 255 then return nil end
+    local s = v:gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
+    if s:match("^https?://[%w%-%.]+$") or s:match("^https?://[%w%-%.]+:%d+$") then return s end
+end
+
+--- The deployment's FRONTEND_URL (its first entry, when it lists several).
+function R.frontend_url()
+    return ((os.getenv("FRONTEND_URL") or ""):match("^%s*([^,%s]*)"):gsub("/+$", ""))
 end
 
 --- After a save: this pod reads them again now, the others within a minute.
@@ -140,8 +154,11 @@ function R.task(ns, task_uuid)
     ]], task_uuid, ns)
 end
 
+-- A task's page in the dashboard: the platform's dashboard_url (§27.5), else FRONTEND_URL. They differ where the
+-- dashboard isn't the site password-reset emails go to (workstation: int-opsapi-ui.workstation.co.uk).
 function R.task_url(project_uuid, task_uuid)
-    local base = (os.getenv("FRONTEND_URL") or ""):match("^%s*([^,%s]*)"):gsub("/+$", "")
+    local base = R.platform().dashboard_url
+    if base == "" then base = R.frontend_url() end
     return base .. "/dashboard/projects/" .. tostring(project_uuid) .. "/tasks/" .. tostring(task_uuid)
 end
 

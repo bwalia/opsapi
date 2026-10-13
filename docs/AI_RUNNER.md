@@ -1181,4 +1181,5 @@ AI Runs is a feature of a SaaS platform, so behaviour is set in the admin dashbo
 - **Runner:**
   - It claims only after its first successful heartbeat, so the workspace's denied commands arrive before any run.
   - Version 0.5.0.
+- **Dashboard address:** a platform setting `dashboard_url` (an http(s) address, no path) sets where task links point, in prompts, run details and the agent's `get_task`. When it's empty, links use `FRONTEND_URL`. The two differ where password-reset emails go to another site than the dashboard, as on workstation int (`FRONTEND_URL` is int.diytaxreturn.co.uk, the dashboard is int-opsapi-ui.workstation.co.uk).
 - **Platform settings page:** reached from AI run settings, and shown only to platform admins. It has no sidebar entry, because plugin menus are per workspace.

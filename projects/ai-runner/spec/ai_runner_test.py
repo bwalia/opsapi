@@ -2739,6 +2739,21 @@ check("... the defaults, an empty row, and the heartbeat config follows", {k: ps
       == {"heartbeat_s": 15, "claim_wait_s": 25, "lease_s": 60}, ps)
 expect("guards back", put_s({"guards": {"max_open_runs_per_user": 0}}), 200)
 
+# --- Dashboard address: where task links point (a platform setting, else FRONTEND_URL) -----------------------------
+ps = expect("the dashboard address is a platform setting", put_ps({"dashboard_url": "https://ops.example.test/"}), 200)
+check("saved without the trailing /, and this server's FRONTEND_URL shown as the fallback",
+      ps.get("dashboard_url") == "https://ops.example.test"
+      and ps.get("dashboard_url_fallback") == "https://dash.example.invalid", ps)
+link = lambda: (expect("a run's details", call("GET", P + f"/runs/{RL['uuid']}", "mgr", A), 200).get("task") or {}).get(
+    "url") or ""
+check("a run's task link points at the dashboard address", link().startswith("https://ops.example.test/dashboard/projects/"),
+      link())
+for v in ("javascript:alert(1)", "https://ops.example.test/path", "ftp://ops.example.test", "https://a b.test", 5):
+    bad(f"dashboard_url {v!r} is refused", put_ps({"dashboard_url": v}), "dashboard_url")
+ps = expect("emptied: back to FRONTEND_URL", put_ps({"dashboard_url": ""}), 200)
+check("... the link uses FRONTEND_URL again", ps.get("dashboard_url") == ""
+      and link().startswith("https://dash.example.invalid/dashboard/projects/"), link())
+
 # --- Migration 6 again ------------------------------------------------------------------------------------------------
 MIG6 = "20261013400000_ai_runner_configurable"
 if MIGRATE:

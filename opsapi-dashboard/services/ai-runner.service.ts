@@ -450,14 +450,19 @@ export interface PlatformSettings {
   defaults: PlatformValues;
   bounds: Record<string, Bounds | Record<string, Bounds>>;
   updated_at?: string | null;
+  /** Where task links point ("" = the deployment's FRONTEND_URL, given as dashboardUrlFallback). */
+  dashboardUrl: string;
+  dashboardUrlFallback: string;
 }
 function platform(d: Record<string, unknown>): PlatformSettings {
-  const { defaults, bounds, updated_at, ...rest } = d || {};
+  const { defaults, bounds, updated_at, dashboard_url, dashboard_url_fallback, ...rest } = d || {};
   // Every number, and objects of numbers (guard_max); not updated_by.
   const values = Object.fromEntries(Object.entries(rest).filter(([, x]) => typeof x === 'number' || (!!x && typeof x === 'object')));
   return {
     values: values as PlatformValues, defaults: (defaults ?? {}) as PlatformValues,
     bounds: (bounds ?? {}) as PlatformSettings['bounds'], updated_at: updated_at as string | null,
+    dashboardUrl: typeof dashboard_url === 'string' ? dashboard_url : '',
+    dashboardUrlFallback: typeof dashboard_url_fallback === 'string' ? dashboard_url_fallback : '',
   };
 }
 
@@ -666,7 +671,8 @@ export const aiRunner = {
   // §27.5 platform settings (platform admins only).
   getPlatformSettings: async () => platform((await get<Record<string, unknown>>('/platform/settings')).data),
   /** Only the keys given change. */
-  savePlatformSettings: async (v: PlatformValues) => platform(await send<Record<string, unknown>>('put', '/platform/settings', v)),
+  savePlatformSettings: async (v: PlatformValues, dashboardUrl?: string) =>
+    platform(await send<Record<string, unknown>>('put', '/platform/settings', dashboardUrl === undefined ? v : { ...v, dashboard_url: dashboardUrl })),
 };
 
 export default aiRunner;

@@ -87,8 +87,11 @@ function at<T>(obj: Record<string, unknown> | undefined, g: Group, key: string):
 function Platform() {
   const loaded = useAiData(() => aiRunner.getPlatformSettings(), []);
   const [v, setV] = useState<PlatformValues | null>(null);
+  const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (loaded.data) setV(loaded.data.values); }, [loaded.data]);
+  useEffect(() => {
+    if (loaded.data) { setV(loaded.data.values); setUrl(loaded.data.dashboardUrl); }
+  }, [loaded.data]);
 
   if (loaded.error?.status === 403) {
     return (
@@ -128,7 +131,9 @@ function Platform() {
     }
     setBusy(true);
     try {
-      setV((await aiRunner.savePlatformSettings(body)).values);
+      const saved = await aiRunner.savePlatformSettings(body, url.trim());
+      setV(saved.values);
+      setUrl(saved.dashboardUrl);
       toast.success('Platform settings saved. Every server uses them within a minute.');
     } catch (err) {
       toast.error(aiErrorText(err));
@@ -143,6 +148,9 @@ function Platform() {
         <p className="text-sm text-secondary-600">
           These apply to every workspace on this platform. Workspaces set their own AI run settings within the bounds below.
         </p>
+        <Input id="air-p-dashboard-url" label="Dashboard address" type="url" value={url} onChange={(e) => setUrl(e.target.value)}
+          placeholder={meta.dashboardUrlFallback || 'https://ops.example.com'}
+          helperText={`Task links in AI run prompts and run details point here. Just the address, no path. Empty = this server's FRONTEND_URL${meta.dashboardUrlFallback ? ` (${meta.dashboardUrlFallback})` : ''}.`} />
         {GROUPS.map((g) => (
           <fieldset key={g.title} className="min-w-0 space-y-3 border-t border-secondary-200 pt-4 first-of-type:border-t-0 first-of-type:pt-0">
             <legend className="sr-only">{g.title}</legend>
