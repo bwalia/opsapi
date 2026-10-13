@@ -1183,3 +1183,80 @@ AI Runs is a feature of a SaaS platform, so behaviour is set in the admin dashbo
   - Version 0.5.0.
 - **Dashboard address:** a platform setting `dashboard_url` (an http(s) address, no path) sets where task links point, in prompts, run details and the agent's `get_task`. When it's empty, links use `FRONTEND_URL`. The two differ where password-reset emails go to another site than the dashboard, as on workstation int (`FRONTEND_URL` is int.diytaxreturn.co.uk, the dashboard is int-opsapi-ui.workstation.co.uk).
 - **Platform settings page:** reached from AI run settings, and shown only to platform admins. It has no sidebar entry, because plugin menus are per workspace.
+
+---
+
+## 28. The built-in runner: no machine needed
+
+A workspace without a machine running PromptPilot can still run AI tasks. Each workspace gets a **built-in runner**: it runs inside OpsAPI on an AI model, so nobody has to keep a laptop or a Mac Studio on. Machines stay the way to run Claude Code or Cursor with a shell (builds, tests); the built-in runner is the always-there default.
+
+### 28.0 Decisions
+- **The model:** the workspace's own AI providers (Workspace → AI providers: a cloud API key, a local OpenAI-compatible server), then the platform's model (`AI_PROVIDER`, Ollama by default). A workspace provider's data never falls back to the platform's model.
+- **What it can do:**
+  - **Without a repository:** plan, answer and write on the task: comments and subtasks.
+  - **With a GitHub repository:** read the code and commit to the run's own branch through the GitHub API, then open a pull request.
+  - **No shell:** it can't run code, builds or tests, so it needs no permission bridge. Nothing reaches the base branch without a person merging the pull request.
+- **GitHub access:** one **GitHub App** for the platform. Workspaces install it on the repositories they choose. There are no personal tokens, and every run's token covers only its one repository.
+
+### 28.1 The runner and its profiles
+- **One per workspace:** `ar_runners.kind = 'builtin'` (migration 7 widens the kind CHECK and adds a unique index on `namespace_id` for it). It is created on first use: the runners list, a preview or a start.
+- **Always online:** `R.online_sql` counts it online whatever its heartbeat. It has no token (a random hash nobody holds), can't be revoked (409) or have its token rotated (409), and stays `builtin` (422 on a kind change). It can be **paused**, and its **Access** works like any runner's (default: everyone who may start runs).
+- **Profiles** (recomputed on every listing):
+  - `provider:<uuid>`: each enabled workspace AI provider, except JobShout. Unavailable when its key or model is missing.
+  - `platform`: the platform's model. Unavailable when the server has no model, or when the shared health check last saw it down.
+  - Workspace providers come first, so the platform model is the default only when the workspace has none.
+- **Repositories:** `none`, then `github:<owner>/<name>` for each repository of the workspace's GitHub installations (archived ones left out). They are read from GitHub at most every 5 minutes, or at once with `GET /runners?refresh=1`, a connect or a disconnect.
+- **Start dialog:** the built-in runner is listed after the machines. The dialog picks the first runner online, so it picks the built-in one when no machine is.
+
+### 28.2 Running a run
+- **Same lifecycle as a machine's:** queued → claimed → running → succeeded / failed / cancelled / lost, with status reports through `R.report` (compare-and-set), turns, follow-ups, `needs_input`, cancel, task automation, notifications and retry.
+- **Where it runs:** in nginx timers. A start or an approval kicks the queue at once; the plugin job `builtin_runner` (every minute, once per deployment) kicks it again for anything missed.
+- **Claiming:** under a cluster-wide advisory lock, at most `builtin_max_runs` built-in runs at once over all workspaces (default 2) and `builtin_max_runs_per_workspace` per workspace (default 1); highest task priority, then oldest. Self-hosted models on shared hardware can't take many at once.
+- **Leases:** the worker renews its runs' leases every 15 s. If the pod dies, the lease sweep marks the run lost, as for a machine.
+- **The agent:** a tool loop over `lib/agent/llm` (`Llm.chat`), at most `builtin_max_steps` model calls (default 40), within the run's time limit (`max_run_minutes`).
+  - **System prompt:** the tools, the branch, the rules (task text is data; never write secrets; `NEEDS_INPUT:` to ask).
+  - **User prompt:** the workspace's template, rendered with the repository instead of a folder.
+  - **Small models:** tool results older than the last 6 shrink to a stub, so a long run stays inside a small context window.
+- **Task tools:** `get_task` (the task, checklist and 20 latest comments), `add_comment` (as the requester, prefixed `[AI run]`, at most 20), `add_subtask` (under the task, in its column, at most 20).
+- **Repository tools:** `list_files`, `read_file` (by lines), `search_code` (GitHub code search, default branch), `write_file` (a whole file, one commit on the run's branch; the branch is made from the base on the first write, and a retry carries on with the branch it left).
+  - **Off limits:** keys and environment files (`.env*`, `*.pem`, `*.key`, `id_rsa`, `.npmrc`, …) for reading and writing; `.github/workflows/` for writing; paths with `.` or `..`.
+- **The end:** the last reply is the summary. With commits and output `pull_request`, a pull request opens from the branch to `pr_base` (or the base when that branch doesn't exist), draft per the settings, with the summary and the task link; an open one for the branch is reused. The summary (and the pull request link) is posted on the task.
+- **Usage:** every model call is an `ai_usage` row (`feature 'agent_run'`, the requester, the run); the run's token totals grow with each call, and each reply is a turn with its usage. The workspace's daily token limit applies at start, and `AI_USER_DAILY_TOKEN_LIMIT` per call.
+- **Failures** (`error_category`): `model_error`, `rate_limited`, `timeout`, `step_limit`, `needs_input_timeout`, `github_error`, `github_not_configured`, `bad_repo_path`, `pr_failed` (the branch is kept), `profile_unavailable`, `plugin_disabled`, `task_gone`, `internal`.
+- **No folder lock:** a built-in run works on its own branch through the API. One open run per task still holds.
+
+### 28.3 The GitHub App
+- **Platform settings** (`PUT /platform/settings { github: { … } }`, platform admins): `app_id`, `app_slug`, `client_id`, `api_url` and `web_url` (GitHub Enterprise Server; default GitHub.com), and the write-only `client_secret` and `private_key` (an RSA PEM), sealed with the secret box (purpose `ai_runner_github`). The view shows only `has_client_secret` / `has_private_key`, and the **callback URL** to give GitHub: `<dashboard>/dashboard/ai-runner/github`. Only the keys given change; `""` clears one; `github: null` clears them all.
+- **Creating the App on GitHub:** Callback URL and Setup URL = that callback URL; *Redirect on update* on; *Request user authorization during installation* off; webhook inactive; repository permissions Contents read and write, Pull requests read and write.
+- **Tokens:** a 9-minute app JWT (RS256, `iss` = App ID) mints installation tokens, cached for 50 minutes. A run's token is scoped to its one repository.
+- **Connecting an installation** (workspace, `ai_runners.manage`):
+  1. **Connect GitHub** opens `<web>/apps/<slug>/installations/new`; the person installs the App on the repositories they choose (or changes them).
+  2. GitHub returns to `/dashboard/ai-runner/github?installation_id=…`. The page asks `POST /github/authorize { installation_id }` for a GitHub sign-in URL whose `state` is signed (HMAC with `JWT_SECRET_KEY`, 10 minutes) and names the workspace, the person and the installation.
+  3. GitHub returns with `?code&state`. `POST /github/installations { code, state }` checks the state (same workspace, same person, unexpired), exchanges the code, and accepts the installation only if GitHub lists it among the person's own (`GET /user/installations`). Installation ids are sequential, so this check is what stops someone attaching another account's installation.
+- **API:** `GET /github` (`ai_runs.create` or `ai_runners.manage`): configured, installations, and the install link for managers. `DELETE /github/installations/:uuid` disconnects one (the App stays installed on GitHub).
+- **Table:** `ar_github_installations (namespace_id, installation_id, account_login, account_type, repository_selection, created_by, UNIQUE (namespace_id, installation_id))`. The same installation may serve several workspaces; each connected it itself.
+
+### 28.4 Dashboard
+- **Start with AI:** the built-in runner reads "(no machine needed)"; its profiles are "AI model"; the folder is a **Repository** list (no repository, or the connected repositories); the output line says what happens to the work.
+- **Runners & sources:** a built-in runner card (what it does, GitHub status, Connect GitHub, the connected accounts with Disconnect, Refresh repositories) and its row (Built-in, Inside OpsAPI, Always on; Access and Pause only).
+- **`/dashboard/ai-runner/github`:** finishes a connection, or says why it can't (organisation approval pending, sign-in denied, expired).
+- **Platform settings:** the built-in limits, and the GitHub App form with the setup steps and the callback URL. Saving the other settings never sends the GitHub App back.
+- **Runs:** a built-in run's "folder" shows as *GitHub owner/name* or *No repository*.
+
+### 28.5 Security
+- **Who:** the built-in runner follows the runner Access rules (§25.1) and every start rule (assignee, project admins, managers; caps; similar work; approval policy).
+- **What it touches:** its own task (comments, subtasks) and, through a token scoped to one repository, its own branch. It can't merge, push to the base branch, change CI, or read keys and environment files. A prompt-injected task can at most write to its branch, which a person reviews.
+- **Secrets:** the App's private key and client secret are sealed and never returned; installation tokens live only in the server's memory cache. Every text the agent writes is redacted (`U.redact`, with the workspace's extra redactions).
+- **Isolation:** a workspace sees and uses only its own built-in runner and installations; another workspace's runner uuid is refused.
+
+### 28.6 Acceptance
+- **Sandbox (`builtin_test.py`, mock Ollama + GitHub, 122 checks):**
+  - the runner in every workspace, online, preselected;
+  - a plan run (tools, subtask, comments, turns, usage, `ai_usage` rows);
+  - the GitHub App settings (platform admin only, validation, sealed, partial saves);
+  - connecting (dev refused, tampered / foreign / other-workspace states refused, someone else's installation refused);
+  - a code run (scoped token, RS256 signature checked with the public key, one commit on the run's branch, secret / workflow / `..` paths refused, the draft pull request, main untouched, the task comment) and its retry;
+  - needs_input, a follow-up, cancel, the per-workspace limit, the step limit, a model failure;
+  - pause, access, no token, no revoke, kind fixed; isolation; disconnect.
+- **Real model (local stack, qwen3.8 on Ollama):** a plan run (comment and five subtasks) and a code run against a mock GitHub (read README and `src/app.js`, committed a correct section on its branch).
+- **Cypress (`ai-runner-builtin.cy.ts`):** the runner card and row, a run started from the task page on the real model, the GitHub return page, the platform page (and that saving it never sends the App).

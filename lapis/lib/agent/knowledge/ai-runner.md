@@ -4,11 +4,11 @@ pages: /dashboard/ai-runner
 api:
 modules: ai_runs, ai_runs_approvals, ai_runners, ai_runs_settings
 tools:
-suggestions: How do I start a task with AI? | How do I answer an agent's permission request? | Why is my run still queued? | How do I route sessions started by hand to a project?
+suggestions: How do I start a task with AI? | Can AI work on a task without a machine? | How do I answer an agent's permission request? | Why is my run still queued?
 readonly: true
 ---
 # AI Runs
-Hands a kanban task to an AI coding agent (Claude Code, Cursor, Ollama) on one of the workspace's own machines. The machine runs PromptPilot in runner mode and asks OpsAPI for work, so OpsAPI never connects to it. The agent works in a repo folder on a new ai/… branch, never on main.
+Hands a kanban task to an AI agent: Claude Code or Cursor on one of the workspace's own machines (PromptPilot in runner mode asks OpsAPI for work; OpsAPI never connects to it), or the built-in runner inside OpsAPI. Work happens on a new ai/… branch, never on main.
 
 ## Pages
 - AI Runs (/dashboard/ai-runner/runs): every run with status, task, runner, folder, branch, tokens and turns; filter by runner or status; updates every 10 s. Managers see overview cards (open runs, queue, runners online, tokens and cost today, last 7 days, average permission wait). Waiting on you lists the requests and approvals you may decide. Open a run for its prompt, live log, conversation, usage, summary, commit, pull request, Cancel and Retry.
@@ -19,6 +19,9 @@ Hands a kanban task to an AI coding agent (Claude Code, Cursor, Ollama) on one o
 
 ## Starting a run
 On a task, Start with AI: pick a runner, profile (and model) and repo folder; the prompt is previewed and only managers (manage on AI runs) can edit it. The task's assignee, its project owners/admins or a manager may start, and only on runners whose Access includes them ("You can't use this runner": ask for access under Runners & sources). One open run per task. "A manager must approve this run" means it waits as Needs approval. "Similar work is already open": check the listed runs, then tick Start anyway. Caps or the daily token limit block Start until a run finishes or the next UTC day.
+
+## Built-in runner (no machine)
+Every workspace has "OpsAPI built-in", always online and picked when no machine is. It uses the workspace's own AI providers or the platform model (Ollama). Repository "No repository": it plans, comments and adds subtasks. With GitHub connected (Runners & sources → Connect GitHub; a platform admin first sets up the GitHub App) it reads the code, commits to its own branch and opens a pull request. It can't run code or tests, never touches keys, .env or workflow files, and asks no permissions. Pause it or limit its Access like any runner; it has no token.
 
 ## Statuses
 Needs approval (cancelled after 3 days) → Queued → Claimed → Starting → Running → Succeeded, Failed, Cancelled or Lost (runner stopped reporting). Waiting for permission: the agent asked to do something risky. Needs input: it asked a question. Cancelling: the runner is stopping it.
@@ -45,6 +48,7 @@ With Track sessions started by hand on, each busy session someone starts by hand
 - Profile unavailable: fix it on the machine (sign Claude in again); its runs wait.
 - Offline after rotating the token: put the new token on the machine and restart.
 - Rate limited: the plan limit is used up; retry after the reset shown on the runner.
+- Built-in runner offers no repositories: connect GitHub (or Refresh repositories).
 - A source can't run tasks; no hand-started tasks: check tracking, routing rules (an ignore rule?) and the connection's Reports filter.
 
 ## Rules

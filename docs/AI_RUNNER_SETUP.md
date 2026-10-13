@@ -2,6 +2,8 @@
 
 This runbook sets up a Mac or Linux machine to run AI coding agents on OpsAPI tasks. The design behind it is in `docs/AI_RUNNER.md`.
 
+**No machine?** Every workspace also has the **built-in runner**, inside OpsAPI: turn on AI Runs and choose Start with AI on a task. It needs no setup to plan and write on tasks; to work in GitHub repositories, see [the built-in runner](#the-built-in-runner-no-machine) at the end. Use a machine when the agent must run code, builds or tests.
+
 The machine runs **PromptPilot in runner mode**. It asks OpsAPI for work, so OpsAPI never connects to the machine and no port is opened. Each run happens in a git repo on the machine, on a new `ai/…` branch, never on `main`. The machine's own git and GitHub credentials push the branch and open the pull request.
 
 ## 1. What the machine needs
@@ -134,3 +136,37 @@ On Linux, use the systemd user unit in `deploy/promptpilot-runner.service`; the 
   - any path outside the folder.
 - Pushing and opening the PR are done by the runner itself, with the machine's credentials.
 - The run-scoped token the agent uses for its task tools is valid only while that run is open, and only for its own task.
+
+## The built-in runner (no machine)
+Every workspace has a runner called **OpsAPI built-in**. It runs inside OpsAPI on an AI model: the workspace's own AI providers, else the platform's model (Ollama). It is always online, and Start with AI picks it when no machine is online. Design: `docs/AI_RUNNER.md` §28.
+
+- **Without a repository** (Repository: *No repository*): it plans, answers and writes on the task, as comments and subtasks.
+- **With GitHub:** it reads the code, commits to its own `ai/…` branch and opens a pull request. It can't run code or tests.
+- **Limits** (platform settings): built-in runs at once (2 over all workspaces, 1 per workspace) and agent steps per run (40).
+- **Turning it off for a workspace:** pause it under Runners & sources, or limit its Access.
+
+### GitHub, once per platform (a platform admin)
+1. On GitHub: Settings → Developer settings → GitHub Apps → **New GitHub App** (under the organisation that should own it).
+   - **Callback URL** and **Setup URL:** the callback URL shown on AI Runs platform settings (`<dashboard>/dashboard/ai-runner/github`). Tick **Redirect on update**.
+   - Leave **Request user authorization (OAuth) during installation** off, and the **webhook** inactive.
+   - **Repository permissions:** Contents read and write, Pull requests read and write.
+   - **Where can it be installed:** any account, if other organisations' workspaces should use it.
+2. Create it, then **Generate a private key** (a `.pem` downloads) and **Generate a new client secret**.
+3. In OpsAPI, **AI Runs platform settings → GitHub App:** App ID, App slug, Client ID, the client secret and the private key. Save. The key and the secret are stored sealed and never shown again.
+
+For GitHub Enterprise Server, also set the API address (`https://<host>/api/v3`) and the web address (`https://<host>`).
+
+### GitHub, per workspace (a runner manager)
+1. **Runners & sources → Connect GitHub.** GitHub asks where to install the App and which repositories it may use.
+2. GitHub sends you back to OpsAPI, then asks you to sign in to GitHub once, so OpsAPI can check you can reach that installation.
+3. The repositories appear in the built-in runner's **Repository** list in Start with AI. **Connect another account or change repositories** goes back to GitHub; **Refresh repositories** reads them again; **Disconnect** removes an account from this workspace (uninstall the App on GitHub to remove it everywhere).
+
+| What you see | Why, and what to do |
+|---|---|
+| "GitHub isn't set up on this server yet" | A platform admin adds the GitHub App (above). |
+| "This GitHub sign-in expired or was started elsewhere" | Connect again from the same workspace, within 10 minutes. |
+| "GitHub didn't confirm the installation" | Your GitHub account can't reach that installation: ask its owner, or install the App yourself. |
+| "sent the install to an organisation owner for approval" | An organisation owner approves the App on GitHub; then Connect GitHub again. |
+| The run fails with `pr_failed` | The changes are on the run's branch; the pull request couldn't open (the base branch is protected or missing). Open it by hand. |
+| The run fails with `step_limit` | The task was too big for one run: split it, or raise the steps in platform settings. |
+| The run fails with `model_error` | The model server didn't answer (busy or down): retry, or choose another AI model. |
