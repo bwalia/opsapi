@@ -97,7 +97,7 @@ function _M.authenticate()
         -- Confine the key to the modules it is scoped for. Routes that use
         -- requireAuth without namespace middleware never check scopes, so
         -- without this a cms-only key would reach them.
-        if not ApiKeyHelper.permits_uri(principal, uri) then
+        if not ApiKeyHelper.permits_uri(principal, uri, ngx.req.get_method()) then
             ngx.log(ngx.WARN, "API key ", principal.key_uuid, " denied for out-of-scope URI: ", uri)
             ngx.status = 403
             ngx.header.content_type = "application/json"

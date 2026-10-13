@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, memo } from 'react';
-import { Menu, Search, ChevronDown, Settings, LogOut, User } from 'lucide-react';
+import { Menu, Search, ChevronDown, Settings, LogOut, User, Key } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { NamespaceSwitcher } from '@/components/namespace/NamespaceSwitcher';
@@ -54,6 +54,14 @@ const ProfileDropdown = memo(function ProfileDropdown({
           >
             <Settings className="w-4 h-4" aria-hidden="true" />
             Settings
+          </a>
+          <a
+            href="/dashboard/settings/api-keys"
+            role="menuitem"
+            className="flex items-center gap-3 px-4 py-2.5 text-sm text-secondary-700 hover:bg-secondary-50"
+          >
+            <Key className="w-4 h-4" aria-hidden="true" />
+            My API keys
           </a>
         </div>
 

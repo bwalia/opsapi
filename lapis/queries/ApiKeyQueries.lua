@@ -28,6 +28,7 @@ function ApiKeyQueries.create(params)
         expires_at = params.expires_at,
         -- Optional: bind the key to a user so it authenticates AS them.
         user_uuid = params.user_uuid,
+        created_via = params.created_via,
     }, { returning = "*" })
     row.key_hash = nil
     return row
@@ -39,11 +40,49 @@ end
 function ApiKeyQueries.listByNamespace(namespace_id)
     return db.query([[
         SELECT uuid, name, key_prefix, scopes, last_used_at,
-               expires_at, revoked_at, created_at, user_uuid
+               expires_at, revoked_at, created_at, user_uuid, created_via
         FROM api_keys
         WHERE namespace_id = ?
         ORDER BY created_at DESC
     ]], namespace_id)
+end
+
+-- ---------------------------------------------------------------------------
+-- Self-service keys: always filtered by namespace AND owner AND created_via,
+-- so a member can only ever see or touch the keys they minted themselves.
+-- ---------------------------------------------------------------------------
+
+--- A member's own self-service keys in a namespace, newest first.
+function ApiKeyQueries.listMine(namespace_id, user_uuid)
+    return db.query([[
+        SELECT uuid, name, key_prefix, scopes, last_used_at,
+               expires_at, revoked_at, created_at, user_uuid, created_via
+        FROM api_keys
+        WHERE namespace_id = ? AND user_uuid = ? AND created_via = 'self'
+        ORDER BY created_at DESC
+    ]], namespace_id, user_uuid)
+end
+
+--- One of a member's own self-service keys, or nil.
+function ApiKeyQueries.findMine(uuid, namespace_id, user_uuid)
+    local rows = db.query([[
+        SELECT uuid, name, key_prefix, revoked_at
+        FROM api_keys
+        WHERE uuid = ? AND namespace_id = ? AND user_uuid = ? AND created_via = 'self'
+        LIMIT 1
+    ]], uuid, namespace_id, user_uuid)
+    return rows and rows[1] or nil
+end
+
+--- How many of a member's self-service keys in a namespace still work.
+function ApiKeyQueries.countActiveMine(namespace_id, user_uuid)
+    local rows = db.query([[
+        SELECT COUNT(*)::int AS n
+        FROM api_keys
+        WHERE namespace_id = ? AND user_uuid = ? AND created_via = 'self'
+          AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())
+    ]], namespace_id, user_uuid)
+    return rows and rows[1] and tonumber(rows[1].n) or 0
 end
 
 --- Fetch one key by uuid, scoped to a namespace (ownership check).

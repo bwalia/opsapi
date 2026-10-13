@@ -20,6 +20,7 @@ ARG OPSAPI_BASE=bwalia/opsapi-base:latest
 # then empty and the loader skips it (no project.lua).
 FROM scratch AS property_deals_plugin
 FROM scratch AS property_pa_plugin
+FROM scratch AS ai_runner_plugin
 
 FROM ${OPSAPI_BASE}
 
@@ -116,6 +117,8 @@ COPY schema-updates.lua production-schema-upgrade.lua ecommerce-migrations.lua /
 COPY --from=property_deals_plugin . /app/projects/property-deals/
 # Property PA imports property_deals modules from its sibling folder (projects/property-deals).
 COPY --from=property_pa_plugin . /app/projects/property-pa/
+# AI Runs (docs/AI_RUNNER.md): runners on people's machines run AI agents on kanban tasks.
+COPY --from=ai_runner_plugin . /app/projects/ai-runner/
 COPY bin /app/bin
 ENV PATH="/app/bin:${PATH}"
 # The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,

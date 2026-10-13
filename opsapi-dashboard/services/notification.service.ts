@@ -220,6 +220,9 @@ export function getNotificationTypeLabel(type: NotificationType): string {
     checklist_completed: 'Checklist Completed',
     comment_reply: 'Comment Reply',
     comment_mentioned: 'Mentioned in Comment',
+    ai_run_permission: 'AI Run Needs a Decision',
+    ai_run_approval: 'AI Run Needs Approval',
+    ai_run_input: 'AI Run Asks a Question',
     general: 'Notification',
   };
   return labels[type] || type;
@@ -259,6 +262,9 @@ export function getNotificationIcon(type: NotificationType): string {
     checklist_completed: 'CheckSquare',
     comment_reply: 'Reply',
     comment_mentioned: 'AtSign',
+    ai_run_permission: 'ShieldQuestion',
+    ai_run_approval: 'ClipboardCheck',
+    ai_run_input: 'MessageCircleQuestion',
     general: 'Bell',
   };
   return icons[type] || 'Bell';

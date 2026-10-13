@@ -572,29 +572,44 @@ return function(app)
 
     ----------------- User Tasks Route --------------------
 
-    -- GET /api/v2/kanban/my-tasks - Get tasks assigned to current user
+    -- GET /api/v2/kanban/my-tasks - Open tasks assigned to the current user, most urgent first.
+    -- Query (all optional): due=today|overdue|today_and_overdue|week|upcoming|none, date=YYYY-MM-DD
+    -- (the caller's local "today"; default UTC today), priority=<csv>, status=<csv>, project_uuid,
+    -- search, page, per_page|perPage (max 100). Bad values -> 400.
     -- Requires: projects.read permission
     app:get("/api/v2/kanban/my-tasks", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
-            local user = self.current_user
+            local filters, filter_err = KanbanTaskQueries.parseMyTaskFilters(self.params)
+            if not filters then
+                return api_response(400, nil, filter_err)
+            end
 
-            local params = {
-                page = Global.pageParam(self.params.page),
-                perPage = Global.perPageParam(self.params.perPage, 20)
-            }
+            -- tonumber("nan"/"inf") is a number in LuaJIT and the Global helpers pass it
+            -- through; it would reach LIMIT/OFFSET as a 500.
+            local page = Global.pageParam(self.params.page)
+            if not (page <= 100000) then page = 1 end
+            local per_page = Global.perPageParam(self.params.per_page or self.params.perPage, 20, 100)
+            if per_page ~= per_page then per_page = 20 end
 
-            local result = KanbanTaskQueries.getByAssignee(user.uuid, self.namespace.id, params)
+            local result = KanbanTaskQueries.getByAssignee(self.current_user.uuid, self.namespace.id, {
+                page = page, perPage = per_page, filters = filters,
+            })
+            local total_pages = math.ceil(result.total / per_page)
 
             return {
                 status = 200,
                 json = {
                     success = true,
-                    data = result.data,
+                    data = setmetatable(result.data, cJson.array_mt),
                     meta = {
                         total = result.total,
-                        page = params.page,
-                        perPage = params.perPage,
-                        totalPages = math.ceil(result.total / params.perPage)
+                        page = page,
+                        per_page = per_page,
+                        total_pages = total_pages,
+                        date = result.date,
+                        -- Older clients read the camelCase names.
+                        perPage = per_page,
+                        totalPages = total_pages,
                     }
                 }
             }

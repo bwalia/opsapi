@@ -9,6 +9,12 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
  * Real-time is polling for now (no WS endpoint wired yet).
  */
 
+/** The user's own calendar date (YYYY-MM-DD), so the assistant's "today" is theirs, not UTC's. */
+function localDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export type ChannelType = 'public' | 'private' | 'direct' | 'business';
 
 export interface ChatChannel {
@@ -376,13 +382,13 @@ export const chatService = {
 
   /** Start a turn. Resolves as soon as the run is queued (202). */
   async sendAgentMessage(message: string, path?: string): Promise<AgentConversation> {
-    const res = await apiClient.post('/api/chat/agent', { message, path }, JSON_BODY);
+    const res = await apiClient.post('/api/chat/agent', { message, path, local_date: localDate() }, JSON_BODY);
     return toConversation(res.data, 'running');
   },
 
   /** Confirm or cancel the delete the assistant is waiting on. */
   async confirmAgentAction(approve: boolean, path?: string): Promise<AgentConversation> {
-    const res = await apiClient.post('/api/chat/agent/confirm', { approve, path }, JSON_BODY);
+    const res = await apiClient.post('/api/chat/agent/confirm', { approve, path, local_date: localDate() }, JSON_BODY);
     return toConversation(res.data, 'done');
   },
 

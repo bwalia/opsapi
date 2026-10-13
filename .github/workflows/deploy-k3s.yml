@@ -288,6 +288,7 @@ jobs:
           build-contexts: |
             property_deals_plugin=./projects/property-deals
             property_pa_plugin=./projects/property-pa
+            ai_runner_plugin=./projects/ai-runner
           push: true
           # Both tags point at the same image. :latest is what every
           # environment pulls; the versioned tag is what the smoke test
