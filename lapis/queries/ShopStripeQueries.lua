@@ -257,6 +257,14 @@ function ShopStripeQueries.timerTick(premature)
     elseif (res.marked_paid + res.cancelled + res.errors) > 0 then
         ngx.log(ngx.NOTICE, "[shop-reconcile] ", U.enc(res))
     end
+    local ok_c, cres = pcall(function()
+        return require("queries.ShopMembershipQueries").closeDueAccounts()
+    end)
+    if not ok_c then
+        ngx.log(ngx.ERR, "[shop-account] closeDueAccounts failed: ", tostring(cres))
+    elseif cres and (cres.closed > 0 or cres.errors > 0) then
+        ngx.log(ngx.NOTICE, "[shop-account] ", U.enc(cres))
+    end
     -- give the pooled connection back (timer contexts do not run after_dispatch)
     pcall(function()
         if db.query("SELECT now() <> statement_timestamp() AS open")[1].open then db.query("ROLLBACK") end
