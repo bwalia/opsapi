@@ -1151,3 +1151,34 @@ AI Runs is a feature of a SaaS platform, so behaviour is set in the admin dashbo
   - isolation between workspaces.
 - **Go:** `report_filter` narrowing (never widening), `extra_denied_commands`, and report-only mode.
 - **Cypress:** the rules editor and tester, connection kind and report filter, and the platform settings page.
+
+### 27.7 As built
+- **Routes:** a connection's kind and report filter are edited with `PUT /runners/:uuid { name?, kind?, labels?, report_filter? }`. `GET /runners?kind=` filters by kind.
+- **Sources:** a `source` is left out of Start with AI, and a run on one is refused (422).
+- **Report filter, the same on the runner and the server:**
+  - **Globs:**
+    - `*` and `?` stay within one folder name, and `**` crosses folders.
+    - A glob covers its folder and everything below it.
+    - `/…` is absolute; `~/…` means under any home folder; any other glob matches at any depth.
+    - An empty glob matches nothing.
+  - **Tools** are compared case-insensitively.
+  - **Runs' own sessions:** a connection's own run sessions are always kept, because the busy-folder check needs them.
+  - **When it applies:** the runner only gets the filter in its first heartbeat's reply. Until then, the server's ingest filter covers it.
+- **Extra denied commands:**
+  - An entry without `*` or `?` is a whole-word prefix of each command segment. One with them is a glob.
+  - The runner denies a match before asking anyone. The server also denies it, as a backstop for older runners.
+- **Rules:**
+  - `session_tracking.enabled` still switches all tracking on and off, rules included. `project_uuid` is the fallback target.
+  - To track only rule-matched sessions, end the list with a match-anything rule that ignores.
+  - An ignored session is recorded, so it isn't routed again later.
+  - At most 100 rules, each with an optional `name`.
+- **Templates:** a line whose variables are all empty is dropped. `{{folder}}` is the full path and `{{repo}}` its last folder name.
+- **Platform settings:**
+  - They are cached for 60 s per worker; a save refreshes them at once on that worker.
+  - `heartbeat_s` must be below both `lease_s` and `online_s`.
+  - Lowering a bound caps the values workspaces already saved.
+  - `GET /settings` returns the current bounds as `limits`, for the form.
+- **Runner:**
+  - It claims only after its first successful heartbeat, so the workspace's denied commands arrive before any run.
+  - Version 0.5.0.
+- **Platform settings page:** reached from AI run settings, and shown only to platform admins. It has no sidebar entry, because plugin menus are per workspace.
