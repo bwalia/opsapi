@@ -2567,6 +2567,8 @@ local _migrations = {
     ['zzs22_shop_suppliers'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 1),
     ['zzs23_shop_supplier_pricing'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 2),
     ['zzs24_shop_supplier_portal_model'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 3),
+    -- Shop account deactivation: pending → auto-close after 90 days
+    ['zzs25_shop_account_deactivations'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 4),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

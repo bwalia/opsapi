@@ -34,6 +34,7 @@ local SESSION_MINUTES = 31      -- Stripe allows 30 min – 24 h
 local LINK_MINUTES = 15
 local SESSION_DAYS = 30
 local MAX_LINKS_PER_HOUR = 5
+local CLOSE_DAYS = 90
 local MEMBER_STATUSES = { active = true, past_due = true }
 
 Q.VIP_SOURCE = VIP_SOURCE
@@ -483,9 +484,85 @@ local function may_sign_in(ns_id, email)
     return r and r.ok == true
 end
 
+local function deactivation_row(ns_id, email, status)
+    return db.query([[
+        SELECT uuid, status, deactivated_at, close_at, closed_at, reactivated_at
+          FROM shop_account_deactivations
+         WHERE namespace_id = ? AND lower(email) = lower(?) AND status = ?
+         ORDER BY id DESC LIMIT 1
+    ]], ns_id, email, status)[1]
+end
+
+local function deactivation_payload(row)
+    if not row then return U.null end
+    return {
+        status = row.status,
+        deactivated_at = row.deactivated_at or U.null,
+        close_at = row.close_at or U.null,
+        closed_at = row.closed_at or U.null,
+        close_days = CLOSE_DAYS,
+    }
+end
+
+--- Closed accounts cannot sign in again. Pending deactivation is cleared on the next successful sign-in.
+function Q.assertCanSignIn(ns_id, email)
+    if deactivation_row(ns_id, email, "closed") then
+        return nil, U.err(403, "ACCOUNT_CLOSED",
+            "This shop account was closed. Email privacy@workstation.co.uk if you need help.")
+    end
+    return true
+end
+
+function Q.reactivateIfPending(ns_id, email)
+    db.query([[
+        UPDATE shop_account_deactivations
+           SET status = 'reactivated', reactivated_at = NOW(), updated_at = NOW()
+         WHERE namespace_id = ? AND lower(email) = lower(?) AND status = 'pending'
+    ]], ns_id, email)
+end
+
+local function revoke_tokens(ns_id, email, keep_session_hash)
+    if keep_session_hash then
+        db.query([[
+            DELETE FROM shop_member_tokens
+             WHERE namespace_id = ? AND lower(email) = lower(?)
+               AND NOT (kind = 'session' AND token_hash = ?)
+        ]], ns_id, email, keep_session_hash)
+    else
+        db.query("DELETE FROM shop_member_tokens WHERE namespace_id = ? AND lower(email) = lower(?)", ns_id, email)
+    end
+end
+
+local function close_one(row)
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        revoke_tokens(row.namespace_id, row.email, nil)
+        db.query([[
+            UPDATE shop_credits SET status = 'void', updated_at = NOW()
+             WHERE namespace_id = ? AND lower(email) = lower(?) AND status = 'available'
+        ]], row.namespace_id, row.email)
+        db.query("DELETE FROM shop_waitlist WHERE namespace_id = ? AND lower(email) = lower(?)",
+            row.namespace_id, row.email)
+        db.query([[
+            UPDATE shop_account_deactivations
+               SET status = 'closed', closed_at = NOW(), updated_at = NOW()
+             WHERE id = ? AND status = 'pending'
+        ]], row.id)
+    end)
+    if ok then
+        db.query("COMMIT")
+        return true
+    end
+    pcall(function() db.query("ROLLBACK") end)
+    ngx.log(ngx.ERR, "[shop-account] close failed for ", tostring(row.email), ": ", tostring(err))
+    return false
+end
+
 --- One-time sign-in link token for an email (hash stored). Used by the emailed link and by
 -- Google / Apple shop sign-in (ShopCustomerAuthQueries), which vouch for the email themselves.
 function Q.issueSignInLink(ns_id, email)
+    local ok, err = Q.assertCanSignIn(ns_id, email)
+    if not ok then return nil, err end
     local token = U.token(32)
     db.query([[INSERT INTO shop_member_tokens (namespace_id, email, kind, token_hash, expires_at)
                VALUES (?, ?, 'link', ?, NOW() + (? || ' minutes')::interval)]],
@@ -508,7 +585,8 @@ function Q.requestLogin(ns_id, body)
         ngx.log(ngx.ERR, "[shop-vip] SHOP_PUBLIC_URL is not set — cannot build sign-in links")
         return { sent = false }
     end
-    local token = Q.issueSignInLink(ns_id, email)
+    local token, terr = Q.issueSignInLink(ns_id, email)
+    if not token then return { sent = false, blocked = terr and terr.code or true } end
     local link = base:gsub("/+$", "") .. "/members/verify?t=" .. token
     local ok = send_mail(ns_id, email, "Your Workstation members sign-in link",
         "<p>Use this link to sign in to your Workstation VIP membership. It works once and expires in "
@@ -530,6 +608,9 @@ function Q.verifyLink(ns_id, body)
     if not row then
         return nil, U.err(410, "LINK_EXPIRED", "This sign-in link has expired or was already used — ask for a new one")
     end
+    local ok, err = Q.assertCanSignIn(ns_id, row.email)
+    if not ok then return nil, err end
+    Q.reactivateIfPending(ns_id, row.email)
     local session = U.token(32)
     db.query([[INSERT INTO shop_member_tokens (namespace_id, email, kind, token_hash, expires_at)
                VALUES (?, ?, 'session', ?, NOW() + (? || ' days')::interval)]],
@@ -653,6 +734,7 @@ function Q.me(ns_id, member)
         }
     end
     local s = Q.settings(ns_id)
+    local pending = deactivation_row(ns_id, member.email, "pending")
     return {
         email = member.email,
         active = member.active == true,
@@ -668,7 +750,59 @@ function Q.me(ns_id, member)
         lock_days = s.lock_days,
         refund_threshold_minor = s.refund_threshold_minor,
         early_access_hours = s.early_access_hours,
+        deactivation = deactivation_payload(pending),
     }
+end
+
+--- POST /member/deactivate — schedule auto-close in 90 days. Keeps the current session so the
+-- account page can show the scheduled date; other sessions/links for the email are revoked.
+function Q.deactivate(ns_id, member, session_token)
+    local email = R.email(member.email)
+    if not email then return nil, U.err(400, "VALIDATION_ERROR", "No email on this session") end
+    if deactivation_row(ns_id, email, "closed") then
+        return nil, U.err(403, "ACCOUNT_CLOSED", "This shop account is already closed")
+    end
+    local pending = deactivation_row(ns_id, email, "pending")
+    if not pending then
+        db.query([[
+            INSERT INTO shop_account_deactivations (uuid, namespace_id, email, status, deactivated_at, close_at)
+            VALUES (?, ?, ?, 'pending', NOW(), NOW() + (? || ' days')::interval)
+        ]], Global.generateUUID(), ns_id, email, tostring(CLOSE_DAYS))
+        pending = deactivation_row(ns_id, email, "pending")
+    end
+    local keep = nz(session_token) and U.sha256_hex(session_token) or nil
+    revoke_tokens(ns_id, email, keep)
+    -- Best-effort: stop VIP renewals when the shopper is leaving.
+    if member.membership and nz(member.membership.stripe_subscription_id)
+        and not member.membership.cancel_at_period_end then
+        pcall(function() Q.cancel(ns_id, member) end)
+    end
+    return Q.me(ns_id, member)
+end
+
+--- POST /member/reactivate — cancel a pending auto-close while still signed in.
+function Q.reactivate(ns_id, member)
+    local email = R.email(member.email)
+    if not email then return nil, U.err(400, "VALIDATION_ERROR", "No email on this session") end
+    if deactivation_row(ns_id, email, "closed") then
+        return nil, U.err(403, "ACCOUNT_CLOSED", "This shop account was closed and cannot be reactivated here")
+    end
+    Q.reactivateIfPending(ns_id, email)
+    return Q.me(ns_id, member)
+end
+
+--- Called from the shop reconciler timer: close every pending account past close_at.
+function Q.closeDueAccounts()
+    local rows = db.query([[
+        SELECT id, namespace_id, email FROM shop_account_deactivations
+         WHERE status = 'pending' AND close_at <= NOW()
+         ORDER BY close_at ASC LIMIT 100
+    ]])
+    local closed, errors = 0, 0
+    for _, row in ipairs(rows or {}) do
+        if close_one(row) then closed = closed + 1 else errors = errors + 1 end
+    end
+    return { closed = closed, errors = errors, scanned = #(rows or {}) }
 end
 
 --- Cancel at the end of the paid period (Stripe), never mid-period.

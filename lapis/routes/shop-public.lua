@@ -37,8 +37,10 @@
       POST   /membership/checkout                { email, interval, accept_terms, terms_version, success_url, cancel_url }
       POST   /member/login                       { email } → emails a one-time link (same answer either way)
       POST   /member/verify                      { token } → { session_token, email }
-      GET    /member                             membership, credits (X-Member-Token)
+      GET    /member                             membership, credits, deactivation (X-Member-Token)
       POST   /member/cancel                      cancel at period end (X-Member-Token)
+      POST   /member/deactivate                  schedule auto-close in 90 days (X-Member-Token)
+      POST   /member/reactivate                  cancel a pending auto-close (X-Member-Token)
       POST   /member/logout
       GET    /member/early-access                products in the members-only window (X-Member-Token)
       POST   /products/:slug/waitlist            { email } (members first)
@@ -339,6 +341,22 @@ return function(app)
         local m, bad = member_or_401()
         if not m then return bad end
         local res, err = Membership.cancel(ns_id, m)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/member/deactivate", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local res, err = Membership.deactivate(ns_id, m, self.req.headers["x-member-token"])
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/member/reactivate", public(function(_, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local res, err = Membership.reactivate(ns_id, m)
         if not res then return U.from_err(err) end
         return U.ok(res)
     end))

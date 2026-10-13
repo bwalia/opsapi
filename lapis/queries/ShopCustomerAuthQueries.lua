@@ -78,7 +78,12 @@ function Q.finish(shop_state, email, email_verified)
     local ns = require("queries.ShopCatalogQueries").namespaceBySlug(shop_state.ns)
     if not ns then return A.error_url(base, "shop_not_found") end
 
-    local token = require("queries.ShopMembershipQueries").issueSignInLink(ns.id, normalised)
+    local Membership = require("queries.ShopMembershipQueries")
+    local token, terr = Membership.issueSignInLink(ns.id, normalised)
+    if not token then
+        local code = (terr and terr.code == "ACCOUNT_CLOSED") and "account_closed" or "sign_in_failed"
+        return A.error_url(base, code)
+    end
     return A.landing_url(base, token, shop_state)
 end
 
@@ -198,7 +203,9 @@ function Q.passwordVerify(ns, body)
     if not email then return nil, U.err(401, "SIGN_IN_EXPIRED", "Please sign in again") end
 
     local Membership = require("queries.ShopMembershipQueries")
-    return Membership.verifyLink(ns.id, { token = Membership.issueSignInLink(ns.id, email) })
+    local link, lerr = Membership.issueSignInLink(ns.id, email)
+    if not link then return nil, lerr end
+    return Membership.verifyLink(ns.id, { token = link })
 end
 
 return Q

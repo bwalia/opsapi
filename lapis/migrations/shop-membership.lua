@@ -15,11 +15,12 @@
       shop_credits              order credit ledger (VIP fee refunds; loyalty
                                 credits use the same table)
       shop_waitlist             "tell me when it's back" with member priority
+      shop_account_deactivations  deactivate now → auto-close after 90 days
 
     Plus: shop_products.public_launch_at (members see it early_access_hours
     sooner), shop_quotes.price_locked, shop_orders.credit_minor.
 
-    Registered in migrations.lua as zzs19–zzs21. Idempotent.
+    Registered in migrations.lua as zzs19–zzs21 and zzs25. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -141,5 +142,39 @@ return {
         db.query([[ALTER TABLE shop_quotes ADD COLUMN IF NOT EXISTS price_locked boolean NOT NULL DEFAULT false]])
         db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS credit_minor integer NOT NULL DEFAULT 0]])
         db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS stripe_coupon_id varchar(255)]])
+    end,
+
+    -- [4] account deactivation (90-day grace, then auto-close) -----------------------------
+    [4] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_account_deactivations (
+                id serial PRIMARY KEY,
+                uuid varchar(64) NOT NULL UNIQUE,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                status varchar(16) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'closed', 'reactivated')),
+                deactivated_at timestamptz NOT NULL DEFAULT NOW(),
+                close_at timestamptz NOT NULL,
+                closed_at timestamptz,
+                reactivated_at timestamptz,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS shop_account_deactivations_pending_uidx
+                ON shop_account_deactivations (namespace_id, lower(email))
+                WHERE status = 'pending'
+        ]])
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS shop_account_deactivations_closed_uidx
+                ON shop_account_deactivations (namespace_id, lower(email))
+                WHERE status = 'closed'
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS shop_account_deactivations_close_idx
+                ON shop_account_deactivations (close_at) WHERE status = 'pending'
+        ]])
     end,
 }
