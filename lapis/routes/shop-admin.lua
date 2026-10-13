@@ -19,6 +19,9 @@
       GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 90|120, refund threshold, …)
       GET               /membership/members    (?status=&q=)
       GET               /waitlist              (?product_uuid=&include_notified=; members first)
+      GET/POST          /credits               loyalty credit (?q=&status=&source=); POST { email, amount_minor,
+                                               min_order_minor?, reason, expires_in_days?, notify? }
+      POST              /credits/:uuid/void    cancel unused credit { reason? }
       POST              /reconcile
 ]]
 
@@ -327,5 +330,37 @@ return function(app)
 
     app:get(BASE .. "/waitlist", guard("read", function(self, ns_id)
         return U.ok(Membership.adminWaitlist(ns_id, self.params))
+    end))
+
+    -- loyalty credits --------------------------------------------------------------------
+    local function actor(self)
+        local u = self.current_user or {}
+        return u.email or u.uuid or (u.api_key and "api-key") or nil
+    end
+
+    app:match(BASE .. "/credits", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(s, ns_id)
+                local data, meta = Membership.adminCredits(ns_id, s.params)
+                return U.ok(data, 200, meta)
+            end)(self)
+        elseif m == "POST" then
+            return guard("update", function(s, ns_id)
+                local body, err = U.read_json()
+                if not body then return U.fail(400, "INVALID_JSON", err) end
+                local res, gerr = Membership.grantCredit(ns_id, body, actor(s))
+                if not res then return U.from_err(gerr) end
+                return U.ok(res, 201)
+            end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    app:post(BASE .. "/credits/:uuid/void", guard("update", function(self, ns_id)
+        local body = U.read_json() or {}
+        local res, err = Membership.voidCredit(ns_id, self.params.uuid, body, actor(self))
+        if not res then return U.from_err(err) end
+        return U.ok(res)
     end))
 end

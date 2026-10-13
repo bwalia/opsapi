@@ -88,6 +88,31 @@ local c = M.apply_credits(400000, 0.2, 0, { { id = 1, amount_minor = 10000, min_
 check("credit: minimum-order rule respected", #c.applied == 1 and c.applied[1].id == 2 and c.credit_minor == 5000)
 check("credit: none → unchanged totals", M.apply_credits(1000, 0.2, 0, {}).total_minor == 1200)
 
+-- loyalty credit (admin) -----------------------------------------------------------------------
+local good = M.validate_credit({ email = " Head@School.org.uk ", amount_minor = 25000, min_order_minor = 500000,
+    reason = "Thanks for the lab order" }, s)
+check("credit grant: valid request cleaned", good and good.email == "head@school.org.uk" and good.amount_minor == 25000
+    and good.min_order_minor == 500000)
+check("credit grant: expiry defaults to the setting", good and good.expires_in_days == 365)
+check("credit grant: notify only when asked", good and good.notify == false)
+check("credit grant: min order defaults to 0", M.validate_credit({ email = "a@b.co", amount_minor = 100, reason = "abc" }, s).min_order_minor == 0)
+local function bad(b) local r, e = M.validate_credit(b, s) return r == nil and e ~= nil end
+check("credit grant: amount must be positive whole pence", bad({ email = "a@b.co", amount_minor = 0, reason = "abc" })
+    and bad({ email = "a@b.co", amount_minor = 12.5, reason = "abc" }) and bad({ email = "a@b.co", amount_minor = -100, reason = "abc" }))
+check("credit grant: typo guard on huge amounts", bad({ email = "a@b.co", amount_minor = M.MAX_CREDIT_MINOR + 1, reason = "abc" }))
+check("credit grant: reason required", bad({ email = "a@b.co", amount_minor = 100 }) and bad({ email = "a@b.co", amount_minor = 100, reason = "  " }))
+check("credit grant: email required", bad({ email = "nope", amount_minor = 100, reason = "abc" }))
+check("credit grant: negative min order rejected", bad({ email = "a@b.co", amount_minor = 100, min_order_minor = -1, reason = "abc" }))
+check("credit grant: expiry bounds", bad({ email = "a@b.co", amount_minor = 100, reason = "abc", expires_in_days = 0 }))
+local fmt = function(m) return string.format("£%.2f", m / 100) end
+check("credit label: with minimum order", M.credit_label(25000, 500000, fmt) == "£250.00 off your next order over £5000.00 (before VAT)")
+check("credit label: no minimum", M.credit_label(25000, 0, fmt) == "£250.00 off your next order (before VAT)")
+-- the min-order rule is enforced when credit is applied
+local under = M.apply_credits(499999, 0.2, 0, { { id = 9, amount_minor = 25000, min_order_minor = 500000 } })
+local over = M.apply_credits(500000, 0.2, 0, { { id = 9, amount_minor = 25000, min_order_minor = 500000 } })
+check("credit redeem: not applied below the minimum order", under.credit_minor == 0)
+check("credit redeem: applied at the minimum order", over.credit_minor == 25000 and over.subtotal_minor == 475000)
+
 -- email ----------------------------------------------------------------------------------------
 check("email: normalised", M.email(" VIP@Lab.ac.uk ") == "vip@lab.ac.uk")
 check("email: junk rejected", M.email("x@y") == nil)
