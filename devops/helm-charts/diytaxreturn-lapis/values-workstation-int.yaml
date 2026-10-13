@@ -176,6 +176,9 @@ corsAllowedDomains: "workstation.co.uk,workstation.academy"
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.
 googleRedirectUri: "https://int-opsapi.workstation.co.uk/auth/google/callback"
+# Facebook sign-in for shop customers returns here. Add it to the Facebook app's
+# Valid OAuth Redirect URIs; FACEBOOK_APP_ID + FACEBOOK_APP_SECRET go in Vault.
+facebookRedirectUri: "https://int-opsapi.workstation.co.uk/auth/facebook/callback"
 
 # Workstation AI Shop (shop.workstation.co.uk, workstation-website/shop).
 # Plain config → SHOP_ALLOWED_ORIGINS / SHOP_PUBLIC_URL container env (see

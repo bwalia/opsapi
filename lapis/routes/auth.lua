@@ -1498,6 +1498,13 @@ return function(app)
         return { redirect_to = final_url }
     end))
 
+    -- Facebook is offered to shop customers only (lib/shop-customer-auth.lua): no dashboard sign-in here.
+    app:get("/auth/facebook/callback", RateLimit.wrap(OAUTH_LIMIT, function(self)
+        local url = ShopCustomerAuth.facebookCallback(self.params)
+        if not url then return { status = 400, json = { error = "Invalid sign-in request" } } end
+        return { redirect_to = url }
+    end))
+
     app:get("/auth/apple/callback", apple_callback)
     app:post("/auth/apple/callback", apple_callback)
 

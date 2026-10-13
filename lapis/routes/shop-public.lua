@@ -44,7 +44,9 @@
       POST   /products/:slug/waitlist            { email } (members first)
 
     Customer sign-in (Google / Apple; any shopper, not only VIP members — ends in the same session):
-      POST   /auth/start                         { provider: google|apple, nonce, next } → { authorize_url } (BFF only)
+      POST   /auth/start                         { provider: google|apple|facebook, nonce, next } → { authorize_url } (BFF only)
+      POST   /auth/password                      { email, password } → { session_token, email } + emails a code (BFF only)
+      POST   /auth/password/verify               { session_token, code } → { session_token, email, expires_in_days } (BFF only)
       GET    /customer/quotes                    the signed-in customer's quotes, matched on email (X-Member-Token)
 ]]
 
@@ -352,6 +354,25 @@ return function(app)
         local body, bad = body_or_400()
         if not body then return bad end
         local res, err = CustomerAuth.start(self.shop_ns, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    -- Existing OpsAPI account: password, then the emailed 6-digit code (as every OpsAPI password sign-in).
+    app:post(BASE .. "/auth/password", public(function(self)
+        if not is_bff(self) then return U.fail(403, "FORBIDDEN", "Not allowed") end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = CustomerAuth.passwordStart(self.shop_ns, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/auth/password/verify", public(function(self)
+        if not is_bff(self) then return U.fail(403, "FORBIDDEN", "Not allowed") end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = CustomerAuth.passwordVerify(self.shop_ns, body)
         if not res then return U.from_err(err) end
         return U.ok(res)
     end))

@@ -1,11 +1,12 @@
 -- luacheck: max line length 140
 --[[
-    Shop customer sign-in (Google / Apple) — pure rules
-    ===================================================
+    Shop customer sign-in (Google / Apple / Facebook) — pure rules
+    ==============================================================
     A shop customer signs in with Google or Apple through OpsAPI's existing
     provider callbacks (/auth/google/callback, /auth/apple/callback), so no new
-    redirect URI has to be registered with either provider. The OAuth `state`
-    carries a `shop` table instead of the dashboard's frontend_url/project_code:
+    redirect URI has to be registered with either provider. Facebook is shop-only
+    and has its own callback (/auth/facebook/callback, FACEBOOK_REDIRECT_URI).
+    The OAuth `state` carries a `shop` table instead of the dashboard's frontend_url/project_code:
 
         { shop = { ns = "<namespace slug>", n = "<nonce>", next = "/account" } }
 
@@ -18,12 +19,16 @@
     checked when the browser lands back, so a forged state can't sign a victim
     into someone else's account. `next` is only ever a same-site path.
 
+    Customers with an OpsAPI account can also sign in with their email and
+    password. Like every OpsAPI password sign-in, a 6-digit code is then emailed
+    and must be entered before the shop session is issued.
+
     No nginx, no DB: unit tested by spec/shop-customer-auth-test.lua.
 ]]
 
 local M = {}
 
-M.PROVIDERS = { google = true, apple = true }
+M.PROVIDERS = { google = true, apple = true, facebook = true }
 M.DEFAULT_NEXT = "/account"
 
 local function escape(s)
@@ -87,6 +92,27 @@ function M.google_authorize_url(client_id, redirect_uri, state)
     return ("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s"
         .. "&response_type=code&scope=openid+profile+email&prompt=select_account&state=%s")
         :format(escape(client_id), escape(redirect_uri), escape(state))
+end
+
+--- Facebook's login dialog. Only the email permission: we match quotes on it, nothing else.
+M.FACEBOOK_GRAPH = "https://graph.facebook.com/v19.0"
+function M.facebook_authorize_url(app_id, redirect_uri, state)
+    return ("https://www.facebook.com/v19.0/dialog/oauth?client_id=%s&redirect_uri=%s"
+        .. "&response_type=code&scope=email&state=%s")
+        :format(escape(app_id), escape(redirect_uri), escape(state))
+end
+
+--- A 6-digit emailed sign-in code.
+function M.valid_code(c)
+    return type(c) == "string" and c:match("^%d%d%d%d%d%d$") ~= nil
+end
+
+--- "j***@example.com": shows which inbox the code went to without echoing the whole address.
+function M.mask_email(email)
+    if type(email) ~= "string" then return nil end
+    local name, domain = email:match("^([^@]+)@(.+)$")
+    if not name then return nil end
+    return name:sub(1, 1) .. "***@" .. domain
 end
 
 return M
