@@ -1,23 +1,42 @@
 'use client';
 
-/** AI run settings (ai_runs_settings.manage): workspace defaults for runs, tracking sessions started by hand, and the prompt template. */
+/**
+ * AI run settings (ai_runs_settings.manage): workspace defaults for runs, task automation, safety additions,
+ * tracking sessions started by hand (default target, tunables and routing rules, §26–§27), and the prompt template.
+ */
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, SlidersHorizontal, Settings as SettingsIcon, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Card, Input, Select, Switch, Textarea } from '@/components/ui';
+import { Button, Card, Input, Select, Textarea, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner } from '@/components/property-deals/ui';
-import { AiRunnerPage, OUTPUT_MODES, PRODUCT, useAiData } from '@/components/ai-runner/ui';
-import { aiRunner, aiErrorText, type SessionTracking, type Settings } from '@/services/ai-runner.service';
-import { kanbanService } from '@/services/kanban.service';
+import { AiRunnerPage, BASE, OUTPUT_MODES, PRODUCT, useAiData } from '@/components/ai-runner/ui';
+import { ColumnField, ProjectSelect, TagsInput, Toggle, shown, strings, typed, useProjects } from '@/components/ai-runner/fields';
+import { TrackRules } from '@/components/ai-runner/TrackRules';
+import { usePermissions } from '@/contexts/PermissionsContext';
+import { useMenuStore } from '@/store/menu.store';
+import {
+  aiRunner, aiErrorText, type KanbanStatus, type SessionTracking, type Settings, type TaskMove,
+} from '@/services/ai-runner.service';
 
 export default function AiRunSettingsPage() {
+  // Platform admin: the user's "administrative" role, or the server's word in the menu response.
+  const { isAdmin: hasAdminRole } = usePermissions();
+  const menuSaysAdmin = useMenuStore((st) => st.isAdmin);
+  const isAdmin = hasAdminRole || menuSaysAdmin;
   return (
     <AiRunnerPage module="ai_runs_settings" action="manage">
       <div className="space-y-6">
         <PageHeader title="AI run settings" description="Workspace defaults for AI runs and the prompt every run starts from."
-          icon={<SettingsIcon className="h-6 w-6" />} />
+          icon={<SettingsIcon className="h-6 w-6" />}
+          actions={isAdmin ? (
+            <Link href={`${BASE}/platform`} className={buttonClass('outline')}>
+              <SlidersHorizontal className="h-4 w-4" aria-hidden /> Platform settings
+            </Link>
+          ) : undefined} />
         <RunSettings />
+        <TrackRules />
         <TemplateEditor />
       </div>
     </AiRunnerPage>
@@ -29,26 +48,63 @@ const DEFAULTS: Settings = {
   pr_draft: false,
   pr_base: 'main',
   max_run_minutes: 60,
-  task_automation: { in_progress_on_start: false, review_on_success: false },
+  task_automation: {
+    on_start: { enabled: false, status: 'in_progress', column: 'In Progress' },
+    on_success: { enabled: false, status: 'review', column: 'Review' },
+  },
   approval_policy: {
     deciders: 'managers', project_admins_decide: false, require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60,
   },
   guards: {
     similar_threshold: 0.45, max_open_runs_per_user: 3, max_open_runs_per_workspace: 10, daily_token_limit: 0, retention_days: 365,
   },
-  session_tracking: { enabled: false, project_uuid: null, column: null, status: 'in_progress', notify: true },
+  session_tracking: {
+    enabled: false, project_uuid: null, column: null, status: 'in_progress', notify: true, gone_after_minutes: 10, max_new_per_heartbeat: 20,
+    idle_statuses: ['idle', 'done', 'finished', 'stopped', 'exited', 'ended', 'completed', 'closed', 'inactive'],
+    tool_labels: { claude: 'Claude', cursor: 'Cursor' },
+  },
+  safety: { extra_denied_commands: [], extra_redactions: [] },
 };
 
-function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <div className="text-sm font-medium text-secondary-800">{label}</div>
-        {hint && <div className="text-xs text-secondary-500">{hint}</div>}
-      </div>
-      <Switch checked={checked} onChange={onChange} aria-label={label} />
-    </div>
-  );
+const KANBAN_STATUSES: { value: KanbanStatus; label: string }[] = [
+  { value: 'open', label: 'Open' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'review', label: 'Review' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** The server's settings over the defaults; task automation from on_start / on_success, else the old booleans (§27.4). */
+function normalize(d: Partial<Settings>, base: Settings = DEFAULTS): Settings {
+  const ta = (isObject(d.task_automation) ? d.task_automation : {}) as Partial<Settings['task_automation']>;
+  const st = { ...base.session_tracking, ...d.session_tracking };
+  const sf = { ...base.safety, ...d.safety };
+  return {
+    ...base, ...d,
+    task_automation: {
+      on_start: { ...base.task_automation.on_start, ...(ta.on_start ?? (ta.in_progress_on_start != null && { enabled: ta.in_progress_on_start })) },
+      on_success: { ...base.task_automation.on_success, ...(ta.on_success ?? (ta.review_on_success != null && { enabled: ta.review_on_success })) },
+    },
+    approval_policy: { ...base.approval_policy, ...d.approval_policy },
+    guards: { ...base.guards, ...d.guards },
+    // An empty Lua table arrives as {} or [] whatever it was.
+    session_tracking: { ...st, idle_statuses: strings(st.idle_statuses), tool_labels: isObject(st.tool_labels) ? st.tool_labels as Record<string, string> : {} },
+    safety: { extra_denied_commands: strings(sf.extra_denied_commands), extra_redactions: strings(sf.extra_redactions) },
+  };
+}
+
+/** Why a redaction pattern can't be used (the server checks it again as PCRE), or null. */
+function regexError(p: string): string | null {
+  if (new TextEncoder().encode(p).length > 200) return 'At most 200 characters.';
+  try {
+    if (new RegExp(p).test('')) return 'It must not match empty text: make it match at least one character.';
+    return null;
+  } catch (e) {
+    return `Not a valid regular expression: ${(e as Error).message}`;
+  }
 }
 
 function RunSettings() {
@@ -56,37 +112,28 @@ function RunSettings() {
   const [s, setS] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    const d = loaded.data;
-    if (d) {
-      setS({
-        ...DEFAULTS, ...d,
-        task_automation: { ...DEFAULTS.task_automation, ...d.task_automation },
-        approval_policy: { ...DEFAULTS.approval_policy, ...d.approval_policy },
-        guards: { ...DEFAULTS.guards, ...d.guards },
-        session_tracking: { ...DEFAULTS.session_tracking, ...d.session_tracking },
-      });
-    }
+    if (loaded.data) setS(normalize(loaded.data));
   }, [loaded.data]);
 
   if (!s) return loaded.error ? <ErrorNote error={loaded.error} product={PRODUCT} /> : <Spinner />;
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
   const g = s.guards;
   const guard = (patch: Partial<Settings['guards']>) => set({ guards: { ...g, ...patch } });
-  // 0 is a valid limit, so an emptied field stays empty (NaN) rather than snapping to 0; `required` stops the save.
-  const typed = (v: string) => (v === '' ? NaN : Number(v));
-  const shown = (n: number) => (Number.isNaN(n) ? '' : n);
+  const move = (k: 'on_start' | 'on_success', patch: Partial<TaskMove>) =>
+    set({ task_automation: { ...s.task_automation, [k]: { ...s.task_automation[k], ...patch } } });
+  const safety = (patch: Partial<Settings['safety']>) => set({ safety: { ...s.safety, ...patch } });
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!s) return;
+    const bad = s.safety.extra_redactions.map(regexError).find(Boolean)
+      || (!s.session_tracking.idle_statuses.length && 'Name at least one idle status.');
+    if (bad) { toast.error(bad); return; }
     setBusy(true);
     try {
-      const saved = await aiRunner.saveSettings(s);
-      if (saved) {
-        setS({
-          ...s, ...saved, guards: { ...s.guards, ...saved.guards }, session_tracking: { ...s.session_tracking, ...saved.session_tracking },
-        });
-      }
+      // Only the new task automation shape: the old booleans would say something else.
+      const saved = await aiRunner.saveSettings({ ...s, task_automation: { on_start: s.task_automation.on_start, on_success: s.task_automation.on_success } });
+      if (saved) setS(normalize(saved, s));
       toast.success('Settings saved');
     } catch (err) {
       toast.error(aiErrorText(err));
@@ -112,10 +159,8 @@ function RunSettings() {
 
         <div className="space-y-3 border-t border-secondary-200 pt-4">
           <h3 className="text-sm font-semibold text-secondary-800">Task automation</h3>
-          <Toggle label="Move the task to In progress when a run starts" checked={s.task_automation.in_progress_on_start}
-            onChange={(v) => set({ task_automation: { ...s.task_automation, in_progress_on_start: v } })} />
-          <Toggle label="Move the task to Review when a run succeeds" checked={s.task_automation.review_on_success}
-            onChange={(v) => set({ task_automation: { ...s.task_automation, review_on_success: v } })} />
+          <TaskMoveFields id="air-s-on-start" label="When a run starts, move its task" move={s.task_automation.on_start} onChange={(p) => move('on_start', p)} />
+          <TaskMoveFields id="air-s-on-success" label="When a run succeeds, move its task" move={s.task_automation.on_success} onChange={(p) => move('on_success', p)} />
         </div>
 
         <div className="space-y-3 border-t border-secondary-200 pt-4">
@@ -173,6 +218,22 @@ function RunSettings() {
           </div>
         </div>
 
+        <div className="space-y-3 border-t border-secondary-200 pt-4">
+          <h3 className="text-sm font-semibold text-secondary-800">Safety</h3>
+          <p className="text-xs text-secondary-500">
+            Add to the built-in rules: runners always block risky commands (git push, sudo, reading secrets, anything outside the run&apos;s
+            folder), and the server always masks tokens, keys and passwords. The built-in rules can&apos;t be removed or loosened here.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TagsInput id="air-s-denied" label="Extra denied commands" values={s.safety.extra_denied_commands}
+              onChange={(v) => safety({ extra_denied_commands: v })} placeholder="terraform apply"
+              hint="A command prefix or glob, such as kubectl delete or rm -rf *. Runners deny it like their built-in list." />
+            <TagsInput id="air-s-redact" label="Extra redactions" values={s.safety.extra_redactions} check={regexError}
+              onChange={(v) => safety({ extra_redactions: v })} placeholder="ACME-[0-9]{6}"
+              hint="Regular expressions. Matching text is masked in logs, prompts and conversations the server stores." />
+          </div>
+        </div>
+
         <SessionTrackingFields t={s.session_tracking} onChange={(patch) => set({ session_tracking: { ...s.session_tracking, ...patch } })} />
 
         <div className="flex justify-end">
@@ -183,25 +244,66 @@ function RunSettings() {
   );
 }
 
-/** §26: a session someone starts by hand on a runner's machine becomes a kanban task. Saved with the form above. */
-function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: (patch: Partial<SessionTracking>) => void }) {
-  // ponytail: the first 200 projects, as Runners → Access lists them; add search if workspaces outgrow that.
-  const projects = useAiData(async () => (await kanbanService.getProjects({ perPage: 200 })).data || [], []);
-  // The column names of the project's first board (where the task goes); free text when they can't be read.
-  const columns = useAiData(async () => {
-    if (!t.project_uuid) return [];
-    const [board] = await kanbanService.getBoards(t.project_uuid);
-    return board ? ((await kanbanService.getBoard(board.uuid)).columns || []).map((c) => c.name) : [];
-  }, [t.project_uuid]);
-  const list = projects.data || [];
-  const names = columns.loading ? [] : columns.data || []; // not the previous project's while the new one loads
-  const column = t.column || '';
+/** Move the run's task to a status (and optionally a column) when a run starts or succeeds (§27.4). */
+function TaskMoveFields({ id, label, move, onChange }: { id: string; label: string; move: TaskMove; onChange: (p: Partial<TaskMove>) => void }) {
+  return (
+    <div className="space-y-2">
+      <Toggle label={label} checked={move.enabled} onChange={(v) => onChange({ enabled: v })} />
+      {move.enabled && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select id={`${id}-status`} label="Status" value={move.status} onChange={(e) => onChange({ status: e.target.value as KanbanStatus })}>
+            {KANBAN_STATUSES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+          <Input id={`${id}-column`} label="Column (optional)" value={move.column || ''} placeholder="Leave the column as it is"
+            onChange={(e) => onChange({ column: e.target.value.trim() ? e.target.value : null })}
+            helperText="A column name on the task's board. Tasks on boards without it keep their column." />
+        </div>
+      )}
+    </div>
+  );
+}
 
+/** tool → label rows (§27.4); rows with no tool name are left out. */
+function ToolLabels({ labels, onChange }: { labels: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+  const [rows, setRows] = useState<[string, string][]>(() => Object.entries(labels));
+  const update = (next: [string, string][]) => {
+    setRows(next);
+    onChange(Object.fromEntries(next.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v])));
+  };
+  return (
+    <fieldset className="min-w-0 space-y-2">
+      <legend className="text-sm font-medium text-secondary-700">Tool names</legend>
+      <p className="text-xs text-secondary-500">How each tool is named in task titles and {'{{tool_label}}'}; others use the tool as reported.</p>
+      {rows.map(([k, v], i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input aria-label={`Tool ${i + 1}`} placeholder="claude" value={k} className="font-mono"
+            onChange={(e) => update(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
+          <Input aria-label={`Label of tool ${i + 1}`} placeholder="Claude" value={v}
+            onChange={(e) => update(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+          <Button type="button" size="sm" variant="ghost" aria-label={`Remove tool ${k || i + 1}`} onClick={() => update(rows.filter((_, j) => j !== i))}>
+            <Trash2 className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
+      ))}
+      <Button type="button" size="sm" variant="outline" leftIcon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setRows([...rows, ['', '']])}>
+        Add a tool
+      </Button>
+    </fieldset>
+  );
+}
+
+/**
+ * §26: a session someone starts by hand on a runner's machine becomes a kanban task — where it goes when no routing
+ * rule matches (§27.3), and the §27.4 tunables. Saved with the form above.
+ */
+function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: (patch: Partial<SessionTracking>) => void }) {
+  const projects = useProjects();
   return (
     <div className="space-y-3 border-t border-secondary-200 pt-4">
       <h3 className="text-sm font-semibold text-secondary-800">Track sessions started by hand</h3>
       <p className="text-xs text-secondary-500">
-        When someone starts Claude Code or Cursor by hand on a runner&apos;s machine, OpsAPI creates a task for the session in this project.
+        When someone starts Claude Code or Cursor by hand on a runner&apos;s machine, OpsAPI creates a task for the session.
+        Routing rules (below) decide first; a session no rule matches goes to this project.
         The task has no assignee, so a manager can assign it like any other. Runs started from OpsAPI already have a task.
         The task takes its title from the session&apos;s first prompt only when the runner&apos;s config has{' '}
         <code className="font-mono">share_manual_prompts: true</code>; otherwise it is named after the tool, folder and machine.
@@ -210,23 +312,9 @@ function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: 
       </p>
       <Toggle label="Create a task for each session started by hand" checked={t.enabled} onChange={(v) => onChange({ enabled: v })} />
       <div className="grid gap-4 sm:grid-cols-3">
-        <Select id="air-s-track-project" label="Project" required={t.enabled} value={t.project_uuid || ''}
-          onChange={(e) => onChange({ project_uuid: e.target.value || null, column: null })}>
-          <option value="">{projects.loading && !projects.data ? 'Loading projects…' : 'Choose a project'}</option>
-          {list.map((p) => <option key={p.uuid} value={p.uuid}>{p.name}</option>)}
-          {/* Saved, but not one the caller can see: keep it rather than lose it on save. */}
-          {projects.data && t.project_uuid && !list.some((p) => p.uuid === t.project_uuid) && <option value={t.project_uuid}>Current project</option>}
-        </Select>
-        {names.length ? (
-          <Select id="air-s-track-column" label="Column" value={column} onChange={(e) => onChange({ column: e.target.value || null })}>
-            <option value="">First column</option>
-            {names.map((n) => <option key={n} value={n}>{n}</option>)}
-            {column && !names.includes(column) && <option value={column}>{column}</option>}
-          </Select>
-        ) : (
-          <Input id="air-s-track-column" label="Column" value={column} placeholder="First column"
-            onChange={(e) => onChange({ column: e.target.value.trim() ? e.target.value : null })} />
-        )}
+        <ProjectSelect id="air-s-track-project" required={t.enabled} value={t.project_uuid} projects={projects}
+          onChange={(uuid) => onChange({ project_uuid: uuid, column: null })} />
+        <ColumnField id="air-s-track-column" projectUuid={t.project_uuid} value={t.column} onChange={(column) => onChange({ column })} />
         <Select id="air-s-track-status" label="Task status" value={t.status}
           onChange={(e) => onChange({ status: e.target.value as SessionTracking['status'] })}>
           <option value="in_progress">In progress</option>
@@ -235,6 +323,17 @@ function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: 
       </div>
       <Toggle label="Tell managers about each new task" hint="A notification with a link to the task." checked={t.notify}
         onChange={(v) => onChange({ notify: v })} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input id="air-s-gone" label="Ended after (minutes)" type="number" min={1} max={1440} required value={shown(t.gone_after_minutes)}
+          onChange={(e) => onChange({ gone_after_minutes: typed(e.target.value) })}
+          helperText="1–1440. A tracked session nobody reports for this long has ended; its task gets a comment." />
+        <Input id="air-s-per-heartbeat" label="New tasks per heartbeat" type="number" min={1} max={100} required value={shown(t.max_new_per_heartbeat)}
+          onChange={(e) => onChange({ max_new_per_heartbeat: typed(e.target.value) })}
+          helperText="1–100 (the platform may cap it lower). More new sessions than this wait for the machine's next report." />
+        <TagsInput id="air-s-idle" label="Idle statuses" values={t.idle_statuses} onChange={(v) => onChange({ idle_statuses: v })} placeholder="idle"
+          hint="Sessions reporting one of these don't count as busy, so they never become tasks." />
+        <ToolLabels labels={t.tool_labels} onChange={(v) => onChange({ tool_labels: v })} />
+      </div>
     </div>
   );
 }

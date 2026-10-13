@@ -1,22 +1,24 @@
 'use client';
 
 /**
- * Runners (ai_runners.manage): the machines that run AI tasks for this workspace through PromptPilot.
- * Register (token shown once + setup), rotate the token, pause / resume, revoke, each machine's sessions, and
- * who may start runs on it (Access, §25.1).
+ * Runners & sources (ai_runners.manage): the connections that feed this workspace — runners (PromptPilot machines
+ * that run AI tasks and report sessions) and sources (anything that only reports sessions, §27.1). Register (token
+ * shown once + setup), rotate the token, pause / resume, revoke, each connection's sessions, what it reports
+ * (§27.2), and who may start runs on a runner (Access, §25.1).
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Copy, KeyRound, ListTree, Pause, Play, Plus, Server, Trash2, Users } from 'lucide-react';
+import { Copy, Filter, KeyRound, ListTree, Pause, Play, Plus, Server, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, ConfirmDialog, Input, Modal, Table } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Input, Modal, Select, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import { AiRunnerPage, BASE, PRODUCT, ProfileList, RunnerStatusBadge, ago, useAiData } from '@/components/ai-runner/ui';
+import { CheckList, TagsInput, strings, useMembers, useProjects } from '@/components/ai-runner/fields';
 import apiClient from '@/lib/api-client';
-import { kanbanService } from '@/services/kanban.service';
-import namespaceService from '@/services/namespace.service';
-import { aiRunner, aiErrorText, type Runner, type RunnerAccess, type RunnerAccessMode } from '@/services/ai-runner.service';
+import {
+  aiRunner, aiErrorText, type ConnectionKind, type Runner, type RunnerAccess, type RunnerAccessMode,
+} from '@/services/ai-runner.service';
 
 export default function RunnersPage() {
   return (
@@ -79,10 +81,57 @@ function runnerJson(name: string): string {
   }, null, 2);
 }
 
-/** The token, once, with how to set the machine up. */
-function TokenModal({ shown, onClose }: { shown: { name: string; token: string; rotated: boolean } | null; onClose: () => void }) {
+/** §27.1: any tool can report its sessions with the connection's token (the same storage and tracking as a heartbeat). */
+function sessionsCurl(auth: string): string {
+  const body = JSON.stringify({
+    sessions: [{
+      key: 'build-42', tool: 'codex', status: 'busy', cwd: '/work/app', branch: 'feature/login', session_id: 'build-42',
+      started_at: '2026-10-13T09:00:00Z', first_prompt: 'Fix the login redirect',
+    }],
+  });
+  return [
+    `curl -X POST ${opsapiUrl()}/api/v2/ai-runner/public/runner/sessions`,
+    `  -H "Authorization: Bearer ${auth}"`,
+    '  -H "Content-Type: application/json"',
+    `  -d '${body}'`,
+  ].join(' \\\n');
+}
+
+const KINDS: { value: ConnectionKind; label: string; hint: string }[] = [
+  { value: 'runner', label: 'Runner', hint: 'A machine running PromptPilot: it runs AI tasks from OpsAPI and reports its sessions.' },
+  { value: 'source', label: 'Source', hint: 'Only reports sessions (a CI job, another observer, an IDE plugin…); it never runs tasks.' },
+];
+const kindOf = (r: Pick<Runner, 'kind'>): ConnectionKind => (r.kind === 'source' ? 'source' : 'runner');
+
+type Shown = { name: string; token: string; rotated: boolean; kind: ConnectionKind };
+
+/** The token, once, with how to set the machine (or the source) up. */
+function TokenModal({ shown, onClose }: { shown: Shown | null; onClose: () => void }) {
   if (!shown) return null;
   const s = slug(shown.name);
+  if (shown.kind === 'source') {
+    return (
+      <Modal isOpen onClose={onClose} size="2xl" title={shown.rotated ? `New token for ${shown.name}` : `Source ${shown.name} registered`}
+        footer={<Button onClick={onClose}>I saved the token</Button>}>
+        <div className="space-y-4 text-sm text-secondary-700">
+          <p className="rounded-lg bg-warning-500/10 p-3 font-medium text-warning-700" role="alert">
+            Copy this token now. You won&apos;t see it again{shown.rotated ? ', and the old token no longer works' : ''}.
+          </p>
+          <CopyBlock text={shown.token} what="Token" testId="runner-token" />
+          <p>
+            Keep it where the source runs (for example in <code className="font-mono">~/.promptpilot/{s}.token</code>, readable only by you),
+            then report sessions with it. Each call replaces what this source reported before:
+          </p>
+          <CopyBlock what="Command" text={sessionsCurl(`$(cat ~/.promptpilot/${s}.token)`)} />
+          <p className="text-xs text-secondary-500">
+            Fields: key, tool, status, cwd, branch, session_id, started_at, updated_at, first_prompt, prompt_preview, labels. Tool and
+            status are free text. With PromptPilot on the machine, add <code className="font-mono">&quot;report_only&quot;: true</code> to its
+            registration instead: it reports sessions and never runs tasks.
+          </p>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal isOpen onClose={onClose} size="2xl" title={shown.rotated ? `New token for ${shown.name}` : `Runner ${shown.name} registered`}
       footer={<Button onClick={onClose}>I saved the token</Button>}>
@@ -142,8 +191,7 @@ function SessionsModal({ runner, onClose }: { runner: Runner | null; onClose: ()
   );
 }
 
-// An empty Lua table arrives as {} rather than [].
-const ids = (v: unknown) => (Array.isArray(v) ? (v as string[]) : []);
+const ids = strings;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 const ACCESS_MODES: { value: RunnerAccessMode; label: string; hint: string }[] = [
@@ -162,56 +210,14 @@ function accessText(a?: RunnerAccess | null): string {
   return 'Owner and managers';
 }
 
-type Choice = { value: string; label: string; hint?: string };
-
-/** Checkboxes with a filter. Picked uuids the list doesn't show (no access, or gone) stay listed so they can be removed. */
-function CheckList({ legend, items, picked, onChange, loading, error }: {
-  legend: string; items: Choice[]; picked: string[]; onChange: (v: string[]) => void; loading: boolean; error?: string;
-}) {
-  const [q, setQ] = useState('');
-  const known = new Set(items.map((i) => i.value));
-  const all = [...items, ...picked.filter((v) => !known.has(v)).map((v) => ({ value: v, label: 'Not in the list', hint: v }))];
-  const shown = all.filter((i) => !q || `${i.label} ${i.hint || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
-  return (
-    <fieldset className="min-w-0 space-y-2">
-      <legend className="text-sm font-medium text-secondary-800">
-        {legend} <span className="font-normal text-secondary-500">({picked.length} selected)</span>
-      </legend>
-      <Input aria-label={`Filter ${legend.toLowerCase()}`} placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-secondary-200 p-2">
-        {error && <p className="text-sm text-error-600">{error}</p>}
-        {!error && loading && !all.length && <p className="text-sm text-secondary-500">Loading…</p>}
-        {!loading && !shown.length && <p className="text-sm text-secondary-500">None found.</p>}
-        {shown.map((i) => (
-          <label key={i.value} className="flex items-start gap-2 text-sm">
-            <input type="checkbox" className="mt-0.5" checked={picked.includes(i.value)}
-              onChange={(e) => onChange(e.target.checked ? [...picked, i.value] : picked.filter((v) => v !== i.value))} />
-            <span className="min-w-0">
-              {i.label}
-              {i.hint && <span className="block break-all text-xs text-secondary-500">{i.hint}</span>}
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 /** Who may start runs on a runner (PUT /runners/:uuid/access). */
 function AccessModal({ runner, onClose, onSaved }: { runner: Runner; onClose: () => void; onSaved: () => void }) {
   const [mode, setMode] = useState<RunnerAccessMode>(runner.access?.mode || 'owner');
   const [users, setUsers] = useState(ids(runner.access?.users));
   const [projects, setProjects] = useState(ids(runner.access?.projects));
   const [busy, setBusy] = useState(false);
-  // ponytail: the first 200 members and projects; add server-side search if workspaces outgrow that.
-  const members = useAiData(async () => (await namespaceService.getMembers({ perPage: 200, status: 'active' })).data || [], [runner.uuid]);
-  const kanban = useAiData(async () => (await kanbanService.getProjects({ perPage: 200 })).data || [], [runner.uuid]);
-  const people: Choice[] = (members.data || []).flatMap((m) => m.user ? [{
-    value: m.user.uuid,
-    label: m.user.full_name || [m.user.first_name, m.user.last_name].filter(Boolean).join(' ') || m.user.email,
-    hint: m.user.email,
-  }] : []);
-  const projectChoices: Choice[] = (kanban.data || []).map((p) => ({ value: p.uuid, label: p.name }));
+  const members = useMembers();
+  const kanban = useProjects();
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -246,9 +252,9 @@ function AccessModal({ runner, onClose, onSaved }: { runner: Runner; onClose: ()
         </fieldset>
         {mode === 'listed' && (
           <div className="grid gap-4 sm:grid-cols-2">
-            <CheckList legend="People" items={people} picked={users} onChange={setUsers} loading={members.loading}
+            <CheckList legend="People" items={members.choices} picked={users} onChange={setUsers} loading={members.loading}
               error={members.error && "Can't load the workspace's members."} />
-            <CheckList legend="Projects" items={projectChoices} picked={projects} onChange={setProjects} loading={kanban.loading}
+            <CheckList legend="Projects" items={kanban.choices} picked={projects} onChange={setProjects} loading={kanban.loading}
               error={kanban.error && "Can't load the projects."} />
           </div>
         )}
@@ -264,15 +270,75 @@ function AccessModal({ runner, onClose, onSaved }: { runner: Runner; onClose: ()
   );
 }
 
+/** "Reports: 2 folders, 1 tool" — what a connection's report filter keeps (§27.2). */
+function filterText(f?: Runner['report_filter']): string {
+  const parts = [
+    [strings(f?.folders).length, 'folder', 'folders'],
+    [strings(f?.exclude_folders).length, 'excluded folder', 'excluded folders'],
+    [strings(f?.tools).length, 'tool', 'tools'],
+  ].flatMap(([n, one, many]) => (n ? [plural(n as number, one as string, many as string)] : []));
+  return parts.length ? `Reports: ${parts.join(', ')}` : 'Reports all the machine allows';
+}
+
+/** What a connection reports (PUT /runners/:uuid/report-filter): it only ever narrows what the machine owner allows. */
+function ReportFilterModal({ runner, onClose, onSaved }: { runner: Runner; onClose: () => void; onSaved: () => void }) {
+  const f = runner.report_filter;
+  const [folders, setFolders] = useState(strings(f?.folders));
+  const [exclude, setExclude] = useState(strings(f?.exclude_folders));
+  const [tools, setTools] = useState(strings(f?.tools));
+  const [busy, setBusy] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await aiRunner.setReportFilter(runner.uuid, { folders, exclude_folders: exclude, tools });
+      toast.success(`What ${runner.name} reports saved`);
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error(aiErrorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal isOpen onClose={onClose} size="2xl" title={`What ${runner.name} reports`}
+      description="Which sessions this connection reports to this workspace. Empty fields keep everything the machine's owner allows.">
+      <form onSubmit={save} className="space-y-4">
+        <p className="rounded-lg bg-secondary-100 p-3 text-xs text-secondary-700">
+          This can only narrow what the machine&apos;s owner allows in its <code className="font-mono">runner.json</code>{' '}
+          (<code className="font-mono">inventory_roots</code>, and <code className="font-mono">share_manual_prompts</code> for prompt
+          text), never widen it. The runner applies it on the machine, and OpsAPI applies it again to whatever arrives.
+        </p>
+        <TagsInput id="air-rf-folders" label="Only these folders" values={folders} onChange={setFolders} placeholder="~/work/**"
+          hint="Globs. A session is reported only when its folder matches one. Empty: every folder allowed." />
+        <TagsInput id="air-rf-exclude" label="Never these folders" values={exclude} onChange={setExclude} placeholder="~/work/private/**"
+          hint="Globs. Sessions in matching folders are never reported, even inside the folders above." />
+        <TagsInput id="air-rf-tools" label="Only these tools" values={tools} onChange={setTools} placeholder="claude"
+          hint="Tool names as the connection reports them (claude, cursor, codex…). Empty: every tool." />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" isLoading={busy}>Save</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function Runners() {
   const runners = useAiData(() => aiRunner.listRunners(), [], 15_000);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [name, setName] = useState('');
+  const [kind, setKind] = useState<ConnectionKind>('runner');
+  const [kindFilter, setKindFilter] = useState<'' | ConnectionKind>('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [token, setToken] = useState<{ name: string; token: string; rotated: boolean } | null>(null);
+  const [token, setToken] = useState<Shown | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'rotate' | 'revoke'; runner: Runner } | null>(null);
   const [sessionsOf, setSessionsOf] = useState<Runner | null>(null);
   const [accessOf, setAccessOf] = useState<Runner | null>(null);
+  const [filterOf, setFilterOf] = useState<Runner | null>(null);
 
   async function act(key: string, fn: () => Promise<unknown>, ok: string) {
     setBusy(key);
@@ -293,11 +359,11 @@ function Runners() {
     e.preventDefault();
     if (!name.trim()) return;
     await act('register', async () => {
-      const res = await aiRunner.registerRunner(name.trim());
+      const res = await aiRunner.registerRunner(name.trim(), kind);
       setRegisterOpen(false);
-      setToken({ name: res.runner?.name || name.trim(), token: res.token, rotated: false });
+      setToken({ name: res.runner?.name || name.trim(), token: res.token, rotated: false, kind });
       setName('');
-    }, 'Runner registered');
+    }, kind === 'source' ? 'Source registered' : 'Runner registered');
   }
 
   async function confirmed() {
@@ -306,7 +372,7 @@ function Runners() {
     if (confirm.kind === 'rotate') {
       await act(`rotate:${r.uuid}`, async () => {
         const res = await aiRunner.rotateToken(r.uuid);
-        setToken({ name: r.name, token: res.token, rotated: true });
+        setToken({ name: r.name, token: res.token, rotated: true, kind: kindOf(r) });
       }, 'New token issued');
     } else {
       await act(`revoke:${r.uuid}`, () => aiRunner.revokeRunner(r.uuid), 'Runner revoked');
@@ -316,24 +382,35 @@ function Runners() {
 
   const columns = [
     { key: 'name', header: 'Name', render: (r: Runner) => <span className="font-medium">{r.name}</span> },
+    {
+      key: 'kind', header: 'Kind', render: (r: Runner) => (
+        <div>
+          <Badge size="sm" variant={kindOf(r) === 'source' ? 'info' : 'default'}>{kindOf(r) === 'source' ? 'Source' : 'Runner'}</Badge>
+          <div className="mt-1 text-xs text-secondary-500">{filterText(r.report_filter)}</div>
+        </div>
+      ),
+    },
     { key: 'status', header: 'Status', render: (r: Runner) => <RunnerStatusBadge status={r.status} /> },
     {
       key: 'machine', header: 'Machine', render: (r: Runner) => (
         <div>
           <div>{r.host || '—'}</div>
           {(r.os || r.version) && <div className="text-xs text-secondary-500">{[r.os, r.version && `v${r.version}`].filter(Boolean).join(' · ')}</div>}
+          {kindOf(r) === 'runner' && <div className="text-xs text-secondary-500">{plural((r.repos || []).length, 'repo', 'repos')}</div>}
         </div>
       ),
     },
     { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => ago(r.last_heartbeat_at) },
     { key: 'profiles', header: 'Profiles', render: (r: Runner) => <ProfileList profiles={r.capabilities?.profiles} /> },
-    { key: 'repos', header: 'Repos', render: (r: Runner) => (r.repos || []).length },
-    { key: 'access', header: 'Access', render: (r: Runner) => accessText(r.access) },
+    { key: 'access', header: 'Access', render: (r: Runner) => (kindOf(r) === 'source' ? <span className="text-secondary-400">—</span> : accessText(r.access)) },
     {
       key: 'actions', header: 'Actions', render: (r: Runner) => r.status === 'revoked' ? null : (
         <div className="flex flex-wrap gap-1">
           <Button size="sm" variant="ghost" onClick={() => setSessionsOf(r)} leftIcon={<ListTree className="h-4 w-4" aria-hidden />} aria-label={`Sessions on ${r.name}`}>Sessions</Button>
-          <Button size="sm" variant="ghost" onClick={() => setAccessOf(r)} leftIcon={<Users className="h-4 w-4" aria-hidden />} aria-label={`Access to ${r.name}`}>Access</Button>
+          <Button size="sm" variant="ghost" onClick={() => setFilterOf(r)} leftIcon={<Filter className="h-4 w-4" aria-hidden />} aria-label={`What ${r.name} reports`}>Reports</Button>
+          {kindOf(r) === 'runner' && (
+            <Button size="sm" variant="ghost" onClick={() => setAccessOf(r)} leftIcon={<Users className="h-4 w-4" aria-hidden />} aria-label={`Access to ${r.name}`}>Access</Button>
+          )}
           {r.status === 'paused' ? (
             <Button size="sm" variant="ghost" isLoading={busy === `resume:${r.uuid}`} onClick={() => act(`resume:${r.uuid}`, () => aiRunner.resumeRunner(r.uuid), 'Runner resumed')}
               leftIcon={<Play className="h-4 w-4" aria-hidden />} aria-label={`Resume ${r.name}`}>Resume</Button>
@@ -351,25 +428,52 @@ function Runners() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Runners"
-        description="Machines that run AI tasks for this workspace through PromptPilot."
+        title="Runners & sources"
+        description="Connections that feed this workspace: runners run AI tasks through PromptPilot and report their sessions; sources only report sessions."
         icon={<Server className="h-6 w-6" />}
-        actions={<Button leftIcon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setRegisterOpen(true)}>Register runner</Button>}
+        actions={<Button leftIcon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setRegisterOpen(true)}>Register</Button>}
       />
+      <div className="w-56 max-w-full">
+        <Select id="air-r-kind" label="Kind" value={kindFilter} onChange={(e) => setKindFilter(e.target.value as '' | ConnectionKind)}>
+          <option value="">Runners and sources</option>
+          <option value="runner">Runners</option>
+          <option value="source">Sources</option>
+        </Select>
+      </div>
       <ErrorNote error={runners.error} product={PRODUCT} />
       <Table<Runner>
-        caption="Runners"
+        caption="Runners and sources"
         columns={columns}
-        data={runners.data || []}
+        data={(runners.data || []).filter((r) => !kindFilter || kindOf(r) === kindFilter)}
         keyExtractor={(r) => r.uuid}
         isLoading={runners.loading && !runners.data}
-        emptyMessage="No runners yet. Register one, then start PromptPilot on that machine."
+        emptyMessage={kindFilter === 'source' ? 'No sources yet.'
+          : 'Nothing registered yet. Register a runner, then start PromptPilot on that machine.'}
       />
 
-      <Modal isOpen={registerOpen} onClose={() => setRegisterOpen(false)} title="Register a runner" size="md"
-        description="One runner per machine (or per set of folders). You get its token once.">
+      <Modal isOpen={registerOpen} onClose={() => setRegisterOpen(false)} title="Register a connection" size="xl"
+        description="One per machine (or per set of folders), or per tool that reports sessions. You get its token once.">
         <form onSubmit={register} className="space-y-4">
-          <Input id="air-runner-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="mac-studio" required maxLength={100} />
+          <Input id="air-runner-name" label="Name" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder={kind === 'source' ? 'ci-sessions' : 'mac-studio'} required maxLength={100} />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-secondary-800">Kind</legend>
+            {KINDS.map((k) => (
+              <label key={k.value} className="flex items-start gap-2 text-sm">
+                <input type="radio" name="air-kind" className="mt-1" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} />
+                <span>
+                  <span className="font-medium text-secondary-900">{k.label}</span>
+                  <span className="block text-xs text-secondary-500">{k.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {kind === 'source' && (
+            <div className="min-w-0 space-y-2 text-sm text-secondary-700">
+              <p>A source reports its sessions with its token (shown once after you register), for example:</p>
+              <CopyBlock what="Example" text={sessionsCurl('$TOKEN')} testId="air-source-example" />
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setRegisterOpen(false)}>Cancel</Button>
             <Button type="submit" isLoading={busy === 'register'} disabled={!name.trim()}>Register</Button>
@@ -380,6 +484,7 @@ function Runners() {
       <TokenModal shown={token} onClose={() => setToken(null)} />
       <SessionsModal runner={sessionsOf} onClose={() => setSessionsOf(null)} />
       {accessOf && <AccessModal runner={accessOf} onClose={() => setAccessOf(null)} onSaved={runners.refresh} />}
+      {filterOf && <ReportFilterModal runner={filterOf} onClose={() => setFilterOf(null)} onSaved={runners.refresh} />}
 
       <ConfirmDialog
         isOpen={!!confirm}
@@ -388,7 +493,7 @@ function Runners() {
         title={confirm?.kind === 'rotate' ? `Rotate the token of ${confirm.runner.name}?` : `Revoke ${confirm?.runner.name}?`}
         message={confirm?.kind === 'rotate'
           ? 'The current token stops working at once. Put the new one on the machine and restart the runner.'
-          : 'The runner can no longer claim or report runs. This cannot be undone; register it again to bring it back.'}
+          : 'It can no longer claim or report runs or sessions. This cannot be undone; register it again to bring it back.'}
         confirmText={confirm?.kind === 'rotate' ? 'Rotate token' : 'Revoke'}
         variant={confirm?.kind === 'rotate' ? 'warning' : 'danger'}
         isLoading={!!busy && busy !== 'register'}
