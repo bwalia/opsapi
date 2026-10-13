@@ -128,6 +128,12 @@ class H(BaseHTTPRequestHandler):
                 state = {n: {br: r["commits"][sha] for br, sha in r["branches"].items()} for n, r in REPOS.items()}
                 return self.send(200, dict(LOG, state=state, pulls=PULLS))
         if path == "/api/chat":
+            # Like Ollama: a tool's `required` must be a list when given (an empty Lua table encodes as {}).
+            for t in b.get("tools") or []:
+                req = t["function"].get("parameters", {}).get("required")
+                if req is not None and not isinstance(req, list):
+                    return self.send(400, {"error": "json: cannot unmarshal object into Go struct field "
+                                                    ".tools.function.parameters.required of type []string"})
             msgs = b.get("messages") or []
             reply = agent(msgs)
             with LOCK:

@@ -342,9 +342,10 @@ end
 -- Tools
 -- ---------------------------------------------------------------------------
 
+-- No `required` when nothing is: the model client encodes an empty table as {}, and Ollama wants a list there.
 local function fn(name, description, properties, required)
     return { type = "function", ["function"] = { name = name, description = description,
-        parameters = { type = "object", properties = properties or {}, required = required or {} } } }
+        parameters = { type = "object", properties = properties or {}, required = required } } }
 end
 
 local TASK_TOOLS = {
