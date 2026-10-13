@@ -28,6 +28,8 @@
       GET    /orders/:uuid?t=
       POST   /chat-sessions
       POST   /chat-sessions/:uuid/messages
+      POST   /chat-sessions/:uuid/requirements   { requirements: {goal, models, budget_gbp, …} } (AI advisor)
+      POST   /chat-sessions/:uuid/contact        { email, name?, company?, phone?, improve_consent } → CRM lead
 ]]
 
 local U = require("lib.shop-util")
@@ -248,6 +250,22 @@ return function(app)
         local body, bad = body_or_400()
         if not body then return bad end
         local res, err = Chat.append(ns_id, self.params.uuid, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/chat-sessions/:uuid/requirements", public(function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Chat.recordRequirements(ns_id, self.params.uuid, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/chat-sessions/:uuid/contact", public(function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Chat.saveContact(ns_id, self.params.uuid, body)
         if not res then return U.from_err(err) end
         return U.ok(res)
     end))

@@ -12,6 +12,7 @@ local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Pricing = require("lib.shop-pricing")
 local Catalog = require("queries.ShopCatalogQueries")
+local Leads = require("queries.ShopLeadQueries")
 local Cart = require("queries.ShopCartQueries")
 
 local ShopQuoteQueries = {}
@@ -195,34 +196,21 @@ function ShopQuoteQueries.publicView(ns_id, uuid, token)
     return ShopQuoteQueries.shape(maybe_expire(q))
 end
 
---- Best-effort CRM lead capture for a new quote.
-local function capture_lead(ns_id, q, customer, total)
-    local ok, err = pcall(function()
-        local CrmLeadQueries = require("queries.CrmLeadQueries")
-        local name = customer.name or ""
-        local first, last = name:match("^(%S+)%s+(.+)$")
-        local lead = CrmLeadQueries.createLeadFromPublic({
-            namespace_id = ns_id,
-            first_name = first or name,
-            last_name = last,
-            email = customer.email,
-            phone = customer.phone,
-            company_name = customer.company,
-            source = "shop_quote",
-            notes = q.quote_number .. " — " .. U.money(total) .. " inc VAT",
-            metadata = U.enc({ quote_uuid = q.uuid, quote_number = q.quote_number, total_minor = total }),
-        })
-        if lead and lead.id then
-            db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE id = ?", lead.id, q.id)
-            q.crm_lead_id = lead.id
-            pcall(function()
-                local Notif = require("queries.CrmLeadNotificationQueries")
-                local ns = db.query("SELECT id, slug, name FROM namespaces WHERE id = ?", ns_id)[1]
-                if ns then Notif.notify(ns, lead) end
-            end)
-        end
-    end)
-    if not ok then ngx.log(ngx.WARN, "[shop] CRM lead capture failed for ", q.quote_number, ": ", tostring(err)) end
+--- Attach a new quote to the customer's CRM lead (one open lead per email; never fails the quote).
+local function capture_lead(ns_id, q, customer, total, chat_session)
+    local lead = Leads.safeUpsert(ns_id, {
+        email = customer.email, name = customer.name, company = customer.company, phone = customer.phone,
+        source = "shop_quote",
+        note = "Quote " .. q.quote_number .. " — " .. U.money(total) .. " inc VAT",
+        quote = { uuid = q.uuid, number = q.quote_number, total_minor = total },
+        chat_session_uuid = chat_session and chat_session.uuid or nil,
+    })
+    if not lead then return end
+    db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE id = ?", lead.id, q.id)
+    q.crm_lead_id = lead.id
+    if chat_session then
+        db.query("UPDATE shop_chat_sessions SET crm_lead_id = ? WHERE id = ?", lead.id, chat_session.id)
+    end
 end
 
 --- Public POST /quotes.
@@ -254,11 +242,11 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
         return nil, U.err(400, "VALIDATION_ERROR", "from must be cart or lines")
     end
 
-    local chat_session_id
+    local chat_session_id, chat_session
     if U.nz(body.chat_session_uuid) then
-        local s = db.query("SELECT id FROM shop_chat_sessions WHERE namespace_id = ? AND uuid = ?", ns_id,
+        local s = db.query("SELECT id, uuid FROM shop_chat_sessions WHERE namespace_id = ? AND uuid = ?", ns_id,
             body.chat_session_uuid)[1]
-        if s then chat_session_id = s.id end
+        if s then chat_session_id, chat_session = s.id, s end
         if s and U.nz(customer.email) then
             db.query("UPDATE shop_chat_sessions SET email = COALESCE(email, ?) WHERE id = ?", customer.email, s.id)
         end
@@ -270,7 +258,7 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
         lines = lines, customer = customer, notes = U.nz(body.notes) and tostring(body.notes):sub(1, 4000) or nil,
         source = source, cart_id = cart and cart.id or nil, chat_session_id = chat_session_id, status = "draft",
     })
-    capture_lead(ns_id, q, customer, q.total_minor)
+    capture_lead(ns_id, q, customer, q.total_minor, chat_session)
     return ShopQuoteQueries.shape(q)
 end
 

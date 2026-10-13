@@ -159,6 +159,7 @@ local shop_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations
 local shop_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-menu-items") or {}
 local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-market") or {}
 local shop_insights_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-insights") or {}
+local shop_advisor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-advisor") or {}
 
 -- Render Templates (namespace {{slot}} template library). Core/always-on:
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
@@ -2547,6 +2548,8 @@ local _migrations = {
     -- Trust signals (real data only): daily price snapshots + add-to-basket events
     ['zzs16_shop_price_history'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_insights_migrations, 1),
     ['zzs17_shop_cart_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_insights_migrations, 2),
+    -- AI advisor: requirements, consent and CRM lead link on chat sessions
+    ['zzs18_shop_advisor_chat_crm'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_advisor_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
