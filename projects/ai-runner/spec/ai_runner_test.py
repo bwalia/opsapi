@@ -11,13 +11,16 @@ confirm, user and workspace caps, the daily token limit, profile health (start r
 API and its RBAC, the overview numbers, notifications to the right people, the retention job, migration 3 and
 isolation between the workspaces. Then §25 (security fixes): runner access modes and the runners list, decider and
 approver rules, exact "allow for this run", oversize requests, request id reuse, redaction, one-line titles, branch
-names, caps under concurrent starts, per-run limits, and migration 4's backfill of existing runners.
+names, caps under concurrent starts, per-run limits, and migration 4's backfill of existing runners. Then §26.5:
+sessions started by hand become tasks (settings, one task per session, titles, skips, the cap, ending, notifications,
+the sessions API, isolation, migration 5).
 """
 import base64
 import hashlib
 import hmac
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -632,7 +635,7 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
 check("plugin migrations are tracked once each", one(
-    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "4")
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "5")
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -1926,6 +1929,272 @@ if MIGRATE:
         expect("revoke it", call("DELETE", P + f"/runners/{u}", "mgr", A), 200)
 else:
     check("AR_MIGRATE is set (run.sh) for the migration 4 backfill check", False)
+
+# =====================================================================================================================
+# §26: sessions started by hand become tasks — settings and RBAC, one task per busy manual session (no duplicate on
+# the next heartbeat nor from parallel ones), titles, project / column / status, skips, disabled, the cap, ending
+# (reported ended, gone from the heartbeat, gone from the sweep), notifications, the sessions API, isolation between
+# the workspaces, a heartbeat tracking can't fail, migration 5
+# =====================================================================================================================
+check("migration 5: the setting, sessions' first prompt, the tracked sessions table", one(
+    "SELECT data_type FROM information_schema.columns WHERE table_name = 'ar_settings' "
+    "AND column_name = 'session_tracking'") == "jsonb" and one(
+    "SELECT data_type FROM information_schema.columns WHERE table_name = 'ar_sessions' "
+    "AND column_name = 'first_prompt'") == "text" and one("SELECT to_regclass('ar_tracked_sessions') IS NOT NULL") == "t")
+cdef = one("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'kanban_notifications_type_check'") or ""
+check("migration 5 widened the notification types once, the others kept", cdef.count("ai_session_task") == 1
+      and cdef.count("ai_run_permission") == 1 and "task_assigned" in cdef, cdef)
+
+ST0 = {"enabled": False, "project_uuid": None, "column": None, "status": "in_progress", "notify": True}
+check("session_tracking: the defaults", expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+      .get("session_tracking") == ST0)
+TP = expect("a project for hand sessions", call("POST", API + "/api/v2/kanban/projects", "owner_a", A,
+                                                {"name": "Hand sessions " + TAG}), 201)["uuid"]
+TP_ID = one(f"SELECT id FROM kanban_projects WHERE uuid = '{TP}'")
+
+
+def put_st(body, user="mgr", ns=None):
+    return call("PUT", P + "/settings", user, ns or A, {"session_tracking": body})
+
+
+for bad, field in (({"enabled": True}, "project_uuid"), ({"project_uuid": "nope"}, "project_uuid"),
+                   ({"project_uuid": projb["uuid"]}, "project_uuid"), ({"project_uuid": str(uuidlib.uuid4())},
+                                                                          "project_uuid"),
+                   ({"project_uuid": TP, "column": "Nowhere"}, "column"), ({"column": "To Do"}, "column"),
+                   ({"status": "done"}, "status"), ({"status": "open"}, "status"), ({"notify": "maybe"}, "notify"),
+                   ({"enabled": 1}, "enabled")):
+    res = put_st(bad)
+    check(f"bad session_tracking {bad} (422 on {field})", res[0] == 422
+          and f"session_tracking.{field}" in (res[1] or {}).get("details", {}), res[:2])
+expect("session_tracking must be an object (422)", call("PUT", P + "/settings", "mgr", A, {"session_tracking": "on"}),
+       422)
+expect("a developer can't change it (403)", put_st({"enabled": False}, "dev"), 403)
+expect("nor a runner manager (403)", put_st({"enabled": False}, "ops"), 403)
+expect("... who can't read the settings either (403)", call("GET", P + "/settings", "ops", A), 403)
+s = expect("tracking on: project, a column in any case, todo", put_st({"enabled": True, "project_uuid": TP,
+                                                                         "column": "to do", "status": "todo"}), 200)
+check("saved with the column's own spelling, the other settings kept", s["session_tracking"] == {
+    "enabled": True, "project_uuid": TP, "column": "To Do", "status": "todo", "notify": True}
+      and s["guards"]["max_open_runs_per_user"] == 0 and s["approval_policy"]["deciders"] == "managers", s)
+check("saving other settings keeps it", expect("save a guard", call("PUT", P + "/settings", "mgr", A, {
+    "guards": {"retention_days": 31}}), 200)["session_tracking"]["column"] == "To Do")
+
+reg_t = expect("manager registers a runner on the team machine", call("POST", P + "/runners", "mgr", A,
+                                                                      {"name": "trk-" + TAG}), 201)
+RT, rt, TRK = reg_t["runner"]["uuid"], Runner(reg_t["token"]), "trk-" + TAG
+
+
+def hb_t(inventory, name="trk runner heartbeats"):
+    return expect(name, rt.hb(version="1.3.0-test", host="mac-trk", os="darwin", load={"running": 0},
+                              capabilities={"max_concurrency": 4, "profiles": PROFILES}, inventory=inventory,
+                              repos=[{"path": "/trk/repo", "branch": "main", "dirty": False}]), 200)
+
+
+def tracked(ref, col="task_uuid"):
+    return one(f"SELECT {col} FROM ar_tracked_sessions WHERE runner_uuid = '{RT}' AND session_ref = '{ref}'")
+
+
+def task_row(task_uuid, cols):
+    return one(f"SELECT {cols} FROM kanban_tasks t JOIN kanban_columns c ON c.id = t.column_id "
+               f"WHERE t.uuid = '{task_uuid}'")
+
+
+def n_tasks(project_id=None):
+    return int(one(f"SELECT COUNT(*) FROM kanban_tasks t JOIN kanban_boards b ON b.id = t.board_id "
+                   f"WHERE b.project_id = {project_id or TP_ID}"))
+
+
+def ends(task_uuid):
+    """The task's 'Session ended' comments."""
+    return sql(f"SELECT c.content FROM kanban_task_comments c JOIN kanban_tasks t ON t.id = c.task_id "
+               f"WHERE t.uuid = '{task_uuid}' AND c.content LIKE 'Session ended%'")
+
+
+def session_note(task_uuid):
+    return sorted(sql(f"SELECT recipient_user_uuid FROM kanban_notifications WHERE type = 'ai_session_task' "
+                      f"AND action_url = '/dashboard/projects/{TP}/tasks/{task_uuid}'"))
+
+
+hb_t([])
+MT = task("Managed work " + TAG, "low")
+RUN_T = expect("a run on this runner", call("POST", P + f"/tasks/{MT['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RT, "profile": "fake", "repo_path": "/trk/repo", "confirm_similar": True}), 201)
+check("... claimed", expect("trk runner claims", rt.claim(), 200).get("run", {}).get("uuid") == RUN_T["uuid"])
+SID = [str(uuidlib.uuid4()) for _ in range(8)]
+FP = "Fix the flaky login test  \nthen run it with API_TOKEN=" + "hunter2secretvalue" + " everywhere"
+M1 = {"key": "k-m1", "tool": "claude", "status": "busy", "cwd": "/trk/alpha", "branch": "feat/login",
+      "session_id": SID[0], "started_at": "2026-10-13T09:30:00Z", "first_prompt": FP}
+M2 = {"key": "k-m2", "tool": "cursor", "status": "running", "cwd": "/trk/beta"}  # no session id nor prompt
+M3 = {"key": "k-m3", "tool": "claude", "status": "idle", "cwd": "/trk/gamma", "session_id": SID[1],
+      "first_prompt": "only idle"}
+M4 = {"key": "k-m4", "tool": "claude", "status": "ended", "cwd": "/trk/eps", "session_id": SID[2]}
+MG = {"key": "k-managed", "tool": "claude", "status": "busy", "cwd": "/trk/repo", "session_id": RUN_T["uuid"]}
+ML = {"key": "k-labelled", "tool": "claude", "status": "busy", "cwd": "/trk/delta", "session_id": SID[3],
+      "labels": {"opsapi_run": str(uuidlib.uuid4())}}
+BASE = [M1, M2, M3, M4, MG, ML]
+hb_t(BASE, "heartbeat: two busy sessions by hand, an idle one, an ended one, a run's own and a labelled one")
+check("one task each for the two busy sessions started by hand, nothing else", n_tasks() == 2
+      and tracked(SID[0]) and tracked("k-m2") and not tracked(SID[1]) and not tracked(SID[2])
+      and not tracked(RUN_T["uuid"]) and not tracked(SID[3]),
+      sql(f"SELECT session_ref FROM ar_tracked_sessions WHERE runner_uuid = '{RT}'"))
+T_M1, T_M2 = tracked(SID[0]), tracked("k-m2")
+check("title from the first prompt's first line, in the column and status set (todo = open), by the runner's owner",
+      task_row(T_M1, "t.title || '|' || t.status || '|' || c.name || '|' || t.reporter_user_uuid || '|' || "
+                     "t.assignee_count") == f"Fix the flaky login test|open|To Do|{USERS['mgr'][0]}|0"
+      and one(f"SELECT COUNT(*) FROM kanban_task_assignees a JOIN kanban_tasks t ON t.id = a.task_id "
+              f"WHERE t.uuid = '{T_M1}'") == "0", task_row(T_M1, "t.title || '|' || t.status || '|' || c.name"))
+desc = json.loads(one(f"SELECT to_json(description) FROM kanban_tasks WHERE uuid = '{T_M1}'") or '""')
+check("description: where it ran, the session, the first prompt (redacted)", desc.startswith(
+    f"Started by hand on {TRK} and tracked automatically by AI Runs.\n\nTool: Claude\nFolder: /trk/alpha\n"
+    f"Branch: feat/login\nStarted: 2026-10-13 09:30 UTC\nSession id: {SID[0]}\n\nFirst prompt:\nFix the flaky")
+      and "API_TOKEN=[REDACTED]" in desc and "hunter2secret" not in desc, desc)
+check("metadata.ai_session", json.loads(one(f"SELECT metadata FROM kanban_tasks WHERE uuid = '{T_M1}'"))
+      .get("ai_session") == {"runner_uuid": RT, "runner_name": TRK, "session_ref": SID[0], "tool": "claude",
+                             "cwd": "/trk/alpha", "branch": "feat/login"})
+check("without a prompt: '<Tool> session in <folder> on <runner>'", task_row(T_M2, "t.title || '|' || c.name")
+      == f"Cursor session in beta on {TRK}|To Do" and "First prompt" not in one(
+    f"SELECT to_json(description) FROM kanban_tasks WHERE uuid = '{T_M2}'"))
+check("the first prompt is stored with the session, redacted", "hunter2secret" not in (one(
+    f"SELECT first_prompt FROM ar_sessions WHERE runner_uuid = '{RT}' AND session_key = 'k-m1'") or "hunter2secret"))
+check("tracked rows: Claude's session id, else the key; tool, folder, branch; seen, not ended", one(
+    f"SELECT string_agg(session_ref || '|' || tool || '|' || cwd || '|' || COALESCE(branch, '-') || '|' || "
+    f"(ended_at IS NULL)::text, ',' ORDER BY id) FROM ar_tracked_sessions WHERE runner_uuid = '{RT}'")
+      == f"{SID[0]}|claude|/trk/alpha|feat/login|true,k-m2|cursor|/trk/beta|-|true")
+check("managers are told, with a link to the task", session_note(T_M1) == MANAGERS and one(
+    f"SELECT title || '|' || message || '|' || project_id || '|' || (task_id IS NOT NULL)::text FROM "
+    f"kanban_notifications WHERE type = 'ai_session_task' AND action_url = '/dashboard/projects/{TP}/tasks/{T_M1}' "
+    f"LIMIT 1") == f"New task from a session started by hand|New task from a Claude session on {TRK}: "
+                   f"Fix the flaky login test|{TP_ID}|true" and session_note(T_M2) == MANAGERS,
+      session_note(T_M1))
+hb_t(BASE, "the same heartbeat again")
+check("... creates nothing more", n_tasks() == 2)
+
+M5 = {"key": "k-m5", "tool": "claude", "status": "busy", "cwd": "/trk/zeta", "session_id": SID[4],
+      "first_prompt": "Parallel " + TAG}
+gate5, out5 = threading.Barrier(6), []
+
+
+def hb_parallel():
+    gate5.wait()
+    out5.append(rt.hb(capabilities={"max_concurrency": 4, "profiles": PROFILES}, inventory=BASE + [M5])[0])
+
+
+ths = [threading.Thread(target=hb_parallel) for _ in range(6)]
+for th in ths:
+    th.start()
+for th in ths:
+    th.join(60)
+check("6 parallel heartbeats with a new session: all 200, exactly one task", out5 == [200] * 6 and n_tasks() == 3
+      and one(f"SELECT COUNT(*) FROM kanban_tasks WHERE title = 'Parallel {TAG}'") == "1", (out5, n_tasks()))
+
+ss = expect("sessions of the runner", call("GET", P + f"/sessions?runner_uuid={RT}", "mgr", A), 200)
+by_key = {x["key"]: x for x in ss}
+check("GET /sessions: a session started by hand links its task", by_key.get("k-m1", {}).get("task") == {
+    "uuid": T_M1, "task_number": int(one(f"SELECT task_number FROM kanban_tasks WHERE uuid = '{T_M1}'")),
+    "title": "Fix the flaky login test", "project_uuid": TP} and by_key["k-m2"]["task"]["uuid"] == T_M2, by_key.get("k-m1"))
+check("... others have none; a run's own still links its run", by_key["k-m3"]["task"] is None
+      and by_key["k-managed"]["task"] is None and by_key["k-managed"]["run"]["uuid"] == RUN_T["uuid"]
+      and by_key["k-labelled"]["task"] is None, by_key)
+
+expect("tracking off", put_st({"enabled": False}), 200)
+M6 = {"key": "k-m6", "tool": "claude", "status": "busy", "cwd": "/trk/eta", "session_id": SID[5]}
+hb_t(BASE + [M5, M6], "heartbeat with a new busy session, tracking off")
+check("disabled tracking creates nothing", n_tasks() == 3 and not tracked(SID[5]))
+s = expect("on again: no column, in progress, no notifications", put_st({
+    "enabled": True, "column": None, "status": "in_progress", "notify": False}), 200)
+check("saved", s["session_tracking"] == {"enabled": True, "project_uuid": TP, "column": None,
+                                         "status": "in_progress", "notify": False}, s["session_tracking"])
+hb_t(BASE + [M5, M6], "the same heartbeat, tracking on")
+T_M6 = tracked(SID[5])
+check("no column set: the first board's first column, in progress, nobody told",
+      T_M6 and task_row(T_M6, "t.status || '|' || c.name") == "in_progress|Backlog" and session_note(T_M6) == [],
+      task_row(T_M6, "t.status || '|' || c.name") if T_M6 else None)
+
+MANY = [{"key": f"k-c{i}", "tool": "claude", "status": "busy", "cwd": f"/trk/c{i}"} for i in range(25)]
+ALL = BASE + [M5, M6] + MANY
+hb_t(ALL, "heartbeat with 25 new busy sessions")
+check("at most 20 new tasks per heartbeat", n_tasks() == 4 + 20, n_tasks())
+hb_t(ALL, "the next heartbeat")
+check("... the other 5 on the next one", n_tasks() == 4 + 25, n_tasks())
+hb_t(ALL, "and the one after")
+check("... then none", n_tasks() == 29, n_tasks())
+
+# Ending: reported ended, gone from the heartbeat, gone from the sweep.
+END_RE = r"^Session ended \(last active \d{4}-\d\d-\d\d \d\d:\d\d UTC\)\.$"
+hb_t([dict(M1, status="ended")] + [m for m in ALL if m is not M1], "heartbeat: the first session ended")
+check("reported ended: ended_at and one comment", tracked(SID[0], "ended_at IS NOT NULL") == "t"
+      and len(ends(T_M1)) == 1 and re.match(END_RE, ends(T_M1)[0]), ends(T_M1))
+hb_t([dict(M1, status="ended")] + [m for m in ALL if m is not M1], "it is reported ended again")
+check("... the comment is posted once, the task's status is left alone", len(ends(T_M1)) == 1
+      and task_row(T_M1, "t.status") == "open")
+LATER = [m for m in ALL if m not in (M1, M2)]
+hb_t(LATER, "heartbeat without the cursor session (just gone)")
+check("not reported, but seen a moment ago: still open", tracked("k-m2", "ended_at IS NULL") == "t" and not ends(T_M2))
+sql(f"UPDATE ar_tracked_sessions SET last_seen_at = NOW() - interval '11 minutes' WHERE runner_uuid = '{RT}' "
+    f"AND session_ref = 'k-m2'")
+hb_t(LATER, "heartbeat: the cursor session gone for 11 minutes")
+check("gone for 10 minutes: ended, one comment naming when it was last active",
+      tracked("k-m2", "ended_at IS NOT NULL") == "t" and len(ends(T_M2)) == 1 and re.match(END_RE, ends(T_M2)[0])
+      and ends(T_M2)[0] == "Session ended (last active " + one(
+          f"SELECT to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') FROM ar_tracked_sessions "
+          f"WHERE runner_uuid = '{RT}' AND session_ref = 'k-m2'") + " UTC).", ends(T_M2))
+hb_t(LATER, "another heartbeat")
+check("... once", len(ends(T_M2)) == 1)
+T_C0 = tracked("k-c0")
+sql(f"UPDATE ar_tracked_sessions SET last_seen_at = NOW() - interval '11 minutes' WHERE runner_uuid = '{RT}' "
+    f"AND session_ref = 'k-c0'")
+run_sweep()  # the runner sends nothing meanwhile: the sweep ends it
+check("a runner that stopped reporting: the lease sweep ends its session, one comment", wait_for(
+    "the sweep ends k-c0", lambda: len(ends(T_C0)) == 1) and tracked("k-c0", "ended_at IS NOT NULL") == "t"
+      and re.match(END_RE, ends(T_C0)[0]))
+run_sweep()
+time.sleep(2)
+check("... once, and the other open sessions stay open", len(ends(T_C0)) == 1 and one(
+    f"SELECT COUNT(*) FROM ar_tracked_sessions WHERE runner_uuid = '{RT}' AND ended_at IS NULL") == str(29 - 3))
+
+# Isolation: B tracks into B's project; A's project isn't B's to name.
+expect("B can't name A's project (422)", put_st({"enabled": True, "project_uuid": TP}, "owner_b", B), 422)
+expect("B tracks into its own project", put_st({"enabled": True, "project_uuid": projb["uuid"]}, "owner_b", B), 200)
+PB_ID = one(f"SELECT id FROM kanban_projects WHERE uuid = '{projb['uuid']}'")
+nb, na = n_tasks(PB_ID), n_tasks()
+SIDB = str(uuidlib.uuid4())
+expect("runner B heartbeats a session started by hand", run_b.hb(**heartbeat_body([
+    {"key": "b-hand", "tool": "claude", "status": "busy", "cwd": "/repos/eps", "session_id": SIDB,
+     "first_prompt": "B work by hand " + TAG}])), 200)
+TB_H = one(f"SELECT task_uuid FROM ar_tracked_sessions WHERE session_ref = '{SIDB}'")
+check("B's session: a task in B's project, nothing in A's", n_tasks(PB_ID) == nb + 1 and n_tasks() == na and TB_H
+      and one(f"SELECT t.title || '|' || c.name FROM kanban_tasks t JOIN kanban_columns c ON c.id = t.column_id "
+              f"WHERE t.uuid = '{TB_H}'") == f"B work by hand {TAG}|Backlog"
+      and one(f"SELECT namespace_id FROM ar_tracked_sessions WHERE session_ref = '{SIDB}'") == B_ID)
+check("... B's owner is told, nobody of A", sorted(sql(
+    f"SELECT recipient_user_uuid FROM kanban_notifications WHERE type = 'ai_session_task' AND namespace_id = {B_ID}"))
+      == [USERS["owner_b"][0]] and one(f"SELECT COUNT(*) FROM kanban_notifications WHERE type = 'ai_session_task' "
+                                       f"AND namespace_id = {A_ID} AND recipient_user_uuid = '{USERS['owner_b'][0]}'")
+      == "0")
+sb = expect("B lists its sessions", call("GET", P + "/sessions", "owner_b", B), 200)
+check("B's sessions link B's task only", [x["task"]["uuid"] for x in sb if x["task"]] == [TB_H], sb)
+check("A's list has none of B's tasks", TB_H not in json.dumps(call("GET", P + "/sessions?per_page=100", "mgr", A)[1]))
+expect("B stops tracking", put_st({"enabled": False}, "owner_b", B), 200)
+
+# Best effort: a project deleted since can't fail a heartbeat.
+sql(f"UPDATE kanban_projects SET deleted_at = NOW() WHERE uuid = '{TP}'")
+hb_t(ALL + [{"key": "k-late", "tool": "claude", "status": "busy", "cwd": "/trk/late"}],
+     "heartbeat while the project is gone")
+check("... answers 200 and creates nothing", not tracked("k-late") and n_tasks() == 29)
+sql(f"UPDATE kanban_projects SET deleted_at = NULL WHERE uuid = '{TP}'")
+expect("tracking off", put_st({"enabled": False}), 200)
+
+# Migration 5 again, on a database that has tracked sessions.
+MIG5 = "20261013300000_ai_runner_session_tracking"
+if MIGRATE:
+    n_rows = one("SELECT COUNT(*) FROM ar_tracked_sessions")
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG5}'")
+    out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
+    cdef = one("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'kanban_notifications_type_check'")
+    check("migration 5 runs again: rows and settings kept, the type added once", out.returncode == 0
+          and f"{MIG5}: running" in out.stdout + out.stderr and one("SELECT COUNT(*) FROM ar_tracked_sessions") == n_rows
+          and cdef.count("ai_session_task") == 1 and expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+          ["session_tracking"]["project_uuid"] == TP, (out.stdout + out.stderr)[-600:])
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")

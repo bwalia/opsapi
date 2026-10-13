@@ -183,6 +183,9 @@ R.SETTINGS_DEFAULTS = {
     -- §24.1. Caps and the token limit: 0 = none.
     guards = { similar_threshold = 0.45, max_open_runs_per_user = 3, max_open_runs_per_workspace = 10,
         daily_token_limit = 0, retention_days = 365 },
+    -- §26.2. Sessions started by hand become tasks: status todo (kanban "open") or in_progress.
+    session_tracking = { enabled = false, project_uuid = cjson.null, column = cjson.null, status = "in_progress",
+        notify = true },
 }
 
 function R.settings(ns)
@@ -202,6 +205,7 @@ function R.settings(ns)
         task_automation = merged(U.json(row.task_automation), d.task_automation),
         approval_policy = merged(U.json(row.approval_policy), d.approval_policy),
         guards = merged(U.json(row.guards), d.guards),
+        session_tracking = merged(U.json(row.session_tracking), d.session_tracking),
         updated_at = U.null(row.updated_at),
         updated_by = U.null(row.updated_by),
     }
@@ -1062,6 +1066,175 @@ function R.alert(run, kind, actor, detail)
 end
 
 -- ---------------------------------------------------------------------------
+-- Sessions started by hand become tasks (§26)
+-- ---------------------------------------------------------------------------
+
+R.TRACK_PER_HEARTBEAT, R.TRACK_GONE_MINUTES = 20, 10
+-- The setting's status -> kanban_tasks.status (kanban has no "todo": a task still to do is "open").
+R.TRACK_STATUS = { todo = "open", in_progress = "in_progress" }
+local TOOL_NAMES = { claude = "Claude", cursor = "Cursor" }
+-- A session's identity across heartbeats (ar_sessions `s`): Claude's session id, else the inventory key.
+local REF_SQL = "COALESCE(NULLIF(s.session_id, ''), s.session_key)"
+local GONE_SQL = "t.last_seen_at < NOW() - interval '" .. R.TRACK_GONE_MINUTES .. " minutes'"
+
+--- Where tracked sessions' tasks go: the project's first board and its column of that name (any case), else the
+-- board's first column. nil when the project, or a board of it, isn't there. column_found: the name matched.
+function R.track_target(ns, project_uuid, column)
+    if type(project_uuid) ~= "string" then return nil end
+    local b = U.one([[SELECT p.id AS project_id, p.uuid AS project_uuid, b.id AS board_id FROM kanban_projects p
+        JOIN kanban_boards b ON b.project_id = p.id AND b.deleted_at IS NULL AND b.archived_at IS NULL
+        WHERE p.uuid = ? AND p.namespace_id = ? AND p.deleted_at IS NULL ORDER BY b.position, b.id LIMIT 1]],
+        project_uuid, ns)
+    if not b then return nil end
+    column = type(column) == "string" and column:lower() or ""
+    local c = U.one([[SELECT id, name, lower(name) = ? AS found FROM kanban_columns WHERE board_id = ?
+        AND deleted_at IS NULL ORDER BY lower(name) = ? DESC, position, id LIMIT 1]], column, b.board_id, column)
+    b.column_id, b.column_name, b.column_found = c and c.id, c and c.name, c ~= nil and c.found == true
+    return b
+end
+
+--- End tracked sessions (where: SQL on ar_tracked_sessions `t`, + values): ended_at, and one comment on the task.
+-- Only the statement that sets ended_at returns the row, so the comment is posted once whoever ends it (a heartbeat,
+-- the sweep, another pod). The task's status is left to people. @return how many ended
+local function end_tracked(where, ...)
+    local rows = db.query([[UPDATE ar_tracked_sessions t SET ended_at = NOW() FROM ar_runners r
+        WHERE r.uuid = t.runner_uuid AND t.ended_at IS NULL AND (]] .. where .. [[)
+        RETURNING t.task_uuid, r.created_by,
+            to_char(t.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"') AS last_active]], ...)
+    for _, e in ipairs(rows) do
+        local ok, err = pcall(function()
+            local task = e.task_uuid and U.one("SELECT id FROM kanban_tasks WHERE uuid = ? AND deleted_at IS NULL",
+                e.task_uuid)
+            if task then
+                require("queries.KanbanTaskQueries").addComment({ task_id = task.id, user_uuid = e.created_by,
+                    content = "Session ended (last active " .. e.last_active .. ")." })
+            end
+        end)
+        if not ok then ngx.log(ngx.ERR, "[ai_runner] session end comment not stored: ", tostring(err)) end
+    end
+    return #rows
+end
+
+-- Managers (§24.6 rules, at most 20) hear about each new task. Never fails the caller.
+local function alert_session_tasks(runner, target, policy, tasks)
+    local ok, err = pcall(function()
+        local users = recipients({ namespace_id = runner.namespace_id, project_uuid = target.project_uuid }, false,
+            true, nil, policy.project_admins_decide == true)
+        local N = require("queries.KanbanNotificationQueries")
+        for _, t in ipairs(tasks) do
+            for _, u in ipairs(users) do
+                local sent, e = pcall(N.create, { namespace_id = runner.namespace_id, recipient_user_uuid = u.uuid,
+                    type = "ai_session_task", title = "New task from a session started by hand",
+                    message = U.clean(t.message, 1000),
+                    action_url = "/dashboard/projects/" .. target.project_uuid .. "/tasks/" .. t.uuid,
+                    project_id = target.project_id, task_id = t.id, priority = "normal",
+                    group_key = "ai_session:" .. t.uuid,
+                    metadata = cjson.encode({ task_uuid = t.uuid, runner_uuid = runner.uuid, kind = "session_task" }) })
+                if not sent then ngx.log(ngx.ERR, "[ai_runner] notification not stored: ", tostring(e)) end
+            end
+        end
+    end)
+    if not ok then ngx.log(ngx.ERR, "[ai_runner] notifying about session tasks failed: ", tostring(err)) end
+end
+
+-- One new task for a session started by hand (s: an ar_sessions row + ref, started).
+local function session_task(runner, target, status, s)
+    local tool = TOOL_NAMES[s.tool] or (s.tool and s.tool ~= "" and (s.tool:gsub("^%l", string.upper))) or "AI"
+    local line = type(s.first_prompt) == "string" and s.first_prompt:match("^%s*([^\r\n]*)"):gsub("%s+$", "")
+    local title = line and line ~= "" and line
+        or (tool .. " session in " .. (s.cwd and s.cwd:match("([^/]+)$") or s.cwd or "an unknown folder")
+            .. " on " .. runner.name)
+    title = U.cut(title, 120)
+    local lines = { "Started by hand on " .. runner.name .. " and tracked automatically by AI Runs.", "" }
+    for _, f in ipairs({ { "Tool", tool }, { "Folder", s.cwd }, { "Branch", s.branch }, { "Started", s.started },
+        { "Session id", s.session_id } }) do
+        if f[2] and f[2] ~= "" then lines[#lines + 1] = f[1] .. ": " .. f[2] end
+    end
+    if line and line ~= "" then lines[#lines + 1] = "\nFirst prompt:\n" .. s.first_prompt end
+    local Tasks = require("queries.KanbanTaskQueries")
+    return U.tx(function()
+        local row = U.one([[INSERT INTO ar_tracked_sessions (namespace_id, runner_uuid, session_ref, tool, cwd, branch)
+            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (runner_uuid, session_ref) DO NOTHING RETURNING id]],
+            runner.namespace_id, runner.uuid, s.ref, s.tool or db.NULL, s.cwd or db.NULL, s.branch or db.NULL)
+        if not row then return nil end -- another heartbeat (or pod) has it
+        -- task_number is the board's MAX + 1: tracked tasks are numbered one at a time per board.
+        db.query("SELECT pg_advisory_xact_lock(hashtext('ai_runner:track:' || ?::text))", target.board_id)
+        local task = Tasks.create({ board_id = target.board_id, column_id = target.column_id, title = title,
+            description = table.concat(lines, "\n"), status = status, reporter_user_uuid = runner.created_by,
+            metadata = cjson.encode({ ai_session = { runner_uuid = runner.uuid, runner_name = runner.name,
+                session_ref = s.ref, tool = U.null(s.tool), cwd = U.null(s.cwd), branch = U.null(s.branch) } }) })
+        Tasks.logActivity(task.id, runner.created_by, "created", "task", task.id)
+        db.query("UPDATE ar_tracked_sessions SET task_uuid = ? WHERE id = ?", task.uuid, row.id)
+        task.message = "New task from a " .. tool .. " session on " .. runner.name .. ": " .. title
+        return task
+    end)
+end
+
+--- Every heartbeat with an inventory (§26.3): tracked sessions it reports are seen again; those it reports ended,
+-- or that nobody reported for R.TRACK_GONE_MINUTES, end. With tracking on, each busy session started by hand that
+-- has no row yet gets a task (at most R.TRACK_PER_HEARTBEAT, the rest on later heartbeats). inv: the heartbeat's
+-- cleaned inventory, already in ar_sessions. Best effort: the caller pcalls it. @return tasks created
+function R.track_sessions(runner, inv)
+    local alive, is_alive, ended = {}, {}, {}
+    for _, s in ipairs(inv) do
+        local ref = s.session_id ~= nil and s.session_id ~= "" and s.session_id or s.key
+        if (s.status or ""):lower() == "ended" then
+            ended[#ended + 1] = ref
+        else
+            alive[#alive + 1], is_alive[ref] = ref, true
+        end
+    end
+    if #alive > 0 then
+        db.query([[UPDATE ar_tracked_sessions SET last_seen_at = NOW() WHERE runner_uuid = ? AND ended_at IS NULL
+            AND session_ref IN ?]], runner.uuid, db.list(alive))
+    end
+    local over = {}
+    for _, ref in ipairs(ended) do if not is_alive[ref] then over[#over + 1] = ref end end
+    if #over > 0 then
+        end_tracked("t.runner_uuid = ? AND (" .. GONE_SQL .. " OR t.session_ref IN ?)", runner.uuid, db.list(over))
+    else
+        end_tracked("t.runner_uuid = ? AND " .. GONE_SQL, runner.uuid)
+    end
+
+    local settings = R.settings(runner.namespace_id)
+    local st = settings.session_tracking
+    if st.enabled ~= true then return 0 end
+    local fresh = db.query([[
+        SELECT ]] .. REF_SQL .. [[ AS ref, s.tool, s.cwd, s.branch, s.session_id, s.first_prompt,
+            to_char(s.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"') AS started
+        FROM ar_sessions s
+        WHERE s.runner_uuid = ? AND s.namespace_id = ? AND NOT s.managed AND s.labels->>'opsapi_run' IS NULL
+          AND COALESCE(s.status, '') <> '' AND lower(s.status) NOT IN ]] .. IDLE .. [[
+          AND NOT EXISTS (SELECT 1 FROM ar_tracked_sessions t WHERE t.runner_uuid = s.runner_uuid
+                          AND t.session_ref = ]] .. REF_SQL .. [[)
+        ORDER BY s.started_at NULLS LAST, s.session_key LIMIT ]] .. R.TRACK_PER_HEARTBEAT,
+        runner.uuid, runner.namespace_id)
+    if #fresh == 0 then return 0 end
+    local target = R.track_target(runner.namespace_id, st.project_uuid, st.column)
+    if not target then
+        ngx.log(ngx.WARN, "[ai_runner] session tracking: no board of project ", tostring(st.project_uuid),
+            " (deleted?); no task created")
+        return 0
+    end
+    local created, done = {}, {}
+    for _, s in ipairs(fresh) do
+        if not done[s.ref] then -- two inventory entries of one session
+            done[s.ref] = true
+            local ok, task = pcall(session_task, runner, target, R.TRACK_STATUS[st.status] or "in_progress", s)
+            if not ok then
+                ngx.log(ngx.ERR, "[ai_runner] session task not created: ", tostring(task))
+            elseif task then
+                created[#created + 1] = task
+            end
+        end
+    end
+    if #created > 0 and st.notify ~= false then
+        alert_session_tasks(runner, target, settings.approval_policy, created)
+    end
+    return #created
+end
+
+-- ---------------------------------------------------------------------------
 -- Retention (job, daily, per workspace, §24.7)
 -- ---------------------------------------------------------------------------
 
@@ -1112,6 +1285,8 @@ function R.sweep()
         RETURNING uuid, namespace_id, requested_by, task_uuid, status
     ]])
     local requests = R.expire_requests()
+    -- §26.3: tracked sessions of runners that stopped reporting them (or stopped heartbeating).
+    local sessions = end_tracked(GONE_SQL)
     -- Locks whose run ended (or was deleted), and any that expired.
     local released = db.query([[
         DELETE FROM ar_locks l WHERE (l.expires_at IS NOT NULL AND l.expires_at < NOW())
@@ -1120,7 +1295,8 @@ function R.sweep()
     for _, r in ipairs(lost) do R.notify(r) end
     for _, r in ipairs(expired) do R.notify(r) end
     for _, r in ipairs(unapproved) do R.notify(r) end
-    return { lost = #lost, cancelled = #expired + #unapproved, locks_released = released, requests_expired = requests }
+    return { lost = #lost, cancelled = #expired + #unapproved, locks_released = released, requests_expired = requests,
+        sessions_ended = sessions }
 end
 
 return R

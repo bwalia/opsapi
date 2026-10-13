@@ -1,7 +1,7 @@
 -- Runner API (docs/AI_RUNNER.md §22.2, §23.2). No user session: under public/, authenticated by the runner token
 -- ("Authorization: Bearer oprn_<48 hex>", stored as a SHA-256 hash and bound to one workspace).
 --   POST /public/runner/heartbeat              capabilities (+ profile health), repos, inventory -> runs to cancel;
---                                              renews leases
+--                                              renews leases; sessions started by hand become tasks (§26)
 --   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } (+ run_token) or 204;
 --                                              skips runs of profiles the runner reports unavailable
 --   POST /public/runner/runs/:uuid/status      { seq, status, question?, ... } compare-and-set; stale seq ignored
@@ -172,7 +172,9 @@ local function inventory(list)
             out[#out + 1] = { key = key, tool = str(s.tool, 40), status = str(s.status, 40),
                 cwd = U.path(str(s.cwd)), branch = str(s.branch, 255), session_id = str(s.session_id, 255),
                 started_at = str(s.started_at, 64), updated_at = str(s.updated_at, 64),
-                prompt_preview = U.redact(str(s.prompt_preview, 200)), labels = l, run = run }
+                prompt_preview = U.redact(str(s.prompt_preview, 200)), labels = l, run = run,
+                -- §26.1: the session's first prompt, which titles its task (redacted before it is cut).
+                first_prompt = U.cut(safe_text(s.first_prompt), 300) }
         end
     end
     return out
@@ -222,19 +224,25 @@ return function(app)
                 if #inv > 0 then
                     db.query([[
                         INSERT INTO ar_sessions (runner_uuid, namespace_id, session_key, tool, status, cwd, branch,
-                            session_id, started_at, updated_at, prompt_preview, labels, run_uuid, managed, seen_at)
+                            session_id, started_at, updated_at, prompt_preview, labels, run_uuid, managed, seen_at,
+                            first_prompt)
                         SELECT ?, ?, x.key, x.tool, x.status, x.cwd, x.branch, x.session_id, ai_runner_ts(x.started_at),
                             ai_runner_ts(x.updated_at), x.prompt_preview, COALESCE(x.labels, '{}'::jsonb), r.uuid,
-                            r.uuid IS NOT NULL, NOW()
+                            r.uuid IS NOT NULL, NOW(), x.first_prompt
                         FROM jsonb_to_recordset(?::jsonb) AS x(key text, tool text, status text, cwd text, branch text,
                             session_id text, started_at text, updated_at text, prompt_preview text, labels jsonb,
-                            run uuid)
+                            run uuid, first_prompt text)
                         LEFT JOIN ar_runs r ON r.uuid = x.run AND r.runner_uuid = ? AND r.namespace_id = ?
                         ON CONFLICT (runner_uuid, session_key) DO NOTHING
                     ]], runner.uuid, runner.namespace_id, cjson.encode(inv), runner.uuid, runner.namespace_id)
                 end
             end
         end)
+        -- §26.3: sessions started by hand become tasks. Never fails (or slows down much) the heartbeat.
+        if inv then
+            local ok, err = pcall(R.track_sessions, runner, inv)
+            if not ok then ngx.log(ngx.ERR, "[ai_runner] session tracking failed: ", tostring(err)) end
+        end
 
         local cancel = {}
         for _, r in ipairs(db.query("SELECT uuid FROM ar_runs WHERE runner_uuid = ? AND namespace_id = ? AND "

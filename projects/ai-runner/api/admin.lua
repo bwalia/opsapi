@@ -9,10 +9,10 @@
 --   POST   /runners/:uuid/pause | /resume   ai_runners.manage (a paused runner heartbeats but claims nothing)
 --   DELETE /runners/:uuid                   ai_runners.manage: revoke (its queued runs are cancelled)
 --   GET    /runners/:uuid/sessions          ai_runs.manage: the machine's last inventory, linked to runs
---   GET    /sessions                        ai_runs.manage or ai_runners.manage: every runner's sessions
---                                           (?runner_uuid&busy=1&page&per_page)
+--   GET    /sessions                        ai_runs.manage or ai_runners.manage: every runner's sessions, with
+--                                           the task of one started by hand (?runner_uuid&busy=1&page&per_page)
 --   GET    /overview                        ai_runs.manage, ai_runners.manage or ai_runs_approvals.manage
---   GET|PUT /settings                       ai_runs_settings.manage (+ guards, §24.1)
+--   GET|PUT /settings                       ai_runs_settings.manage (+ guards §24.1, session_tracking §26.2)
 --   GET|PUT /projects/:project_uuid/settings  owner/admin of the kanban project or ai_runs_settings.manage
 --   GET|PUT /template                       ai_runs_settings.manage: the workspace template, versioned on save
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -266,11 +266,18 @@ return function(app)
                    s.seen_at, s.run_uuid, ru.uuid AS runner_uuid, ru.name AS runner_name, ru.status AS runner_state,
                    (ru.last_heartbeat_at IS NOT NULL AND ru.last_heartbeat_at > NOW() - interval ']] .. R.ONLINE_S
                 .. [[ seconds') AS online,
-                   t.task_number, COALESCE(t.title, x.task_snapshot->>'title') AS task_title
+                   t.task_number, COALESCE(t.title, x.task_snapshot->>'title') AS task_title,
+                   tt.uuid AS tracked_uuid, tt.task_number AS tracked_number, tt.title AS tracked_title,
+                   tp.uuid AS tracked_project
             FROM ar_sessions s
             JOIN ar_runners ru ON ru.uuid = s.runner_uuid
             LEFT JOIN ar_runs x ON x.uuid = s.run_uuid
             LEFT JOIN kanban_tasks t ON t.uuid = x.task_uuid
+            LEFT JOIN ar_tracked_sessions ts ON ts.runner_uuid = s.runner_uuid
+                AND ts.session_ref = COALESCE(NULLIF(s.session_id, ''), s.session_key)
+            LEFT JOIN kanban_tasks tt ON tt.uuid = ts.task_uuid AND tt.deleted_at IS NULL
+            LEFT JOIN kanban_boards tb ON tb.id = tt.board_id
+            LEFT JOIN kanban_projects tp ON tp.id = tb.project_id
             WHERE ]] .. w .. [[
             ORDER BY lower(ru.name), ru.id, s.managed DESC, s.updated_at DESC NULLS LAST, s.session_key
             LIMIT ? OFFSET ?]], unpack(q_args))) do
@@ -280,7 +287,10 @@ return function(app)
                 runner = { uuid = s.runner_uuid, name = s.runner_name,
                     status = R.runner_status({ status = s.runner_state, online = s.online }) },
                 run = s.run_uuid and { uuid = s.run_uuid, task_title = U.null(s.task_title),
-                    task_number = U.null(s.task_number) } or cjson.null }
+                    task_number = U.null(s.task_number) } or cjson.null,
+                -- §26.4: the task a session started by hand became.
+                task = s.tracked_uuid and { uuid = s.tracked_uuid, task_number = U.null(s.tracked_number),
+                    title = s.tracked_title, project_uuid = U.null(s.tracked_project) } or cjson.null }
         end
         local total = db.query([[SELECT COUNT(*)::int AS n FROM ar_sessions s
             JOIN ar_runners ru ON ru.uuid = s.runner_uuid WHERE ]] .. w, unpack(args))[1].n
@@ -369,16 +379,35 @@ return function(app)
             max_open_runs_per_workspace = { type = "integer", min = 0, max = 1000 },
             daily_token_limit = { type = "integer", min = 0, max = 1000000000 },
             retention_days = { type = "integer", min = 30, max = 3650 } })
+        merge("session_tracking", { enabled = { type = "boolean" }, project_uuid = { type = "uuid" },
+            column = { max = 100 }, status = { enum = { "todo", "in_progress" } }, notify = { type = "boolean" } })
+        -- §26.2: the tasks of sessions started by hand go to a kanban project of this workspace (required when on),
+        -- into a column of its first board. Checked when given, so a project deleted since doesn't block other saves.
+        local st = s.session_tracking
+        if b.session_tracking ~= nil then
+            if st.column == "" then st.column = cjson.null end
+            local target = st.project_uuid ~= cjson.null and R.track_target(ns, st.project_uuid, st.column)
+            if st.project_uuid == cjson.null and st.enabled == true then
+                U.invalid({ ["session_tracking.project_uuid"] = "is required when tracking is on" })
+            elseif st.project_uuid ~= cjson.null and not target then
+                U.invalid({ ["session_tracking.project_uuid"] = "must be a kanban project of this workspace" })
+            elseif st.column ~= cjson.null and not (target and target.column_found) then
+                U.invalid({ ["session_tracking.column"] = "must be a column of the project's first board" })
+            end
+            if target then st.project_uuid = target.project_uuid end
+            if st.column ~= cjson.null then st.column = target.column_name end
+        end
         db.query([[
             INSERT INTO ar_settings (namespace_id, output_mode, pr_draft, pr_base, max_run_minutes, task_automation,
-                approval_policy, guards, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?)
+                approval_policy, guards, session_tracking, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?)
             ON CONFLICT (namespace_id) DO UPDATE SET output_mode = EXCLUDED.output_mode, pr_draft = EXCLUDED.pr_draft,
                 pr_base = EXCLUDED.pr_base, max_run_minutes = EXCLUDED.max_run_minutes,
                 task_automation = EXCLUDED.task_automation, approval_policy = EXCLUDED.approval_policy,
-                guards = EXCLUDED.guards, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                guards = EXCLUDED.guards, session_tracking = EXCLUDED.session_tracking,
+                updated_by = EXCLUDED.updated_by, updated_at = NOW()
         ]], ns, s.output_mode, s.pr_draft, s.pr_base, s.max_run_minutes, cjson.encode(s.task_automation),
-            cjson.encode(s.approval_policy), cjson.encode(s.guards), sdk.user(self).uuid)
+            cjson.encode(s.approval_policy), cjson.encode(s.guards), cjson.encode(st), sdk.user(self).uuid)
         return sdk.ok(R.settings(ns))
     end)))
 
