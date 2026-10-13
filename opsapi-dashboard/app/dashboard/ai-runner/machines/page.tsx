@@ -3,7 +3,8 @@
 /**
  * Machines (docs/AI_RUNNER.md §24.4, ai_runners.manage): every runner with its status and each agent profile's
  * health and plan usage, then every session it last reported — runs it manages (linked to the run) and sessions
- * started by hand. Refreshes every 15 seconds while the tab is visible.
+ * started by hand (linked to their task once tracking created one, §26.4). Refreshes every 15 seconds while the tab
+ * is visible.
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
@@ -52,7 +53,18 @@ const sessionColumns = [
         const label = `${s.run.task_number != null ? `#${s.run.task_number} ` : ''}${s.run.task_title || 'Open run'}`;
         return <Link href={`${BASE}/runs/${s.run.uuid}`} className="block min-w-[8rem] text-primary-600 hover:underline">{label}</Link>;
       }
-      return <span className="whitespace-nowrap text-secondary-500">{s.managed ? 'Managed run' : 'Started by hand'}</span>;
+      const t = s.task; // §26: the task tracking created for a session started by hand
+      return (
+        <span className="block whitespace-nowrap text-secondary-500">
+          {s.managed ? 'Managed run' : 'Started by hand'}
+          {t?.uuid && t.project_uuid && (
+            <Link href={`/dashboard/projects/${t.project_uuid}/tasks/${t.uuid}`} title={t.title || undefined}
+              className="block text-primary-600 hover:underline">
+              Task{t.task_number != null ? ` #${t.task_number}` : ''} →
+            </Link>
+          )}
+        </span>
+      );
     },
   },
   {

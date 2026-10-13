@@ -1,6 +1,6 @@
 /**
  * AI Runs (OpsAPI plugin projects/ai-runner) — typed client for the dashboard pages.
- * Contract: docs/AI_RUNNER.md §22.3, §23.3, §24 and §25 (user API, session JWT). Requests go through apiClient
+ * Contract: docs/AI_RUNNER.md §22.3, §23.3, §24, §25 and §26 (user API, session JWT). Requests go through apiClient
  * (auth + workspace headers). Writes carry `_replay: true` so they never sit in the offline
  * outbox: a run started or a token minted by a background replay later is worse than an error now.
  */
@@ -234,6 +234,8 @@ export interface MachineSession {
   branch?: string | null;
   managed?: boolean;
   run?: { uuid: string; task_title?: string | null; task_number?: number | null } | null;
+  /** §26: the task created for a session started by hand, once tracking picked it up. */
+  task?: { uuid: string; task_number?: number | null; title?: string | null; project_uuid?: string | null } | null;
   prompt_preview?: string | null;
   updated_at?: string | null;
   seen_at?: string | null;
@@ -315,6 +317,17 @@ export interface Guards {
   daily_token_limit: number;
   retention_days: number;
 }
+/** §26: a busy session started by hand on a runner becomes an unassigned task in this project. */
+export interface SessionTracking {
+  enabled: boolean;
+  /** A kanban project of the workspace; required when enabled. */
+  project_uuid: string | null;
+  /** A column name on the project's first board; null = its first column. */
+  column: string | null;
+  status: 'todo' | 'in_progress';
+  /** Tell managers about each new task. */
+  notify: boolean;
+}
 export interface Settings {
   output_mode: OutputMode;
   pr_draft: boolean;
@@ -323,6 +336,7 @@ export interface Settings {
   task_automation: { in_progress_on_start: boolean; review_on_success: boolean };
   approval_policy: ApprovalPolicy;
   guards: Guards;
+  session_tracking: SessionTracking;
 }
 
 /** GET /overview (§24.5): numbers for managers. */

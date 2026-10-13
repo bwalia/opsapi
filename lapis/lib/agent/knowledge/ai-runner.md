@@ -39,6 +39,9 @@ The run page's Conversation shows each agent turn with its tokens and every mess
 ## Approvals
 Runs of profiles that can't ask for permission (such as Cursor) always need a manager's approval to start; with "Runs started by an assignee need a manager's approval first" switched on, so do runs started by someone who is not a manager. A manager approves or rejects (with an optional reason) from the banner on the run page or from Waiting on you. Approve queues the run; Reject cancels it. Nobody approves a run they asked for: they see "Another manager must approve it".
 
+## Sessions started by hand
+With Track sessions started by hand on (AI run settings), each busy Claude Code or Cursor session someone starts by hand on a runner's machine becomes a task in the chosen project, column and status, with no assignee: a manager assigns it. Machines links it (Task #N →). It is titled with the session's first prompt only when the runner's config has share_manual_prompts: true; inventory_roots in that config widens which folders are seen.
+
 ## Usage
 The run page totals tokens in and out, cache read and write, the agent's cost estimate and the number of turns. Every turn is also counted on the workspace's AI usage page.
 

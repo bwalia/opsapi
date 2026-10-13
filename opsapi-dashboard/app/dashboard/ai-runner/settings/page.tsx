@@ -1,6 +1,6 @@
 'use client';
 
-/** AI run settings (ai_runs_settings.manage): workspace defaults for runs, and the prompt template. */
+/** AI run settings (ai_runs_settings.manage): workspace defaults for runs, tracking sessions started by hand, and the prompt template. */
 import React, { useEffect, useState } from 'react';
 import { Settings as SettingsIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -8,7 +8,8 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Select, Switch, Textarea } from '@/components/ui';
 import { ErrorNote, Spinner } from '@/components/property-deals/ui';
 import { AiRunnerPage, OUTPUT_MODES, PRODUCT, useAiData } from '@/components/ai-runner/ui';
-import { aiRunner, aiErrorText, type Settings } from '@/services/ai-runner.service';
+import { aiRunner, aiErrorText, type SessionTracking, type Settings } from '@/services/ai-runner.service';
+import { kanbanService } from '@/services/kanban.service';
 
 export default function AiRunSettingsPage() {
   return (
@@ -35,6 +36,7 @@ const DEFAULTS: Settings = {
   guards: {
     similar_threshold: 0.45, max_open_runs_per_user: 3, max_open_runs_per_workspace: 10, daily_token_limit: 0, retention_days: 365,
   },
+  session_tracking: { enabled: false, project_uuid: null, column: null, status: 'in_progress', notify: true },
 };
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -61,6 +63,7 @@ function RunSettings() {
         task_automation: { ...DEFAULTS.task_automation, ...d.task_automation },
         approval_policy: { ...DEFAULTS.approval_policy, ...d.approval_policy },
         guards: { ...DEFAULTS.guards, ...d.guards },
+        session_tracking: { ...DEFAULTS.session_tracking, ...d.session_tracking },
       });
     }
   }, [loaded.data]);
@@ -79,7 +82,11 @@ function RunSettings() {
     setBusy(true);
     try {
       const saved = await aiRunner.saveSettings(s);
-      if (saved) setS({ ...s, ...saved, guards: { ...s.guards, ...saved.guards } });
+      if (saved) {
+        setS({
+          ...s, ...saved, guards: { ...s.guards, ...saved.guards }, session_tracking: { ...s.session_tracking, ...saved.session_tracking },
+        });
+      }
       toast.success('Settings saved');
     } catch (err) {
       toast.error(aiErrorText(err));
@@ -166,11 +173,69 @@ function RunSettings() {
           </div>
         </div>
 
+        <SessionTrackingFields t={s.session_tracking} onChange={(patch) => set({ session_tracking: { ...s.session_tracking, ...patch } })} />
+
         <div className="flex justify-end">
           <Button type="submit" isLoading={busy}>Save settings</Button>
         </div>
       </form>
     </Card>
+  );
+}
+
+/** §26: a session someone starts by hand on a runner's machine becomes a kanban task. Saved with the form above. */
+function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: (patch: Partial<SessionTracking>) => void }) {
+  // ponytail: the first 200 projects, as Runners → Access lists them; add search if workspaces outgrow that.
+  const projects = useAiData(async () => (await kanbanService.getProjects({ perPage: 200 })).data || [], []);
+  // The column names of the project's first board (where the task goes); free text when they can't be read.
+  const columns = useAiData(async () => {
+    if (!t.project_uuid) return [];
+    const [board] = await kanbanService.getBoards(t.project_uuid);
+    return board ? ((await kanbanService.getBoard(board.uuid)).columns || []).map((c) => c.name) : [];
+  }, [t.project_uuid]);
+  const list = projects.data || [];
+  const names = columns.loading ? [] : columns.data || []; // not the previous project's while the new one loads
+  const column = t.column || '';
+
+  return (
+    <div className="space-y-3 border-t border-secondary-200 pt-4">
+      <h3 className="text-sm font-semibold text-secondary-800">Track sessions started by hand</h3>
+      <p className="text-xs text-secondary-500">
+        When someone starts Claude Code or Cursor by hand on a runner&apos;s machine, OpsAPI creates a task for the session in this project.
+        The task has no assignee, so a manager can assign it like any other. Runs started from OpsAPI already have a task.
+        The task takes its title from the session&apos;s first prompt only when the runner&apos;s config has{' '}
+        <code className="font-mono">share_manual_prompts: true</code>; otherwise it is named after the tool, folder and machine.
+        The runner reports sessions in its allowed folders; add <code className="font-mono">inventory_roots</code> to its config to see
+        more (<code className="font-mono">[&quot;~&quot;]</code> for every session on the machine).
+      </p>
+      <Toggle label="Create a task for each session started by hand" checked={t.enabled} onChange={(v) => onChange({ enabled: v })} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Select id="air-s-track-project" label="Project" required={t.enabled} value={t.project_uuid || ''}
+          onChange={(e) => onChange({ project_uuid: e.target.value || null, column: null })}>
+          <option value="">{projects.loading && !projects.data ? 'Loading projects…' : 'Choose a project'}</option>
+          {list.map((p) => <option key={p.uuid} value={p.uuid}>{p.name}</option>)}
+          {/* Saved, but not one the caller can see: keep it rather than lose it on save. */}
+          {projects.data && t.project_uuid && !list.some((p) => p.uuid === t.project_uuid) && <option value={t.project_uuid}>Current project</option>}
+        </Select>
+        {names.length ? (
+          <Select id="air-s-track-column" label="Column" value={column} onChange={(e) => onChange({ column: e.target.value || null })}>
+            <option value="">First column</option>
+            {names.map((n) => <option key={n} value={n}>{n}</option>)}
+            {column && !names.includes(column) && <option value={column}>{column}</option>}
+          </Select>
+        ) : (
+          <Input id="air-s-track-column" label="Column" value={column} placeholder="First column"
+            onChange={(e) => onChange({ column: e.target.value.trim() ? e.target.value : null })} />
+        )}
+        <Select id="air-s-track-status" label="Task status" value={t.status}
+          onChange={(e) => onChange({ status: e.target.value as SessionTracking['status'] })}>
+          <option value="in_progress">In progress</option>
+          <option value="todo">To do</option>
+        </Select>
+      </div>
+      <Toggle label="Tell managers about each new task" hint="A notification with a link to the task." checked={t.notify}
+        onChange={(v) => onChange({ notify: v })} />
+    </div>
   );
 }
 
