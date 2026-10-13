@@ -1066,3 +1066,88 @@ A fresh review of the whole feature (plugin, runner, dashboard, MCP) confirmed t
 - **Go tests:** `first_prompt` is sent only with `share_manual_prompts`, and is redacted; `inventory_roots` (sessions outside `allowed_roots` are reported but can't be used for runs).
 - **Real runner (`promptpilot_test.py`):** a fake "manual" session the runner reports (a session whose labels make it manual) becomes a task.
 - **Cypress:** the settings section saves, and Machines shows the task link.
+
+---
+
+## 27. Everything configurable (multi-tenant SaaS)
+
+AI Runs is a feature of a SaaS platform, so behaviour is set in the admin dashboard, not in code:
+- **Workspace admins** configure their own workspace.
+- **Platform admins** configure platform-wide timings and limits.
+- **Machine owners** control what may leave their machine.
+
+### 27.0 Boundaries (what is deliberately *not* configurable)
+- **Tenant boundary:** a source's data is only ever written into the workspace that source is connected to. There is no token that writes across workspaces.
+  - A machine or integration that should feed several workspaces connects to each one, with its own token. A `runner.json` has a list of `registrations`, and the Runners page registers a connection.
+  - So "which workspace gets the tasks" is decided by which workspaces the source is connected to.
+- **Consent boundary:** the machine owner's `runner.json` decides:
+  - which folders may be reported at most (`inventory_roots`);
+  - whether prompt text may leave the machine (`share_manual_prompts`);
+  - which commands may run (profiles).
+
+  Dashboards can narrow these, never widen them. The commands an agent profile runs are never set from a web page.
+- **Safety:** the runner's built-in safety list and the server's redaction can be **added to** from the dashboard, never removed.
+
+### 27.1 Sources, not just PromptPilot
+- **Kinds:** a registered connection has `kind`, either `runner` (runs tasks and reports sessions; the default) or `source` (only reports sessions). A `source` gets 403 on `claim`.
+  - **Register:** `POST /runners { name, kind }`.
+  - **Runners page:** becomes **Runners & sources**, with a kind filter and register dialog.
+- **Open session-report API, for any tool** (a CI job, another observer, an IDE plugin, Codex, Windsurf, …):
+  - **Endpoint:** `POST /api/v2/ai-runner/public/runner/sessions { sessions: [ { key, tool, status, cwd, branch, session_id, started_at, updated_at, first_prompt, prompt_preview, labels } ] }`, with the connection's token.
+  - **Behaviour:** the same storage and tracking as a heartbeat inventory.
+  - **Fields:** `tool` and `status` are free text.
+  - **Docs:** `docs/AI_RUNNER_SOURCES.md`, with a curl example.
+- **PromptPilot report-only mode:** a registration with `report_only: true` never claims runs, so a machine can be tracked without running anything.
+
+### 27.2 What a connection reports (server-driven, per connection)
+- **Setting:** `ar_runners.report_filter JSONB`: `{ folders: [glob], exclude_folders: [glob], tools: [names] }`; empty means everything the owner allows. It is set on the Runners & sources page with `ai_runners.manage`.
+- **Delivery:** the server returns it in the heartbeat's `config.report_filter`. The runner applies it on top of `inventory_roots` (only ever narrowing). The server also applies it on ingest, for sources that don't filter themselves.
+
+### 27.3 Routing rules: where each session's task goes
+- **Table `ar_track_rules`:** ordered per workspace; the first enabled match wins.
+  - **`match`:** `{ runner_uuids[], tools[], folder_globs[], branch_globs[], prompt_keywords[] }`. Empty means any.
+  - **`action`:**
+    ```
+    { type: "create_task"|"ignore", project_uuid, column, status: todo|in_progress, priority,
+      assignee_uuids[] (empty = unassigned), title_template, description_template,
+      notify: "managers"|"assignees"|"none"|"users", notify_user_uuids[] }
+    ```
+- **Fallback:** a session no rule matches uses the workspace default, the §26.2 `session_tracking` target.
+- **Templates:** variables `{{first_prompt}}`, `{{prompt_preview}}`, `{{tool}}`, `{{tool_label}}`, `{{folder}}`, `{{repo}}`, `{{branch}}`, `{{runner}}`, `{{started}}` and `{{session_id}}`; unknown ones render empty. The defaults reproduce the §26.3 title and description.
+- **API** (`ai_runs_settings.manage`):
+  - `GET/POST /track-rules`, `PUT/DELETE /track-rules/:uuid`, `POST /track-rules/order { uuids }`;
+  - `POST /track-rules/test { session }` returns `{ rule, action, title, description }` for a sample session. Nothing is created.
+- **Checks:** projects and assignees must be in the workspace (assignees must be active members), and globs are capped in size.
+
+### 27.4 Workspace tunables (AI run settings)
+- **`session_tracking`** gains:
+  - `gone_after_minutes` (1–1440, default 10);
+  - `max_new_per_heartbeat` (1–100, default 20);
+  - `idle_statuses` (default the current idle list): sessions with these statuses don't count as busy;
+  - `tool_labels` `{ tool: label }` (default `{claude: "Claude", cursor: "Cursor"}`).
+- **`task_automation`** replaces the fixed "in progress" / "review" with `on_start` and `on_success`, each `{ enabled, status, column }`. The status is a kanban status; the column name is optional (else unchanged). The old booleans are read as before.
+- **`safety`** adds to the built-in lists:
+  - `extra_denied_commands` ([prefix or glob]): sent to runners in the heartbeat config, and denied like the built-in safety list;
+  - `extra_redactions` ([regex], validated and size-capped): masked on the server.
+
+### 27.5 Platform settings (platform admins)
+- **Table `ar_platform_settings`** (one row), set with `GET/PUT /api/v2/ai-runner/platform/settings` (platform admin only). It holds:
+  - protocol timings: `heartbeat_s`, `claim_wait_s`, `lease_s`, `online_s`;
+  - timeouts: `queue_timeout_hours`, `approval_timeout_hours`;
+  - limits: `max_events_per_run`, `max_queued_followups`, `max_requests_per_run`, `max_tracked_per_heartbeat_cap`;
+  - upper bounds for the workspace guards.
+- **Defaults** are today's values, used when the table is empty.
+- **Caching:** the values are read once a minute into a shared cache, so nothing extra happens per request. The runner already follows the heartbeat and claim timings the server sends.
+- **Dashboard:** an admin-only page, **AI Runs platform settings**.
+
+### 27.6 Acceptance
+- **Plugin sandbox:**
+  - source kind (no claim; the session API works);
+  - report filters on ingest;
+  - rules: first match wins, ignore, each match field, templates, assignees and notify modes, the tester, order, validation and RBAC;
+  - the workspace tunables, task-automation columns and extra redactions;
+  - platform settings (platform admin only, bounds, picked up by the heartbeat config and timeouts);
+  - migrations run twice;
+  - isolation between workspaces.
+- **Go:** `report_filter` narrowing (never widening), `extra_denied_commands`, and report-only mode.
+- **Cypress:** the rules editor and tester, connection kind and report filter, and the platform settings page.
