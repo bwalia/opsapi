@@ -128,6 +128,8 @@ local kanban_project_migrations = load_if_enabled(ProjectConfig.FEATURES.KANBAN,
     {}
 local kanban_enhancement_migrations = load_if_enabled(ProjectConfig.FEATURES.KANBAN, "migrations.kanban-enhancements") or
     {}
+-- My Tasks page menu item (migrations/my-tasks.lua)
+local my_tasks_migrations = load_if_enabled(ProjectConfig.FEATURES.KANBAN, "migrations.my-tasks") or {}
 
 -- Menu (usually enabled for most projects)
 local menu_system_migrations = load_if_enabled(ProjectConfig.FEATURES.MENU, "migrations.menu-system") or {}
@@ -2499,6 +2501,8 @@ local _migrations = {
     ['845_create_api_keys'] = api_key_migrations[1],
     -- Optional user binding — a key can act as a specific user (personal token).
     ['846_add_api_keys_user_uuid'] = api_key_migrations[2],
+    -- Self-service personal keys (api_keys.created_via = 'self'). 'zzak' sorts after the numerics.
+    ['zzak1_api_keys_created_via'] = api_key_migrations[3],
 
     -- =========================================================================
     -- FIELD SERVICE (850-861). Feature-gated. Numbered after CRM (500s),
@@ -2655,6 +2659,8 @@ local _migrations = {
     ['zzform5_forms_workspace_settings'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 5),
     ['zzform6_forms_custom_domains'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 6),
     ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
+    -- My Tasks sidebar item, right after Dashboard (migrations/my-tasks.lua)
+    ['zzmt1_my_tasks_menu'] = conditional_array(ProjectConfig.FEATURES.KANBAN, my_tasks_migrations, 1),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

@@ -1,15 +1,15 @@
 ---
 title: Projects
-pages: /dashboard/projects
+pages: /dashboard/projects, /dashboard/my-tasks
 api: /api/v2/kanban/projects, /api/v2/kanban/my-tasks, /api/v2/kanban/boards, /api/v2/kanban/columns, /api/v2/kanban/tasks, /api/v2/kanban/comments, /api/v2/kanban/checklists, /api/v2/kanban/checklist-items, /api/v2/kanban/labels, /api/v2/kanban/time-entries, /api/v2/kanban/timer, /api/v2/kanban/sprints, /api/v2/kanban/epics, /api/v2/namespace/members
 modules: projects, users
 tools: list_projects, create_project, list_my_tasks, create_task
-suggestions: Show tasks assigned to me | Create a high-priority task to fix login | Log 30 minutes on this task
+suggestions: What are my tasks today? | Create a high-priority task to fix login | Log 30 minutes on this task
 readonly: false
 ---
 # Projects
 Kanban project management. A project has boards (default "Main Board": Backlog, To Do, In Progress, Review, Done), tasks (#task_number), sprints and epics. Project status: active|on_hold|completed|archived|cancelled. Task status: open|in_progress|blocked|review|completed|cancelled. Priority: critical|high|medium|low|none.
-URLs: /dashboard/projects/{project_uuid} = board; .../tasks/{task_uuid} = task page; .../sprints, .../epics, .../analytics, .../settings. Read uuids from the current URL.
+URLs: /dashboard/projects/{project_uuid} = board; .../tasks/{task_uuid} = task page; .../sprints, .../epics, .../analytics, .../settings. Read uuids from the current URL. /dashboard/my-tasks = My Tasks (my open tasks across projects: Today incl. overdue, This week, All open; priority filter).
 
 ## Using the page
 - List: **New Project** (Project Name*, Description, Color, Visibility; advanced: Customer, Start/Due Date); tabs All/Starred/Active/On Hold/Completed/Archived; card menu Edit/Archive/Delete.
@@ -27,8 +27,10 @@ URLs: /dashboard/projects/{project_uuid} = board; .../tasks/{task_uuid} = task p
 - Time: duration_minutes 1–1440, or started_at+ended_at. One running timer per user. Only `logged` entries can be approved/rejected, by a project admin, never your own; approved entries are locked.
 - Sprints: planned → start (one active per project) → complete; cancel unless completed (tasks return to backlog); can't delete an active sprint. Completing leaves unfinished tasks — add them to the next sprint.
 - GET /api/v2/kanban/projects lists only my non-archived projects and ignores search/status — filter yourself.
+- "My tasks today / this week / overdue": list_my_tasks (due=today_and_overdue for today). Rows carry task_number, overdue and `url` (the task page) — list by priority and link titles to `url`.
 
 ## API
+- `GET /api/v2/kanban/my-tasks?due&date&priority&status&project_uuid&search&page&per_page` — my open tasks by priority then due date. due: today|overdue|today_and_overdue|week|upcoming|none; date: YYYY-MM-DD (my today); priority/status: comma lists; items add project_uuid, task_number, board_uuid, overdue, url
 - `GET /api/v2/kanban/projects` · `POST /api/v2/kanban/projects` {name*, description, visibility: private|internal|public, color: "#hex", start_date, due_date: YYYY-MM-DD, customer_uuid}
 - `GET /api/v2/kanban/projects/{project_uuid}` (incl. boards) · `PUT /api/v2/kanban/projects/{project_uuid}` {same fields, status} · `DELETE /api/v2/kanban/projects/{project_uuid}`
 - `GET /api/v2/kanban/projects/{project_uuid}/members` · `POST /api/v2/kanban/projects/{project_uuid}/members` {user_uuid*, role: admin|member|viewer|guest} · `PUT /api/v2/kanban/projects/{project_uuid}/members/{user_uuid}/role {role*}` · `DELETE /api/v2/kanban/projects/{project_uuid}/members/{user_uuid}`

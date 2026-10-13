@@ -43,10 +43,26 @@ end
 -- here, centrally and fail-closed: a key may only reach /api/v2/<module>/...
 -- for a module it is actually scoped for. Anything else is refused before the
 -- handler runs, including any route added later.
+-- A self-service key is also held to the actions its owner chose, by HTTP method: a read-only
+-- key can't write anywhere, even where a route only checks project membership (kanban).
+local METHOD_ACTION = { GET = "read", HEAD = "read", OPTIONS = "read", POST = "create", PUT = "update",
+    PATCH = "update", DELETE = "delete" }
+
+local function allows(principal, actions, method)
+    if not principal.self_service then return true end
+    local want = METHOD_ACTION[string.upper(method or "GET")]
+    if not want or type(actions) ~= "table" then return false end
+    for _, a in ipairs(actions) do
+        if a == want or a == "manage" then return true end
+    end
+    return false
+end
+
 -- @param principal table from ApiKey.authenticate
 -- @param uri string ngx.var.uri
+-- @param method string|nil request method (self-service keys: checked against their actions)
 -- @return boolean
-function ApiKey.permits_uri(principal, uri)
+function ApiKey.permits_uri(principal, uri, method)
     if type(uri) ~= "string" then return false end
     -- The module is the first segment, with or without more path: a key
     -- scoped to customers may list/create (/api/v2/customers) as well as
@@ -54,7 +70,7 @@ function ApiKey.permits_uri(principal, uri)
     local module_name = uri:match("^/api/v2/([^/]+)")
     if not module_name then return false end
     local scopes = principal and principal.scopes or {}
-    if scopes[module_name] ~= nil then return true end
+    if scopes[module_name] ~= nil then return allows(principal or {}, scopes[module_name], method) end
     -- A plugin's routes live under its api_prefix (/api/v2/helpdesk/...) while
     -- its RBAC modules are named per resource (helpdesk_tickets): a key scoped
     -- for one of the plugin's modules may reach the plugin's prefix. The
@@ -65,12 +81,140 @@ function ApiKey.permits_uri(principal, uri)
         local prefix = plugin.api_prefix
         if uri:sub(1, #prefix + 1) == prefix .. "/" then
             for _, m in ipairs(plugin.modules) do
-                if scopes[m.machine_name] ~= nil then return true end
+                if scopes[m.machine_name] ~= nil and allows(principal or {}, scopes[m.machine_name], method) then
+                    return true
+                end
             end
             return false
         end
     end
     return false
+end
+
+-- ---------------------------------------------------------------------------
+-- Self-service ("personal") keys: a member mints a key for themselves
+-- (routes/api-keys.lua, /api/v2/me/api-keys). Such a key never holds more than
+-- its owner: scopes are checked against the owner's role at mint time and
+-- narrowed to the owner's CURRENT role on every request (authenticate below).
+-- ---------------------------------------------------------------------------
+
+ApiKey.SELF = "self"                 -- api_keys.created_via for self-service keys
+ApiKey.SELF_DEFAULT_DAYS = 90
+ApiKey.SELF_MAX_DAYS = 365
+ApiKey.SELF_MAX_ACTIVE = 10          -- live self-service keys per user per workspace
+ApiKey.SELF_CREATES_PER_HOUR = 10
+-- What an AI agent / MCP server needs: read, create and update tasks (create also covers time
+-- entries and comments, which are POSTs).
+ApiKey.AGENT_PRESET = { kanban = { "read", "create", "update" }, projects = { "read" } }
+
+-- Modules that manage keys, members or roles: never on a personal key.
+local SELF_FORBIDDEN = { namespace = true, api_keys = true }
+
+-- A scope that only opens a URL prefix (see permits_uri) whose routes enforce a
+-- different RBAC module: every /api/v2/kanban/* route checks projects.* (the
+-- kanban feature's module in helper/project-config.lua), so a member holding
+-- projects.X holds kanban.X for this purpose.
+local SCOPE_ALIASES = { kanban = "projects" }
+-- Modules whose writes each route decides per project (project owner/admin/member/viewer), exactly as
+-- for the same person in the dashboard: any access to the aliased module lets a key carry every action
+-- but manage, and the route still refuses what the person can't do in that project.
+local ROLE_GOVERNED = { kanban = { "read", "create", "update", "delete" } }
+
+-- The actions a member holds on a module (alias included), as a set.
+local function held(perms, module_name)
+    local set = {}
+    for _, m in ipairs({ module_name, SCOPE_ALIASES[module_name] }) do
+        local acts = perms[m]
+        if type(acts) == "table" then
+            for _, a in ipairs(acts) do set[a] = true end
+        end
+    end
+    if ROLE_GOVERNED[module_name] and next(set) ~= nil then
+        for _, a in ipairs(ROLE_GOVERNED[module_name]) do set[a] = true end
+    end
+    return set
+end
+
+--- Narrow a key's scopes to what its owner holds now. Per module, keep the
+-- actions both sides have; "manage" on one side stands for every action of the
+-- other. Modules left with no action are dropped.
+-- @param scopes table key scopes {module -> [actions]}
+-- @param perms table the owner's permissions, same shape
+-- @return table effective scopes
+function ApiKey.effective_scopes(scopes, perms)
+    local out = {}
+    for module_name, actions in pairs(scopes or {}) do
+        local have, keep = held(perms or {}, module_name), {}
+        for _, a in ipairs(type(actions) == "table" and actions or {}) do
+            if have.manage or have[a] then
+                keep[a] = true
+            elseif a == "manage" then
+                for h in pairs(have) do keep[h] = true end
+            end
+        end
+        local list = {}
+        for a in pairs(keep) do list[#list + 1] = a end
+        if #list > 0 then
+            table.sort(list)
+            out[module_name] = list
+        end
+    end
+    return out
+end
+
+--- Validate the scopes a member asks for on their own key: every module/action
+-- must be one they hold now ("manage" covers all), and never a module that
+-- manages keys, members or roles.
+-- @param scopes any decoded request value
+-- @param perms table the caller's permissions in this workspace
+-- @return table|nil normalized scopes
+-- @return string|nil error message (the caller answers 422)
+function ApiKey.check_self_scopes(scopes, perms)
+    if type(scopes) ~= "table" or next(scopes) == nil then
+        return nil, "scopes must be a non-empty object of module -> actions, e.g. {\"projects\":[\"read\"]}"
+    end
+    local out, denied = {}, {}
+    for module_name, actions in pairs(scopes) do
+        if type(module_name) ~= "string" or module_name == "" then
+            return nil, "scope module names must be strings"
+        end
+        if SELF_FORBIDDEN[module_name] then
+            return nil, "Personal API keys cannot be granted the " .. module_name .. " module"
+        end
+        if type(actions) ~= "table" or #actions == 0 then
+            return nil, "scope actions for " .. module_name .. " must be a non-empty array"
+        end
+        local have, list, seen = held(perms or {}, module_name), {}, {}
+        for _, a in ipairs(actions) do
+            if type(a) ~= "string" or a == "" then
+                return nil, "scope actions for " .. module_name .. " must be strings"
+            end
+            if not (have.manage or have[a]) then
+                denied[#denied + 1] = module_name .. "." .. a
+            elseif not seen[a] then
+                seen[a] = true
+                list[#list + 1] = a
+            end
+        end
+        out[module_name] = list
+    end
+    if #denied > 0 then
+        table.sort(denied)
+        return nil, "You do not have these permissions in this workspace: " .. table.concat(denied, ", ")
+    end
+    return out
+end
+
+--- Days until a self-service key expires: default 90, whole days 1..365.
+-- @return number|nil days
+-- @return string|nil error message
+function ApiKey.self_expiry_days(value)
+    if value == nil then return ApiKey.SELF_DEFAULT_DAYS end
+    local n = tonumber(value)
+    if not n or n ~= math.floor(n) or n < 1 or n > ApiKey.SELF_MAX_DAYS then
+        return nil, "expires_in_days must be a whole number from 1 to " .. ApiKey.SELF_MAX_DAYS
+    end
+    return n
 end
 
 --- Hash a raw key with SHA-256 for storage/lookup.
@@ -136,14 +280,16 @@ function ApiKey.authenticate(raw)
 
     local rows = db.query([[
         SELECT ak.id, ak.uuid, ak.name, ak.namespace_id, ak.scopes,
-               ak.expires_at, ak.revoked_at, ak.user_uuid,
-               (ak.expires_at IS NOT NULL AND ak.expires_at < NOW()) AS is_expired,
+               ak.expires_at, ak.revoked_at, ak.user_uuid, ak.created_via,
+               (ak.expires_at IS NOT NULL AND ak.expires_at <= NOW()) AS is_expired,
                ns.id AS ns_id, ns.uuid AS ns_uuid, ns.slug AS ns_slug,
                ns.name AS ns_name, ns.status AS ns_status,
-               u.username AS user_username
+               u.username AS user_username, u.active AS user_active,
+               nm.id AS member_id, nm.status AS member_status
         FROM api_keys ak
         JOIN namespaces ns ON ns.id = ak.namespace_id
         LEFT JOIN users u ON u.uuid = ak.user_uuid
+        LEFT JOIN namespace_members nm ON nm.namespace_id = ak.namespace_id AND nm.user_id = u.id
         WHERE ak.key_hash = ?
         LIMIT 1
     ]], ApiKey.hash(raw))
@@ -169,10 +315,26 @@ function ApiKey.authenticate(raw)
         if ok and type(decoded) == "table" then scopes = decoded end
     end
 
+    -- A self-service key is only ever as strong as its owner is NOW: removed,
+    -- suspended or deactivated owners lose it, and a demotion narrows it on the
+    -- next request. getPermissions is the same cached lookup (busted on every
+    -- role change) the namespace middleware runs for a session. Admin-minted
+    -- keys (created_via NULL) keep their scopes as granted.
+    if row.created_via == ApiKey.SELF then
+        local active = row.user_active == true or row.user_active == "t"
+        if not active or row.member_id == nil or row.member_id == ngx.null
+            or row.member_status ~= "active" then
+            return nil, "API key owner is no longer an active member of this workspace", 401
+        end
+        local perms = require("queries.NamespaceMemberQueries").getPermissions(row.member_id)
+        scopes = ApiKey.effective_scopes(scopes, perms)
+    end
+
     touch_last_used(row.id)
 
     local principal = {
         api_key = true,
+        self_service = row.created_via == ApiKey.SELF,
         key_id = row.id,
         key_uuid = row.uuid,
         key_name = row.name,

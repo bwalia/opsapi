@@ -97,7 +97,23 @@ return function(app)
     -- System prompts come in two parts: the stable one (instructions + guide,
     -- identical for everyone on that page, so providers can cache it) first,
     -- then who the user is and today's date.
-    local function build_page_prompt(user, ns, scope, page_path, perms)
+    -- The user's own calendar date from the browser (YYYY-MM-DD), so "today" is their today, not UTC's.
+    -- Anything else, or a date more than two days from the server's (no timezone is that far), is ignored.
+    local function user_local_date(v)
+        if type(v) ~= "string" then return nil end
+        local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+        if not y then return nil end
+        local t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+        if not t or os.date("!%Y-%m-%d", t) ~= v or math.abs(os.time() - t) > 2 * 86400 then return nil end
+        return v
+    end
+
+    local function date_line(local_date)
+        return local_date and ("- Today's date (the user's local date): " .. local_date)
+            or ("- Today's date (UTC): " .. os.date("!%Y-%m-%d"))
+    end
+
+    local function build_page_prompt(user, ns, scope, page_path, perms, local_date)
         local lines = {
             "You are OpsAPI Assistant, built into the " .. scope.title .. " page of the OpsAPI business "
                 .. "platform. You do two things: GUIDE the user (explain how this page works and how to do "
@@ -134,7 +150,7 @@ return function(app)
             "Context:",
             "- User: " .. display_name(user) .. " (user uuid " .. tostring(user.uuid) .. ")",
             "- Workspace: " .. (ns.name or "current workspace"),
-            "- Today's date (UTC): " .. os.date("!%Y-%m-%d"),
+            date_line(local_date),
             "- Page: " .. scope.title .. (page_path and (" — the user is on " .. page_path
                 .. " (ids in this URL are the record they are looking at)") or ""),
         }
@@ -144,7 +160,7 @@ return function(app)
         return { table.concat(lines, "\n"), table.concat(context, "\n") }
     end
 
-    local function build_system_prompt(user, ns, scope)
+    local function build_system_prompt(user, ns, scope, local_date)
         return { table.concat({
             "You are OpsAPI Assistant, an AI agent embedded in the OpsAPI business platform.",
             "You help the user get real work done by CALLING the provided tools — creating and looking up "
@@ -175,7 +191,7 @@ return function(app)
             "Context:",
             "- User: " .. display_name(user),
             "- Workspace: " .. (ns.name or "current workspace"),
-            "- Today's date (UTC): " .. os.date("!%Y-%m-%d"),
+            date_line(local_date),
         }, "\n") }
     end
 
@@ -438,6 +454,7 @@ return function(app)
             user_uuid = user.uuid,
             scope = scope,
             tool_names = tool_names,
+            local_date = self.agent_local_date,
             port = tonumber(ngx.var.server_port) or 80,
             forward_headers = {
                 ["Authorization"] = h["authorization"],
@@ -544,6 +561,7 @@ return function(app)
             local user = require_user(self)
             if not user then return { status = 401, json = { error = "Unauthorized" } } end
             local data = parse_json_body()
+            self.agent_local_date = user_local_date(data.local_date)
             local scope, page_path = page_of(self, data)
             local ns = self.namespace or {}
             local prev = latest_run(user.uuid, ns.id, scope.key)
@@ -563,6 +581,7 @@ return function(app)
             if not user then return { status = 401, json = { error = "Unauthorized" } } end
 
             local data = parse_json_body()
+            self.agent_local_date = user_local_date(data.local_date)
             local text = type(data.message) == "string" and data.message:gsub("^%s+", ""):gsub("%s+$", "") or ""
             if text == "" then
                 return { status = 400, json = { error = "message is required" } }
@@ -624,8 +643,9 @@ return function(app)
                 page_path = page_path,
                 tools = tools,
                 system = (page_path and scope.key ~= "general")
-                    and build_page_prompt(user, ns, scope, page_path, permissions_line(self, scope))
-                    or build_system_prompt(user, ns, scope),
+                    and build_page_prompt(user, ns, scope, page_path, permissions_line(self, scope),
+                        self.agent_local_date)
+                    or build_system_prompt(user, ns, scope, self.agent_local_date),
                 conversation = to_model_conversation(turns),
             })
             if not ok then

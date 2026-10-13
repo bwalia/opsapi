@@ -16,6 +16,7 @@ import { resolveLayout, WIDGETS, type WidgetId } from '@/components/dashboard/ho
 import { fetchPropertySummary, propertyStat, DealsAtRisk, type PropertySummary } from '@/components/dashboard/home/PropertyWidgets';
 import HotLeads from '@/components/property-deals/HotLeads';
 import DueSoon from '@/components/property-deals/DueSoon';
+import MyTasksToday from '@/components/dashboard/home/MyTasksToday';
 import type { DashboardStats, HealthStatus as HealthStatusType, NamespaceModule } from '@/types';
 
 // Static icons - defined outside component to prevent recreation
@@ -196,6 +197,7 @@ export default function DashboardPage() {
       {widgets.filter((id) => WIDGETS[id].size === 'full').map((id) => (
         <RevealItem key={id}>
           {id === 'recent_orders' && <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />}
+          {id === 'my_tasks_today' && <MyTasksToday />}
           {id === 'pd_hot_leads' && <HotLeads />}
           {id === 'pd_due_soon' && <DueSoon />}
           {id === 'pd_deals_at_risk' && <DealsAtRisk summary={property} />}

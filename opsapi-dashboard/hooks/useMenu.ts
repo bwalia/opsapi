@@ -128,6 +128,8 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Bug: icons.Bug,
     Code: icons.Code,
     Server: icons.Server,
+    Monitor: icons.Monitor,
+    Bot: icons.Bot,
     Cloud: icons.Cloud,
     Headphones: icons.Headphones,
     Stethoscope: icons.Stethoscope,

@@ -1399,8 +1399,8 @@ return function(app)
         local ok_state, state_data = pcall(cJson.decode, raw_state)
         if ok_state and type(state_data) == "table" then
             redirect_from = type(state_data.from) == "string" and state_data.from or "/"
-            -- The token is sent here and anyone can forge `state`: only a trusted origin,
-            -- else FRONTEND_URL below (same rule as /auth/google/callback).
+            -- The session token is sent here, and anyone can forge `state`: only a trusted
+            -- origin, else FRONTEND_URL below (same rule as the Google callback).
             state_frontend_url = require("middleware.cors").trustedFrontend(state_data.frontend_url,
                 get_allowed_reset_origins())
             state_project_code = state_data.project_code

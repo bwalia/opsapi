@@ -1,28 +1,38 @@
 {
-  "name": "opsapi-kanban-mcp",
-  "version": "0.1.0",
-  "description": "MCP server exposing OpsAPI kanban project management to Claude Code / any MCP-compatible agent: list an employee's tasks, log time per task, and attach the PR link on completion.",
+  "name": "@opsapi/mcp",
+  "version": "0.2.0",
+  "description": "MCP server for OpsAPI kanban: list, create, update, move and search tasks, log time and attach PRs, acting as you via a personal API key. stdio and Streamable HTTP.",
   "type": "module",
   "bin": {
-    "opsapi-kanban-mcp": "dist/index.js"
+    "opsapi-mcp": "dist/index.js",
+    "opsapi-kanban-mcp": "dist/index.js",
+    "opsapi-mcp-http": "dist/http.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "GETTING-STARTED.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "start:http": "node dist/http.js",
+    "dev": "tsc && node dist/index.js",
+    "test": "tsc && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.23.8"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }

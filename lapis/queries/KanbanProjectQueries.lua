@@ -303,19 +303,35 @@ function KanbanProjectQueries.getByUser(user_uuid, namespace_id, params)
           AND pm.left_at IS NULL
           AND p.namespace_id = ?
           AND p.status != 'archived'
+          %s
         ORDER BY pm.is_starred DESC, p.updated_at DESC NULLS LAST
         LIMIT ? OFFSET ?
     ]]
 
-    local projects = db.query(sql, user_uuid, namespace_id, perPage, offset)
+    -- Optional name / description search (LIKE wildcards in the input are matched literally).
+    local search_sql, search_args = "", {}
+    if type(params.search) == "string" and params.search:match("%S") then
+        local term = "%" .. params.search:sub(1, 100):gsub("[\\%%_]", "\\%0") .. "%"
+        search_sql = "AND (p.name ILIKE ? OR p.description ILIKE ?)"
+        search_args = { term, term }
+    end
+
+    local unpack_args = table.unpack or unpack
+    local args = { user_uuid, namespace_id }
+    for _, v in ipairs(search_args) do args[#args + 1] = v end
+    local page_args = { unpack_args(args) }
+    page_args[#page_args + 1] = perPage
+    page_args[#page_args + 1] = offset
+    local projects = db.query(sql:format(search_sql), unpack_args(page_args))
 
     local count_sql = [[
         SELECT COUNT(*) as total
         FROM kanban_projects p
         INNER JOIN kanban_project_members pm ON pm.project_id = p.id
         WHERE pm.user_uuid = ? AND pm.left_at IS NULL AND p.namespace_id = ? AND p.status != 'archived'
+        %s
     ]]
-    local count_result = db.query(count_sql, user_uuid, namespace_id)
+    local count_result = db.query(count_sql:format(search_sql), unpack_args(args))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     return {
