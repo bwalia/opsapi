@@ -566,6 +566,8 @@ load_if("notifications", "routes.test-notification")
 -- ============================================
 -- Tenant gate for every hospital route below (must load first; see file header)
 load_if("hospital", "routes.hospital-scope")
+load_if("hospital", "routes.hospitals")
+load_if("hospital", "routes.patients")
 load_if("hospital", "routes.hospital-departments")
 load_if("hospital", "routes.hospital-wards")
 load_if("hospital", "routes.care-plans")
