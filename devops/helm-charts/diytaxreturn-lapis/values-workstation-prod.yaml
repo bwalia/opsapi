@@ -101,6 +101,10 @@ setup:
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
 corsAllowedDomains: "workstation.co.uk,workstation.academy"
 
+# Google sign-in returns here, not to the diytaxreturn API in the shared Vault
+# secret. Must be an authorised redirect URI on the Google OAuth client.
+googleRedirectUri: "https://opsapi.workstation.co.uk/auth/google/callback"
+
 # Workstation AI Shop (shop.workstation.co.uk, workstation-website/shop).
 # Plain config → SHOP_ALLOWED_ORIGINS / SHOP_PUBLIC_URL container env (see
 # templates/deployment.yaml). allowedOrigins gates /checkout success/cancel URLs.

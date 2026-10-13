@@ -321,6 +321,8 @@ app:before_filter(function(self)
         ["/auth/e2e/peek-otp"] = true,    -- TEST-ONLY: secret-gated in routes/e2e-otp.lua (no JWT; route only registered when E2E_OTP_PEEK_ENABLED=true)
         ["/auth/google"] = true,          -- Google OAuth initiation
         ["/auth/google/callback"] = true, -- Google OAuth callback
+        ["/auth/apple"] = true,           -- Apple Sign In initiation
+        ["/auth/apple/callback"] = true,  -- Apple Sign In callback (form_post)
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
         ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
         ["/auth/logout"] = true,         -- Logout (revokes refresh token)

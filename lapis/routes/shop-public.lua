@@ -42,6 +42,10 @@
       POST   /member/logout
       GET    /member/early-access                products in the members-only window (X-Member-Token)
       POST   /products/:slug/waitlist            { email } (members first)
+
+    Customer sign-in (Google / Apple; any shopper, not only VIP members — ends in the same session):
+      POST   /auth/start                         { provider: google|apple, nonce, next } → { authorize_url } (BFF only)
+      GET    /customer/quotes                    the signed-in customer's quotes, matched on email (X-Member-Token)
 ]]
 
 local U = require("lib.shop-util")
@@ -55,6 +59,7 @@ local Chat = require("queries.ShopChatQueries")
 local Market = require("queries.ShopMarketQueries")
 local Insights = require("queries.ShopInsightsQueries")
 local Membership = require("queries.ShopMembershipQueries")
+local CustomerAuth = require("queries.ShopCustomerAuthQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -338,6 +343,24 @@ return function(app)
 
     app:post(BASE .. "/member/logout", public(function(self, ns_id)
         return U.ok(Membership.logout(ns_id, self.req.headers["x-member-token"]))
+    end))
+
+    -- Customer sign-in (Google / Apple) ------------------------------------------------
+    -- BFF only: the shop sets the nonce cookie it will check when the browser comes back.
+    app:post(BASE .. "/auth/start", public(function(self)
+        if not is_bff(self) then return U.fail(403, "FORBIDDEN", "Not allowed") end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = CustomerAuth.start(self.shop_ns, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:get(BASE .. "/customer/quotes", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local data, meta = Quote.forCustomer(ns_id, m.email, self.params)
+        return U.ok(data, 200, meta)
     end))
 
     app:get(BASE .. "/member/early-access", public(function(_, ns_id)
