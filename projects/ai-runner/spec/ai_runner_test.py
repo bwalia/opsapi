@@ -13,7 +13,11 @@ isolation between the workspaces. Then §25 (security fixes): runner access mode
 approver rules, exact "allow for this run", oversize requests, request id reuse, redaction, one-line titles, branch
 names, caps under concurrent starts, per-run limits, and migration 4's backfill of existing runners. Then §26.5:
 sessions started by hand become tasks (settings, one task per session, titles, skips, the cap, ending, notifications,
-the sessions API, isolation, migration 5).
+the sessions API, isolation, migration 5). Then §27.6: sources (kind, no claim, the session API), report filters on
+ingest, routing rules (first match wins, ignore, each match field, templates, assignees and notify modes, the tester,
+order, validation, RBAC), the workspace tunables, task-automation columns, extra redactions and denied commands,
+platform settings (platform admin only, bounds, picked up by the heartbeat config and timeouts), migration 6 run again,
+and isolation between the workspaces.
 """
 import base64
 import hashlib
@@ -562,8 +566,10 @@ expect("developer can't change settings", call("PUT", P + "/settings", "dev", A,
 s = expect("turn on task automation", call("PUT", P + "/settings", "mgr", A,
                                            {"task_automation": {"in_progress_on_start": True,
                                                                 "review_on_success": True}}), 200)
-check("settings saved with defaults kept", s.get("task_automation") == {"in_progress_on_start": True,
-                                                                         "review_on_success": True}
+check("settings saved with defaults kept (the booleans switch on_start / on_success on, §27.4)",
+      s.get("task_automation") == {"in_progress_on_start": True, "review_on_success": True,
+                                   "on_start": {"enabled": True, "status": "in_progress", "column": "In Progress"},
+                                   "on_success": {"enabled": True, "status": "review", "column": "Review"}}
       and s["output_mode"] == "pull_request" and s["approval_policy"]["deciders"] == "managers", s)
 expect("bad setting (422)", call("PUT", P + "/settings", "mgr", A, {"max_run_minutes": 0}), 422)
 R5 = expect("assignee starts T5", start("dev", T5, "/repos/eps"), 201)
@@ -635,7 +641,7 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
 check("plugin migrations are tracked once each", one(
-    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "5")
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "6")
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -1946,8 +1952,11 @@ check("migration 5 widened the notification types once, the others kept", cdef.c
       and cdef.count("ai_run_permission") == 1 and "task_assigned" in cdef, cdef)
 
 ST0 = {"enabled": False, "project_uuid": None, "column": None, "status": "in_progress", "notify": True}
+ST27 = {"gone_after_minutes": 10, "max_new_per_heartbeat": 20, "idle_statuses": [
+    "idle", "done", "finished", "stopped", "exited", "ended", "completed", "closed", "inactive"],
+        "tool_labels": {"claude": "Claude", "cursor": "Cursor"}}  # §27.4
 check("session_tracking: the defaults", expect("settings", call("GET", P + "/settings", "mgr", A), 200)
-      .get("session_tracking") == ST0)
+      .get("session_tracking") == dict(ST0, **ST27))
 TP = expect("a project for hand sessions", call("POST", API + "/api/v2/kanban/projects", "owner_a", A,
                                                 {"name": "Hand sessions " + TAG}), 201)["uuid"]
 TP_ID = one(f"SELECT id FROM kanban_projects WHERE uuid = '{TP}'")
@@ -1973,8 +1982,8 @@ expect("nor a runner manager (403)", put_st({"enabled": False}, "ops"), 403)
 expect("... who can't read the settings either (403)", call("GET", P + "/settings", "ops", A), 403)
 s = expect("tracking on: project, a column in any case, todo", put_st({"enabled": True, "project_uuid": TP,
                                                                          "column": "to do", "status": "todo"}), 200)
-check("saved with the column's own spelling, the other settings kept", s["session_tracking"] == {
-    "enabled": True, "project_uuid": TP, "column": "To Do", "status": "todo", "notify": True}
+check("saved with the column's own spelling, the other settings kept", s["session_tracking"] == dict(ST27, **{
+    "enabled": True, "project_uuid": TP, "column": "To Do", "status": "todo", "notify": True})
       and s["guards"]["max_open_runs_per_user"] == 0 and s["approval_policy"]["deciders"] == "managers", s)
 check("saving other settings keeps it", expect("save a guard", call("PUT", P + "/settings", "mgr", A, {
     "guards": {"retention_days": 31}}), 200)["session_tracking"]["column"] == "To Do")
@@ -2102,8 +2111,8 @@ hb_t(BASE + [M5, M6], "heartbeat with a new busy session, tracking off")
 check("disabled tracking creates nothing", n_tasks() == 3 and not tracked(SID[5]))
 s = expect("on again: no column, in progress, no notifications", put_st({
     "enabled": True, "column": None, "status": "in_progress", "notify": False}), 200)
-check("saved", s["session_tracking"] == {"enabled": True, "project_uuid": TP, "column": None,
-                                         "status": "in_progress", "notify": False}, s["session_tracking"])
+check("saved", s["session_tracking"] == dict(ST27, enabled=True, project_uuid=TP, column=None, status="in_progress",
+                                             notify=False), s["session_tracking"])
 hb_t(BASE + [M5, M6], "the same heartbeat, tracking on")
 T_M6 = tracked(SID[5])
 check("no column set: the first board's first column, in progress, nobody told",
@@ -2195,6 +2204,557 @@ if MIGRATE:
           and f"{MIG5}: running" in out.stdout + out.stderr and one("SELECT COUNT(*) FROM ar_tracked_sessions") == n_rows
           and cdef.count("ai_session_task") == 1 and expect("settings", call("GET", P + "/settings", "mgr", A), 200)
           ["session_tracking"]["project_uuid"] == TP, (out.stdout + out.stderr)[-600:])
+
+# =====================================================================================================================
+# §27: everything configurable — sources (kind, no claim, the session API), report filters on ingest, routing rules
+# (first match wins, ignore, each match field, templates, assignees and notify modes, the tester, order, validation,
+# RBAC), the workspace tunables, task-automation columns, extra redactions and denied commands, platform settings
+# (platform admin only, bounds, picked up by the heartbeat config and timeouts), migration 6 again, isolation
+# =====================================================================================================================
+check("migration 6: kind and report filter on connections, safety, routing rules, platform settings", one(
+    "SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY column_name) FROM information_schema.columns "
+    "WHERE (table_name = 'ar_runners' AND column_name IN ('kind', 'report_filter')) "
+    "OR (table_name = 'ar_settings' AND column_name = 'safety')") == "kind:character varying,report_filter:jsonb,safety:jsonb"
+      and one("SELECT to_regclass('ar_track_rules') IS NOT NULL AND to_regclass('ar_platform_settings') IS NOT NULL")
+      == "t")
+EMPTY_RF = {"folders": [], "exclude_folders": [], "tools": []}
+
+
+def bad(name, res, field):
+    check(f"{name} (422 on {field})", res[0] == 422 and field in ((res[1] or {}).get("details") or {}), res[:2])
+
+
+def put_s(body, user="mgr", ns=None):
+    return call("PUT", P + "/settings", user, ns or A, body)
+
+
+def report(conn, sessions, name="the source reports its sessions"):
+    return expect(name, call("POST", P + "/public/runner/sessions", body={"sessions": sessions}, token=conn.token), 200)
+
+
+s = expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+check("safety: nothing added by default", s.get("safety") == {"extra_denied_commands": [], "extra_redactions": []}, s)
+rt_view = expect("an existing runner", call("GET", P + f"/runners/{RT}", "mgr", A), 200)
+check("connections registered so far are runners that report everything", rt_view.get("kind") == "runner"
+      and rt_view.get("report_filter") == EMPTY_RF, rt_view)
+expect("settings off the way: no caps, no start approval", put_s({"guards": {
+    "max_open_runs_per_user": 0, "max_open_runs_per_workspace": 0, "daily_token_limit": 0},
+    "approval_policy": {"require_start_approval": False}}), 200)
+rt_settings = expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+rt_put = put_s({k: v for k, v in rt_settings.items() if k not in ("updated_at", "updated_by")})
+check("a settings round trip (GET -> PUT, as seed_demo.py does) changes nothing", rt_put[0] == 200 and {
+    k: v for k, v in rt_put[1]["data"].items() if k not in ("updated_at", "updated_by")} == {
+    k: v for k, v in rt_settings.items() if k not in ("updated_at", "updated_by")}, rt_put[:2])
+
+# --- Sources (§27.1) -----------------------------------------------------------------------------------------------
+expect("an unknown kind (422)", call("POST", P + "/runners", "mgr", A, {"name": "robot-" + TAG, "kind": "robot"}), 422)
+SRC_NAME = "ci-src-" + TAG
+src = expect("manager registers a source", call("POST", P + "/runners", "mgr", A, {"name": SRC_NAME, "kind": "source"}),
+             201)
+SRC, src_conn = src["runner"]["uuid"], Runner(src["token"])
+check("... kind source, reporting everything", src["runner"]["kind"] == "source"
+      and src["runner"]["report_filter"] == EMPTY_RF, src["runner"])
+res = src_conn.claim()
+check("a source can't claim runs (403)", res[0] == 403, res[:2])
+hb = expect("the source heartbeats", src_conn.hb(version="ci-1", host="ci", os="linux"), 200)
+check("heartbeat: kind, and config with the platform timings, the report filter and the extra denied commands",
+      hb.get("kind") == "source" and hb.get("config") == {"heartbeat_s": 15, "claim_wait_s": 25, "lease_s": 60,
+                                                          "report_filter": EMPTY_RF, "extra_denied_commands": []}, hb)
+expect("session report without a token (401)", call("POST", P + "/public/runner/sessions", body={"sessions": []}), 401)
+expect("sessions must be a list (422)", call("POST", P + "/public/runner/sessions", body={"sessions": {"a": 1}},
+                                             token=src_conn.token), 422)
+r = report(src_conn, [{"key": "ci-1", "tool": "Codex CLI", "status": "Thinking hard", "cwd": "/ci/app", "branch": "main",
+                       "session_id": "ci-sess-1", "first_prompt": "Build it", "labels": {"job": "42"}}])
+check("stored like a heartbeat inventory, tool and status free text", r == {"stored": 1, "tasks_created": 0} and one(
+    f"SELECT tool || '|' || status || '|' || cwd || '|' || first_prompt FROM ar_sessions WHERE runner_uuid = '{SRC}'")
+      == "Codex CLI|Thinking hard|/ci/app|Build it", r)
+ss = expect("sessions of the source", call("GET", P + f"/sessions?runner_uuid={SRC}", "mgr", A), 200)
+check("... listed on Machines, the source online", [x["key"] for x in ss] == ["ci-1"]
+      and ss[0]["runner"]["status"] == "online", ss)
+ks = expect("runners of kind source", call("GET", P + "/runners?kind=source&per_page=100", "mgr", A), 200)
+kr = expect("runners of kind runner", call("GET", P + "/runners?kind=runner&per_page=100", "mgr", A), 200)
+check("?kind filters the list", [x["uuid"] for x in ks] == [SRC] and SRC not in [x["uuid"] for x in kr]
+      and RT in [x["uuid"] for x in kr], (ks, kr))
+expect("?kind=robot (400)", call("GET", P + "/runners?kind=robot", "mgr", A), 400)
+TX = task("Not on a source " + TAG, "low")
+pv = expect("preview", call("POST", P + f"/tasks/{TX['uuid']}/runs/preview", "mgr", A, {}), 200)
+check("the Start dialog never offers a source", SRC not in [x["uuid"] for x in pv["runners"]], pv["runners"])
+bad("starting a run on a source", call("POST", P + f"/tasks/{TX['uuid']}/runs", "mgr", A, {
+    "runner_uuid": SRC, "profile": "claude", "repo_path": "/ci/app", "confirm_similar": True}), "runner_uuid")
+expect("B can't see A's source (404)", call("GET", P + f"/runners/{SRC}", "owner_b", B), 404)
+
+# --- Report filters (§27.2) ----------------------------------------------------------------------------------------
+for bad_rf, field in (("x", "report_filter"), ({"folders": "/x"}, "report_filter.folders"),
+                      ({"tools": ["a" * 41]}, "report_filter.tools"),
+                      ({"folders": ["/f%d" % i for i in range(51)]}, "report_filter.folders"),
+                      ({"exclude_folders": [""]}, "report_filter.exclude_folders")):
+    bad(f"bad report filter {json.dumps(bad_rf)[:40]}", call("PUT", P + f"/runners/{SRC}", "mgr", A,
+                                                             {"report_filter": bad_rf}), field)
+expect("a developer can't set it (403)", call("PUT", P + f"/runners/{SRC}", "dev", A, {"report_filter": {}}), 403)
+RF = {"folders": ["/hand/", "~/ci", "client-*"], "exclude_folders": ["/hand/**/private", "node_modules"],
+      "tools": [" Claude", "cursor", "CODEX"]}
+v = expect("manager sets the source's report filter", call("PUT", P + f"/runners/{SRC}", "mgr", A,
+                                                            {"report_filter": RF}), 200)
+RF_SAVED = {"folders": ["/hand", "~/ci", "client-*"], "exclude_folders": ["/hand/**/private", "node_modules"],
+            "tools": ["claude", "cursor", "codex"]}
+check("saved: trailing slashes dropped, tools trimmed and in lower case, the kind kept",
+      v.get("report_filter") == RF_SAVED and v.get("kind") == "source", v)
+hb = expect("the source heartbeats", src_conn.hb(), 200)
+check("its heartbeat config carries the filter", hb["config"]["report_filter"] == RF_SAVED, hb["config"])
+FILT = [{"key": "f1", "tool": "claude", "status": "busy", "cwd": "/hand/web"},                 # kept
+        {"key": "f2", "tool": "claude", "status": "busy", "cwd": "/hand/web/private/x"},       # excluded below private
+        {"key": "f3", "tool": "claude", "status": "busy", "cwd": "/elsewhere"},                # in no folder
+        {"key": "f4", "tool": "windsurf", "status": "busy", "cwd": "/hand/web"},               # tool not listed
+        {"key": "f5", "tool": "Codex", "status": "busy", "cwd": "/Users/ann/ci/app"},          # ~/ci, tool in any case
+        {"key": "f6", "tool": "cursor", "status": "busy", "cwd": "/srv/client-web/src"},       # relative glob, any depth
+        {"key": "f7", "tool": "cursor", "status": "busy", "cwd": "/srv/client-web/node_modules/x"},  # excluded anywhere
+        {"key": "f8", "tool": "claude", "status": "busy"}]                                     # no folder
+r = report(src_conn, FILT, "the source reports eight sessions")
+kept = lambda: sorted(sql(f"SELECT session_key FROM ar_sessions WHERE runner_uuid = '{SRC}'"))
+check("the server applies the filter on ingest", r["stored"] == 3 and kept() == ["f1", "f5", "f6"], (r, kept()))
+expect("the same through a heartbeat inventory", src_conn.hb(inventory=FILT), 200)
+check("... the same three kept", kept() == ["f1", "f5", "f6"], kept())
+expect("filter cleared (null = everything)", call("PUT", P + f"/runners/{SRC}", "mgr", A, {"report_filter": None}), 200)
+check("... everything reported is kept", report(src_conn, FILT)["stored"] == 8)
+
+# A runner's own run sessions pass any filter (its busy-folder check relies on them).
+reg_c = expect("a runner for §27 runs", call("POST", P + "/runners", "mgr", A, {"name": "cfg-" + TAG}), 201)
+RC, rc = reg_c["runner"]["uuid"], Runner(reg_c["token"])
+CREPOS = [{"path": f"/cfg/{n}", "branch": "main", "dirty": False} for n in ("one", "two", "three")]
+
+
+def hb_c(inventory=None, name="cfg runner heartbeats"):
+    return expect(name, rc.hb(version="1.4.0-test", host="cfg", os="darwin", load={"running": 0},
+                              capabilities={"max_concurrency": 4, "profiles": PROFILES}, repos=CREPOS,
+                              inventory=inventory or []), 200)
+
+
+hb_c()
+expect("its filter: claude sessions under /nowhere only", call("PUT", P + f"/runners/{RC}", "mgr", A, {
+    "report_filter": {"folders": ["/nowhere"], "tools": ["claude"]}}), 200)
+TF = task("Filtered runner " + TAG, "low")
+RF1 = expect("a run on it", call("POST", P + f"/tasks/{TF['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/one", "confirm_similar": True}), 201)
+check("... claimed", expect("claim", rc.claim(), 200).get("run", {}).get("uuid") == RF1["uuid"])
+hb_c([{"key": "own", "tool": "fake", "status": "busy", "cwd": "/cfg/one", "session_id": RF1["uuid"]},
+      {"key": "own-label", "tool": "fake", "status": "busy", "cwd": "/cfg/two", "labels": {"opsapi_run": "x"}},
+      {"key": "other", "tool": "fake", "status": "busy", "cwd": "/cfg/three"}], "heartbeat: its run's session and others")
+check("its run's sessions are kept whatever the filter, the others filtered", sorted(sql(
+    f"SELECT session_key || '|' || managed::text FROM ar_sessions WHERE runner_uuid = '{RC}'"))
+      == ["own-label|false", "own|true"], sql(f"SELECT session_key FROM ar_sessions WHERE runner_uuid = '{RC}'"))
+expect("its run ends", rc.status(RF1["uuid"], "succeeded"), 200)
+expect("filter cleared", call("PUT", P + f"/runners/{RC}", "mgr", A, {"report_filter": None}), 200)
+
+# --- Routing rules (§27.3) ------------------------------------------------------------------------------------------
+expect("tracking set up, still off: To Do in the hand-sessions project, managers told", put_st({
+    "enabled": False, "project_uuid": TP, "column": "to do", "status": "todo", "notify": True}), 200)
+TP2 = expect("a project for routed sessions", call("POST", API + "/api/v2/kanban/projects", "owner_a", A,
+                                                   {"name": "Routed " + TAG}), 201)["uuid"]
+for user in ("dev", "ops"):
+    expect(f"{user} can't list routing rules (403)", call("GET", P + "/track-rules", user, A), 403)
+expect("... nor add one (403)", call("POST", P + "/track-rules", "dev", A, {"action": {"type": "ignore"}}), 403)
+expect("... nor use the tester (403)", call("POST", P + "/track-rules/test", "dev", A, {"session": {}}), 403)
+
+
+def rule(body, user="mgr", ns=None):
+    return call("POST", P + "/track-rules", user, ns or A, body)
+
+
+def try_rule(session, user="mgr", ns=None):
+    return expect("tester", call("POST", P + "/track-rules/test", user, ns or A, {"session": session}), 200)
+
+
+CT = {"type": "create_task", "project_uuid": TP2}
+for body_, field in (
+        ({}, "action"), ({"action": {"type": "move"}}, "action.type"),
+        ({"action": {"type": "create_task"}}, "action.project_uuid"),
+        ({"action": dict(CT, project_uuid=projb["uuid"])}, "action.project_uuid"),
+        ({"action": dict(CT, column="Nowhere")}, "action.column"), ({"action": dict(CT, status="done")}, "action.status"),
+        ({"action": dict(CT, priority="urgent")}, "action.priority"),
+        ({"action": dict(CT, notify="everyone")}, "action.notify"),
+        ({"action": dict(CT, notify="users")}, "action.notify_user_uuids"),
+        ({"action": dict(CT, assignee_uuids=[USERS["owner_b"][0]])}, "action.assignee_uuids"),
+        ({"action": dict(CT, notify="users", notify_user_uuids=["nope"])}, "action.notify_user_uuids"),
+        ({"action": dict(CT, title_template="x" * 501)}, "action.title_template"),
+        ({"action": dict(CT, description_template="x" * 5001)}, "action.description_template"),
+        ({"action": CT, "match": "all"}, "match"),
+        ({"action": CT, "match": {"tools": ["t%d" % i for i in range(51)]}}, "match.tools"),
+        ({"action": CT, "match": {"folder_globs": ["x" * 256]}}, "match.folder_globs"),
+        ({"action": CT, "match": {"runner_uuids": [regb["runner"]["uuid"]]}}, "match.runner_uuids"),
+        ({"action": CT, "match": {"prompt_keywords": ["k" * 101]}}, "match.prompt_keywords"),
+        ({"action": CT, "match": {"branch_globs": "main"}}, "match.branch_globs")):
+    bad(f"bad rule {json.dumps(body_)[:70]}", rule(body_), field)
+
+
+def mk(body, name):
+    return expect(f"rule: {name}", rule(dict(body, name=name)), 201)
+
+
+R_OFF = mk({"enabled": False, "action": {"type": "ignore"}}, "off: ignore everything")
+R_IGN = mk({"match": {"folder_globs": ["/hand/**/secret"]}, "action": {"type": "ignore"}}, "ignore secret folders")
+R_CUR = mk({"match": {"tools": ["Cursor"]}, "action": dict(
+    CT, column="in progress", status="todo", priority="high", assignee_uuids=[USERS["dev"][0]], notify="assignees",
+    title_template="[{{tool_label}}] {{ repo }} on {{branch}}",
+    description_template="By {{runner}}\nPrompt: {{first_prompt}}\nUnknown: {{nope}}\n\nStarted {{started}}")},
+           "Cursor sessions")
+R_REL = mk({"match": {"runner_uuids": [SRC.upper()], "branch_globs": ["release/*"], "prompt_keywords": ["Hotfix"]},
+            "action": dict(CT, status="in_progress", priority="critical", notify="users",
+                           notify_user_uuids=[USERS["dev2"][0]])}, "the source's hotfixes on release branches")
+R_QUIET = mk({"match": {"prompt_keywords": ["quiet"]}, "action": dict(CT, notify="none")}, "quiet ones")
+check("rules saved whole and normalised, each last in order", R_CUR["action"] == {
+    "type": "create_task", "project_uuid": TP2, "column": "In Progress", "status": "todo", "priority": "high",
+    "assignee_uuids": [USERS["dev"][0]], "title_template": "[{{tool_label}}] {{ repo }} on {{branch}}",
+    "description_template": "By {{runner}}\nPrompt: {{first_prompt}}\nUnknown: {{nope}}\n\nStarted {{started}}",
+    "notify": "assignees", "notify_user_uuids": []} and R_CUR["match"] == {
+    "runner_uuids": [], "tools": ["cursor"], "folder_globs": [], "branch_globs": [], "prompt_keywords": []}
+      and R_REL["match"]["runner_uuids"] == [SRC] and R_REL["match"]["prompt_keywords"] == ["hotfix"]
+      and R_OFF["enabled"] is False and R_OFF["action"]["type"] == "ignore"
+      and [x["position"] for x in (R_OFF, R_IGN, R_CUR, R_REL, R_QUIET)] == [1, 2, 3, 4, 5], R_CUR)
+res = call("GET", P + "/track-rules", "mgr", A)
+check("GET lists them in order, with the variables and the default templates", res[0] == 200
+      and [x["uuid"] for x in res[1]["data"]] == [x["uuid"] for x in (R_OFF, R_IGN, R_CUR, R_REL, R_QUIET)]
+      and res[1]["meta"]["variables"] == ["first_prompt", "prompt_preview", "tool", "tool_label", "folder", "repo",
+                                          "branch", "runner", "started", "session_id"]
+      and res[1]["meta"]["default_title_template"] == "{{first_prompt}}"
+      and res[1]["meta"]["default_description_template"].startswith("Started by hand on {{runner}} and tracked"),
+      res[:2])
+
+DEFAULT_ACTION = {"type": "create_task", "project_uuid": TP, "column": "To Do", "status": "todo", "priority": None,
+                  "assignee_uuids": [], "title_template": "", "description_template": "", "notify": "managers",
+                  "notify_user_uuids": []}
+t = try_rule({"tool": "claude", "cwd": "/hand/a/secret/b", "status": "busy"})
+check("tester: a secret folder -> the ignore rule, no task", t["rule"]["uuid"] == R_IGN["uuid"]
+      and t["action"]["type"] == "ignore" and t["title"] is None and t["description"] is None, t)
+t = try_rule({"runner_uuid": SRC, "tool": "cursor", "cwd": "/hand/web", "branch": "feat/x",
+              "first_prompt": "Cursor work"})
+check("tester: Cursor -> its rule; title and description from its templates, unknown variables and empty lines out",
+      t["rule"]["uuid"] == R_CUR["uuid"] and t["title"] == "[Cursor] web on feat/x"
+      and t["description"] == f"By {SRC_NAME}\nPrompt: Cursor work", t)
+t = try_rule({"runner_uuid": SRC, "tool": "claude", "cwd": "/hand/api", "branch": "release/1.2",
+              "first_prompt": "HOTFIX the login\nthen test"})
+check("tester: runner, branch glob and a keyword in any case -> the hotfix rule, titled by the prompt's first line",
+      t["rule"]["uuid"] == R_REL["uuid"] and t["title"] == "HOTFIX the login", t)
+t = try_rule({"runner_uuid": SRC, "tool": "claude", "cwd": "/hand/api", "branch": "release/1.2/rc",
+              "first_prompt": "hotfix"})
+check("tester: * stays within one branch level -> no rule, the workspace default", t["rule"] is None
+      and t["action"] == DEFAULT_ACTION and t["title"] == "hotfix", t)
+t = try_rule({"tool": "claude", "cwd": "/hand/api", "branch": "release/1.2", "first_prompt": "hotfix"})
+check("tester: another runner -> not the hotfix rule", t["rule"] is None, t)
+t = try_rule({"runner_uuid": RT, "tool": "claude", "cwd": "/hand/api", "started_at": "2026-10-13T09:30:00Z"})
+check("tester: the default title and description reproduce §26.3", t["title"] == f"Claude session in api on {TRK}"
+      and t["description"] == f"Started by hand on {TRK} and tracked automatically by AI Runs.\n\nTool: Claude\n"
+                              f"Folder: /hand/api\nStarted: 2026-10-13 09:30 UTC", t)
+t = try_rule({"tool": "claude", "first_prompt": "quiet please, key sk_live_" + "q" * 24})
+check("tester: a keyword rule; the prompt redacted as on ingest", t["rule"]["uuid"] == R_QUIET["uuid"]
+      and t["title"] == "quiet please, key sk_live_[REDACTED]", t)
+bad("tester: B's runner", call("POST", P + "/track-rules/test", "mgr", A, {
+    "session": {"runner_uuid": regb["runner"]["uuid"]}}), "session.runner_uuid")
+bad("tester: no session", call("POST", P + "/track-rules/test", "mgr", A, {}), "session")
+
+ORDER = [R_OFF, R_IGN, R_REL, R_CUR, R_QUIET]
+o = expect("reorder: hotfixes before Cursor", call("POST", P + "/track-rules/order", "mgr", A,
+                                                   {"uuids": [x["uuid"] for x in ORDER]}), 200)
+check("order saved", [x["uuid"] for x in o] == [x["uuid"] for x in ORDER] and [x["position"] for x in o]
+      == [1, 2, 3, 4, 5], o)
+BOTH = {"runner_uuid": SRC, "tool": "cursor", "cwd": "/hand/web", "branch": "release/2.0", "first_prompt": "hotfix"}
+check("first match wins: the hotfix rule now", try_rule(BOTH)["rule"]["uuid"] == R_REL["uuid"])
+for bad_o in ([R_IGN["uuid"]], [x["uuid"] for x in ORDER] + [str(uuidlib.uuid4())], ["x"], "all"):
+    bad(f"bad order {json.dumps(bad_o)[:40]}", call("POST", P + "/track-rules/order", "mgr", A, {"uuids": bad_o}),
+        "uuids")
+expect("order back", call("POST", P + "/track-rules/order", "mgr", A, {
+    "uuids": [x["uuid"] for x in (R_OFF, R_IGN, R_CUR, R_REL, R_QUIET)]}), 200)
+check("... and the Cursor rule wins again", try_rule(BOTH)["rule"]["uuid"] == R_CUR["uuid"])
+u = expect("rename and switch off the quiet rule", call("PUT", P + f"/track-rules/{R_QUIET['uuid']}", "mgr", A,
+                                                        {"name": "quiet (off)", "enabled": False}), 200)
+check("... saved, its match and action kept", u["name"] == "quiet (off)" and u["enabled"] is False
+      and u["action"] == R_QUIET["action"] and u["match"] == R_QUIET["match"], u)
+check("a rule switched off is skipped", try_rule({"tool": "claude", "first_prompt": "quiet"})["rule"] is None)
+expect("on again", call("PUT", P + f"/track-rules/{R_QUIET['uuid']}", "mgr", A, {"enabled": True}), 200)
+bad("PUT a bad action", call("PUT", P + f"/track-rules/{R_QUIET['uuid']}", "mgr", A, {"action": {"type": "x"}}),
+    "action.type")
+expect("PUT a rule that isn't there (404)", call("PUT", P + f"/track-rules/{uuidlib.uuid4()}", "mgr", A, {}), 404)
+expect("B can't change A's rule (404)", call("PUT", P + f"/track-rules/{R_CUR['uuid']}", "owner_b", B,
+                                             {"enabled": False}), 404)
+expect("... nor delete it (404)", call("DELETE", P + f"/track-rules/{R_CUR['uuid']}", "owner_b", B), 404)
+check("B lists none of A's rules", expect("B's rules", call("GET", P + "/track-rules", "owner_b", B), 200) == [])
+bad("B can't order A's rules", call("POST", P + "/track-rules/order", "owner_b", B, {"uuids": [R_CUR["uuid"]]}),
+    "uuids")
+check("B's tester knows nothing of A's rules", try_rule({"tool": "cursor"}, "owner_b", B)["rule"] is None)
+R_DEL = mk({"action": {"type": "ignore"}}, "to delete")
+expect("delete a rule", call("DELETE", P + f"/track-rules/{R_DEL['uuid']}", "mgr", A), 200)
+expect("... once (404)", call("DELETE", P + f"/track-rules/{R_DEL['uuid']}", "mgr", A), 404)
+check("... gone from the list", R_DEL["uuid"] not in json.dumps(call("GET", P + "/track-rules", "mgr", A)[1]))
+
+# The rules at work: the source reports sessions started by hand.
+expect("tracking on", put_st({"enabled": True}), 200)
+
+
+def tracked_src(ref, col="task_uuid"):
+    return one(f"SELECT {col} FROM ar_tracked_sessions WHERE runner_uuid = '{SRC}' AND session_ref = '{ref}'")
+
+
+def where(task_uuid):
+    return one(f"SELECT p.uuid || '|' || c.name || '|' || t.status || '|' || t.priority || '|' || t.title "
+               f"FROM kanban_tasks t JOIN kanban_columns c ON c.id = t.column_id JOIN kanban_boards b ON b.id = t.board_id "
+               f"JOIN kanban_projects p ON p.id = b.project_id WHERE t.uuid = '{task_uuid}'")
+
+
+def notes(task_uuid, project):
+    return sorted(sql(f"SELECT recipient_user_uuid FROM kanban_notifications WHERE type = 'ai_session_task' "
+                      f"AND action_url = '/dashboard/projects/{project}/tasks/{task_uuid}'"))
+
+
+SESS = [{"key": "r-ign", "tool": "claude", "status": "busy", "cwd": "/hand/a/secret", "session_id": "rs-ign"},
+        {"key": "r-cur", "tool": "cursor", "status": "busy", "cwd": "/hand/web", "branch": "feat/x",
+         "session_id": "rs-cur", "first_prompt": "Cursor work"},
+        {"key": "r-rel", "tool": "claude", "status": "busy", "cwd": "/hand/api", "branch": "release/1.2",
+         "session_id": "rs-rel", "first_prompt": "HOTFIX the login"},
+        {"key": "r-quiet", "tool": "claude", "status": "busy", "cwd": "/hand/q", "session_id": "rs-quiet",
+         "first_prompt": "quiet work"},
+        {"key": "r-def", "tool": "claude", "status": "busy", "cwd": "/hand/def", "session_id": "rs-def",
+         "first_prompt": "Default route " + TAG}]
+r = report(src_conn, SESS, "the source reports five sessions started by hand")
+check("four tasks: the one in a secret folder is ignored", r == {"stored": 5, "tasks_created": 4}, r)
+check("ignored: a row without a task, so it is never looked at again", tracked_src("rs-ign", "task_uuid IS NULL")
+      == "t")
+T_CUR, T_REL, T_Q, T_D = (tracked_src(x) for x in ("rs-cur", "rs-rel", "rs-quiet", "rs-def"))
+check("Cursor rule: its project, column, todo, high, its title template, assigned to dev",
+      where(T_CUR) == f"{TP2}|In Progress|open|high|[Cursor] web on feat/x" and sql(
+          f"SELECT a.user_uuid FROM kanban_task_assignees a JOIN kanban_tasks t ON t.id = a.task_id "
+          f"WHERE t.uuid = '{T_CUR}' AND a.deleted_at IS NULL") == [USERS["dev"][0]], where(T_CUR))
+check("... its description template", json.loads(one(f"SELECT to_json(description) FROM kanban_tasks "
+                                                       f"WHERE uuid = '{T_CUR}'")) == f"By {SRC_NAME}\nPrompt: Cursor work")
+check("... its assignees are told (notify: assignees)", notes(T_CUR, TP2) == [USERS["dev"][0]], notes(T_CUR, TP2))
+check("hotfix rule: the first column, in progress, critical; the named user told (notify: users)",
+      where(T_REL) == f"{TP2}|Backlog|in_progress|critical|HOTFIX the login"
+      and notes(T_REL, TP2) == [USERS["dev2"][0]], (where(T_REL), notes(T_REL, TP2)))
+check("quiet rule: a task, nobody told (notify: none)", T_Q and where(T_Q).startswith(f"{TP2}|") and notes(T_Q, TP2) == [])
+check("no rule: the workspace default (To Do, todo), managers told", where(T_D)
+      == f"{TP}|To Do|open|medium|Default route {TAG}" and notes(T_D, TP) == MANAGERS, (where(T_D), notes(T_D, TP)))
+r = report(src_conn, SESS, "the same report again")
+check("... creates nothing more; the ignored one stays ignored", r["tasks_created"] == 0 and one(
+    f"SELECT COUNT(*) FROM ar_tracked_sessions WHERE runner_uuid = '{SRC}'") == "5", r)
+
+# --- Workspace tunables (§27.4) -------------------------------------------------------------------------------------
+for bad_st, field in (({"gone_after_minutes": 0}, "gone_after_minutes"), ({"gone_after_minutes": 1441}, "gone_after_minutes"),
+                      ({"max_new_per_heartbeat": 0}, "max_new_per_heartbeat"),
+                      ({"max_new_per_heartbeat": 101}, "max_new_per_heartbeat"),
+                      ({"idle_statuses": []}, "idle_statuses"), ({"idle_statuses": "idle"}, "idle_statuses"),
+                      ({"tool_labels": ["x"]}, "tool_labels"), ({"tool_labels": {"claude": ""}}, "tool_labels")):
+    bad(f"bad session_tracking {bad_st}", put_st(bad_st), "session_tracking." + field)
+st = expect("tunables: 2 new tasks per report, gone after 3 minutes, 'paused' is idle, tool labels", put_st({
+    "max_new_per_heartbeat": 2, "gone_after_minutes": 3, "idle_statuses": ["Idle", "paused"],
+    "tool_labels": {"Codex": "OpenAI Codex", "claude": "Claude Code"}, "notify": False}), 200)["session_tracking"]
+check("saved; statuses and tool names in lower case", st["max_new_per_heartbeat"] == 2 and st["gone_after_minutes"] == 3
+      and st["idle_statuses"] == ["idle", "paused"] and st["tool_labels"] == {"codex": "OpenAI Codex",
+                                                                                "claude": "Claude Code"}, st)
+MORE = SESS + [{"key": f"m{i}", "tool": "codex", "status": "running", "cwd": f"/hand/m{i}"} for i in range(3)] + [
+    {"key": "m-paused", "tool": "claude", "status": "paused", "cwd": "/hand/p"}]
+check("at most max_new_per_heartbeat (2) new tasks per report",
+      report(src_conn, MORE, "three new busy sessions and a paused one")["tasks_created"] == 2)
+check("... the third on the next; a status in idle_statuses isn't busy", report(src_conn, MORE, "the next report")
+      ["tasks_created"] == 1 and tracked_src("m-paused") is None and tracked_src("m2") is not None)
+check("the workspace's tool label names the task", one(f"SELECT title FROM kanban_tasks WHERE uuid = '{tracked_src('m0')}'")
+      == f"OpenAI Codex session in m0 on {SRC_NAME}")
+busy = expect("busy sessions", call("GET", P + f"/sessions?runner_uuid={SRC}&busy=1", "mgr", A), 200)
+check("... and Machines' busy filter leaves it out", "m-paused" not in [x["key"] for x in busy]
+      and "m0" in [x["key"] for x in busy], [x["key"] for x in busy])
+sql(f"UPDATE ar_tracked_sessions SET last_seen_at = NOW() - interval '4 minutes' WHERE runner_uuid = '{SRC}' "
+    f"AND session_ref IN ('m0', 'm1')")
+report(src_conn, [m for m in MORE if m["key"] != "m0"], "a report without m0, gone for 4 minutes")
+check("gone for the workspace's 3 minutes: ended, one comment", tracked_src("m0", "ended_at IS NOT NULL") == "t"
+      and len(ends(tracked_src("m0"))) == 1 and tracked_src("m1", "ended_at IS NULL") == "t")
+sql(f"UPDATE ar_tracked_sessions SET last_seen_at = NOW() - interval '4 minutes' WHERE runner_uuid = '{SRC}' "
+    f"AND session_ref = 'm1'")
+run_sweep()
+check("the lease sweep uses it too", wait_for("the sweep ends m1", lambda: tracked_src("m1", "ended_at IS NOT NULL")
+                                              == "t") and len(ends(tracked_src("m1"))) == 1)
+st = expect("tunables back to their defaults (null)", put_st({"max_new_per_heartbeat": None, "gone_after_minutes": None,
+                                                              "idle_statuses": None, "tool_labels": None,
+                                                              "enabled": False}), 200)["session_tracking"]
+check("... the defaults", {k: st[k] for k in ST27} == ST27, st)
+
+# Task automation: any status, a column or none.
+for bad_ta, field in (({"on_start": {"status": "doing"}}, "task_automation.on_start.status"),
+                      ({"on_start": "yes"}, "task_automation.on_start"),
+                      ({"on_success": {"enabled": "maybe"}}, "task_automation.on_success.enabled"),
+                      ({"on_success": {"column": "x" * 101}}, "task_automation.on_success.column")):
+    bad(f"bad task_automation {json.dumps(bad_ta)[:40]}", put_s({"task_automation": bad_ta}), field)
+ta = expect("on start: blocked, in Review; on success: completed, column unchanged", put_s({"task_automation": {
+    "on_start": {"enabled": True, "status": "blocked", "column": "review"},
+    "on_success": {"enabled": True, "status": "completed", "column": None}}}), 200)["task_automation"]
+check("saved; the old booleans mirror them", ta == {
+    "in_progress_on_start": True, "review_on_success": True,
+    "on_start": {"enabled": True, "status": "blocked", "column": "review"},
+    "on_success": {"enabled": True, "status": "completed", "column": None}}, ta)
+hb_c()
+TA = task("Automate with columns " + TAG, "low")
+RA = expect("start a run on it", call("POST", P + f"/tasks/{TA['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/one", "confirm_similar": True}), 201)
+check("on_start: blocked, in the Review column", col(TA) == "blocked|Review", col(TA))
+check("claimed", expect("claim", rc.claim(), 200).get("run", {}).get("uuid") == RA["uuid"])
+expect("running", rc.status(RA["uuid"], "running"), 200)
+expect("succeeded", rc.status(RA["uuid"], "succeeded"), 200)
+check("on_success: completed, the column left as it was", col(TA) == "completed|Review", col(TA))
+ta = expect("the old booleans still switch them", put_s({"task_automation": {
+    "in_progress_on_start": False, "review_on_success": False}}), 200)["task_automation"]
+check("... off, the rest of each kept", ta["on_start"] == {"enabled": False, "status": "blocked", "column": "review"}
+      and ta["on_success"]["enabled"] is False and ta["in_progress_on_start"] is False, ta)
+sql(f"UPDATE ar_settings SET task_automation = '{{\"in_progress_on_start\": true}}' WHERE namespace_id = {A_ID}")
+ta = expect("settings", call("GET", P + "/settings", "mgr", A), 200)["task_automation"]
+check("a row saved before §27 reads as before: in progress in the In Progress column; nothing on success",
+      ta == {"in_progress_on_start": True, "review_on_success": False,
+             "on_start": {"enabled": True, "status": "in_progress", "column": "In Progress"},
+             "on_success": {"enabled": False, "status": "review", "column": "Review"}}, ta)
+expect("automation off again", put_s({"task_automation": {"on_start": None, "on_success": None}}), 200)
+
+# Safety additions: extra redactions (server) and extra denied commands (runners, and the server's backstop).
+for bad_sf, field in (({"extra_redactions": ["("]}, "extra_redactions"), ({"extra_redactions": ["a*"]}, "extra_redactions"),
+                      ({"extra_redactions": ["x" * 201]}, "extra_redactions"),
+                      ({"extra_redactions": [f"r{i}" for i in range(21)]}, "extra_redactions"),
+                      ({"extra_denied_commands": ["x" * 201]}, "extra_denied_commands"),
+                      ({"extra_denied_commands": [f"c{i}" for i in range(101)]}, "extra_denied_commands"),
+                      ({"extra_denied_commands": "rm"}, "extra_denied_commands")):
+    bad(f"bad safety {json.dumps(bad_sf)[:40]}", put_s({"safety": bad_sf}), "safety." + field)
+bad("safety must be an object", put_s({"safety": ["x"]}), "safety")
+expect("a developer can't change it (403)", put_s({"safety": {}}, "dev"), 403)
+sf = expect("two denied commands and a redaction", put_s({"safety": {
+    "extra_denied_commands": ["terraform apply", "kubectl delete *"], "extra_redactions": ["ACME-[0-9]{4}"]}}),
+            200)["safety"]
+check("saved", sf == {"extra_denied_commands": ["terraform apply", "kubectl delete *"],
+                      "extra_redactions": ["ACME-[0-9]{4}"]}, sf)
+check("runners get the denied commands in the heartbeat config", hb_c()["config"]["extra_denied_commands"]
+      == ["terraform apply", "kubectl delete *"])
+check("B's runners get none", expect("runner B heartbeats", run_b.hb(**heartbeat_body([
+    {"key": "b-acme", "tool": "claude", "status": "idle", "cwd": "/repos/eps", "first_prompt": "B ACME-5555"}])),
+    200)["config"]["extra_denied_commands"] == [])
+check("... and B's texts aren't masked by A's pattern", one(
+    f"SELECT first_prompt FROM ar_sessions WHERE runner_uuid = '{regb['runner']['uuid']}' AND session_key = 'b-acme'")
+      == "B ACME-5555")
+report(src_conn, [{"key": "acme", "tool": "claude", "status": "idle", "cwd": "/hand/acme",
+                   "first_prompt": "Ship ACME-9876 today"}], "the source reports a workspace secret")
+check("A's own pattern masks it on ingest", one(
+    f"SELECT first_prompt FROM ar_sessions WHERE runner_uuid = '{SRC}' AND session_key = 'acme'")
+      == "Ship [REDACTED] today")
+TS = task("Safety checks " + TAG, "low")
+RS = expect("a run for the safety checks", call("POST", P + f"/tasks/{TS['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/two", "confirm_similar": True}), 201)
+check("claimed", expect("claim", rc.claim(), 200).get("run", {}).get("uuid") == RS["uuid"])
+expect("running", rc.status(RS["uuid"], "running"), 200)
+expect("an event with the workspace secret", rc.events(RS["uuid"], [{"seq": 1, "type": "log",
+                                                                     "text": "deploying ACME-1234 to prod"}]), 200)
+check("... masked in the run log", one(f"SELECT text FROM ar_run_events WHERE run_uuid = '{RS['uuid']}' AND seq = 1")
+      == "deploying [REDACTED] to prod")
+for rid, cmd, status, reason in (
+        ("d1", "cd infra &&  terraform   apply -auto-approve", "denied",
+         "Blocked by the workspace's safety rules: terraform apply"),
+        ("d2", "kubectl delete pod web-1", "denied", "Blocked by the workspace's safety rules: kubectl delete *"),
+        ("d3", "terraform plan", "pending", None), ("d4", "echo terraform apply", "pending", None)):
+    q = expect(f"permission for: {cmd}", rc.perm(RS["uuid"], {"request_id": rid, "tool": "Bash",
+                                                               "input": {"command": cmd}}), 201)["request"]
+    check(f"... {status}" + (" without asking (the server's backstop)" if reason else ""), q["status"] == status
+          and q["reason"] == reason, q)
+
+# --- Platform settings (§27.5) -----------------------------------------------------------------------------------------
+DEF = {"heartbeat_s": 15, "claim_wait_s": 25, "lease_s": 60, "online_s": 45, "queue_timeout_hours": 24,
+       "approval_timeout_hours": 72, "max_events_per_run": 20000, "max_queued_followups": 50,
+       "max_requests_per_run": 500, "max_tracked_per_heartbeat_cap": 100,
+       "guard_max": {"max_open_runs_per_user": 100, "max_open_runs_per_workspace": 1000,
+                     "daily_token_limit": 1000000000, "retention_days": 3650, "max_run_minutes": 1440}}
+PS = P + "/platform/settings"
+for user in ("mgr", "owner_a", "dev"):
+    expect(f"{user} can't read the platform settings (403)", call("GET", PS, user, A), 403)
+expect("nor anyone signed out (401)", call("GET", PS), 401)
+ps = expect("a platform admin reads them, no workspace needed", call("GET", PS, "platform"), 200)
+check("the defaults, with their bounds", {k: ps.get(k) for k in DEF} == DEF and ps["defaults"] == DEF
+      and ps["bounds"]["heartbeat_s"] == {"min": 5, "max": 300}
+      and ps["bounds"]["guard_max"]["retention_days"] == {"min": 30, "max": 36500} and ps["updated_by"] is None, ps)
+
+
+def put_ps(body, user="platform"):
+    return call("PUT", PS, user, None, body)
+
+
+expect("a workspace owner can't change them (403)", put_ps({"heartbeat_s": 20}, "owner_a"), 403)
+for b_, field in (({"heartbeat_s": 4}, "heartbeat_s"), ({"heartbeat_s": 301}, "heartbeat_s"),
+                  ({"claim_wait_s": 26}, "claim_wait_s"), ({"lease_s": 3601}, "lease_s"),
+                  ({"queue_timeout_hours": 0}, "queue_timeout_hours"), ({"max_events_per_run": 99}, "max_events_per_run"),
+                  ({"max_queued_followups": 1.5}, "max_queued_followups"), ({"online_s": "x"}, "online_s"),
+                  ({"guard_max": {"retention_days": 29}}, "guard_max.retention_days"), ({"guard_max": 5}, "guard_max"),
+                  ({"heartbeat_s": 60}, "heartbeat_s")):  # not less than the lease
+    bad(f"bad platform setting {json.dumps(b_)[:40]}", put_ps(b_), field)
+SET = {"heartbeat_s": 20, "claim_wait_s": 2, "lease_s": 120, "queue_timeout_hours": 1, "max_queued_followups": 3,
+       "max_tracked_per_heartbeat_cap": 1, "guard_max": {"max_open_runs_per_user": 5}}
+ps = expect("a platform admin sets timings and limits", put_ps(SET), 200)
+check("saved, the others at their defaults; the row holds only what was set",
+      {k: ps[k] for k in DEF if k != "guard_max"} == dict({k: v for k, v in DEF.items() if k != "guard_max"},
+                                                           **{k: v for k, v in SET.items() if k != "guard_max"})
+      and ps["guard_max"] == dict(DEF["guard_max"], max_open_runs_per_user=5) and ps["updated_by"] == USERS["platform"][0]
+      and json.loads(one("SELECT settings FROM ar_platform_settings")) == SET, ps)
+check("runners follow them from the heartbeat config", {k: hb_c()["config"][k] for k in ("heartbeat_s", "claim_wait_s",
+                                                                                        "lease_s")}
+      == {"heartbeat_s": 20, "claim_wait_s": 2, "lease_s": 120})
+t0 = time.time()
+res = rc.claim(wait=25)
+check("a claim waits at most claim_wait_s (2 s)", res[0] == 204 and time.time() - t0 < 6, (res[0], time.time() - t0))
+TL = task("Lease from the platform " + TAG, "low")
+RL = expect("a run", call("POST", P + f"/tasks/{TL['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/three", "confirm_similar": True}), 201)
+check("claimed", expect("claim", rc.claim(), 200).get("run", {}).get("uuid") == RL["uuid"])
+lease = float(one(f"SELECT EXTRACT(EPOCH FROM lease_until - NOW()) FROM ar_runs WHERE uuid = '{RL['uuid']}'"))
+check("its lease is the platform's lease_s (120 s)", 100 < lease <= 121, lease)
+ok3 = all(call("POST", P + f"/runs/{RS['uuid']}/turns", "mgr", A, {"text": f"f{i}"})[0] == 201 for i in range(3))
+res = call("POST", P + f"/runs/{RS['uuid']}/turns", "mgr", A, {"text": "one too many"})
+check("max_queued_followups (3): the 4th is refused (409)", ok3 and res[0] == 409 and res[1].get("queued") == 3, res[:2])
+for run_ in (RL, RS):
+    expect("the run ends", rc.status(run_["uuid"], "succeeded"), 200)
+TQ = task("Never claimed in time " + TAG, "low")
+RQ = expect("a run nobody claims", call("POST", P + f"/tasks/{TQ['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/one", "confirm_similar": True}), 201)
+sql(f"UPDATE ar_runs SET created_at = NOW() - interval '2 hours' WHERE uuid = '{RQ['uuid']}'")
+run_sweep()
+check("queue_timeout_hours (1): the sweep cancels it", wait_for("the sweep cancels it", lambda: one(
+    f"SELECT status || '|' || error FROM ar_runs WHERE uuid = '{RQ['uuid']}'")
+    == "cancelled|No runner claimed it within 1 hours"))
+bad("a guard above the platform's upper bound", put_s({"guards": {"max_open_runs_per_user": 6}}),
+    "guards.max_open_runs_per_user")
+expect("... within it", put_s({"guards": {"max_open_runs_per_user": 5}}), 200)
+bad("max_new_per_heartbeat above the platform's cap (1)", put_st({"max_new_per_heartbeat": 2}),
+    "session_tracking.max_new_per_heartbeat")
+expect("the platform lowers the bound to 4", put_ps({"guard_max": {"max_open_runs_per_user": 4}}), 200)
+s = expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+check("a value saved under a higher bound is capped by the lower one", s["guards"]["max_open_runs_per_user"] == 4
+      and s["session_tracking"]["max_new_per_heartbeat"] == 1, (s["guards"], s["session_tracking"]))
+ps = expect("back to the defaults (null resets each)", put_ps({k: None for k in DEF}), 200)
+check("... the defaults, an empty row, and the heartbeat config follows", {k: ps[k] for k in DEF} == DEF
+      and json.loads(one("SELECT settings FROM ar_platform_settings")) in ({}, [])
+      and {k: hb_c()["config"][k] for k in ("heartbeat_s", "claim_wait_s", "lease_s")}
+      == {"heartbeat_s": 15, "claim_wait_s": 25, "lease_s": 60}, ps)
+expect("guards back", put_s({"guards": {"max_open_runs_per_user": 0}}), 200)
+
+# --- Migration 6 again ------------------------------------------------------------------------------------------------
+MIG6 = "20261013400000_ai_runner_configurable"
+if MIGRATE:
+    before = one("SELECT (SELECT COUNT(*) FROM ar_track_rules) || '|' || (SELECT COUNT(*) FROM ar_runners "
+                 "WHERE kind = 'source') || '|' || (SELECT COUNT(*) FROM ar_platform_settings)")
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG6}'")
+    out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
+    check("migration 6 runs again: rules, sources, the safety settings and the platform row kept",
+          out.returncode == 0 and f"{MIG6}: running" in out.stdout + out.stderr and one(
+              "SELECT (SELECT COUNT(*) FROM ar_track_rules) || '|' || (SELECT COUNT(*) FROM ar_runners WHERE kind = "
+              "'source') || '|' || (SELECT COUNT(*) FROM ar_platform_settings)") == before
+          and expect("settings", call("GET", P + "/settings", "mgr", A), 200)["safety"]["extra_redactions"]
+          == ["ACME-[0-9]{4}"], (out.stdout + out.stderr)[-600:])
+    # A database from before §27: the connection columns come back with every connection a runner reporting everything.
+    sql("ALTER TABLE ar_runners DROP COLUMN kind, DROP COLUMN report_filter")
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG6}'")
+    out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
+    check("... and on a database from before it, every connection is a runner reporting everything",
+          out.returncode == 0 and one("SELECT string_agg(DISTINCT kind || '|' || report_filter::text, ',') "
+                                      "FROM ar_runners") == "runner|{}"
+          and expect("the old source", call("GET", P + f"/runners/{SRC}", "mgr", A), 200).get("kind") == "runner",
+          (out.stdout + out.stderr)[-600:])
+expect("safety additions cleared", put_s({"safety": {"extra_denied_commands": [], "extra_redactions": []}}), 200)
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")

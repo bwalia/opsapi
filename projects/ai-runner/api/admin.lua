@@ -1,9 +1,11 @@
 -- Runners, machines, the overview, settings and the prompt template (docs/AI_RUNNER.md §22.3, §24, §25.1).
---   GET    /runners                         ai_runs.create or ai_runners.manage (?include_revoked=true): the runners
---                                           the caller may use; `access` shown to ai_runners.manage
+--   GET    /runners                         ai_runs.create or ai_runners.manage (?include_revoked=true, ?kind=runner|
+--                                           source): the connections the caller may use; `access` and
+--                                           `report_filter` shown to ai_runners.manage
 --   GET    /runners/:uuid                   same (404 for a runner the caller may not use)
---   POST   /runners { name, labels? }       ai_runners.manage -> 201 { runner, token } (the token is shown once)
---   PUT    /runners/:uuid { name?, labels? } ai_runners.manage
+--   POST   /runners { name, kind?, labels?, report_filter? }  ai_runners.manage -> 201 { runner, token } (the
+--                                           token is shown once); kind runner (default) or source (§27.1)
+--   PUT    /runners/:uuid { name?, kind?, labels?, report_filter? }  ai_runners.manage
 --   PUT    /runners/:uuid/access { mode: owner|everyone|listed, users?, projects? }  ai_runners.manage
 --   POST   /runners/:uuid/rotate-token      ai_runners.manage -> { runner, token }; the old token stops working
 --   POST   /runners/:uuid/pause | /resume   ai_runners.manage (a paused runner heartbeats but claims nothing)
@@ -12,9 +14,12 @@
 --   GET    /sessions                        ai_runs.manage or ai_runners.manage: every runner's sessions, with
 --                                           the task of one started by hand (?runner_uuid&busy=1&page&per_page)
 --   GET    /overview                        ai_runs.manage, ai_runners.manage or ai_runs_approvals.manage
---   GET|PUT /settings                       ai_runs_settings.manage (+ guards §24.1, session_tracking §26.2)
+--   GET|PUT /settings                       ai_runs_settings.manage (+ guards §24.1, session_tracking §26.2 + §27.4,
+--                                           task_automation on_start / on_success and safety §27.4)
 --   GET|PUT /projects/:project_uuid/settings  owner/admin of the kanban project or ai_runs_settings.manage
 --   GET|PUT /template                       ai_runs_settings.manage: the workspace template, versioned on save
+--   GET|PUT /platform/settings              platform admins only, no workspace (§27.5): timings, timeouts, limits
+--                                           and the workspace guards' upper bounds; null resets one to its default
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -43,6 +48,18 @@ local function labels_of(v)
     end
     return U.array(out)
 end
+
+-- §27.2: what a connection reports, { folders, exclude_folders, tools }; nil = not given, null = everything.
+local function report_filter_of(v)
+    if v == nil then return nil end
+    if v ~= cjson.null and not U.object(v) then U.invalid({ report_filter = "must be an object" }) end
+    v = v ~= cjson.null and v or {}
+    return { folders = U.strings(v.folders, "report_filter.folders", 50, 255, U.folder_glob),
+        exclude_folders = U.strings(v.exclude_folders, "report_filter.exclude_folders", 50, 255, U.folder_glob),
+        tools = U.strings(v.tools, "report_filter.tools", 50, 40, string.lower) }
+end
+
+local KINDS = { "runner", "source" }
 
 local function runner_or_404(ns, uuid)
     local r = R.runner(ns, uuid)
@@ -93,6 +110,30 @@ local function access_list(v, field, ns)
     return U.array(rows)
 end
 
+local function platform_admin(self)
+    if not require("helper.admin-check").isPlatformAdmin(sdk.user(self)) then
+        U.fail(403, "Only a platform admin can see or change the AI Runs platform settings")
+    end
+end
+
+-- { min, max } pairs as objects, for the settings page.
+local function bounds_view(bounds)
+    local out = {}
+    for k, b in pairs(bounds) do
+        out[k] = type(b[1]) == "number" and { min = b[1], max = b[2] } or bounds_view(b)
+    end
+    return out
+end
+
+-- The values in force (from the row, not the cache: what was just saved), the defaults, the bounds, who saved.
+local function platform_view()
+    local row = U.one("SELECT settings, updated_by, updated_at FROM ar_platform_settings WHERE id = 1") or {}
+    local v = R.platform_values(U.json(row.settings), R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
+    v.defaults, v.bounds = R.PLATFORM_DEFAULTS, bounds_view(R.PLATFORM_BOUNDS)
+    v.updated_at, v.updated_by = U.null(row.updated_at), U.null(row.updated_by)
+    return v
+end
+
 local function template_view(t)
     return { uuid = U.null(t.uuid), version = t.version, body = t.body, builtin = t.builtin == true,
         created_by = U.null(t.created_by), created_at = U.null(t.created_at),
@@ -107,14 +148,22 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local page, per_page, offset = sdk.page(self.params)
         local all = self.params.include_revoked == "true" or self.params.include_revoked == "1"
+        local kind = self.params.kind
+        if kind ~= nil and kind ~= "" and kind ~= "runner" and kind ~= "source" then
+            U.fail(400, "kind must be runner or source")
+        end
         local cond, args = R.runner_access_sql(self, ns)
         local w = cond .. " AND r.namespace_id = ?" .. (all and "" or " AND r.status <> 'revoked'")
         args[#args + 1] = ns
+        if kind == "runner" or kind == "source" then
+            w = w .. " AND r.kind = ?"
+            args[#args + 1] = kind
+        end
         local q_args = { unpack(args) }
         q_args[#q_args + 1] = per_page
         q_args[#q_args + 1] = offset
         local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
-        for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. " FROM ar_runners r WHERE " .. w
+        for i, r in ipairs(db.query("SELECT " .. R.runner_cols() .. " FROM ar_runners r WHERE " .. w
             .. " ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?", unpack(q_args))) do
             out[i] = R.runner_view(r, show_access)
         end
@@ -134,11 +183,13 @@ return function(app)
     app:post("/runners", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local b = body(self)
-        local d, errors = sdk.validate(b, { name = { required = true, max = 100 } })
+        local d, errors = sdk.validate(b, { name = { required = true, max = 100 }, kind = { enum = KINDS } })
         if not d then U.invalid(errors) end
         local raw, hash, hint = U.new_token()
         local row = db.insert("ar_runners", { namespace_id = ns, name = U.clean(d.name),
             labels = cjson.encode(labels_of(b.labels) or U.array()), token_hash = hash, token_hint = hint,
+            kind = type(d.kind) == "string" and d.kind or "runner",
+            report_filter = cjson.encode(report_filter_of(b.report_filter) or R.report_filter({})),
             created_by = sdk.user(self).uuid }, { returning = "*" })[1]
         return sdk.created({ runner = R.runner_view(R.runner(ns, row.uuid), true), token = raw })
     end)))
@@ -148,11 +199,13 @@ return function(app)
         local r = runner_or_404(ns, self.params.uuid)
         if r.status == "revoked" then U.fail(409, "This runner was revoked") end
         local b = body(self)
-        local d, errors = sdk.validate(b, { name = { max = 100 } }, true)
+        local d, errors = sdk.validate(b, { name = { max = 100 }, kind = { enum = KINDS } }, true)
         if not d or d.name == db.NULL or d.name == "" then U.invalid(errors or { name = "is required" }) end
-        local name, l = d.name and U.clean(d.name) or r.name, labels_of(b.labels)
-        db.query("UPDATE ar_runners SET name = ?, labels = COALESCE(?::jsonb, labels), updated_at = NOW() WHERE id = ?",
-            name, l and cjson.encode(l) or db.NULL, r.id)
+        local name, l, rf = d.name and U.clean(d.name) or r.name, labels_of(b.labels), report_filter_of(b.report_filter)
+        local kind = type(d.kind) == "string" and d.kind or r.kind
+        db.query([[UPDATE ar_runners SET name = ?, labels = COALESCE(?::jsonb, labels), kind = ?,
+            report_filter = COALESCE(?::jsonb, report_filter), updated_at = NOW() WHERE id = ?]],
+            name, l and cjson.encode(l) or db.NULL, kind, rf and cjson.encode(rf) or db.NULL, r.id)
         return sdk.ok(R.runner_view(R.runner(ns, r.uuid), true))
     end)))
 
@@ -253,7 +306,8 @@ return function(app)
             args[#args + 1] = p.runner_uuid:lower()
         end
         if p.busy == "1" or p.busy == "true" then
-            where[#where + 1] = "lower(COALESCE(s.status, '')) NOT IN " .. R.IDLE_SQL
+            where[#where + 1] = "lower(COALESCE(s.status, '')) NOT IN ?"
+            args[#args + 1] = R.idle(ns)
         end
         local w = table.concat(where, " AND ")
         local page, per_page, offset = sdk.page(p)
@@ -264,8 +318,7 @@ return function(app)
         for i, s in ipairs(db.query([[
             SELECT s.session_key, s.tool, s.status, s.cwd, s.branch, s.managed, s.prompt_preview, s.updated_at,
                    s.seen_at, s.run_uuid, ru.uuid AS runner_uuid, ru.name AS runner_name, ru.status AS runner_state,
-                   (ru.last_heartbeat_at IS NOT NULL AND ru.last_heartbeat_at > NOW() - interval ']] .. R.ONLINE_S
-                .. [[ seconds') AS online,
+                   ]] .. R.online_sql("ru") .. [[ AS online,
                    t.task_number, COALESCE(t.title, x.task_snapshot->>'title') AS task_title,
                    tt.uuid AS tracked_uuid, tt.task_number AS tracked_number, tt.title AS tracked_title,
                    tp.uuid AS tracked_project
@@ -310,7 +363,7 @@ return function(app)
             .. "AND status IN " .. R.OPEN_SQL .. " GROUP BY status", ns)) do
             by_status[r.status] = r.n
         end
-        local online = "last_heartbeat_at > NOW() - interval '" .. R.ONLINE_S .. " seconds'"
+        local online = "last_heartbeat_at > NOW() - interval '" .. math.floor(R.platform().online_s) .. " seconds'"
         local runners = U.one([[SELECT COUNT(*) FILTER (WHERE status = 'active' AND ]] .. online .. [[)::int AS online,
                 COUNT(*) FILTER (WHERE status = 'active' AND NOT COALESCE(]] .. online .. [[, false))::int AS offline,
                 COUNT(*) FILTER (WHERE status = 'paused')::int AS paused
@@ -343,48 +396,84 @@ return function(app)
     app:put("/settings", sdk.handler({ permission = "ai_runs_settings.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local b = body(self)
+        local p = R.platform()
+        local gm = p.guard_max -- §27.5: the platform's upper bounds
         local d, errors = sdk.validate(b, {
             output_mode = { enum = R.OUTPUT_MODES }, pr_draft = { type = "boolean" }, pr_base = { max = 255 },
-            max_run_minutes = { type = "integer", min = 1, max = 1440 },
+            max_run_minutes = { type = "integer", min = 1, max = gm.max_run_minutes },
         }, true)
         if not d then U.invalid(errors) end
         local s = R.settings(ns)
         local function put(into, defaults, clean)
             for k, v in pairs(clean) do
-                if v == db.NULL then into[k] = defaults[k] else into[k] = v end
+                if v == db.NULL then into[k] = R.copy(defaults[k]) else into[k] = v end
             end
         end
         put(s, R.SETTINGS_DEFAULTS, d)
         if not U.is_branch(s.pr_base) then U.invalid({ pr_base = "must be a branch name" }) end
-        local function merge(name, rules)
-            local given = b[name]
-            if given == nil then return end
-            if type(given) ~= "table" or given[1] ~= nil then U.invalid({ [name] = "must be an object" }) end
-            local clean, errs = sdk.validate(given, rules, true)
+        local function object(name, given)
+            if not U.object(given) then U.invalid({ [name] = "must be an object" }) end
+            return given
+        end
+        local function validate(name, given, rules)
+            local clean, errs = sdk.validate(object(name, given), rules, true)
             if not clean then
                 local out = {}
                 for k, m in pairs(errs) do out[name .. "." .. k] = m end
                 U.invalid(out)
             end
-            put(s[name], R.SETTINGS_DEFAULTS[name], clean)
+            return clean
         end
-        merge("task_automation", { in_progress_on_start = { type = "boolean" },
-            review_on_success = { type = "boolean" } })
+        local function merge(name, rules)
+            if b[name] == nil then return end
+            put(s[name], R.SETTINGS_DEFAULTS[name], validate(name, b[name], rules))
+        end
+
+        -- §27.4: on_start / on_success { enabled, status, column }; the old booleans still switch them on or off
+        -- (an object given wins). The booleans are kept, mirroring `enabled`.
+        if b.task_automation ~= nil then
+            local given = object("task_automation", b.task_automation)
+            local flags = validate("task_automation", given, { in_progress_on_start = { type = "boolean" },
+                review_on_success = { type = "boolean" } })
+            local ta, td = s.task_automation, R.SETTINGS_DEFAULTS.task_automation
+            for which, flag in pairs({ on_start = "in_progress_on_start", on_success = "review_on_success" }) do
+                local name = "task_automation." .. which
+                if given[which] == cjson.null then
+                    ta[which] = R.copy(td[which])
+                elseif given[which] ~= nil then
+                    for k, v in pairs(validate(name, given[which], { enabled = { type = "boolean" },
+                        status = { enum = R.TASK_STATUSES }, column = { max = 100 } })) do
+                        if v == db.NULL then
+                            ta[which][k] = k == "column" and cjson.null or td[which][k]
+                        else
+                            ta[which][k] = v
+                        end
+                    end
+                    if ta[which].column == "" then ta[which].column = cjson.null end
+                elseif type(flags[flag]) == "boolean" then
+                    ta[which].enabled = flags[flag]
+                end
+            end
+            ta.in_progress_on_start, ta.review_on_success = ta.on_start.enabled == true, ta.on_success.enabled == true
+        end
         merge("approval_policy", { deciders = { enum = { "requester", "managers", "requester_or_managers" } },
             require_start_approval = { type = "boolean" }, project_admins_decide = { type = "boolean" },
             permission_timeout_minutes = { type = "integer", min = 1, max = 1440 },
             input_timeout_minutes = { type = "integer", min = 1, max = 1440 } })
         merge("guards", { similar_threshold = { type = "number", min = 0.1, max = 1 },
-            max_open_runs_per_user = { type = "integer", min = 0, max = 100 },
-            max_open_runs_per_workspace = { type = "integer", min = 0, max = 1000 },
-            daily_token_limit = { type = "integer", min = 0, max = 1000000000 },
-            retention_days = { type = "integer", min = 30, max = 3650 } })
+            max_open_runs_per_user = { type = "integer", min = 0, max = gm.max_open_runs_per_user },
+            max_open_runs_per_workspace = { type = "integer", min = 0, max = gm.max_open_runs_per_workspace },
+            daily_token_limit = { type = "integer", min = 0, max = gm.daily_token_limit },
+            retention_days = { type = "integer", min = 30, max = gm.retention_days } })
         merge("session_tracking", { enabled = { type = "boolean" }, project_uuid = { type = "uuid" },
-            column = { max = 100 }, status = { enum = { "todo", "in_progress" } }, notify = { type = "boolean" } })
+            column = { max = 100 }, status = { enum = { "todo", "in_progress" } }, notify = { type = "boolean" },
+            gone_after_minutes = { type = "integer", min = 1, max = 1440 },
+            max_new_per_heartbeat = { type = "integer", min = 1, max = p.max_tracked_per_heartbeat_cap } })
         -- §26.2: the tasks of sessions started by hand go to a kanban project of this workspace (required when on),
         -- into a column of its first board. Checked when given, so a project deleted since doesn't block other saves.
         local st = s.session_tracking
         if b.session_tracking ~= nil then
+            local given = b.session_tracking
             if st.column == "" then st.column = cjson.null end
             local target = st.project_uuid ~= cjson.null and R.track_target(ns, st.project_uuid, st.column)
             if st.project_uuid == cjson.null and st.enabled == true then
@@ -396,18 +485,62 @@ return function(app)
             end
             if target then st.project_uuid = target.project_uuid end
             if st.column ~= cjson.null then st.column = target.column_name end
+            -- §27.4: the statuses that aren't busy, and how each tool is named in titles.
+            if given.idle_statuses == cjson.null then
+                st.idle_statuses = U.array({ unpack(R.IDLE_STATUSES) })
+            elseif given.idle_statuses ~= nil then
+                st.idle_statuses = U.strings(given.idle_statuses, "session_tracking.idle_statuses", 50, 40,
+                    string.lower)
+                if #st.idle_statuses == 0 then
+                    U.invalid({ ["session_tracking.idle_statuses"] = "must name at least one status" })
+                end
+            end
+            if given.tool_labels == cjson.null then
+                st.tool_labels = R.copy(R.SETTINGS_DEFAULTS.session_tracking.tool_labels)
+            elseif given.tool_labels ~= nil then
+                local labels, n = {}, 0
+                for tool, label in pairs(object("session_tracking.tool_labels", given.tool_labels)) do
+                    n = n + 1
+                    tool = type(tool) == "string" and U.clean(tool:match("^%s*(.-)%s*$")):lower()
+                    label = type(label) == "string" and U.clean(label:match("^%s*(.-)%s*$"))
+                    if n > 50 or not tool or tool == "" or #tool > 40 or not label or label == "" or #label > 60 then
+                        U.invalid({ ["session_tracking.tool_labels"] =
+                            "maps up to 50 tool names (1-40 characters) to labels (1-60 characters)" })
+                    end
+                    labels[tool] = label
+                end
+                st.tool_labels = labels
+            end
+        end
+        -- §27.4: additions to the safety lists (they can only add: the built-in ones always apply).
+        if b.safety ~= nil then
+            local given = object("safety", b.safety)
+            if given.extra_denied_commands ~= nil then
+                s.safety.extra_denied_commands = U.strings(given.extra_denied_commands, "safety.extra_denied_commands",
+                    100, 200)
+            end
+            if given.extra_redactions ~= nil then
+                s.safety.extra_redactions = U.strings(given.extra_redactions, "safety.extra_redactions", 20, 200,
+                    function(re)
+                        local ok, message = U.check_regex(re)
+                        if ok then return re end
+                        return nil, "each entry " .. message
+                    end)
+            end
         end
         db.query([[
             INSERT INTO ar_settings (namespace_id, output_mode, pr_draft, pr_base, max_run_minutes, task_automation,
-                approval_policy, guards, session_tracking, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?)
+                approval_policy, guards, session_tracking, safety, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?)
             ON CONFLICT (namespace_id) DO UPDATE SET output_mode = EXCLUDED.output_mode, pr_draft = EXCLUDED.pr_draft,
                 pr_base = EXCLUDED.pr_base, max_run_minutes = EXCLUDED.max_run_minutes,
                 task_automation = EXCLUDED.task_automation, approval_policy = EXCLUDED.approval_policy,
-                guards = EXCLUDED.guards, session_tracking = EXCLUDED.session_tracking,
+                guards = EXCLUDED.guards, session_tracking = EXCLUDED.session_tracking, safety = EXCLUDED.safety,
                 updated_by = EXCLUDED.updated_by, updated_at = NOW()
         ]], ns, s.output_mode, s.pr_draft, s.pr_base, s.max_run_minutes, cjson.encode(s.task_automation),
-            cjson.encode(s.approval_policy), cjson.encode(s.guards), cjson.encode(st), sdk.user(self).uuid)
+            cjson.encode(s.approval_policy), cjson.encode(s.guards), cjson.encode(st), cjson.encode(s.safety),
+            sdk.user(self).uuid)
+        ngx.ctx.ar_redact = nil -- the workspace's redactions may have changed
         return sdk.ok(R.settings(ns))
     end)))
 
@@ -480,5 +613,53 @@ return function(app)
             RETURNING uuid, version, body, created_by, created_at
         ]], ns, U.clean(d.body), cjson.encode(U.array({ unpack(R.TEMPLATE_VARIABLES) })), sdk.user(self).uuid, ns)
         return sdk.ok(template_view(row))
+    end)))
+
+    -- Platform settings (§27.5) --------------------------------------------------------------------------------
+    -- Platform admins only, and for every workspace: no workspace header, no workspace RBAC.
+    app:get("/platform/settings", sdk.handler({ namespace = false }, U.guard(function(self)
+        platform_admin(self)
+        return sdk.ok(platform_view())
+    end)))
+
+    -- Only the keys given change; null puts one back to its default (the row keeps only what was set).
+    app:put("/platform/settings", sdk.handler({ namespace = false }, U.guard(function(self)
+        platform_admin(self)
+        local b = body(self)
+        local row = U.one("SELECT settings FROM ar_platform_settings WHERE id = 1")
+        local stored = row and U.object(U.json(row.settings)) or {}
+        local function apply(into, given, defaults, bounds, prefix)
+            local rules = {}
+            for k, d in pairs(defaults) do
+                if type(d) ~= "table" then rules[k] = { type = "integer", min = bounds[k][1], max = bounds[k][2] } end
+            end
+            local clean, errs = sdk.validate(given, rules, true)
+            if not clean then
+                local out = {}
+                for k, m in pairs(errs) do out[prefix .. k] = m end
+                U.invalid(out)
+            end
+            for k, v in pairs(clean) do
+                if v == db.NULL then into[k] = nil else into[k] = v end
+            end
+        end
+        apply(stored, b, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS, "")
+        if b.guard_max == cjson.null then
+            stored.guard_max = nil
+        elseif b.guard_max ~= nil then
+            if not U.object(b.guard_max) then U.invalid({ guard_max = "must be an object" }) end
+            stored.guard_max = U.object(stored.guard_max) or {}
+            apply(stored.guard_max, b.guard_max, R.PLATFORM_DEFAULTS.guard_max, R.PLATFORM_BOUNDS.guard_max,
+                "guard_max.")
+        end
+        local v = R.platform_values(stored, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
+        -- A runner heartbeats well within its lease, and within the time it counts as online.
+        if v.heartbeat_s >= v.lease_s then U.invalid({ heartbeat_s = "must be less than lease_s" }) end
+        if v.heartbeat_s >= v.online_s then U.invalid({ heartbeat_s = "must be less than online_s" }) end
+        db.query([[INSERT INTO ar_platform_settings (id, settings, updated_by) VALUES (1, ?::jsonb, ?)
+            ON CONFLICT (id) DO UPDATE SET settings = EXCLUDED.settings, updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()]], cjson.encode(stored), sdk.user(self).uuid)
+        R.platform_changed()
+        return sdk.ok(platform_view())
     end)))
 end

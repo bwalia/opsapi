@@ -1,9 +1,13 @@
 -- Runner API (docs/AI_RUNNER.md §22.2, §23.2). No user session: under public/, authenticated by the runner token
 -- ("Authorization: Bearer oprn_<48 hex>", stored as a SHA-256 hash and bound to one workspace).
---   POST /public/runner/heartbeat              capabilities (+ profile health), repos, inventory -> runs to cancel;
---                                              renews leases; sessions started by hand become tasks (§26)
---   POST /public/runner/claim                  long-poll (wait_s <= 25) -> 200 { run } (+ run_token) or 204;
---                                              skips runs of profiles the runner reports unavailable
+--   POST /public/runner/heartbeat              capabilities (+ profile health), repos, inventory -> runs to cancel
+--                                              and config (platform timings, report_filter, extra_denied_commands);
+--                                              renews leases; sessions started by hand become tasks (§26, §27.3)
+--   POST /public/runner/sessions               { sessions: [...] } the connection's sessions, for any tool (§27.1):
+--                                              stored and tracked like a heartbeat inventory
+--   POST /public/runner/claim                  long-poll (wait_s <= claim_wait_s) -> 200 { run } (+ run_token) or
+--                                              204; skips runs of profiles the runner reports unavailable; a
+--                                              source (kind "source") -> 403
 --   POST /public/runner/runs/:uuid/status      { seq, status, question?, ... } compare-and-set; stale seq ignored
 --   POST /public/runner/runs/:uuid/events      { events: [{ seq, type, text?, data? }] } idempotent on (run, seq)
 --   POST /public/runner/runs/:uuid/permissions              ask a person; idempotent on request_id (409 when
@@ -13,6 +17,7 @@
 --   POST /public/runner/runs/:uuid/turns                    an agent turn + its usage; idempotent on turn
 --   POST /public/runner/runs/:uuid/turns/next               long-poll for people's messages
 -- Revoked token -> 401; plugin off in the workspace -> 404; paused runner: heartbeat works, claim gives 204.
+-- Inventories pass the connection's report filter (§27.2) before they are stored.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -26,7 +31,8 @@ local MAX_EVENTS, MAX_EVENT_TEXT, MAX_EVENT_DATA = 200, 4096, 8192
 local MAX_INPUT, MAX_TURN_TEXT, INT_MAX = 8192, 8192, 2147483647
 local EVENT_TYPES = { log = true, progress = true, tool = true, usage = true }
 local MAX_SUMMARY = 2000
--- The one event a run gets when it reaches R.MAX_RUN_EVENTS (a seq no runner reaches, so it sorts last).
+-- The one event a run gets when it reaches the platform's max_events_per_run (a seq no runner reaches, so it sorts
+-- last).
 local TRUNCATED_SEQ = 2147483647
 
 -- Lookup by hash: the comparison never touches the secret itself, so its timing tells nothing about it.
@@ -35,10 +41,11 @@ local function auth()
     if type(h) == "table" then h = h[1] end
     local raw = type(h) == "string" and h:match("^%s*[Bb]earer%s+(oprn_%x+)%s*$")
     if not raw or #raw ~= 53 then U.fail(401, "Unauthorized") end
-    local r = U.one("SELECT " .. R.RUNNER_COLS .. [[, n.status AS ns_status FROM ar_runners r
+    local r = U.one("SELECT " .. R.runner_cols() .. [[, n.status AS ns_status FROM ar_runners r
         JOIN namespaces n ON n.id = r.namespace_id WHERE r.token_hash = ?]], U.sha256(raw))
     if not r or r.status == "revoked" then U.fail(401, "Unauthorized") end
     R.require_plugin(r.ns_status, r.namespace_id)
+    ngx.ctx.ar_ns = r.namespace_id -- the workspace's own redactions apply from here (U.redact)
     return r
 end
 
@@ -180,6 +187,50 @@ local function inventory(list)
     return out
 end
 
+-- Store a connection's inventory (its sessions, replacing the last list) after its report filter, then track the
+-- sessions started by hand (§26.3, §27.3), which never fails the caller. inv: inventory() of the request.
+-- @return the sessions kept
+local function store_sessions(runner, inv)
+    local rf = R.report_filter(runner.report_filter)
+    if #rf.folders + #rf.exclude_folders + #rf.tools > 0 then
+        -- The connection's own runs pass whatever the filter (the busy-folder check needs them).
+        local runs = {}
+        for _, s in ipairs(inv) do if s.run then runs[#runs + 1] = s.run:lower() end end
+        local mine = {}
+        if #runs > 0 then
+            for _, r in ipairs(db.query([[SELECT uuid FROM ar_runs WHERE runner_uuid = ? AND namespace_id = ?
+                AND uuid IN ?]], runner.uuid, runner.namespace_id, db.list(runs))) do
+                mine[r.uuid] = true
+            end
+        end
+        for _, s in ipairs(inv) do s.linked = s.run ~= nil and mine[s.run:lower()] == true end
+        inv = R.filter_sessions(inv, rf)
+        for _, s in ipairs(inv) do s.linked = nil end
+    end
+    U.tx(function()
+        db.query("DELETE FROM ar_sessions WHERE runner_uuid = ? AND namespace_id = ?", runner.uuid,
+            runner.namespace_id)
+        if #inv > 0 then
+            db.query([[
+                INSERT INTO ar_sessions (runner_uuid, namespace_id, session_key, tool, status, cwd, branch,
+                    session_id, started_at, updated_at, prompt_preview, labels, run_uuid, managed, seen_at,
+                    first_prompt)
+                SELECT ?, ?, x.key, x.tool, x.status, x.cwd, x.branch, x.session_id, ai_runner_ts(x.started_at),
+                    ai_runner_ts(x.updated_at), x.prompt_preview, COALESCE(x.labels, '{}'::jsonb), r.uuid,
+                    r.uuid IS NOT NULL, NOW(), x.first_prompt
+                FROM jsonb_to_recordset(?::jsonb) AS x(key text, tool text, status text, cwd text, branch text,
+                    session_id text, started_at text, updated_at text, prompt_preview text, labels jsonb,
+                    run uuid, first_prompt text)
+                LEFT JOIN ar_runs r ON r.uuid = x.run AND r.runner_uuid = ? AND r.namespace_id = ?
+                ON CONFLICT (runner_uuid, session_key) DO NOTHING
+            ]], runner.uuid, runner.namespace_id, cjson.encode(inv), runner.uuid, runner.namespace_id)
+        end
+    end)
+    local ok, created = pcall(R.track_sessions, runner, inv)
+    if not ok then ngx.log(ngx.ERR, "[ai_runner] session tracking failed: ", tostring(created)) end
+    return inv, ok and created or 0
+end
+
 local STATUS_RULES = {
     seq = { type = "integer", required = true, min = 1 },
     status = { required = true, enum = { "starting", "running", "waiting_permission", "needs_input", "succeeded",
@@ -215,46 +266,45 @@ return function(app)
             -- Inline literals only (no "?" placeholders: lapis would also replace any "?" inside them).
             db.query("UPDATE ar_runners SET " .. db.encode_assigns(set) .. " WHERE id = "
                 .. db.escape_literal(runner.id))
-            db.query("UPDATE ar_runs SET heartbeat_at = NOW(), lease_until = NOW() + interval '" .. R.LEASE_S
-                .. " seconds' WHERE runner_uuid = ? AND namespace_id = ? AND status IN " .. R.ACTIVE_SQL,
+            db.query("UPDATE ar_runs SET heartbeat_at = NOW(), lease_until = " .. R.lease_sql()
+                .. " WHERE runner_uuid = ? AND namespace_id = ? AND status IN " .. R.ACTIVE_SQL,
                 runner.uuid, runner.namespace_id)
-            if inv then
-                db.query("DELETE FROM ar_sessions WHERE runner_uuid = ? AND namespace_id = ?", runner.uuid,
-                    runner.namespace_id)
-                if #inv > 0 then
-                    db.query([[
-                        INSERT INTO ar_sessions (runner_uuid, namespace_id, session_key, tool, status, cwd, branch,
-                            session_id, started_at, updated_at, prompt_preview, labels, run_uuid, managed, seen_at,
-                            first_prompt)
-                        SELECT ?, ?, x.key, x.tool, x.status, x.cwd, x.branch, x.session_id, ai_runner_ts(x.started_at),
-                            ai_runner_ts(x.updated_at), x.prompt_preview, COALESCE(x.labels, '{}'::jsonb), r.uuid,
-                            r.uuid IS NOT NULL, NOW(), x.first_prompt
-                        FROM jsonb_to_recordset(?::jsonb) AS x(key text, tool text, status text, cwd text, branch text,
-                            session_id text, started_at text, updated_at text, prompt_preview text, labels jsonb,
-                            run uuid, first_prompt text)
-                        LEFT JOIN ar_runs r ON r.uuid = x.run AND r.runner_uuid = ? AND r.namespace_id = ?
-                        ON CONFLICT (runner_uuid, session_key) DO NOTHING
-                    ]], runner.uuid, runner.namespace_id, cjson.encode(inv), runner.uuid, runner.namespace_id)
-                end
-            end
         end)
         -- §26.3: sessions started by hand become tasks. Never fails (or slows down much) the heartbeat.
-        if inv then
-            local ok, err = pcall(R.track_sessions, runner, inv)
-            if not ok then ngx.log(ngx.ERR, "[ai_runner] session tracking failed: ", tostring(err)) end
-        end
+        if inv then store_sessions(runner, inv) end
 
         local cancel = {}
         for _, r in ipairs(db.query("SELECT uuid FROM ar_runs WHERE runner_uuid = ? AND namespace_id = ? AND "
             .. "status = 'cancelling' ORDER BY id", runner.uuid, runner.namespace_id)) do
             cancel[#cancel + 1] = r.uuid
         end
-        return sdk.ok({ runner_uuid = runner.uuid, status = runner.status, cancel = U.array(cancel),
-            config = { heartbeat_s = R.HEARTBEAT_S, claim_wait_s = R.CLAIM_WAIT_S, lease_s = R.LEASE_S } })
+        -- §27.5 timings from the platform settings; §27.2 what this connection reports; §27.4 the workspace's
+        -- additions to the runner's safety list.
+        local p = R.platform()
+        return sdk.ok({ runner_uuid = runner.uuid, status = runner.status, kind = runner.kind or "runner",
+            cancel = U.array(cancel), config = { heartbeat_s = p.heartbeat_s, claim_wait_s = p.claim_wait_s,
+                lease_s = p.lease_s, report_filter = R.report_filter(runner.report_filter),
+                extra_denied_commands = U.array({ unpack(R.settings(runner.namespace_id).safety
+                    .extra_denied_commands or {}) }) } })
+    end)))
+
+    -- §27.1: any tool reports its sessions with its connection's token (a source, or a runner).
+    app:post("/public/runner/sessions", sdk.handler({ namespace = false }, U.guard(function(self)
+        local runner = auth()
+        local b = body(self)
+        if type(b.sessions) ~= "table" or (next(b.sessions) ~= nil and b.sessions[1] == nil) then
+            U.invalid({ sessions = "must be a list" })
+        end
+        if #b.sessions > 500 then U.invalid({ sessions = "at most 500 per call" }) end
+        db.query("UPDATE ar_runners SET last_heartbeat_at = NOW(), updated_at = NOW() WHERE id = ?", runner.id)
+        local kept, created = store_sessions(runner, inventory(b.sessions))
+        return sdk.ok({ stored = #kept, tasks_created = created })
     end)))
 
     app:post("/public/runner/claim", sdk.handler({ namespace = false }, U.guard(function(self)
         local runner = auth()
+        if runner.kind == "source" then U.fail(403, "This connection is a source: it reports sessions, it can't "
+            .. "claim runs") end
         local run = R.claim(runner, R.wait_s(body(self).wait_s))
         if not run then return { status = 204, layout = false, "" } end
         return sdk.ok({ run = R.payload(run) })
@@ -310,10 +360,11 @@ return function(app)
             rows[#rows + 1] = { seq = seq, type = e.type, data = data, text = safe_text(e.text, MAX_EVENT_TEXT) }
         end
         if #rows == 0 then return sdk.ok({ stored = 0 }) end
-        -- §25.7: at most R.MAX_RUN_EVENTS per run; past that they are dropped and the log says so once.
+        -- §25.7: at most max_events_per_run (§27.5) per run; past that they are dropped and the log says so once.
         -- ponytail: counted from the (run_uuid, seq) index on every batch, not locked (one runner posts a run's
         -- events, in order); keep a counter on ar_runs if 20k-entry counts ever show up.
-        local room = R.MAX_RUN_EVENTS - U.one("SELECT COUNT(*)::int AS n FROM ar_run_events WHERE run_uuid = ?",
+        local max_events = R.platform().max_events_per_run
+        local room = max_events - U.one("SELECT COUNT(*)::int AS n FROM ar_run_events WHERE run_uuid = ?",
             run.uuid).n
         local truncated = #rows > room
         if truncated then rows = { unpack(rows, 1, math.max(room, 0)) } end
@@ -329,7 +380,7 @@ return function(app)
         if truncated then
             db.query([[INSERT INTO ar_run_events (run_uuid, namespace_id, seq, type, text) VALUES (?, ?, ?, 'log', ?)
                 ON CONFLICT (run_uuid, seq) DO NOTHING]], run.uuid, runner.namespace_id, TRUNCATED_SEQ,
-                "Log truncated: this run reached " .. R.MAX_RUN_EVENTS .. " events, later ones are not kept")
+                "Log truncated: this run reached " .. max_events .. " events, later ones are not kept")
         end
         return sdk.ok({ stored = stored, truncated = truncated })
     end)))
@@ -377,16 +428,22 @@ return function(app)
         if found then return replay(found) end
 
         local minutes = R.policy(run.namespace_id).permission_timeout_s / 60
+        local max_requests = R.platform().max_requests_per_run
+        -- §27.4: the workspace's extra denied commands, denied without asking (the runner should have already).
+        local blocked = tool == "Bash" and R.denied_command(R.settings(run.namespace_id).safety.extra_denied_commands,
+            b.input.command)
         -- Under the run's row lock: the per-run limit (§25.7) holds when requests come in together.
         local row, capped = U.tx(function()
             U.one("SELECT id FROM ar_runs WHERE id = ? FOR UPDATE", run.id)
             if U.one("SELECT COUNT(*)::int AS n FROM ar_run_requests WHERE run_uuid = ?", run.uuid).n
-                >= R.MAX_RUN_REQUESTS then
+                >= max_requests then
                 return nil, true
             end
             local status, reason, by = "pending", nil, nil
             if too_large then
                 status, reason = "denied", "Too large to review"
+            elseif blocked then
+                status, reason = "denied", U.clean("Blocked by the workspace's safety rules: " .. blocked, 2000)
             elseif rememberable then
                 local earlier = U.one([[SELECT decided_by FROM ar_run_requests WHERE run_uuid = ? AND tool = ?
                     AND rule_key = ? AND status = 'allowed' AND remember AND rememberable
@@ -410,7 +467,7 @@ return function(app)
         end)
         if capped then
             return sdk.ok({ request = { uuid = cjson.null, status = "denied",
-                reason = "This run has asked for " .. R.MAX_RUN_REQUESTS .. " permissions, the most one run may" } })
+                reason = "This run has asked for " .. max_requests .. " permissions, the most one run may" } })
         end
         if not row then return replay(existing()) end -- the same request_id raced in
         R.notify(run)
