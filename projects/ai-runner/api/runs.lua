@@ -25,6 +25,7 @@ local db = require("lapis.db")
 local sdk = require("helper.plugin-sdk")
 local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
+local B = require("ai_runner.builtin")
 
 -- Run fields in the API (all real columns; the list leaves out the prompt, the detail adds it).
 local FIELDS = { "uuid", "task_uuid", "project_uuid", "requested_by", "assignee_uuid", "runner_uuid", "profile",
@@ -66,6 +67,16 @@ end
 local function map(rows, fn)
     for i, r in ipairs(rows) do rows[i] = fn(r) end
     return U.array(rows)
+end
+
+-- How the prompt names the run's folder and what happens to its work: a machine's folder, or for the built-in
+-- runner (§28) its GitHub repository (or none) and its branch.
+local function render_opts(builtin, repo_path, defaults, output_mode)
+    if builtin then
+        return { repo_path = repo_path and B.repo_label(repo_path) or nil, base_branch = defaults.base_branch,
+            output_mode = output_mode, output_text = B.OUTPUT_TEXT[repo_path == B.NO_REPO and "none" or output_mode] }
+    end
+    return { repo_path = repo_path, base_branch = defaults.base_branch, output_mode = output_mode }
 end
 
 local function task_or_404(ns, task_uuid)
@@ -123,14 +134,16 @@ local function list(self, ns, params)
     return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
 end
 
--- The runners the caller may use for a task of this project (§25.1); sources run nothing (§27.1).
+-- The runners the caller may use for a task of this project (§25.1); sources run nothing (§27.1). The built-in
+-- runner (§28) comes last: the Start dialog picks the first one online, so it is the default when no machine is.
 local function runners(self, ns, project_uuid)
+    B.refresh(ns)
     local cond, args = R.runner_access_sql(self, ns, project_uuid)
     args[#args + 1] = ns
     local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
     for i, r in ipairs(db.query("SELECT " .. R.runner_cols() .. " FROM ar_runners r WHERE " .. cond
-        .. " AND r.namespace_id = ? AND r.status <> 'revoked' AND r.kind = 'runner' ORDER BY lower(r.name), r.id "
-        .. "LIMIT 100", unpack(args))) do
+        .. " AND r.namespace_id = ? AND r.status <> 'revoked' AND r.kind IN ('runner', 'builtin') "
+        .. "ORDER BY r.kind = 'builtin', lower(r.name), r.id LIMIT 100", unpack(args))) do
         out[i] = R.runner_view(r, show_access)
     end
     return out
@@ -157,12 +170,15 @@ return function(app)
             end
         end
         local defaults = R.defaults(ns, task)
+        local builtin = runner_uuid and B.is_builtin(ns, runner_uuid)
         local suggested = R.default_repo_path(ns, task, runner_uuid, defaults.project_settings)
-        local repo_path = type(d.repo_path) == "string" and U.path(d.repo_path) or suggested
+        if builtin and not B.repo_ref(suggested) then suggested = B.NO_REPO end
+        local given = type(d.repo_path) == "string" and (builtin and B.repo_ref(d.repo_path) or U.path(d.repo_path))
+        local repo_path = given or suggested
         local tpl = R.template(ns)
         local guards = R.settings(ns).guards
-        local busy = runner_uuid and repo_path and R.busy_session(ns, runner_uuid, repo_path)
-        local lock = runner_uuid and repo_path and R.folder_lock(ns, runner_uuid, repo_path)
+        local busy = not builtin and runner_uuid and repo_path and R.busy_session(ns, runner_uuid, repo_path)
+        local lock = not builtin and runner_uuid and repo_path and R.folder_lock(ns, runner_uuid, repo_path)
         local profile
         for _, r in ipairs(list_) do
             if r.uuid == runner_uuid then
@@ -172,8 +188,7 @@ return function(app)
             end
         end
         return sdk.ok({
-            prompt = R.render(tpl.body, task, { repo_path = repo_path, base_branch = defaults.base_branch,
-                output_mode = defaults.output_mode }),
+            prompt = R.render(tpl.body, task, render_opts(builtin, repo_path, defaults, defaults.output_mode)),
             template_version = tpl.version, template_uuid = U.null(tpl.uuid), can_edit_prompt = privileged,
             runners = U.array(list_), runner_uuid = U.null(runner_uuid), default_repo_path = U.null(suggested),
             repo_path = U.null(repo_path), work_branch = R.work_branch(task), output_mode = defaults.output_mode,
@@ -198,16 +213,21 @@ return function(app)
             })
             if not d then U.invalid(errors) end
             for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
-            local path = U.path(d.repo_path)
-            if not path then U.invalid({ repo_path = "must be an absolute folder path" }) end
+            local builtin = B.is_builtin(ns, d.runner_uuid:lower())
+            local path = builtin and B.repo_ref(d.repo_path) or (not builtin and U.path(d.repo_path)) or nil
+            if not path then
+                U.invalid({ repo_path = builtin and "must be one of the built-in runner's repositories, or none"
+                    or "must be an absolute folder path" })
+            end
+            if builtin then B.refresh(ns) end
             if d.prompt and not privileged then
                 return sdk.error(403, "Only an AI runs manager can edit the prompt")
             end
             local defaults = R.defaults(ns, task)
             local output_mode = d.output_mode or defaults.output_mode
             local tpl = R.template(ns)
-            local prompt = d.prompt and U.clean(d.prompt) or R.render(tpl.body, task, { repo_path = path,
-                base_branch = defaults.base_branch, output_mode = output_mode })
+            local prompt = d.prompt and U.clean(d.prompt) or R.render(tpl.body, task,
+                render_opts(builtin, path, defaults, output_mode))
             local key = ngx.req.get_headers()["Idempotency-Key"]
             local run = R.create(self, ns, task, {
                 runner_uuid = d.runner_uuid:lower(), profile = d.profile, model = d.model, repo_path = path,
@@ -290,6 +310,7 @@ return function(app)
             if not R.can_start(self, task) then return sdk.error(403, NOT_ALLOWED) end
             local d, errors = sdk.validate(body(self), { confirm_similar = { type = "boolean" } })
             if not d then U.invalid(errors) end
+            if B.is_builtin(ns, run.runner_uuid) then B.refresh(ns) end
             local key = ngx.req.get_headers()["Idempotency-Key"]
             local new = R.create(self, ns, task, {
                 runner_uuid = run.runner_uuid, profile = run.profile, model = run.model, repo_path = run.repo_path,

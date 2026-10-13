@@ -4,11 +4,12 @@
  * Runners & sources (ai_runners.manage): the connections that feed this workspace — runners (PromptPilot machines
  * that run AI tasks and report sessions) and sources (anything that only reports sessions, §27.1). Register (token
  * shown once + setup), rotate the token, pause / resume, revoke, each connection's sessions, what it reports
- * (§27.2), and who may start runs on a runner (Access, §25.1).
+ * (§27.2), and who may start runs on a runner (Access, §25.1). §28: the built-in runner (inside OpsAPI, no machine) is
+ * listed too — pause it or limit who may use it — with the GitHub installations whose repositories it works in.
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Copy, Filter, KeyRound, ListTree, Pause, Play, Plus, Server, Trash2, Users } from 'lucide-react';
+import { Bot, Copy, ExternalLink, Filter, GitBranch, KeyRound, ListTree, Pause, Play, Plus, RefreshCw, Server, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, ConfirmDialog, Input, Modal, Select, Table } from '@/components/ui';
@@ -17,7 +18,7 @@ import { AiRunnerPage, BASE, PRODUCT, ProfileList, RunnerStatusBadge, ago, useAi
 import { CheckList, TagsInput, strings, useMembers, useProjects } from '@/components/ai-runner/fields';
 import apiClient from '@/lib/api-client';
 import {
-  aiRunner, aiErrorText, type ConnectionKind, type Runner, type RunnerAccess, type RunnerAccessMode,
+  aiRunner, aiErrorText, type ConnectionKind, type GithubInstallation, type Runner, type RunnerAccess, type RunnerAccessMode,
 } from '@/services/ai-runner.service';
 
 export default function RunnersPage() {
@@ -101,7 +102,8 @@ const KINDS: { value: ConnectionKind; label: string; hint: string }[] = [
   { value: 'runner', label: 'Runner', hint: 'A machine running PromptPilot: it runs AI tasks from OpsAPI and reports its sessions.' },
   { value: 'source', label: 'Source', hint: 'Only reports sessions (a CI job, another observer, an IDE plugin…); it never runs tasks.' },
 ];
-const kindOf = (r: Pick<Runner, 'kind'>): ConnectionKind => (r.kind === 'source' ? 'source' : 'runner');
+const kindOf = (r: Pick<Runner, 'kind'>): ConnectionKind => (r.kind === 'source' || r.kind === 'builtin' ? r.kind : 'runner');
+const KIND_LABEL: Record<ConnectionKind, string> = { runner: 'Runner', source: 'Source', builtin: 'Built-in' };
 
 type Shown = { name: string; token: string; rotated: boolean; kind: ConnectionKind };
 
@@ -327,6 +329,116 @@ function ReportFilterModal({ runner, onClose, onSaved }: { runner: Runner; onClo
   );
 }
 
+/**
+ * §28: the built-in runner runs inside OpsAPI, so no machine is needed. It works without a repository (plans,
+ * comments, subtasks); with the GitHub App installed it works in the repositories chosen there, through pull requests.
+ */
+function BuiltinCard({ runner, onChanged }: { runner?: Runner; onChanged: () => void }) {
+  const github = useAiData(() => aiRunner.github(), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [disconnect, setDisconnect] = useState<GithubInstallation | null>(null);
+  const repos = (runner?.repos || []).filter((r) => r.path !== 'none');
+  const g = github.data;
+
+  async function run(key: string, fn: () => Promise<unknown>, ok: string) {
+    setBusy(key);
+    try {
+      await fn();
+      toast.success(ok);
+      github.refresh();
+      onChanged();
+    } catch (e) {
+      toast.error(aiErrorText(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="space-y-3 rounded-xl border border-secondary-200 bg-surface p-4" aria-labelledby="air-builtin-title" data-testid="air-builtin">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="air-builtin-title" className="flex items-center gap-2 text-base font-semibold text-secondary-900">
+            <Bot className="h-5 w-5 text-primary-600" aria-hidden /> Built-in runner: no machine needed
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-secondary-600">
+            Runs inside OpsAPI on an AI model: the workspace&apos;s own (AI providers), else the platform&apos;s. Without a repository it
+            plans, answers and adds comments and subtasks. With GitHub connected it reads the code and opens a pull request from its
+            own branch. It has no shell, so it can&apos;t run code or tests; for that, use a machine runner.
+          </p>
+        </div>
+        {runner && <RunnerStatusBadge status={runner.status} />}
+      </div>
+      <ErrorNote error={github.error} product={PRODUCT} />
+      {g && !g.configured && (
+        <p className="rounded-lg bg-secondary-100 p-3 text-sm text-secondary-700">
+          To work in repositories, a platform admin first sets up the GitHub App under{' '}
+          <Link className="underline" href={`${BASE}/platform`}>AI Runs platform settings</Link>.
+        </p>
+      )}
+      {g?.configured && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium text-secondary-800">GitHub</h3>
+            {g.install_url && (
+              <a href={g.install_url} className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+                <GitBranch className="h-4 w-4" aria-hidden /> {g.installations.length ? 'Connect another account or change repositories' : 'Connect GitHub'}
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            )}
+            <Button size="sm" variant="ghost" isLoading={busy === 'refresh'} leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />}
+              onClick={() => run('refresh', () => aiRunner.refreshRunners(), 'Repositories read from GitHub')}>
+              Refresh repositories
+            </Button>
+          </div>
+          {g.installations.length === 0 ? (
+            <p className="text-sm text-secondary-600">
+              No GitHub account connected yet. Connect GitHub installs the App on the repositories you choose; GitHub then brings you
+              back here to confirm.
+            </p>
+          ) : (
+            <ul className="divide-y divide-secondary-100 rounded-lg border border-secondary-200">
+              {g.installations.map((i) => (
+                <li key={i.uuid} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span>
+                    <span className="font-medium text-secondary-900">{i.account_login || `Installation ${i.installation_id}`}</span>
+                    <span className="text-secondary-500">
+                      {' '}· {i.account_type || 'account'} · {i.repository_selection === 'all' ? 'all repositories' : 'selected repositories'}
+                      {i.created_by_name ? ` · connected by ${i.created_by_name}` : ''}
+                    </span>
+                  </span>
+                  {g.can_manage && (
+                    <Button size="sm" variant="ghost" className="text-error-600" onClick={() => setDisconnect(i)}
+                      leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label={`Disconnect ${i.account_login || i.installation_id}`}>
+                      Disconnect
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-secondary-500" data-testid="air-builtin-repos">
+            {repos.length ? `Repositories it can work in: ${repos.map((r) => r.label || r.path).join(', ')}` : 'No repositories yet.'}
+          </p>
+        </div>
+      )}
+      <ConfirmDialog
+        isOpen={!!disconnect}
+        onClose={() => setDisconnect(null)}
+        onConfirm={async () => {
+          const i = disconnect;
+          setDisconnect(null);
+          if (i) await run(`disconnect:${i.uuid}`, () => aiRunner.githubDisconnect(i.uuid), 'GitHub account disconnected');
+        }}
+        title={`Disconnect ${disconnect?.account_login || 'this account'}?`}
+        message="The built-in runner stops offering its repositories to this workspace. The App stays installed on GitHub (uninstall it there to remove it everywhere)."
+        confirmText="Disconnect"
+        variant="danger"
+      />
+    </section>
+  );
+}
+
 function Runners() {
   const runners = useAiData(() => aiRunner.listRunners(), [], 15_000);
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -385,30 +497,41 @@ function Runners() {
     {
       key: 'kind', header: 'Kind', render: (r: Runner) => (
         <div>
-          <Badge size="sm" variant={kindOf(r) === 'source' ? 'info' : 'default'}>{kindOf(r) === 'source' ? 'Source' : 'Runner'}</Badge>
-          <div className="mt-1 text-xs text-secondary-500">{filterText(r.report_filter)}</div>
+          <Badge size="sm" variant={kindOf(r) === 'source' ? 'info' : kindOf(r) === 'builtin' ? 'success' : 'default'}>{KIND_LABEL[kindOf(r)]}</Badge>
+          {kindOf(r) !== 'builtin' && <div className="mt-1 text-xs text-secondary-500">{filterText(r.report_filter)}</div>}
         </div>
       ),
     },
     { key: 'status', header: 'Status', render: (r: Runner) => <RunnerStatusBadge status={r.status} /> },
     {
       key: 'machine', header: 'Machine', render: (r: Runner) => (
+        kindOf(r) === 'builtin' ? (
+          <div>
+            <div>Inside OpsAPI</div>
+            <div className="text-xs text-secondary-500">{plural((r.repos || []).filter((x) => x.path !== 'none').length, 'GitHub repo', 'GitHub repos')}</div>
+          </div>
+        ) : (
         <div>
           <div>{r.host || '—'}</div>
           {(r.os || r.version) && <div className="text-xs text-secondary-500">{[r.os, r.version && `v${r.version}`].filter(Boolean).join(' · ')}</div>}
           {kindOf(r) === 'runner' && <div className="text-xs text-secondary-500">{plural((r.repos || []).length, 'repo', 'repos')}</div>}
         </div>
+        )
       ),
     },
-    { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => ago(r.last_heartbeat_at) },
+    { key: 'heartbeat', header: 'Last heartbeat', render: (r: Runner) => (kindOf(r) === 'builtin' ? 'Always on' : ago(r.last_heartbeat_at)) },
     { key: 'profiles', header: 'Profiles', render: (r: Runner) => <ProfileList profiles={r.capabilities?.profiles} /> },
     { key: 'access', header: 'Access', render: (r: Runner) => (kindOf(r) === 'source' ? <span className="text-secondary-400">—</span> : accessText(r.access)) },
     {
       key: 'actions', header: 'Actions', render: (r: Runner) => r.status === 'revoked' ? null : (
         <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setSessionsOf(r)} leftIcon={<ListTree className="h-4 w-4" aria-hidden />} aria-label={`Sessions on ${r.name}`}>Sessions</Button>
-          <Button size="sm" variant="ghost" onClick={() => setFilterOf(r)} leftIcon={<Filter className="h-4 w-4" aria-hidden />} aria-label={`What ${r.name} reports`}>Reports</Button>
-          {kindOf(r) === 'runner' && (
+          {kindOf(r) !== 'builtin' && (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setSessionsOf(r)} leftIcon={<ListTree className="h-4 w-4" aria-hidden />} aria-label={`Sessions on ${r.name}`}>Sessions</Button>
+              <Button size="sm" variant="ghost" onClick={() => setFilterOf(r)} leftIcon={<Filter className="h-4 w-4" aria-hidden />} aria-label={`What ${r.name} reports`}>Reports</Button>
+            </>
+          )}
+          {kindOf(r) !== 'source' && (
             <Button size="sm" variant="ghost" onClick={() => setAccessOf(r)} leftIcon={<Users className="h-4 w-4" aria-hidden />} aria-label={`Access to ${r.name}`}>Access</Button>
           )}
           {r.status === 'paused' ? (
@@ -418,8 +541,12 @@ function Runners() {
             <Button size="sm" variant="ghost" isLoading={busy === `pause:${r.uuid}`} onClick={() => act(`pause:${r.uuid}`, () => aiRunner.pauseRunner(r.uuid), 'Runner paused')}
               leftIcon={<Pause className="h-4 w-4" aria-hidden />} aria-label={`Pause ${r.name}`}>Pause</Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'rotate', runner: r })} leftIcon={<KeyRound className="h-4 w-4" aria-hidden />} aria-label={`Rotate the token of ${r.name}`}>Rotate token</Button>
-          <Button size="sm" variant="ghost" className="text-error-600" onClick={() => setConfirm({ kind: 'revoke', runner: r })} leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label={`Revoke ${r.name}`}>Revoke</Button>
+          {kindOf(r) !== 'builtin' && (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'rotate', runner: r })} leftIcon={<KeyRound className="h-4 w-4" aria-hidden />} aria-label={`Rotate the token of ${r.name}`}>Rotate token</Button>
+              <Button size="sm" variant="ghost" className="text-error-600" onClick={() => setConfirm({ kind: 'revoke', runner: r })} leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label={`Revoke ${r.name}`}>Revoke</Button>
+            </>
+          )}
         </div>
       ),
     },
@@ -433,11 +560,13 @@ function Runners() {
         icon={<Server className="h-6 w-6" />}
         actions={<Button leftIcon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setRegisterOpen(true)}>Register</Button>}
       />
+      <BuiltinCard runner={(runners.data || []).find((r) => kindOf(r) === 'builtin')} onChanged={runners.refresh} />
       <div className="w-56 max-w-full">
         <Select id="air-r-kind" label="Kind" value={kindFilter} onChange={(e) => setKindFilter(e.target.value as '' | ConnectionKind)}>
           <option value="">Runners and sources</option>
           <option value="runner">Runners</option>
           <option value="source">Sources</option>
+          <option value="builtin">Built-in</option>
         </Select>
       </div>
       <ErrorNote error={runners.error} product={PRODUCT} />

@@ -269,7 +269,7 @@ check("only the hash is stored", one(f"SELECT token_hash FROM ar_runners WHERE u
 expect("runner names are unique per workspace", call("POST", P + "/runners", "mgr", A, {"name": "Mac-Studio"}), 409)
 check("a new runner is for its owner (and AI-run managers) only, shown to runner managers",
       reg["runner"].get("access") == {"mode": "owner", "users": [], "projects": []}, reg["runner"])
-lst = call("GET", P + "/runners", "dev", A)
+lst = call("GET", P + "/runners?kind=runner", "dev", A)  # (every workspace also has its built-in runner, §28)
 check("... so a developer's runners list leaves it out", lst[0] == 200 and lst[1]["data"] == [], lst[:2])
 expect("... and a developer can't open it (404)", call("GET", P + f"/runners/{RUNNER}", "dev", A), 404)
 acc = expect("manager opens the runner to everyone", call("PUT", P + f"/runners/{RUNNER}/access", "mgr", A,
@@ -641,7 +641,7 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
 check("plugin migrations are tracked once each", one(
-    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "6")
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "7")
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -2659,6 +2659,7 @@ for rid, cmd, status, reason in (
 DEF = {"heartbeat_s": 15, "claim_wait_s": 25, "lease_s": 60, "online_s": 45, "queue_timeout_hours": 24,
        "approval_timeout_hours": 72, "max_events_per_run": 20000, "max_queued_followups": 50,
        "max_requests_per_run": 500, "max_tracked_per_heartbeat_cap": 100,
+       "builtin_max_runs": 2, "builtin_max_runs_per_workspace": 1, "builtin_max_steps": 40,
        "guard_max": {"max_open_runs_per_user": 100, "max_open_runs_per_workspace": 1000,
                      "daily_token_limit": 1000000000, "retention_days": 3650, "max_run_minutes": 1440}}
 PS = P + "/platform/settings"
@@ -2768,8 +2769,10 @@ if MIGRATE:
           and expect("settings", call("GET", P + "/settings", "mgr", A), 200)["safety"]["extra_redactions"]
           == ["ACME-[0-9]{4}"], (out.stdout + out.stderr)[-600:])
     # A database from before §27: the connection columns come back with every connection a runner reporting everything.
+    # (and before §28, whose migration widens the kind CHECK that migration 6 makes)
     sql("ALTER TABLE ar_runners DROP COLUMN kind, DROP COLUMN report_filter")
-    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG6}'")
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name IN ('{MIG6}', "
+        f"'20261014090000_ai_runner_builtin')")
     out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
     check("... and on a database from before it, every connection is a runner reporting everything",
           out.returncode == 0 and one("SELECT string_agg(DISTINCT kind || '|' || report_filter::text, ',') "

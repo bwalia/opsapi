@@ -17,10 +17,10 @@ cleanup() {
   if [ -n "${KEEP:-}" ]; then
     echo "KEEP: sandbox left running (ar-api-$ID, ar-pg-$ID, network $NET, $W)"
     echo "      API $AR_API  ·  psql: docker exec -it ar-pg-$ID psql -U postgres -d e2e"
-    echo "      remove: docker rm -f ar-api-$ID ar-pg-$ID; docker network rm $NET; rm -rf $W"
+    echo "      remove: docker rm -f ar-api-$ID ar-pg-$ID ar-mock-$ID; docker network rm $NET; rm -rf $W"
     return
   fi
-  docker rm -f "ar-api-$ID" "ar-pg-$ID" >/dev/null 2>&1 || true
+  docker rm -f "ar-api-$ID" "ar-pg-$ID" "ar-mock-$ID" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$W"
 }
@@ -50,12 +50,16 @@ docker exec "ar-pg-$ID" psql -U postgres -d e2e -qc 'CREATE EXTENSION IF NOT EXI
   CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
   CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS cube; CREATE EXTENSION IF NOT EXISTS earthdistance;'
 
+# A stand-in for Ollama (the platform model) and GitHub, for the built-in runner suite (builtin_test.py).
+docker run -d --name "ar-mock-$ID" --network "$NET" --network-alias ar-mock -p 127.0.0.1::8080 \
+  -v "$W/src/projects/ai-runner/spec/mock_ai_github.py:/mock.py:ro" python:3.12-alpine python3 -I /mock.py >/dev/null
 docker run -d --name "ar-api-$ID" --network "$NET" -p 127.0.0.1::80 -v "$W/src/lapis:/app" \
   -v "$W/src/projects:/app/projects" \
   -e POSTGRES_HOST=ar-pg -e POSTGRES_USER=pguser -e POSTGRES_PASSWORD=pgpassword -e POSTGRES_DB=e2e \
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=all -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
-  -e FRONTEND_URL=https://dash.example.invalid -e REDIS_ENABLED=false lapis-lapis >/dev/null
+  -e FRONTEND_URL=https://dash.example.invalid -e REDIS_ENABLED=false \
+  -e OLLAMA_URL=http://ar-mock:8080 -e OLLAMA_MODEL=mock-qwen -e AI_FALLBACK_PROVIDER=none lapis-lapis >/dev/null
 sleep 6
 [ "$(docker inspect -f '{{.State.Running}}' "ar-api-$ID")" = true ] || { docker logs "ar-api-$ID" 2>&1 | tail -40; exit 1; }
 migrate() { docker exec -w /app "ar-api-$ID" lapis migrate > "$W/migrate-$1.log" 2>&1 || { tail -40 "$W/migrate-$1.log"; exit 1; }; }
@@ -83,10 +87,11 @@ docker exec "ar-pg-$ID" psql -U postgres -d e2e -qc "INSERT INTO user__roles (uu
 
 PORT=$(docker port "ar-api-$ID" 80/tcp | head -1 | sed 's/.*://')
 AR_API="http://127.0.0.1:$PORT"
-export AR_API AR_JWT_SECRET="$JWT_SECRET" AR_PSQL="docker exec -i ar-pg-$ID psql -U postgres -d e2e -tA -c" \
+AR_MOCK="http://127.0.0.1:$(docker port "ar-mock-$ID" 8080/tcp | head -1 | sed 's/.*://')"
+export AR_API AR_MOCK AR_JWT_SECRET="$JWT_SECRET" AR_PSQL="docker exec -i ar-pg-$ID psql -U postgres -d e2e -tA -c" \
   AR_MIGRATE="docker exec -w /app ar-api-$ID lapis migrate"
 # PROMPTPILOT_BIN=/path/to/promptpilot PROMPTPILOT_DIR=/path/to/promptpilot-source adds the real runner suite.
-SUITES=${ONLY:-ai_runner_test${PROMPTPILOT_BIN:+ promptpilot_test}}
+SUITES=${ONLY:-ai_runner_test builtin_test${PROMPTPILOT_BIN:+ promptpilot_test}}
 ( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
   echo "--- server errors ---"
   docker exec "ar-api-$ID" sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' \

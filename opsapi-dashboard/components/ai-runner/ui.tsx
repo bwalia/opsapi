@@ -19,6 +19,11 @@ import {
 export const BASE = '/dashboard/ai-runner';
 export const PRODUCT = 'AI Runs';
 
+/** §28: a built-in run's "folder" is a GitHub repository ("github:owner/name") or none; a machine run's is a path. */
+export const isRepoRef = (path?: string | null) => path === 'none' || !!path?.startsWith('github:');
+export const repoText = (path?: string | null) =>
+  path === 'none' ? 'No repository' : path?.startsWith('github:') ? `GitHub ${path.slice(7)}` : path || '—';
+
 // Plugin on/off per workspace, probed at most once a minute. Every plugin route answers
 // 404 (PLUGIN_DISABLED, or no route when the plugin isn't deployed) before it checks the role,
 // so a 403 still means "on".

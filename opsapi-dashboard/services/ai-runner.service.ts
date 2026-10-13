@@ -43,6 +43,8 @@ export interface RunnerRepo {
   remote?: string;
   branch?: string;
   dirty?: boolean;
+  /** §28 built-in runner: "owner/name", or what "none" means. */
+  label?: string;
 }
 /**
  * Who may start runs on a runner (§25.1). owner: its owner and AI-run managers; everyone: anyone who may start runs;
@@ -54,8 +56,11 @@ export interface RunnerAccess {
   users?: string[];
   projects?: string[];
 }
-/** §27.1: a runner runs tasks and reports sessions; a source only reports sessions (it can't claim runs). */
-export type ConnectionKind = 'runner' | 'source';
+/**
+ * §27.1: a runner runs tasks and reports sessions; a source only reports sessions (it can't claim runs). §28: every
+ * workspace also has one built-in runner, inside OpsAPI (no machine, no token).
+ */
+export type ConnectionKind = 'runner' | 'source' | 'builtin';
 /**
  * §27.2: what a connection reports, narrowing what its machine owner allows (inventory_roots). Empty = everything
  * the owner allows.
@@ -453,9 +458,33 @@ export interface PlatformSettings {
   /** Where task links point ("" = the deployment's FRONTEND_URL, given as dashboardUrlFallback). */
   dashboardUrl: string;
   dashboardUrlFallback: string;
+  /** §28.3: the GitHub App the built-in runner works through (secrets: only whether they are set). */
+  github: GithubApp;
 }
+export interface GithubApp {
+  api_url: string;
+  web_url: string;
+  app_id: string;
+  app_slug: string;
+  client_id: string;
+  has_client_secret: boolean;
+  has_private_key: boolean;
+  /** Give GitHub this as the App's callback URL and setup URL. */
+  callback_url: string;
+  default_api_url: string;
+  default_web_url: string;
+  configured: boolean;
+}
+/** What a save of the GitHub App sends: only the keys given change; "" clears one. Secrets are write-only. */
+export type GithubAppInput = Partial<Pick<GithubApp, 'api_url' | 'web_url' | 'app_id' | 'app_slug' | 'client_id'>>
+  & { client_secret?: string; private_key?: string };
+const EMPTY_GITHUB: GithubApp = {
+  api_url: '', web_url: '', app_id: '', app_slug: '', client_id: '', has_client_secret: false, has_private_key: false,
+  callback_url: '', default_api_url: 'https://api.github.com', default_web_url: 'https://github.com', configured: false,
+};
 function platform(d: Record<string, unknown>): PlatformSettings {
-  const { defaults, bounds, updated_at, dashboard_url, dashboard_url_fallback, ...rest } = d || {};
+  // github is its own section (never sent back with the numbers: that would clear the App).
+  const { defaults, bounds, updated_at, dashboard_url, dashboard_url_fallback, github, ...rest } = d || {};
   // Every number, and objects of numbers (guard_max); not updated_by.
   const values = Object.fromEntries(Object.entries(rest).filter(([, x]) => typeof x === 'number' || (!!x && typeof x === 'object')));
   return {
@@ -463,7 +492,28 @@ function platform(d: Record<string, unknown>): PlatformSettings {
     bounds: (bounds ?? {}) as PlatformSettings['bounds'], updated_at: updated_at as string | null,
     dashboardUrl: typeof dashboard_url === 'string' ? dashboard_url : '',
     dashboardUrlFallback: typeof dashboard_url_fallback === 'string' ? dashboard_url_fallback : '',
+    github: { ...EMPTY_GITHUB, ...(github && typeof github === 'object' ? github as Partial<GithubApp> : {}) },
   };
+}
+
+/** §28.3: a GitHub App installation this workspace connected. */
+export interface GithubInstallation {
+  uuid: string;
+  installation_id: number;
+  account_login: string | null;
+  account_type: string | null;
+  repository_selection: string | null;
+  created_by_name: string | null;
+  created_at: string;
+}
+export interface GithubStatus {
+  /** The platform has a GitHub App set up. */
+  configured: boolean;
+  can_manage: boolean;
+  /** GitHub's page to install the App (or change its repositories); managers only. */
+  install_url: string | null;
+  installations: GithubInstallation[];
+  web_url: string;
 }
 
 /** GET /overview (§24.5): numbers for managers. */
@@ -673,6 +723,21 @@ export const aiRunner = {
   /** Only the keys given change. */
   savePlatformSettings: async (v: PlatformValues, dashboardUrl?: string) =>
     platform(await send<Record<string, unknown>>('put', '/platform/settings', dashboardUrl === undefined ? v : { ...v, dashboard_url: dashboardUrl })),
+  /** §28.3: the GitHub App alone (null clears all of it). */
+  saveGithubApp: async (g: GithubAppInput | null) =>
+    platform(await send<Record<string, unknown>>('put', '/platform/settings', { github: g })),
+
+  // §28.3 GitHub for the built-in runner: the workspace's installations.
+  github: async (): Promise<GithubStatus> => {
+    const d = (await get<GithubStatus>('/github')).data;
+    return { ...d, installations: list<GithubInstallation>(d.installations) };
+  },
+  /** The GitHub sign-in that proves the person can reach the installation GitHub just named. */
+  githubAuthorize: (installationId: number) => send<{ url: string }>('post', '/github/authorize', { installation_id: installationId }),
+  githubConnect: (code: string, state: string) => send<GithubInstallation>('post', '/github/installations', { code, state }),
+  githubDisconnect: (uuid: string) => send<unknown>('delete', `/github/installations/${id(uuid)}`),
+  /** The runners list, with the built-in runner's repositories read from GitHub again. */
+  refreshRunners: async () => list<Runner>((await get<Runner[]>('/runners?refresh=1')).data),
 };
 
 export default aiRunner;

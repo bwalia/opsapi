@@ -28,6 +28,8 @@ local db = require("lapis.db")
 local sdk = require("helper.plugin-sdk")
 local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
+local B = require("ai_runner.builtin")
+local G = require("ai_runner.github")
 
 local function body(self)
     local b, err = sdk.body(self)
@@ -65,6 +67,11 @@ local function runner_or_404(ns, uuid)
     local r = R.runner(ns, uuid)
     if not r then U.fail(404, "Runner not found") end
     return r
+end
+
+-- §28: the built-in runner has no token and is never revoked (a workspace pauses it, or limits who may use it).
+local function not_builtin(r, what)
+    if r.kind == "builtin" then U.fail(409, "The built-in runner " .. what) end
 end
 
 local function may_list_runners(self)
@@ -134,8 +141,66 @@ local function platform_view()
     -- Where task links point; "" = the deployment's FRONTEND_URL (shown so the page can say what that is).
     v.dashboard_url = R.base_url(type(stored) == "table" and stored.dashboard_url) or ""
     v.dashboard_url_fallback = R.frontend_url()
+    -- §28.3: the GitHub App; secrets are only ever "set" or not.
+    local gh = type(stored) == "table" and type(stored.github) == "table" and stored.github or {}
+    local function str(x) return type(x) == "string" and x or "" end
+    v.github = { api_url = str(gh.api_url), web_url = str(gh.web_url), app_id = gh.app_id and tostring(gh.app_id) or "",
+        app_slug = str(gh.app_slug), client_id = str(gh.client_id),
+        has_client_secret = type(gh.client_secret_sealed) == "string",
+        has_private_key = type(gh.private_key_sealed) == "string",
+        callback_url = (v.dashboard_url ~= "" and v.dashboard_url or v.dashboard_url_fallback)
+            .. "/dashboard/ai-runner/github",
+        default_api_url = G.API_URL, default_web_url = G.WEB_URL }
+    v.github.configured = v.github.app_id ~= "" and v.github.app_slug ~= "" and v.github.client_id ~= ""
+        and v.github.has_client_secret and v.github.has_private_key
     v.updated_at, v.updated_by = U.null(row.updated_at), U.null(row.updated_by)
     return v
+end
+
+-- §28.3: the GitHub App settings as stored, from a PUT's github object. Only the keys given change; null or ""
+-- clears one; null for the whole object clears them all. The client secret and private key are sealed and never
+-- returned.
+local function github_of(given, current)
+    if given == cjson.null then return nil end
+    if not U.object(given) then U.invalid({ github = "must be an object" }) end
+    local out = U.object(current) or {}
+    local function set(k, check, message)
+        local v = given[k]
+        if v == nil then return end
+        if v == cjson.null or v == "" then out[k] = nil return end
+        local ok = type(v) == "string" and check(v)
+        if not ok then U.invalid({ ["github." .. k] = message }) end
+        out[k] = ok
+    end
+    set("api_url", G.base_url,
+        "must be an address like https://api.github.com (GitHub Enterprise: https://host/api/v3)")
+    set("web_url", G.base_url, "must be an address like https://github.com")
+    set("app_id", function(v) return v:match("^%d+$") and #v <= 20 and v end, "must be the App ID (a number)")
+    set("app_slug", function(v) return v:match("^[%w%-]+$") and #v <= 100 and v end,
+        "must be the App's slug, as in github.com/apps/<slug>")
+    set("client_id", function(v) return v:match("^[%w%.]+$") and #v <= 100 and v end, "must be the App's client ID")
+    local Box = require("helper.secret-box")
+    for k, check in pairs({
+        client_secret = function(v) return v:match("^[%w]+$") and #v <= 200 end,
+        private_key = function(v)
+            v = v:gsub("\\n", "\n")
+            local ok, key = pcall(require("resty.openssl.pkey").new, v)
+            return #v <= 16384 and ok and key and key:is_private() and key:get_key_type().sn == "rsaEncryption" and v
+        end,
+    }) do
+        local v = given[k]
+        if v == cjson.null or v == "" then
+            out[k .. "_sealed"] = nil
+        elseif v ~= nil then
+            local plain = type(v) == "string" and check(v)
+            if not plain then
+                U.invalid({ ["github." .. k] = k == "private_key" and "must be the App's private key (PEM, RSA)"
+                    or "must be the App's client secret" })
+            end
+            out[k .. "_sealed"] = Box.seal(plain == true and v or plain, G.PURPOSE)
+        end
+    end
+    return next(out) and out or nil
 end
 
 local function template_view(t)
@@ -153,13 +218,16 @@ return function(app)
         local page, per_page, offset = sdk.page(self.params)
         local all = self.params.include_revoked == "true" or self.params.include_revoked == "1"
         local kind = self.params.kind
-        if kind ~= nil and kind ~= "" and kind ~= "runner" and kind ~= "source" then
-            U.fail(400, "kind must be runner or source")
+        if kind ~= nil and kind ~= "" and kind ~= "runner" and kind ~= "source" and kind ~= "builtin" then
+            U.fail(400, "kind must be runner, source or builtin")
+        end
+        if kind ~= "runner" and kind ~= "source" then
+            B.refresh(ns, self.params.refresh == "1" or self.params.refresh == "true")
         end
         local cond, args = R.runner_access_sql(self, ns)
         local w = cond .. " AND r.namespace_id = ?" .. (all and "" or " AND r.status <> 'revoked'")
         args[#args + 1] = ns
-        if kind == "runner" or kind == "source" then
+        if kind == "runner" or kind == "source" or kind == "builtin" then
             w = w .. " AND r.kind = ?"
             args[#args + 1] = kind
         end
@@ -168,7 +236,7 @@ return function(app)
         q_args[#q_args + 1] = offset
         local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
         for i, r in ipairs(db.query("SELECT " .. R.runner_cols() .. " FROM ar_runners r WHERE " .. w
-            .. " ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?", unpack(q_args))) do
+            .. " ORDER BY r.kind = 'builtin', lower(r.name), r.id LIMIT ? OFFSET ?", unpack(q_args))) do
             out[i] = R.runner_view(r, show_access)
         end
         local total = db.query("SELECT COUNT(*)::int AS n FROM ar_runners r WHERE " .. w, unpack(args))[1].n
@@ -207,6 +275,7 @@ return function(app)
         if not d or d.name == db.NULL or d.name == "" then U.invalid(errors or { name = "is required" }) end
         local name, l, rf = d.name and U.clean(d.name) or r.name, labels_of(b.labels), report_filter_of(b.report_filter)
         local kind = type(d.kind) == "string" and d.kind or r.kind
+        if r.kind == "builtin" and kind ~= "builtin" then U.invalid({ kind = "the built-in runner stays built-in" }) end
         db.query([[UPDATE ar_runners SET name = ?, labels = COALESCE(?::jsonb, labels), kind = ?,
             report_filter = COALESCE(?::jsonb, report_filter), updated_at = NOW() WHERE id = ?]],
             name, l and cjson.encode(l) or db.NULL, kind, rf and cjson.encode(rf) or db.NULL, r.id)
@@ -232,6 +301,7 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local r = runner_or_404(ns, self.params.uuid)
         if r.status == "revoked" then U.fail(409, "This runner was revoked") end
+        not_builtin(r, "has no token")
         local raw, hash, hint = U.new_token()
         db.query("UPDATE ar_runners SET token_hash = ?, token_hint = ?, updated_at = NOW() WHERE id = ?", hash, hint,
             r.id)
@@ -252,6 +322,7 @@ return function(app)
     app:delete("/runners/:uuid", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local r = runner_or_404(ns, self.params.uuid)
+        not_builtin(r, "can't be revoked; pause it instead")
         if r.status ~= "revoked" then
             U.tx(function()
                 db.query([[UPDATE ar_runners SET status = 'revoked', revoked_at = NOW(), updated_at = NOW()
@@ -371,7 +442,7 @@ return function(app)
         local runners = U.one([[SELECT COUNT(*) FILTER (WHERE status = 'active' AND ]] .. online .. [[)::int AS online,
                 COUNT(*) FILTER (WHERE status = 'active' AND NOT COALESCE(]] .. online .. [[, false))::int AS offline,
                 COUNT(*) FILTER (WHERE status = 'paused')::int AS paused
-            FROM ar_runners WHERE namespace_id = ? AND status <> 'revoked']], ns)
+            FROM ar_runners WHERE namespace_id = ? AND status <> 'revoked' AND kind <> 'builtin']], ns)
         local today = "date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
         local cost = U.one([[SELECT COALESCE(SUM(cost_estimate), 0) AS c FROM ar_run_turns
             WHERE namespace_id = ? AND role = 'assistant' AND at >= ]] .. today, ns).c
@@ -670,6 +741,10 @@ return function(app)
                 stored.dashboard_url = url
             end
             b.dashboard_url = nil
+        end
+        if b.github ~= nil then
+            stored.github = github_of(b.github, stored.github)
+            b.github = nil
         end
         apply(stored, b, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS, "")
         if b.guard_max == cjson.null then

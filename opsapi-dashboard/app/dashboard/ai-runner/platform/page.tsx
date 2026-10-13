@@ -4,17 +4,20 @@
  * AI Runs platform settings (docs/AI_RUNNER.md §27.5): timings and limits for every workspace, platform admins only.
  * The server decides who may see them (403 for everyone else), so the page shows nothing to others even when their
  * cached roles are stale; AI run settings links here only for platform admins (no sidebar entry: plugin menu items
- * can't be admin-only). Only the fields shown are saved.
+ * can't be admin-only). Only the fields shown are saved. §28: the built-in runner's limits, and the GitHub App it works
+ * through (its own form: the client secret and private key are write-only).
  */
 import React, { useEffect, useState } from 'react';
-import { Lock, SlidersHorizontal } from 'lucide-react';
+import { GitBranch, Lock, SlidersHorizontal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Card, Input } from '@/components/ui';
+import { Button, Card, Input, Textarea } from '@/components/ui';
 import { ErrorNote, Spinner } from '@/components/property-deals/ui';
 import { AiRunnerPage, PRODUCT, useAiData } from '@/components/ai-runner/ui';
 import { shown, typed } from '@/components/ai-runner/fields';
-import { aiRunner, aiErrorText, type Bounds, type PlatformValues } from '@/services/ai-runner.service';
+import {
+  aiRunner, aiErrorText, type Bounds, type GithubApp, type GithubAppInput, type PlatformValues,
+} from '@/services/ai-runner.service';
 
 export default function AiRunsPlatformPage() {
   return (
@@ -23,6 +26,7 @@ export default function AiRunsPlatformPage() {
         <PageHeader title="AI Runs platform settings" description="Timings and limits for every workspace. Only platform admins see this page."
           icon={<SlidersHorizontal className="h-6 w-6" />} />
         <Platform />
+        <GithubAppForm />
       </div>
     </AiRunnerPage>
   );
@@ -61,6 +65,15 @@ const GROUPS: Group[] = [
         key: 'max_tracked_per_heartbeat_cap', label: 'New tracked tasks per heartbeat, at most', min: 1, max: 1000, def: 100,
         help: "The highest a workspace may set for New tasks per heartbeat.",
       },
+    ],
+  },
+  {
+    title: 'Built-in runner',
+    intro: 'Runs inside OpsAPI on the AI models (no machine). Keep these within what the model server can take at once.',
+    fields: [
+      { key: 'builtin_max_runs', label: 'Built-in runs at once (all workspaces)', min: 1, max: 100, def: 2, help: 'More wait in the queue.' },
+      { key: 'builtin_max_runs_per_workspace', label: 'Built-in runs at once per workspace', min: 1, max: 20, def: 1, help: '' },
+      { key: 'builtin_max_steps', label: 'Agent steps per run', min: 5, max: 200, def: 40, help: 'Model calls in one run; a run that needs more fails.' },
     ],
   },
   {
@@ -171,6 +184,100 @@ function Platform() {
         ))}
         <div className="flex justify-end">
           <Button type="submit" isLoading={busy}>Save platform settings</Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+const GITHUB_FIELDS: { key: keyof GithubAppInput & keyof GithubApp; label: string; help: string; placeholder?: string }[] = [
+  { key: 'app_id', label: 'App ID', help: 'On the App’s General page.' },
+  { key: 'app_slug', label: 'App slug', help: 'As in github.com/apps/<slug>.' },
+  { key: 'client_id', label: 'Client ID', help: 'On the App’s General page.' },
+  { key: 'api_url', label: 'API address', help: 'Empty = GitHub.com. GitHub Enterprise Server: https://<host>/api/v3.', placeholder: 'https://api.github.com' },
+  { key: 'web_url', label: 'Web address', help: 'Empty = GitHub.com. GitHub Enterprise Server: https://<host>.', placeholder: 'https://github.com' },
+];
+
+/**
+ * §28.3: the GitHub App the built-in runner works through, for every workspace. Each workspace installs it on the
+ * repositories it chooses (Runners & sources → Connect GitHub).
+ */
+function GithubAppForm() {
+  const loaded = useAiData(() => aiRunner.getPlatformSettings(), []);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [secret, setSecret] = useState('');
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState<'save' | 'remove' | null>(null);
+  const [g, setG] = useState<GithubApp | null>(null);
+  useEffect(() => {
+    const x = loaded.data?.github;
+    if (x) { setG(x); setForm(Object.fromEntries(GITHUB_FIELDS.map((f) => [f.key, String(x[f.key] ?? '')]))); }
+  }, [loaded.data]);
+  if (loaded.error || !g) return null; // the settings card above says why
+
+  async function save(input: GithubAppInput | null, which: 'save' | 'remove') {
+    setBusy(which);
+    try {
+      const saved = await aiRunner.saveGithubApp(input);
+      setG(saved.github);
+      setForm(Object.fromEntries(GITHUB_FIELDS.map((f) => [f.key, String(saved.github[f.key] ?? '')])));
+      setSecret('');
+      setKey('');
+      toast.success(which === 'remove' ? 'GitHub App removed' : 'GitHub App saved');
+    } catch (err) {
+      toast.error(aiErrorText(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const input: GithubAppInput = { ...form };
+    if (secret.trim()) input.client_secret = secret.trim();
+    if (key.trim()) input.private_key = key.trim();
+    save(input, 'save');
+  }
+
+  return (
+    <Card>
+      <form onSubmit={submit} className="space-y-5" aria-labelledby="air-gh-title">
+        <div>
+          <h2 id="air-gh-title" className="flex items-center gap-2 text-base font-semibold text-secondary-900">
+            <GitBranch className="h-5 w-5" aria-hidden /> GitHub App {g.configured ? '(set up)' : '(not set up)'}
+          </h2>
+          <p className="mt-1 text-sm text-secondary-600">
+            The built-in runner reads code and opens pull requests through one GitHub App. Workspaces install it on the repositories
+            they choose; OpsAPI never sees a personal token.
+          </p>
+        </div>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary-700">
+          <li>On GitHub: Settings → Developer settings → GitHub Apps → New GitHub App.</li>
+          <li>
+            Callback URL and Setup URL: <code className="break-all font-mono text-xs" data-testid="air-gh-callback">{g.callback_url}</code>.
+            Tick <em>Redirect on update</em>. Leave <em>Request user authorization during installation</em> off, and the webhook inactive.
+          </li>
+          <li>Repository permissions: Contents read and write, Pull requests read and write (Metadata read comes with them).</li>
+          <li>Create it, generate a private key and a client secret, and enter them here.</li>
+        </ol>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {GITHUB_FIELDS.map((f) => (
+            <Input key={f.key} id={`air-gh-${f.key}`} label={f.label} value={form[f.key] ?? ''} placeholder={f.placeholder}
+              onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} helperText={f.help} spellCheck={false} autoComplete="off" />
+          ))}
+          <Input id="air-gh-client_secret" label="Client secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
+            autoComplete="new-password" placeholder={g.has_client_secret ? 'Saved; type to replace' : ''}
+            helperText={g.has_client_secret ? 'Saved (never shown). Leave empty to keep it.' : 'Generate one on the App’s General page.'} />
+        </div>
+        <Textarea id="air-gh-private_key" label="Private key (PEM)" rows={4} value={key} onChange={(e) => setKey(e.target.value)}
+          className="font-mono text-xs" spellCheck={false} placeholder={g.has_private_key ? 'Saved; paste a new key to replace it' : '-----BEGIN RSA PRIVATE KEY-----'}
+          helperText={g.has_private_key ? 'Saved (never shown). Leave empty to keep it.' : 'The .pem file GitHub downloads when you generate a private key.'} />
+        <div className="flex flex-wrap justify-end gap-2">
+          {(g.configured || g.app_id) && (
+            <Button type="button" variant="ghost" className="text-error-600" isLoading={busy === 'remove'} disabled={busy !== null}
+              onClick={() => save(null, 'remove')}>Remove the GitHub App</Button>
+          )}
+          <Button type="submit" isLoading={busy === 'save'} disabled={busy !== null}>Save GitHub App</Button>
         </div>
       </form>
     </Card>
