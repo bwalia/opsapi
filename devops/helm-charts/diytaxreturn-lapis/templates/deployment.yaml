@@ -248,6 +248,16 @@ spec:
             - name: CORS_ALLOWED_ORIGINS
               value: {{ .Values.corsAllowedOrigins | quote }}
             {{- end }}
+            # ── Google sign-in callback ────────────────────────────────────
+            # GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI come from the shared Vault
+            # ExternalSecret, whose REDIRECT_URI is diytaxreturn's callback —
+            # so Google sent other tenants' sign-ins to the diytaxreturn API.
+            # ``googleRedirectUri`` points Google back at THIS release; it must
+            # also be listed as an authorised redirect URI on the OAuth client.
+            {{- if .Values.googleRedirectUri }}
+            - name: GOOGLE_REDIRECT_URI
+              value: {{ .Values.googleRedirectUri | quote }}
+            {{- end }}
             # ── Workstation AI Shop (feature "shop") ───────────────────────
             # Non-secret shop config, owned by git per env (values-workstation-*.yaml
             # `shop:` block). Both OPTIONAL — omitted when unset, so other
