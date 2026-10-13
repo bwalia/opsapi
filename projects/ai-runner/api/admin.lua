@@ -128,8 +128,12 @@ end
 -- The values in force (from the row, not the cache: what was just saved), the defaults, the bounds, who saved.
 local function platform_view()
     local row = U.one("SELECT settings, updated_by, updated_at FROM ar_platform_settings WHERE id = 1") or {}
-    local v = R.platform_values(U.json(row.settings), R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
+    local stored = U.json(row.settings)
+    local v = R.platform_values(stored, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
     v.defaults, v.bounds = R.PLATFORM_DEFAULTS, bounds_view(R.PLATFORM_BOUNDS)
+    -- Where task links point; "" = the deployment's FRONTEND_URL (shown so the page can say what that is).
+    v.dashboard_url = R.base_url(type(stored) == "table" and stored.dashboard_url) or ""
+    v.dashboard_url_fallback = R.frontend_url()
     v.updated_at, v.updated_by = U.null(row.updated_at), U.null(row.updated_by)
     return v
 end
@@ -654,6 +658,18 @@ return function(app)
             for k, v in pairs(clean) do
                 if v == db.NULL then into[k] = nil else into[k] = v end
             end
+        end
+        if b.dashboard_url ~= nil then
+            if b.dashboard_url == cjson.null or b.dashboard_url == "" then
+                stored.dashboard_url = nil
+            else
+                local url = R.base_url(b.dashboard_url)
+                if not url then
+                    U.invalid({ dashboard_url = "must be the dashboard's address, like https://ops.example.com (no path)" })
+                end
+                stored.dashboard_url = url
+            end
+            b.dashboard_url = nil
         end
         apply(stored, b, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS, "")
         if b.guard_max == cjson.null then
