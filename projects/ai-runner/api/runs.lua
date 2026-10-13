@@ -123,13 +123,14 @@ local function list(self, ns, params)
     return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
 end
 
--- The runners the caller may use for a task of this project (§25.1).
+-- The runners the caller may use for a task of this project (§25.1); sources run nothing (§27.1).
 local function runners(self, ns, project_uuid)
     local cond, args = R.runner_access_sql(self, ns, project_uuid)
     args[#args + 1] = ns
     local out, show_access = {}, sdk.can(self, "ai_runners", "manage")
-    for i, r in ipairs(db.query("SELECT " .. R.RUNNER_COLS .. " FROM ar_runners r WHERE " .. cond
-        .. " AND r.namespace_id = ? AND r.status <> 'revoked' ORDER BY lower(r.name), r.id LIMIT 100", unpack(args))) do
+    for i, r in ipairs(db.query("SELECT " .. R.runner_cols() .. " FROM ar_runners r WHERE " .. cond
+        .. " AND r.namespace_id = ? AND r.status <> 'revoked' AND r.kind = 'runner' ORDER BY lower(r.name), r.id "
+        .. "LIMIT 100", unpack(args))) do
         out[i] = R.runner_view(r, show_access)
     end
     return out
@@ -337,10 +338,10 @@ return function(app)
             if not R.IS_ACTIVE[now.status] then
                 U.fail(409, "This run isn't working right now (" .. now.status .. ")", { status = now.status })
             end
-            -- §25.7: the agent hasn't taken the ones already waiting; don't pile more on.
+            -- §25.7: the agent hasn't taken the ones already waiting; don't pile more on (§27.5 max_queued_followups).
             local queued = U.one([[SELECT COUNT(*)::int AS n FROM ar_run_turns WHERE run_uuid = ? AND role = 'user'
                 AND status = 'queued']], run.uuid).n
-            if queued >= R.MAX_QUEUED_TURNS then
+            if queued >= R.platform().max_queued_followups then
                 U.fail(409, "This run already has " .. queued .. " messages waiting for the agent", { queued = queued })
             end
             return R.insert_turn(run, { role = "user", status = "queued", author_user_uuid = me,

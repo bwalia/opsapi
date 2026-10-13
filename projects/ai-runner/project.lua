@@ -31,7 +31,7 @@ return {
     -- Native pages in opsapi-dashboard/app/dashboard/ai-runner.
     menu = {
         { label = "AI Runs", route = "/dashboard/ai-runner/runs", module = "ai_runs", icon = "Bot" },
-        { label = "Runners", route = "/dashboard/ai-runner/runners", module = "ai_runners", icon = "Server" },
+        { label = "Runners & sources", route = "/dashboard/ai-runner/runners", module = "ai_runners", icon = "Server" },
         { label = "Machines", route = "/dashboard/ai-runner/machines", module = "ai_runners", icon = "Monitor" },
         { label = "AI run settings", route = "/dashboard/ai-runner/settings", module = "ai_runs_settings",
           icon = "Settings" },
