@@ -160,6 +160,7 @@ local shop_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migra
 local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-market") or {}
 local shop_insights_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-insights") or {}
 local shop_advisor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-advisor") or {}
+local shop_supplier_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-suppliers") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -2558,6 +2559,10 @@ local _migrations = {
     ['zzs19_shop_membership'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 1),
     ['zzs20_shop_member_tokens_credits'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 2),
     ['zzs21_shop_membership_columns'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 3),
+    -- Supplier catalogue sync: suppliers/items/history, product pricing + price changes, portal/bids data model
+    ['zzs22_shop_suppliers'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 1),
+    ['zzs23_shop_supplier_pricing'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 2),
+    ['zzs24_shop_supplier_portal_model'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_supplier_migrations, 3),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

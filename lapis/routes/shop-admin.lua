@@ -22,6 +22,16 @@
       GET/POST          /credits               loyalty credit (?q=&status=&source=); POST { email, amount_minor,
                                                min_order_minor?, reason, expires_in_days?, notify? }
       POST              /credits/:uuid/void    cancel unused credit { reason? }
+      GET/POST          /suppliers             supplier feeds (CSV/JSON/XML; login write-only)
+      GET/PUT/DELETE    /suppliers/:uuid
+      POST              /suppliers/:uuid/import  upload the price file as the raw body (≤ 10 MB)
+      POST              /suppliers/:uuid/sync    fetch the feed URL now
+      POST              /suppliers/sync-due      all due suppliers (market-sync CronJob)
+      GET               /suppliers/:uuid/items   (?q=&linked=true|false&changed=true&active=all)
+      GET               /supplier-items/:uuid/history   daily cost (12 months)
+      POST              /supplier-items/:uuid/link      { product_uuid|null, pricing_source, margin_pct? }
+      GET               /price-changes          (?status=pending|applied|approved|rejected|superseded)
+      POST              /price-changes/:uuid/approve | /reject
       POST              /reconcile
 ]]
 
@@ -362,5 +372,107 @@ return function(app)
         local res, err = Membership.voidCredit(ns_id, self.params.uuid, body, actor(self))
         if not res then return U.from_err(err) end
         return U.ok(res)
+    end))
+
+    -- supplier catalogue sync ------------------------------------------------------------
+    local Suppliers = require("queries.ShopSupplierQueries")
+    local function result(res, err, status)
+        if res == nil then return U.from_err(err) end
+        return U.ok(res, status)
+    end
+    local function json_body()
+        local body, err = U.read_json()
+        if not body then return nil, U.fail(400, "INVALID_JSON", err) end
+        return body
+    end
+
+    app:match(BASE .. "/suppliers", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(_, ns_id) return U.ok(Suppliers.list(ns_id)) end)(self)
+        elseif m == "POST" then
+            return guard("update", function(_, ns_id)
+                local body, bad = json_body()
+                if not body then return bad end
+                return result(Suppliers.create(ns_id, body), nil, 201)
+            end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    -- before /suppliers/:uuid so "sync-due" isn't taken for a uuid
+    app:post(BASE .. "/suppliers/sync-due", guard("update", function(_, ns_id)
+        return U.ok(Suppliers.syncDue(ns_id))
+    end))
+
+    app:match(BASE .. "/suppliers/:uuid", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(s, ns_id)
+                local sup = Suppliers.get(ns_id, s.params.uuid)
+                if not sup then return U.fail(404, "NOT_FOUND", "Supplier not found") end
+                return U.ok(sup)
+            end)(self)
+        elseif m == "PUT" or m == "PATCH" then
+            return guard("update", function(s, ns_id)
+                local body, bad = json_body()
+                if not body then return bad end
+                return result(Suppliers.update(ns_id, s.params.uuid, body))
+            end)(self)
+        elseif m == "DELETE" then
+            return guard("delete", function(s, ns_id) return result(Suppliers.delete(ns_id, s.params.uuid)) end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    app:post(BASE .. "/suppliers/:uuid/import", guard("update", function(self, ns_id)
+        ngx.req.read_body()
+        local text = ngx.req.get_body_data()
+        if not text then
+            local path = ngx.req.get_body_file()
+            if path then
+                local f = io.open(path, "rb")
+                if f then
+                    text = f:read("*a")
+                    f:close()
+                end
+            end
+        end
+        return result(Suppliers.importUpload(ns_id, self.params.uuid, text))
+    end))
+
+    app:post(BASE .. "/suppliers/:uuid/sync", guard("update", function(self, ns_id)
+        return result(Suppliers.syncNow(ns_id, self.params.uuid))
+    end))
+
+    app:get(BASE .. "/suppliers/:uuid/items", guard("read", function(self, ns_id)
+        local data, meta = Suppliers.items(ns_id, self.params.uuid, self.params)
+        if not data then return U.from_err(meta) end
+        return U.ok(data, 200, meta)
+    end))
+
+    app:get(BASE .. "/supplier-items/:uuid/history", guard("read", function(self, ns_id)
+        local h = Suppliers.itemHistory(ns_id, self.params.uuid)
+        if not h then return U.fail(404, "NOT_FOUND", "Supplier item not found") end
+        return U.ok(h)
+    end))
+
+    app:post(BASE .. "/supplier-items/:uuid/link", guard("update", function(self, ns_id)
+        local body, bad = json_body()
+        if not body then return bad end
+        return result(Suppliers.link(ns_id, self.params.uuid, body))
+    end))
+
+    app:get(BASE .. "/price-changes", guard("read", function(self, ns_id)
+        local data, meta = Suppliers.priceChanges(ns_id, self.params)
+        return U.ok(data, 200, meta)
+    end))
+
+    app:post(BASE .. "/price-changes/:uuid/approve", guard("update", function(self, ns_id)
+        return result(Suppliers.decide(ns_id, self.params.uuid, true, actor(self)))
+    end))
+
+    app:post(BASE .. "/price-changes/:uuid/reject", guard("update", function(self, ns_id)
+        return result(Suppliers.decide(ns_id, self.params.uuid, false, actor(self)))
     end))
 end

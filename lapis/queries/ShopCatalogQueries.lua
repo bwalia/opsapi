@@ -483,6 +483,7 @@ function ShopCatalogQueries.listCategories(ns_id, opts)
     opts = opts or {}
     local rows = db.query([[
         SELECT c.uuid, c.slug, c.name, c.description, c.image_url, c.sort_order, c.is_active,
+               c.margin_pct::float8 AS margin_pct,
                pc.slug AS parent_slug, pc.uuid AS parent_uuid,
                (SELECT COUNT(*) FROM shop_products p WHERE p.category_id = c.id
                   AND (p.status = 'active' OR ?))::int AS product_count,
@@ -562,6 +563,14 @@ function ShopCatalogQueries.saveCategory(ns_id, doc, uuid)
         sort_order = U.int(pick("sort_order", 0), 0),
         is_active = U.bool(pick("is_active", true), true),
     }
+    -- supplier pricing: category margin % (null = use the supplier's default)
+    if doc.margin_pct ~= nil then
+        local m = tonumber(doc.margin_pct)
+        if doc.margin_pct ~= cjson.null and (not m or m < -50 or m > 500) then
+            return nil, U.err(400, "VALIDATION_ERROR", "margin_pct must be between -50 and 500")
+        end
+        fields.margin_pct = m or db.NULL
+    end
     if existing then
         fields.updated_at = db.raw("NOW()")
         db.update("shop_categories", fields, { id = existing.id })
@@ -607,6 +616,8 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
         allow_backorder = p.allow_backorder == true, price_verified = p.price_verified == true,
         status = p.status, is_featured = p.is_featured == true, sort_order = p.sort_order,
         public_launch_at = p.public_launch_at or U.null,
+        pricing_source = p.pricing_source or "manual",
+        margin_pct = tonumber(p.margin_pct) or U.null,
         category = U.nz(p.category_uuid) and { uuid = p.category_uuid, slug = p.category_slug,
             name = p.category_name } or U.null,
         from_price_minor = Pricing.from_price(p, (function()
@@ -733,6 +744,13 @@ local function validate_product_doc(doc, existing)
         return "price_mode must be fixed|configurable|quote_only"
     end
     if doc.status ~= nil and not PRODUCT_STATUS[doc.status] then return "status must be draft|active|archived" end
+    if doc.pricing_source ~= nil and doc.pricing_source ~= "manual" and doc.pricing_source ~= "supplier" then
+        return "pricing_source must be manual or supplier"
+    end
+    if doc.margin_pct ~= nil and doc.margin_pct ~= cjson.null then
+        local m = tonumber(doc.margin_pct)
+        if not m or m < -50 or m > 500 then return "margin_pct must be between -50 and 500" end
+    end
     if doc.base_price_minor ~= nil and not U.int(doc.base_price_minor, nil) then return "base_price_minor must be an integer" end
     if doc.option_groups ~= nil and type(doc.option_groups) ~= "table" then return "option_groups must be an array" end
     if doc.rules ~= nil and type(doc.rules) ~= "table" then return "rules must be an array" end
@@ -933,6 +951,9 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
         if doc.allow_backorder ~= nil then fields.allow_backorder = U.bool(doc.allow_backorder, true) end
         if doc.price_verified ~= nil then fields.price_verified = U.bool(doc.price_verified, false) end
         set("status", doc.status)
+        -- validated in validate_product_doc
+        if doc.pricing_source ~= nil then fields.pricing_source = doc.pricing_source end
+        if doc.margin_pct ~= nil then fields.margin_pct = tonumber(doc.margin_pct) or db.NULL end
         if doc.public_launch_at ~= nil then
             -- null/"" = launched for everyone; otherwise an ISO timestamp (members see it early_access_hours sooner)
             fields.public_launch_at = U.nz(doc.public_launch_at) and tostring(doc.public_launch_at) or db.NULL
