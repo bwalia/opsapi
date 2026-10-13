@@ -12,6 +12,12 @@ import type {
   ShopCategoryInput,
   ShopChatSession,
   ShopCredit,
+  ShopPriceChange,
+  ShopPriceChangeStatus,
+  ShopSupplier,
+  ShopSupplierInput,
+  ShopSupplierItem,
+  ShopSupplierSummary,
   ShopCreditGrant,
   ShopCreditStatus,
   ShopDashboardKpis,
@@ -275,6 +281,60 @@ export const shopService = {
   },
 
   // ---------------- Chats ----------------
+  // ---------------- Suppliers ----------------
+  async getSuppliers(): Promise<ShopSupplier[]> {
+    const res = await apiClient.get(`${BASE}/suppliers`);
+    return unwrap<ShopSupplier[]>(res) ?? [];
+  },
+
+  async createSupplier(body: ShopSupplierInput): Promise<ShopSupplier> {
+    return unwrap<ShopSupplier>(await apiClient.post(`${BASE}/suppliers`, body, JSON_BODY));
+  },
+
+  async updateSupplier(uuid: string, body: ShopSupplierInput): Promise<ShopSupplier> {
+    return unwrap<ShopSupplier>(await apiClient.put(`${BASE}/suppliers/${uuid}`, body, JSON_BODY));
+  },
+
+  async deleteSupplier(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/suppliers/${uuid}`);
+  },
+
+  async syncSupplier(uuid: string): Promise<ShopSupplierSummary> {
+    return unwrap<ShopSupplierSummary>(await apiClient.post(`${BASE}/suppliers/${uuid}/sync`, {}, { ...JSON_BODY, timeout: 300000 }));
+  },
+
+  /** Upload a price file (sent as the raw body). */
+  async importSupplierFile(uuid: string, file: File): Promise<ShopSupplierSummary> {
+    const res = await apiClient.post(`${BASE}/suppliers/${uuid}/import`, await file.text(), {
+      headers: { 'Content-Type': file.type || 'text/plain' },
+      timeout: 300000,
+    });
+    return unwrap<ShopSupplierSummary>(res);
+  },
+
+  async getSupplierItems(
+    uuid: string,
+    params: ShopPageParams & { q?: string; linked?: 'true' | 'false' | ''; changed?: boolean } = {}
+  ): Promise<ShopList<ShopSupplierItem>> {
+    const qs = buildQueryString({ q: params.q, linked: params.linked || undefined, changed: params.changed ? 'true' : undefined, limit: params.limit, offset: params.offset });
+    return unwrapList<ShopSupplierItem>(await apiClient.get(`${BASE}/suppliers/${uuid}/items${qs}`), params.limit, params.offset);
+  },
+
+  async linkSupplierItem(itemUuid: string, body: { product_uuid: string | null; pricing_source?: 'supplier' | 'manual'; margin_pct?: number | null }) {
+    return unwrap<{ linked: boolean; pricing?: { applied: number; pending: number; unchanged: number } }>(
+      await apiClient.post(`${BASE}/supplier-items/${itemUuid}/link`, body, JSON_BODY)
+    );
+  },
+
+  async getPriceChanges(params: ShopPageParams & { status?: ShopPriceChangeStatus | '' } = {}): Promise<ShopList<ShopPriceChange>> {
+    const qs = buildQueryString({ status: params.status || undefined, limit: params.limit, offset: params.offset });
+    return unwrapList<ShopPriceChange>(await apiClient.get(`${BASE}/price-changes${qs}`), params.limit, params.offset);
+  },
+
+  async decidePriceChange(uuid: string, approve: boolean): Promise<ShopPriceChange> {
+    return unwrap<ShopPriceChange>(await apiClient.post(`${BASE}/price-changes/${uuid}/${approve ? 'approve' : 'reject'}`, {}, JSON_BODY));
+  },
+
   // ---------------- Credits (loyalty) ----------------
   async getCredits(params: ShopPageParams & { q?: string; status?: ShopCreditStatus | '' } = {}): Promise<ShopList<ShopCredit>> {
     const qs = buildQueryString({ q: params.q, status: params.status, limit: params.limit, offset: params.offset });
