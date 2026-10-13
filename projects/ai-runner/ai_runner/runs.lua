@@ -28,6 +28,8 @@ R.PLATFORM_DEFAULTS = {
     queue_timeout_hours = 24, approval_timeout_hours = 72,
     max_events_per_run = 20000, max_queued_followups = 50, max_requests_per_run = 500,
     max_tracked_per_heartbeat_cap = 100,
+    -- §28: built-in runs at once (every workspace / one workspace) and the agent's tool steps per run.
+    builtin_max_runs = 2, builtin_max_runs_per_workspace = 1, builtin_max_steps = 40,
     guard_max = { max_open_runs_per_user = 100, max_open_runs_per_workspace = 1000, daily_token_limit = 1000000000,
         retention_days = 3650, max_run_minutes = 1440 },
 }
@@ -37,6 +39,7 @@ R.PLATFORM_BOUNDS = {
     queue_timeout_hours = { 1, 720 }, approval_timeout_hours = { 1, 720 },
     max_events_per_run = { 100, 1000000 }, max_queued_followups = { 1, 1000 }, max_requests_per_run = { 10, 10000 },
     max_tracked_per_heartbeat_cap = { 1, 1000 },
+    builtin_max_runs = { 1, 100 }, builtin_max_runs_per_workspace = { 1, 20 }, builtin_max_steps = { 5, 200 },
     guard_max = { max_open_runs_per_user = { 1, 10000 }, max_open_runs_per_workspace = { 1, 100000 },
         daily_token_limit = { 1, 2000000000 }, retention_days = { 30, 36500 }, max_run_minutes = { 1, 10080 } },
 }
@@ -82,6 +85,8 @@ function R.platform()
     ngx.ctx.ar_platform = platform_values(stored, R.PLATFORM_DEFAULTS, R.PLATFORM_BOUNDS)
     -- Where task links point (prompts, run details, the agent's get_task); "" = FRONTEND_URL.
     ngx.ctx.ar_platform.dashboard_url = R.base_url(type(stored) == "table" and stored.dashboard_url) or ""
+    -- §28.3: the GitHub App, as stored (secrets sealed; ai_runner/github.lua opens them).
+    ngx.ctx.ar_platform.github = type(stored) == "table" and type(stored.github) == "table" and stored.github or {}
     return ngx.ctx.ar_platform
 end
 
@@ -446,7 +451,7 @@ function R.render(body, task, opts)
         work_branch = R.work_branch(task),
         base_branch = opts.base_branch ~= nil and opts.base_branch ~= "" and opts.base_branch
             or "the folder's default branch",
-        output_mode = OUTPUT_TEXT[opts.output_mode] or OUTPUT_TEXT.pull_request,
+        output_mode = opts.output_text or OUTPUT_TEXT[opts.output_mode] or OUTPUT_TEXT.pull_request,
     }
     return (body:gsub("{{%s*([%w_%.]+)%s*}}", function(k) return vars[k] or "" end))
 end
@@ -455,10 +460,11 @@ end
 -- Runners and conflicts
 -- ---------------------------------------------------------------------------
 
---- SQL: is runner row `alias` online (a heartbeat within the platform's online_s)?
+--- SQL: is runner row `alias` online (a heartbeat within the platform's online_s)? The built-in runner (§28) runs
+-- inside OpsAPI: always.
 function R.online_sql(alias)
-    return "(" .. alias .. ".last_heartbeat_at IS NOT NULL AND " .. alias .. ".last_heartbeat_at > NOW() - interval '"
-        .. math.floor(R.platform().online_s) .. " seconds')"
+    return "(" .. alias .. ".kind = 'builtin' OR (" .. alias .. ".last_heartbeat_at IS NOT NULL AND " .. alias
+        .. ".last_heartbeat_at > NOW() - interval '" .. math.floor(R.platform().online_s) .. " seconds'))"
 end
 
 --- The ar_runners columns (alias r) every runner read uses, with `online`.
@@ -750,9 +756,12 @@ function R.create(self, ns, task, inp)
             status = status, attempt = inp.attempt or 1, retry_of = inp.retry_of or db.NULL,
             idempotency_key = inp.idempotency_key or db.NULL, timeout_s = inp.timeout_s or db.NULL,
         }, { returning = "*" })[1]
-        db.query([[INSERT INTO ar_locks (lock_key, namespace_id, run_uuid, runner_uuid, scope, repo_path)
-            VALUES (?, ?, ?, ?, 'repo', ?)]], R.lock_key(ns, runner.uuid, inp.repo_path), ns, run.uuid, runner.uuid,
-            inp.repo_path)
+        -- A built-in run (§28) has no folder: it works on its own branch through the API, so it locks nothing.
+        if runner.kind ~= "builtin" then
+            db.query([[INSERT INTO ar_locks (lock_key, namespace_id, run_uuid, runner_uuid, scope, repo_path)
+                VALUES (?, ?, ?, ?, 'repo', ?)]], R.lock_key(ns, runner.uuid, inp.repo_path), ns, run.uuid,
+                runner.uuid, inp.repo_path)
+        end
         return run
     end)
     if not ok then
@@ -787,9 +796,14 @@ function R.automate(run, which)
     end
 end
 
---- Task automation when a run enters the queue (at start, or when a manager approves it).
+--- Task automation when a run enters the queue (at start, or when a manager approves it); a built-in run (§28)
+-- starts at once.
 function R.on_queued(run)
     R.automate(run, "on_start")
+    if U.one("SELECT 1 AS x FROM ar_runners WHERE uuid = ? AND namespace_id = ? AND kind = 'builtin'",
+        run.runner_uuid, run.namespace_id) then
+        require("ai_runner.builtin").kick()
+    end
 end
 
 local function not_pending(run)
