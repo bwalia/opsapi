@@ -258,6 +258,13 @@ spec:
             - name: GOOGLE_REDIRECT_URI
               value: {{ .Values.googleRedirectUri | quote }}
             {{- end }}
+            # Facebook sign-in (shop customers only). FACEBOOK_APP_ID and
+            # FACEBOOK_APP_SECRET come from Vault; until both are set the shop
+            # does not offer Facebook. Must be a Valid OAuth Redirect URI on the app.
+            {{- if .Values.facebookRedirectUri }}
+            - name: FACEBOOK_REDIRECT_URI
+              value: {{ .Values.facebookRedirectUri | quote }}
+            {{- end }}
             # ── Workstation AI Shop (feature "shop") ───────────────────────
             # Non-secret shop config, owned by git per env (values-workstation-*.yaml
             # `shop:` block). Both OPTIONAL — omitted when unset, so other

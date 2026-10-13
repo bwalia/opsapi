@@ -323,6 +323,7 @@ app:before_filter(function(self)
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/apple"] = true,           -- Apple Sign In initiation
         ["/auth/apple/callback"] = true,  -- Apple Sign In callback (form_post)
+        ["/auth/facebook/callback"] = true, -- Facebook sign-in callback (shop customers only)
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
         ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
         ["/auth/logout"] = true,         -- Logout (revokes refresh token)

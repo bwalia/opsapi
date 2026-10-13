@@ -2,7 +2,7 @@
 --[[
     Plain-Lua unit test for lib/shop-customer-auth.lua (no nginx, no DB, no busted).
     Covers the rules that keep shop sign-in safe: only a same-site `next`, only a
-    well-formed nonce, only google/apple, and a state that round-trips.
+    well-formed nonce, only google/apple/facebook, and a state that round-trips.
 
     Run from lapis/:
         luajit spec/shop-customer-auth-test.lua
@@ -47,7 +47,8 @@ check("slug refused", not A.valid_slug("Workstation") and not A.valid_slug("../x
 -- state -------------------------------------------------------------------------------
 local st, why = A.build_state("workstation", { provider = "google", nonce = NONCE, next = "/account" })
 check("state built", st and st.shop.ns == "workstation" and st.shop.n == NONCE and st.shop.next == "/account", why)
-check("state refuses facebook", A.build_state("workstation", { provider = "facebook", nonce = NONCE }) == nil)
+check("state allows facebook", A.build_state("workstation", { provider = "facebook", nonce = NONCE }) ~= nil)
+check("state refuses unknown provider", A.build_state("workstation", { provider = "twitter", nonce = NONCE }) == nil)
 check("state refuses bad nonce", A.build_state("workstation", { provider = "apple", nonce = "x" }) == nil)
 check("state sanitises next", A.build_state("workstation", { provider = "apple", nonce = NONCE, next = "//evil" }).shop.next == "/account")
 
@@ -67,6 +68,17 @@ check("error url", A.error_url("https://shop.workstation.co.uk", "email_unverifi
     == "https://shop.workstation.co.uk/login?error=email_unverified")
 local g = A.google_authorize_url("id.apps", "https://opsapi.workstation.co.uk/auth/google/callback", '{"shop":1}')
 check("google url escapes state", g:find("state=%7B%22shop%22%3A1%7D", 1, true) ~= nil, g)
+
+local f = A.facebook_authorize_url("123", "https://opsapi.workstation.co.uk/auth/facebook/callback", '{"shop":1}')
+check("facebook url asks only for email", f:find("scope=email&", 1, true) ~= nil and f:find("state=%7B%22shop%22%3A1%7D", 1, true) ~= nil, f)
+
+-- password sign-in --------------------------------------------------------------------
+check("code ok", A.valid_code("012345"))
+for _, c in ipairs({ "12345", "1234567", "12a456", " 123456", 123456 }) do
+    check("code refused: " .. tostring(c), not A.valid_code(c))
+end
+check("mask email", A.mask_email("jane.doe@example.com") == "j***@example.com", A.mask_email("jane.doe@example.com"))
+check("mask non-email", A.mask_email("nope") == nil and A.mask_email(nil) == nil)
 
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)
