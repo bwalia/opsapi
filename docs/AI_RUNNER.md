@@ -1000,3 +1000,69 @@ A fresh review of the whole feature (plugin, runner, dashboard, MCP) confirmed t
 - **Past 20,000 events in a run:** further events are dropped, after one "Log truncated" event with seq 2147483647.
 - **MCP HTTP:** allowed hosts come from `MCP_HOST` (default: localhost and the listen address). A request carrying an Origin needs that Origin in `MCP_ALLOWED_ORIGINS`.
 - **Tampered folder:** after `git_tampered`, the runner runs no more git in that folder (a tampered config could define filters). The folder is left on the run's branch, with the agent's changes uncommitted, for a person to check `.git`. `gh` also gets the hook and fsmonitor overrides, through `GIT_CONFIG_COUNT`, because it runs git itself.
+
+---
+
+## 26. Tracking sessions started by hand as tasks
+
+**Goal:** everything an AI agent does on a team machine is tracked in OpsAPI. When someone starts Claude Code or Cursor by hand on the Mac Studio (not through Start with AI), OpsAPI creates a kanban task for that session automatically. A manager can then assign it to an employee like any other task. Runs started from OpsAPI already have a task and are skipped.
+
+### 26.1 What the runner reports (PromptPilot)
+- **Session details:** the heartbeat inventory already lists every session the observer sees under the registration's roots: tool, status `busy|idle|ended`, cwd, branch, session_id, started_at, updated_at and labels.
+- **`first_prompt`:** a new inventory field, with the session's first prompt (redacted, whitespace collapsed, at most 300 characters). It is sent only when `share_manual_prompts: true`. `prompt_preview` stays the latest prompt, cut to 80 characters.
+- **`inventory_roots`:** an optional list in a registration. Sessions under these folders are reported in the inventory, but runs may still only use `allowed_roots`. The default is `allowed_roots`, and `["~"]` reports every session on the machine. Each entry must exist (config error otherwise).
+
+### 26.2 Settings (`ar_settings.session_tracking JSONB`, plugin migration 5)
+`{ enabled: false, project_uuid: null, column: null, status: "in_progress", notify: true }`, in `GET/PUT /settings`, which needs `ai_runs_settings.manage`.
+- `project_uuid` must be a kanban project of the workspace, and is required when `enabled`.
+- `column` is a column name on that project's first board. If it is not set, the task goes to the board's first column.
+- `status` is the task status to set: `todo` or `in_progress`.
+
+### 26.3 Creating the task (server, on heartbeat)
+- **Table `ar_tracked_sessions`:**
+  - columns: `namespace_id`, `runner_uuid`, `session_ref` (Claude's `session_id`, else the inventory `key`), `task_uuid`, `tool`, `cwd`, `branch`, `first_seen_at`, `last_seen_at`, `ended_at`;
+  - `UNIQUE (runner_uuid, session_ref)`, with the same-namespace trigger.
+- **When a task is created:** tracking is enabled, and the heartbeat reports a session that is **not managed** (no run linked), whose status is `busy`, and which has no row yet. All three must hold.
+- **What happens:** the server creates one kanban task in the configured project, column and status, then inserts the row.
+  - `ON CONFLICT DO NOTHING` plus the unique key mean two pods or two heartbeats never create two tasks.
+  - At most 20 new tasks per heartbeat; any extra are created on later heartbeats.
+- **The task:**
+  - **Title:** the first line of `first_prompt` (at most 120 characters). Without it: `<Tool> session in <folder name> on <runner name>`.
+  - **Description:**
+    - "Started by hand on <runner> and tracked automatically by AI Runs.";
+    - tool, folder, branch, started, session id;
+    - the first prompt, if shared.
+  - **Assignees:** none, so a manager assigns it.
+  - **`created_by`:** the runner's `created_by`.
+  - **`metadata.ai_session`:** `{ runner_uuid, runner_name, session_ref, tool, cwd, branch }`.
+- **Notification:** when `notify` is on, managers (§24.6 rules, at most 20) get an `ai_session_task` notification, "New task from a Claude session on mac-studio: <title>", linking to the task. The migration widens the notification type check.
+- **Ending:**
+  - Each heartbeat updates `last_seen_at` for the sessions it reports.
+  - A tracked session that is reported `ended`, or that stops being reported for 10 minutes, gets `ended_at` and one task comment: "Session ended (last active <time>)."
+  - The lease sweep handles disappeared sessions of runners that stopped reporting.
+  - The task status is not changed; people decide when it's done.
+- **Best effort:** none of this can fail a heartbeat. It is wrapped and logged, like the notifications.
+
+### 26.4 API and dashboard
+- `GET /sessions` rows gain `task { uuid, task_number, title, project_uuid }` for tracked sessions.
+- **AI run settings:** a "Track sessions started by hand" section with:
+  - the toggle, project, column, status and notify fields;
+  - a note that titles need `share_manual_prompts: true` on the runner, and that `inventory_roots` widens what is seen.
+- **Machines page:** a manual session shows its task ("Task #12 →").
+
+### 26.5 Acceptance
+- **Plugin sandbox:**
+  - a fake runner's busy manual session creates exactly one task, with no duplicate on the next heartbeat, nor from parallel heartbeats;
+  - title from `first_prompt`, and the fallback title;
+  - project, column and status;
+  - managed sessions and idle-only sessions are skipped;
+  - disabled tracking does nothing;
+  - the 20-per-heartbeat cap;
+  - ending: the comment is posted once, both for an `ended` status and for disappearance (with the clock backdated);
+  - the notification;
+  - settings validation and RBAC;
+  - isolation between workspaces;
+  - migration 5 run twice.
+- **Go tests:** `first_prompt` is sent only with `share_manual_prompts`, and is redacted; `inventory_roots` (sessions outside `allowed_roots` are reported but can't be used for runs).
+- **Real runner (`promptpilot_test.py`):** a fake "manual" session the runner reports (a session whose labels make it manual) becomes a task.
+- **Cypress:** the settings section saves, and Machines shows the task link.
