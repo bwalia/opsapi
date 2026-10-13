@@ -2723,6 +2723,13 @@ bad("max_new_per_heartbeat above the platform's cap (1)", put_st({"max_new_per_h
     "session_tracking.max_new_per_heartbeat")
 expect("the platform lowers the bound to 4", put_ps({"guard_max": {"max_open_runs_per_user": 4}}), 200)
 s = expect("settings", call("GET", P + "/settings", "mgr", A), 200)
+check("GET /settings carries the platform's current bounds for the form (limits)",
+      s.get("limits", {}).get("guards", {}).get("max_open_runs_per_user") == 4
+      and s["limits"]["max_new_per_heartbeat"] == 1 and s["limits"]["max_run_minutes"] == DEF["guard_max"]["max_run_minutes"],
+      s.get("limits"))
+check("a GET -> PUT round trip (limits included) is accepted and changes nothing", expect(
+    "round trip", call("PUT", P + "/settings", "mgr", A, {k: v for k, v in s.items() if k not in ("updated_at", "updated_by")}),
+    200)["guards"] == s["guards"])
 check("a value saved under a higher bound is capped by the lower one", s["guards"]["max_open_runs_per_user"] == 4
       and s["session_tracking"]["max_new_per_heartbeat"] == 1, (s["guards"], s["session_tracking"]))
 ps = expect("back to the defaults (null resets each)", put_ps({k: None for k in DEF}), 200)

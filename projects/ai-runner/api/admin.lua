@@ -389,13 +389,25 @@ return function(app)
     end)))
 
     -- Workspace settings ---------------------------------------------------------------------------------------
+    -- §27.5: the platform's current upper bounds, so the settings form allows what the platform allows.
+    local function with_limits(s)
+        local p = R.platform()
+        local gm = p.guard_max
+        s.limits = { max_run_minutes = gm.max_run_minutes, max_new_per_heartbeat = p.max_tracked_per_heartbeat_cap,
+            guards = { max_open_runs_per_user = gm.max_open_runs_per_user,
+                max_open_runs_per_workspace = gm.max_open_runs_per_workspace,
+                daily_token_limit = gm.daily_token_limit, retention_days = gm.retention_days } }
+        return s
+    end
+
     app:get("/settings", sdk.handler({ permission = "ai_runs_settings.manage" }, U.guard(function(self)
-        return sdk.ok(R.settings(sdk.namespace_id(self)))
+        return sdk.ok(with_limits(R.settings(sdk.namespace_id(self))))
     end)))
 
     app:put("/settings", sdk.handler({ permission = "ai_runs_settings.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local b = body(self)
+        b.limits = nil -- read-only, returned by GET (a GET -> PUT round trip sends it back)
         local p = R.platform()
         local gm = p.guard_max -- §27.5: the platform's upper bounds
         local d, errors = sdk.validate(b, {
@@ -541,7 +553,7 @@ return function(app)
             cjson.encode(s.approval_policy), cjson.encode(s.guards), cjson.encode(st), cjson.encode(s.safety),
             sdk.user(self).uuid)
         ngx.ctx.ar_redact = nil -- the workspace's redactions may have changed
-        return sdk.ok(R.settings(ns))
+        return sdk.ok(with_limits(R.settings(ns)))
     end)))
 
     -- Project settings -----------------------------------------------------------------------------------------

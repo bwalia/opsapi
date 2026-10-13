@@ -110,6 +110,7 @@ function regexError(p: string): string | null {
 function RunSettings() {
   const loaded = useAiData(() => aiRunner.getSettings(), []);
   const [s, setS] = useState<Settings | null>(null);
+  const lim = s?.limits;
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (loaded.data) setS(normalize(loaded.data));
@@ -152,7 +153,7 @@ function RunSettings() {
           </Select>
           <Input id="air-s-base" label="Pull request base branch" value={s.pr_base} onChange={(e) => set({ pr_base: e.target.value })}
             disabled={s.output_mode !== 'pull_request'} className="font-mono" />
-          <Input id="air-s-minutes" label="Max run minutes" type="number" min={1} max={1440} required value={s.max_run_minutes || ''}
+          <Input id="air-s-minutes" label="Max run minutes" type="number" min={1} max={lim?.max_run_minutes ?? 1440} required value={s.max_run_minutes || ''}
             onChange={(e) => set({ max_run_minutes: Number(e.target.value) || 0 })} helperText="A run still going after this is stopped." />
         </div>
         <Toggle label="Open pull requests as drafts" checked={s.pr_draft} onChange={(v) => set({ pr_draft: v })} />
@@ -203,16 +204,16 @@ function RunSettings() {
             <Input id="air-s-similar" label="Similar work threshold (%)" type="number" min={10} max={100} required
               value={shown(Math.round(g.similar_threshold * 100))} onChange={(e) => guard({ similar_threshold: typed(e.target.value) / 100 })}
               helperText="How alike two task titles must be (10–100) for an open run to count as similar work. Starting then needs Start anyway. Lower warns more often." />
-            <Input id="air-s-user-cap" label="Max open runs per person" type="number" min={0} max={100} required
+            <Input id="air-s-user-cap" label="Max open runs per person" type="number" min={0} max={lim?.guards.max_open_runs_per_user ?? 100} required
               value={shown(g.max_open_runs_per_user)} onChange={(e) => guard({ max_open_runs_per_user: typed(e.target.value) })}
               helperText="Runs one person may have open at once (0–100)." />
-            <Input id="air-s-ws-cap" label="Max open runs in the workspace" type="number" min={0} max={1000} required
+            <Input id="air-s-ws-cap" label="Max open runs in the workspace" type="number" min={0} max={lim?.guards.max_open_runs_per_workspace ?? 1000} required
               value={shown(g.max_open_runs_per_workspace)} onChange={(e) => guard({ max_open_runs_per_workspace: typed(e.target.value) })}
               helperText="Runs open at once across the workspace (0–1000). Approving a waiting run is never blocked." />
-            <Input id="air-s-tokens" label="Daily token limit" type="number" min={0} max={1_000_000_000} required
+            <Input id="air-s-tokens" label="Daily token limit" type="number" min={0} max={lim?.guards.daily_token_limit ?? 1_000_000_000} required
               value={shown(g.daily_token_limit)} onChange={(e) => guard({ daily_token_limit: typed(e.target.value) })}
               helperText="Agent tokens (in + out) per day, UTC. At the limit no new run starts; running ones finish." />
-            <Input id="air-s-retention" label="Keep run logs (days)" type="number" min={30} max={3650} required
+            <Input id="air-s-retention" label="Keep run logs (days)" type="number" min={30} max={lim?.guards.retention_days ?? 3650} required
               value={shown(g.retention_days)} onChange={(e) => guard({ retention_days: typed(e.target.value) })}
               helperText="30–3650. After this, a finished run's log, conversation text and request details are deleted; the run, its summary and usage stay." />
           </div>
@@ -234,7 +235,7 @@ function RunSettings() {
           </div>
         </div>
 
-        <SessionTrackingFields t={s.session_tracking} onChange={(patch) => set({ session_tracking: { ...s.session_tracking, ...patch } })} />
+        <SessionTrackingFields t={s.session_tracking} maxPerHeartbeat={lim?.max_new_per_heartbeat ?? 100} onChange={(patch) => set({ session_tracking: { ...s.session_tracking, ...patch } })} />
 
         <div className="flex justify-end">
           <Button type="submit" isLoading={busy}>Save settings</Button>
@@ -296,7 +297,7 @@ function ToolLabels({ labels, onChange }: { labels: Record<string, string>; onCh
  * §26: a session someone starts by hand on a runner's machine becomes a kanban task — where it goes when no routing
  * rule matches (§27.3), and the §27.4 tunables. Saved with the form above.
  */
-function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: (patch: Partial<SessionTracking>) => void }) {
+function SessionTrackingFields({ t, maxPerHeartbeat, onChange }: { t: SessionTracking; maxPerHeartbeat: number; onChange: (patch: Partial<SessionTracking>) => void }) {
   const projects = useProjects();
   return (
     <div className="space-y-3 border-t border-secondary-200 pt-4">
@@ -327,7 +328,7 @@ function SessionTrackingFields({ t, onChange }: { t: SessionTracking; onChange: 
         <Input id="air-s-gone" label="Ended after (minutes)" type="number" min={1} max={1440} required value={shown(t.gone_after_minutes)}
           onChange={(e) => onChange({ gone_after_minutes: typed(e.target.value) })}
           helperText="1–1440. A tracked session nobody reports for this long has ended; its task gets a comment." />
-        <Input id="air-s-per-heartbeat" label="New tasks per heartbeat" type="number" min={1} max={100} required value={shown(t.max_new_per_heartbeat)}
+        <Input id="air-s-per-heartbeat" label="New tasks per heartbeat" type="number" min={1} max={maxPerHeartbeat} required value={shown(t.max_new_per_heartbeat)}
           onChange={(e) => onChange({ max_new_per_heartbeat: typed(e.target.value) })}
           helperText="1–100 (the platform may cap it lower). More new sessions than this wait for the machine's next report." />
         <TagsInput id="air-s-idle" label="Idle statuses" values={t.idle_statuses} onChange={(v) => onChange({ idle_statuses: v })} placeholder="idle"

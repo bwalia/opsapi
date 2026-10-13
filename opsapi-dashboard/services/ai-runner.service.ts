@@ -379,6 +379,14 @@ export interface Settings {
   guards: Guards;
   session_tracking: SessionTracking;
   safety: Safety;
+  /** §27.5: the platform's current upper bounds (read-only; GET only). */
+  limits?: SettingsLimits;
+}
+
+export interface SettingsLimits {
+  max_run_minutes: number;
+  max_new_per_heartbeat: number;
+  guards: { max_open_runs_per_user: number; max_open_runs_per_workspace: number; daily_token_limit: number; retention_days: number };
 }
 
 /** §27.3: which sessions a routing rule applies to; an empty list matches any. */
