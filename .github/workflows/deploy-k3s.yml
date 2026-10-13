@@ -217,10 +217,10 @@ jobs:
           && (needs.autotag.result == 'success' || needs.autotag.result == 'skipped')
           && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
     outputs:
-      # The immutable tag this run produced. The smoke test pulls THIS rather
-      # than :latest — otherwise a concurrent run that pushes :latest in
-      # between build and smoke means we smoke-test someone else's commit.
-      image_ref: ${{ steps.version.outputs.IMAGE_REF }}
+      # Only the bare tag is passed on: GitHub drops a job output that contains a
+      # secret's value ("Skip output ... may contain secret"), and the registry
+      # name (bwalia) equals one, so a full "bwalia/opsapi:<tag>" ref arrived
+      # empty. Jobs rebuild the ref from env.IMAGE_REGISTRY/IMAGE_NAME + this tag.
       # The bare tag (no registry/repo prefix) — this is the string Ring
       # Promoter promotes as the diytaxreturn-opsapi "version", so the
       # seed-ring-promoter job below needs it on its own.
@@ -338,8 +338,8 @@ jobs:
 
       - name: Run smoke test container
         env:
-          # image_ref is this run's immutable tag; :latest is only a fallback.
-          IMAGE_REF: ${{ needs.build.outputs.image_ref || format('{0}/{1}:latest', env.IMAGE_REGISTRY, env.IMAGE_NAME) }}
+          # This run's immutable tag (smoke-test THIS build, not whatever :latest is now); :latest only as a fallback.
+          IMAGE_REF: ${{ format('{0}/{1}:{2}', env.IMAGE_REGISTRY, env.IMAGE_NAME, needs.build.outputs.image_tag || 'latest') }}
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -654,14 +654,14 @@ jobs:
           # run's immutable build tag; else :latest.
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
           if [ -z "$TAG" ]; then
-            REF="${{ needs.build.outputs.image_ref }}"
+            BUILT="${{ needs.build.outputs.image_tag }}"
             # A push that built nothing (e.g. auto-tag failed, so build was skipped) must not
             # quietly re-roll an old :latest as if it were this commit.
-            if [ -z "$REF" ] && [ "${{ github.event_name }}" = push ]; then
+            if [ -z "$BUILT" ] && [ "${{ github.event_name }}" = push ]; then
               echo "::error::no image was built for this commit (build: ${{ needs.build.result }}); not deploying :latest"
               exit 1
             fi
-            if [ -n "$REF" ]; then TAG="${REF##*:}"; else TAG="latest"; fi
+            TAG="${BUILT:-latest}"
           fi
           echo "Deploying release '${RELEASE_NAME}' to namespace '${TARGET_ENV}' with image tag '${TAG}'"
 
