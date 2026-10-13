@@ -16,6 +16,9 @@
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
+      GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 90|120, refund threshold, …)
+      GET               /membership/members    (?status=&q=)
+      GET               /waitlist              (?product_uuid=&include_notified=; members first)
       POST              /reconcile
 ]]
 
@@ -297,5 +300,32 @@ return function(app)
 
     app:post(BASE .. "/reconcile", guard("update", function(_, ns_id)
         return U.ok(ShopStripe.reconcile(ns_id, {}))
+    end))
+
+    -- VIP membership ------------------------------------------------------------------
+    local Membership = require("queries.ShopMembershipQueries")
+
+    app:match(BASE .. "/membership/settings", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(_, ns_id) return U.ok(Membership.adminSettings(ns_id)) end)(self)
+        elseif m == "PUT" or m == "PATCH" then
+            return guard("update", function(_, ns_id)
+                local body, err = U.read_json()
+                if not body then return U.fail(400, "INVALID_JSON", err) end
+                local res, verr = Membership.updateSettings(ns_id, body)
+                if not res then return U.from_err(verr) end
+                return U.ok(res)
+            end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    app:get(BASE .. "/membership/members", guard("read", function(self, ns_id)
+        return U.ok(Membership.adminMembers(ns_id, self.params))
+    end))
+
+    app:get(BASE .. "/waitlist", guard("read", function(self, ns_id)
+        return U.ok(Membership.adminWaitlist(ns_id, self.params))
     end))
 end

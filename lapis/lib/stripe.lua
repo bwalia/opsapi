@@ -193,6 +193,8 @@ function Stripe:create_checkout_session(options)
     if options.phone_number_collection then data.phone_number_collection = options.phone_number_collection end
     if options.tax_id_collection then data.tax_id_collection = options.tax_id_collection end
     if options.expires_at then data.expires_at = options.expires_at end
+    -- One-off discounts (the shop applies customer credit as a single-use coupon)
+    if options.discounts then data.discounts = options.discounts end
 
     return self:_request("POST", "/checkout/sessions", data, options.idempotency_key)
 end

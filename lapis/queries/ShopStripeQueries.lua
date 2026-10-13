@@ -22,6 +22,7 @@ local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Orders = require("queries.ShopOrderQueries")
 local Stock = require("queries.ShopStockQueries")
+local Membership = require("queries.ShopMembershipQueries")
 
 local ShopStripeQueries = {}
 
@@ -106,12 +107,35 @@ function handlers.charge_refunded(charge)
     return order
 end
 
+-- VIP membership checkouts (mode=subscription) share the shop webhook; their sessions carry
+-- metadata.source = "workstation-shop-vip". Membership handlers return nil (no order to link).
+local function vip_or(order_handler, vip_handler)
+    return function(obj, event)
+        if Membership.isVipObject(obj) then
+            vip_handler(obj, event)
+            return nil
+        end
+        return order_handler(obj, event)
+    end
+end
+
+local function vip_only(vip_handler)
+    return function(obj, event)
+        vip_handler(obj, event)
+        return nil
+    end
+end
+
 local DISPATCH = {
-    ["checkout.session.completed"] = handlers.session_completed,
-    ["checkout.session.async_payment_succeeded"] = handlers.session_async_succeeded,
-    ["checkout.session.expired"] = handlers.session_expired,
-    ["checkout.session.async_payment_failed"] = handlers.session_async_failed,
+    ["checkout.session.completed"] = vip_or(handlers.session_completed, Membership.onSessionCompleted),
+    ["checkout.session.async_payment_succeeded"] = vip_or(handlers.session_async_succeeded, Membership.onSessionCompleted),
+    ["checkout.session.expired"] = vip_or(handlers.session_expired, Membership.onSessionExpired),
+    ["checkout.session.async_payment_failed"] = vip_or(handlers.session_async_failed, Membership.onSessionExpired),
     ["charge.refunded"] = handlers.charge_refunded,
+    -- membership renewals and changes
+    ["invoice.paid"] = vip_only(Membership.onInvoicePaid),
+    ["customer.subscription.updated"] = vip_only(Membership.onSubscriptionChanged),
+    ["customer.subscription.deleted"] = vip_only(Membership.onSubscriptionChanged),
 }
 ShopStripeQueries.HANDLED_EVENTS = DISPATCH
 

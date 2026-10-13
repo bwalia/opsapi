@@ -25,7 +25,7 @@ local QUOTE_COLS = [[
     q.id, q.uuid, q.namespace_id, q.quote_number, q.access_token, q.status, q.source, q.customer::text AS customer,
     q.notes, q.internal_notes, q.lines::text AS lines, q.subtotal_minor, q.vat_minor, q.shipping_minor,
     q.total_minor, q.currency, q.valid_until, q.cart_id, q.chat_session_id, q.order_id, q.crm_lead_id,
-    q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at,
+    q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at, q.price_locked,
     (q.valid_until < NOW()) AS is_past_validity
 ]]
 
@@ -50,6 +50,7 @@ function ShopQuoteQueries.shape(q, opts)
         total_minor = q.total_minor,
         currency = q.currency,
         valid_until = q.valid_until,
+        price_locked = q.price_locked == true,
         created_at = q.created_at,
         notes = q.notes or U.null,
         url_path = url_path(q),
@@ -254,10 +255,20 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local source = SOURCES[body.source] and body.source or (chat_session_id and "chat" or "cart")
     if source == "admin" then source = "cart" end
 
+    -- VIP price lock: a signed-in, active member's own quote holds its prices for lock_days (90/120)
+    -- instead of 30. Checkout from a quote already charges the quote's snapshot prices.
+    local member = ngx.ctx and ngx.ctx.shop_member
+    local locked = member ~= nil and member.active == true and U.nz(customer.email)
+        and tostring(customer.email):lower() == member.email
     local q = ShopQuoteQueries.insert(ns_id, {
         lines = lines, customer = customer, notes = U.nz(body.notes) and tostring(body.notes):sub(1, 4000) or nil,
         source = source, cart_id = cart and cart.id or nil, chat_session_id = chat_session_id, status = "draft",
+        valid_until = locked and os.date("!%Y-%m-%d %H:%M:%S", os.time() + member.lock_days * 86400) or nil,
     })
+    if locked then
+        db.query("UPDATE shop_quotes SET price_locked = true WHERE id = ?", q.id)
+        q.price_locked = true
+    end
     capture_lead(ns_id, q, customer, q.total_minor, chat_session)
     return ShopQuoteQueries.shape(q)
 end
