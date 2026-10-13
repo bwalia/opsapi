@@ -18,6 +18,7 @@ local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Pricing = require("lib.shop-pricing")
 local Stock = require("queries.ShopStockQueries")
+local Insights = require("queries.ShopInsightsQueries")
 
 local ShopCatalogQueries = {}
 
@@ -332,6 +333,7 @@ local FROM_PRICE_SQL = [[
                          WHERE o.group_id = g2.id AND o.is_active) m ON m.min_delta IS NOT NULL
     ), 0)
 ]]
+ShopCatalogQueries.FROM_PRICE_SQL = FROM_PRICE_SQL
 
 local HELD_SQL = [[
     COALESCE((SELECT SUM(r.qty) FROM shop_stock_reservations r
@@ -961,6 +963,7 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
         if type(doc.rules) == "table" then
             save_rules(product_id, doc.rules)
         end
+        Insights.snapshotPrices(ns_id, { product_id })
         local uuid = db.query("SELECT uuid FROM shop_products WHERE id = ?", product_id)[1].uuid
         return { uuid = uuid, id = product_id, created = created, unresolved = unresolved }
     end)

@@ -14,6 +14,7 @@
       GET    /market/products/:uuid                     (sources + latest obs + summary + history)
       GET    /market/overview?stale=&diff_gt=&q=&anomalies=
       POST   /market/products/:uuid/apply-price         { strategy: median|min|value, value_minor? }
+      POST   /market/snapshot-prices                    (daily price history + basket-event pruning; market-sync CronJob)
 
     The public read (GET /api/v2/public/shop/:ns/market) lives in shop-public.lua.
 ]]
@@ -22,6 +23,7 @@ local U = require("lib.shop-util")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local Market = require("queries.ShopMarketQueries")
+local Insights = require("queries.ShopInsightsQueries")
 
 local BASE = "/api/v2/shop/admin/market"
 local MAX_BATCH = 500
@@ -146,6 +148,10 @@ return function(app)
         local doc = Market.productDetail(ns_id, self.params.uuid, self.params)
         if not doc then return U.fail(404, "NOT_FOUND", "Product not found") end
         return U.ok(doc)
+    end))
+
+    app:post(BASE .. "/snapshot-prices", guard("update", function(_, ns_id)
+        return U.ok(Insights.dailySnapshot(ns_id))
     end))
 
     app:post(BASE .. "/products/:uuid/apply-price", guard("update", function(self, ns_id)

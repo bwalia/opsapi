@@ -158,6 +158,7 @@ local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrati
 local shop_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-system") or {}
 local shop_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-menu-items") or {}
 local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-market") or {}
+local shop_insights_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-insights") or {}
 
 -- Render Templates (namespace {{slot}} template library). Core/always-on:
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
@@ -2543,6 +2544,9 @@ local _migrations = {
     -- Market-price RAG (shop/MARKET.prompt.md §A): pinned sources + scraped observations
     ['zzs14_shop_market_sources'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_market_migrations, 1),
     ['zzs15_shop_market_observations'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_market_migrations, 2),
+    -- Trust signals (real data only): daily price snapshots + add-to-basket events
+    ['zzs16_shop_price_history'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_insights_migrations, 1),
+    ['zzs17_shop_cart_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_insights_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
