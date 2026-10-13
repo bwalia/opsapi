@@ -4,58 +4,49 @@ pages: /dashboard/ai-runner
 api:
 modules: ai_runs, ai_runs_approvals, ai_runners, ai_runs_settings
 tools:
-suggestions: How do I start a task with AI? | How do I answer an agent's permission request? | Why is my run still queued? | What is running on our machines?
+suggestions: How do I start a task with AI? | How do I answer an agent's permission request? | Why is my run still queued? | How do I route sessions started by hand to a project?
 readonly: true
 ---
 # AI Runs
-Hands a kanban task to an AI coding agent (Claude Code, Cursor, Ollama) running on one of the workspace's own machines. The machine runs PromptPilot in runner mode: it asks OpsAPI for work, so OpsAPI never connects to the machine. The agent works in a repo folder on that machine, on a new ai/… branch, never on main.
+Hands a kanban task to an AI coding agent (Claude Code, Cursor, Ollama) on one of the workspace's own machines. The machine runs PromptPilot in runner mode and asks OpsAPI for work, so OpsAPI never connects to it. The agent works in a repo folder on a new ai/… branch, never on main.
 
 ## Pages
-- AI Runs (/dashboard/ai-runner/runs): every run, newest first, with status, task, runner, folder and branch, tokens and turns. Filter by runner or status. Updates every 10 seconds. Managers see overview cards on top: open runs by status and the queue, runners online / offline / paused, tokens and estimated cost today, the last 7 days' outcomes and the average wait for a permission decision. Waiting on you lists the permission requests and start approvals you may decide, with quick Allow / Deny and Approve / Reject buttons and a link to each run. Open a run to see its prompt, live log, conversation, usage, summary, commit and pull request, and to Cancel or Retry it.
-- Runners (/dashboard/ai-runner/runners): Register runner gives a token once — copy it into the machine's runner config. Pause, Resume, Rotate token and Revoke each runner. Each profile shows Available, or Unavailable with the reason (for example "not logged in": the machine's health check failed, so it takes no work), and how much of its plan limit is used and when it resets (for example "53% of the 7-day limit used"). Sessions shows what the machine last reported, including sessions started by hand, so you can see what is already running before starting more. Access sets who may start runs on that machine: "Only its owner and AI-run managers" (every new runner starts like this), "Everyone who can start runs", or "Selected people and projects".
-- Machines (/dashboard/ai-runner/machines): every runner with its status, last heartbeat and each profile's health and plan usage, then every session it reported: runs it manages link to their run, others are marked "Started by hand". Filter by runner or Busy only. Updates every 15 seconds.
-- AI run settings (/dashboard/ai-runner/settings): default output (pull request, pushed branch or local only), pull request base branch and drafts, max run minutes, moving the task to In progress / Review, the approval policy (who decides permission requests, whether project owners and admins can also decide, whether runs started by an assignee need a manager, the permission timeout and the input timeout, in minutes), limits and safeguards, and the prompt template every run starts from. Limits and safeguards: the similar work threshold (how alike task titles must be, 10–100%), max open runs per person and in the workspace, the daily token limit (0 = no limit for these three), and how many days run logs are kept (30–3650; the run, summary and usage stay).
+- AI Runs (/dashboard/ai-runner/runs): every run with status, task, runner, folder, branch, tokens and turns; filter by runner or status; updates every 10 s. Managers see overview cards (open runs, queue, runners online, tokens and cost today, last 7 days, average permission wait). Waiting on you lists the requests and approvals you may decide. Open a run for its prompt, live log, conversation, usage, summary, commit, pull request, Cancel and Retry.
+- Runners & sources (/dashboard/ai-runner/runners): connections that feed the workspace. A runner runs tasks and reports its sessions; a source (a CI job, another tool) only reports sessions through the open session API and never runs tasks. Filter by kind. Register asks the kind and shows the token once. Per row: Sessions, Reports (what it reports: only these folders, never these folders, only these tools — it can only narrow what the machine's owner allows in runner.json), Access (runners: "Only its owner and AI-run managers", the default, "Everyone who can start runs", or "Selected people and projects"), Pause/Resume, Rotate token, Revoke. Profiles show Available or Unavailable with the reason (e.g. "not logged in") and plan usage.
+- Machines (/dashboard/ai-runner/machines): each runner's status, heartbeat, profiles and every session it reported: runs link to their run, others are "Started by hand" (with "Task #N →" once tracked). Filter by runner or Busy only; updates every 15 s.
+- AI run settings (/dashboard/ai-runner/settings): default output (pull request, pushed branch, local), PR base and drafts, max run minutes; task automation (when a run starts / succeeds, move its task to a status and optionally a column); the approval policy (who decides requests, project admins deciding too, manager approval for assignee runs, permission and input timeouts); limits (similar-work threshold 10–100%, max open runs per person and workspace, daily token limit — 0 = none — and days run logs are kept; the run, summary and usage stay); Safety (extra denied commands and extra redaction regexes, added to built-in rules that can't be removed); session tracking; routing rules; the prompt template.
+- AI Runs platform settings (/dashboard/ai-runner/platform): platform admins only (linked from AI run settings): runner timings, queue and approval timeouts, per-run limits, and the highest values workspaces may set.
 
 ## Starting a run
-On a task page, Start with AI: choose a runner, an agent profile (and model), and the repo folder on that machine. The prompt is shown before you start; only someone with manage on AI runs can edit it. Only the task's assignee, an owner or admin of its project, or someone with manage on AI runs can start a run, and only on a runner whose Access includes them: the dialog lists just those, and "You can't use this runner" means an AI-run manager has to add you under Runners → Access. A task has at most one open run. When the dialog says "A manager must approve this run before it starts", the run is created as Needs approval and waits for a manager. "Similar work is already open" lists open runs on tasks with a similar title: check them, then tick Start anyway to go on. The dialog shows your open runs against the caps; when a cap or the daily token limit is reached, Start stays off until a run finishes (or the next day, UTC). Unavailable profiles can't be chosen.
+On a task, Start with AI: pick a runner, profile (and model) and repo folder; the prompt is previewed and only managers (manage on AI runs) can edit it. The task's assignee, its project owners/admins or a manager may start, and only on runners whose Access includes them ("You can't use this runner": ask for access under Runners & sources). One open run per task. "A manager must approve this run" means it waits as Needs approval. "Similar work is already open": check the listed runs, then tick Start anyway. Caps or the daily token limit block Start until a run finishes or the next UTC day.
 
 ## Statuses
-- Needs approval (pending_approval): waiting for a manager to approve the start; no runner picks it up. Cancelled after 3 days without a decision.
-- Queued (waiting for its runner) → Claimed → Starting → Running → Succeeded, Failed, Cancelled or Lost.
-- Waiting for permission (waiting_permission): the agent asked to do something risky, such as running a command, and waits for a decision.
-- Needs input (needs_input): the agent asked a question and waits for an answer.
-- Cancelling: a cancel was asked for and the runner is stopping the agent. Lost: the runner stopped reporting.
+Needs approval (cancelled after 3 days) → Queued → Claimed → Starting → Running → Succeeded, Failed, Cancelled or Lost (runner stopped reporting). Waiting for permission: the agent asked to do something risky. Needs input: it asked a question. Cancelling: the runner is stopping it.
 
-## Deciding permission requests
-Reading and editing files in the run's folder needs no permission. Running commands and anything else risky is asked first. The run page shows "Needs your decision" with the tool, the command or file, the path and the agent's description:
-- Allow: this once.
-- Allow for this run: also allows this exact command (for a file edit: that file) again later in this run without asking. It isn't offered for a command that chains or redirects others (; && | $( ) < > and the like): those are allowed once each time.
-- Deny: the agent is told no, with your reason if you give one, and carries on.
-Who may decide depends on the approval policy in AI run settings: managers (manage on AI runs or AI run approvals; owners and admins of the task's project only when "Project owners and admins can also decide" is on), the person who started the run, or either. Under managers, the person who started the run never decides its requests, even as a manager. Others see "Waiting for a decision". A request too large to review is denied automatically ("Too large to review"). A request nobody answers within the permission timeout is denied. Some commands (git push, sudo, reading secrets, anything outside the folder) are blocked by the runner itself and never reach you. Every request and its decision, who decided and when, is listed under Permission requests on the run page. The notification bell tells deciders about a new request and managers about a run needing approval, and tells the requester when the agent asks a question; clicking it opens the run.
+## Permission requests
+Reading and editing files in the folder needs no permission; commands and other risky steps are asked. The run page shows "Needs your decision": Allow (once), Allow for this run (this exact command or file again, not offered for chained or redirected commands), Deny (with a reason). Who decides follows the approval policy; under managers the requester never decides their own run. Too-large requests and unanswered ones (permission timeout) are denied. The runner blocks some commands itself (git push, sudo, secrets, outside the folder, plus the workspace's extra denied commands). Every request, its decision, who decided and when is listed under Permission requests on the run page. The bell tells deciders about new requests, managers about runs needing approval and the requester when the agent asks a question.
 
-## Messaging the agent
-The run page's Conversation shows each agent turn with its tokens and every message people sent. The person who started the run, or a manager, can type in the message box while the run is open: a follow-up is delivered after the agent's current turn. When the agent asks a question it is highlighted as "The agent asks" and the run waits for your answer; without one within the input timeout the run fails.
-
-## Approvals
-Runs of profiles that can't ask for permission (such as Cursor) always need a manager's approval to start; with "Runs started by an assignee need a manager's approval first" switched on, so do runs started by someone who is not a manager. A manager approves or rejects (with an optional reason) from the banner on the run page or from Waiting on you. Approve queues the run; Reject cancels it. Nobody approves a run they asked for: they see "Another manager must approve it".
-
-## Sessions started by hand
-With Track sessions started by hand on (AI run settings), each busy Claude Code or Cursor session someone starts by hand on a runner's machine becomes a task in the chosen project, column and status, with no assignee: a manager assigns it. Machines links it (Task #N →). It is titled with the session's first prompt only when the runner's config has share_manual_prompts: true; inventory_roots in that config widens which folders are seen.
+## Messages and approvals
+The run page's Conversation shows each agent turn with its tokens and people's messages. The requester or a manager can message the agent while the run is open; it gets the message after its current turn. A question ("The agent asks") waits for an answer; without one by the input timeout the run fails. Profiles that can't ask (Cursor) always need a manager's approval to start, and so do runs started by a non-manager when "Runs started by an assignee need a manager's approval first" is on. A manager approves (queues it) or rejects (cancels it, optional reason) from the run page banner or Waiting on you; nobody approves their own run ("Another manager must approve it").
 
 ## Usage
-The run page totals tokens in and out, cache read and write, the agent's cost estimate and the number of turns. Every turn is also counted on the workspace's AI usage page.
+The run page totals tokens in and out, cache read and write, the agent's cost estimate and turns. Every turn is also counted on the workspace's AI usage page.
+
+## Sessions started by hand
+With Track sessions started by hand on, each busy session someone starts by hand (Claude Code, Cursor, or any source) becomes a task. Routing rules decide first, top to bottom; the first enabled match wins: create a task (project, column, status, priority, assignees, title and description templates with {{first_prompt}}, {{tool_label}}, {{folder}}, {{repo}}, {{branch}}, {{runner}}… and who is told) or ignore it. A session no rule matches goes to the default project. Test a session shows which rule matches and the title it would create, without creating anything. Tunables: ended after (minutes), new tasks per heartbeat, idle statuses, tool names. Titles use the first prompt only when the runner has share_manual_prompts: true; inventory_roots widens which folders it reports.
 
 ## Troubleshooting
-- Stuck in Needs approval: a manager has to approve it, and not the person who asked for it.
-- A runner is missing from Start with AI: its Access doesn't include you.
-- Stuck in queued: the runner is offline or paused, or busy with as many runs as it allows. Check Runners: it should be online.
-- Stuck in Waiting for permission: someone allowed to decide has to answer on the run page or under Waiting on you.
-- Refused folder: the folder must be inside the runner's allowed folders, be a git repo, have no uncommitted changes, and not be used by another run.
-- No Start with AI button: the AI Runs plugin is off for this workspace (My Workspace → Plugins) or your role lacks create on AI runs.
-- Profile unavailable: fix it on the machine (for Claude, sign in again); it is checked every few minutes. Its queued runs wait.
-- Runner shows offline after a token rotation: put the new token in the machine's config and restart the runner.
-- A run failed as rate limited: the agent's plan limit is used up; Runners shows when it resets. Retry after that.
+- Needs approval: another manager must approve it.
+- Runner missing from Start with AI: its Access doesn't include you.
+- Queued: runner offline, paused or full; check Runners & sources.
+- Waiting for permission: someone allowed to decide must answer on the run page or under Waiting on you.
+- Refused folder: must be inside the runner's allowed folders, a clean git repo, not used by another run.
+- No Start with AI button: plugin off (My Workspace → Plugins) or no create on AI runs.
+- Profile unavailable: fix it on the machine (sign Claude in again); its runs wait.
+- Offline after rotating the token: put the new token on the machine and restart.
+- Rate limited: the plan limit is used up; retry after the reset shown on the runner.
+- A source can't run tasks; no hand-started tasks: check tracking, routing rules (an ignore rule?) and the connection's Reports filter.
 
 ## Rules
-- The assistant cannot start, cancel, approve or change runs or runners, and cannot decide permission requests — explain the pages and guide the user to their buttons.
-- Never ask for or repeat a runner token.
+- The assistant cannot start, cancel, approve or change runs, runners, rules or settings, or decide requests — explain the pages and point to their buttons.
+- Never ask for or repeat a runner or source token.
