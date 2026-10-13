@@ -559,6 +559,101 @@ export interface ShopCreditGrant {
   notify?: boolean;
 }
 
+/** Supplier catalogue sync. Costs are pence ex VAT. */
+export type ShopSupplierFormat = 'csv' | 'json' | 'xml';
+export type ShopSupplierAuth = 'none' | 'basic' | 'bearer' | 'header';
+export const SHOP_SUPPLIER_FIELDS = ['supplier_sku', 'name', 'cost', 'mpn', 'brand', 'category', 'stock', 'lead_time_days', 'rrp', 'url', 'ean'] as const;
+export type ShopSupplierField = (typeof SHOP_SUPPLIER_FIELDS)[number];
+
+export interface ShopSupplierSummary {
+  records: number;
+  kept: number;
+  filtered_out: number;
+  invalid: number;
+  created: number;
+  updated: number;
+  cost_changed: number;
+  big_cost_changes: number;
+  deactivated: number;
+  auto_linked: number;
+  invalid_examples: string[];
+  pricing?: { applied: number; pending: number; unchanged: number; lead_times_updated: number };
+}
+
+export interface ShopSupplier {
+  uuid: string;
+  name: string;
+  feed_format: ShopSupplierFormat;
+  feed_url: string | null;
+  feed_options: { delimiter?: string; records_path?: string; record_tag?: string };
+  auth_type: ShopSupplierAuth;
+  auth_username: string | null;
+  auth_header_name: string | null;
+  has_auth_secret: boolean;
+  mapping: Partial<Record<ShopSupplierField, string>>;
+  filter: { keywords?: string[] };
+  prices_include_vat: boolean;
+  default_margin_pct: number;
+  change_threshold_pct: number;
+  update_lead_times: boolean;
+  sync_hours: number;
+  is_active: boolean;
+  last_synced_at: string | null;
+  last_status: 'ok' | 'error' | 'running' | null;
+  last_error: string | null;
+  last_summary: ShopSupplierSummary | null;
+  item_counts: { active: number; total: number; linked: number };
+}
+
+export type ShopSupplierInput = Partial<Omit<ShopSupplier, 'uuid' | 'has_auth_secret' | 'last_synced_at' | 'last_status' | 'last_error' | 'last_summary' | 'item_counts'>> & {
+  /** Write-only: omitted = keep, '' = remove. */
+  auth_secret?: string;
+};
+
+export interface ShopSupplierItem {
+  uuid: string;
+  supplier_sku: string;
+  mpn: string | null;
+  name: string;
+  brand: string | null;
+  cost_minor: number;
+  previous_cost_minor: number | null;
+  cost_change_pct: number | null;
+  stock_qty: number | null;
+  in_stock: boolean | null;
+  lead_time_days: number | null;
+  is_active: boolean;
+  cost_changed_at: string | null;
+  product_uuid: string | null;
+  product_sku: string | null;
+  product_name: string | null;
+  pricing_source: 'manual' | 'supplier' | null;
+  product_price_minor: number | null;
+  product_margin_pct: number | null;
+}
+
+export type ShopPriceChangeStatus = 'pending' | 'applied' | 'approved' | 'rejected' | 'superseded';
+export const SHOP_PRICE_CHANGE_STATUSES: ShopPriceChangeStatus[] = ['pending', 'applied', 'approved', 'rejected', 'superseded'];
+
+export interface ShopPriceChange {
+  uuid: string;
+  product_uuid: string;
+  product_sku: string;
+  product_name: string;
+  old_price_minor: number;
+  new_price_minor: number;
+  current_price_minor: number;
+  cost_minor: number;
+  margin_pct: number;
+  change_pct: number | null;
+  status: ShopPriceChangeStatus;
+  supplier_name: string | null;
+  supplier_sku: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
 export interface ShopChatSession {
   uuid: string;
   email?: string | null;

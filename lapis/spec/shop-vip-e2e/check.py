@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """VIP price-lock membership end-to-end checks (driven by run.sh in a throwaway sandbox).
 
-Usage: check.py <api_url> <shop_bff_key> <webhook_secret> <postgres_container> <smtp_sink_container> <admin_jwt>
+Usage: check.py <api_url> <shop_bff_key> <webhook_secret> <postgres_container> <smtp_sink_container> <admin_jwt> <feed_container>
 Calls the public shop API as the shop BFF does, sends Stripe webhooks signed with the sandbox secret,
 reads the sign-in email from the SMTP sink and checks the database with psql in the sandbox Postgres.
 """
 import email, hashlib, hmac, json, re, subprocess, sys, time, urllib.request, urllib.error, secrets
 from email import policy
 
-API, KEY, WHSEC, PG, SMTP, ADMIN = sys.argv[1:7]
+API, KEY, WHSEC, PG, SMTP, ADMIN, FEED = sys.argv[1:8]
 BASE = API + "/api/v2/public/shop/workstation"
 HOOK = API + "/api/v2/public/shop/stripe/webhook"
 RUN = secrets.token_hex(3)
@@ -364,6 +364,109 @@ st, used = admin("GET", f"/credits?q={L}&status=used")
 check("loyalty: shows as used on the order", used["meta"]["total"] == 1 and used["data"][0]["used_order_number"] is not None, used)
 st, v = admin("POST", f"/credits/{used['data'][0]['uuid']}/void", {})
 check("loyalty: used credit can't be cancelled", st == 409, v)
+
+# --- supplier catalogue sync (phase 5) ------------------------------------------------------------------------
+def feed(csv_text, name="feed.csv"):
+    subprocess.run(["docker", "exec", "-i", FEED, "sh", "-c", f"cat > /feed/{name}"], input=csv_text.encode(), check=True)
+
+def upload(uuid, text):
+    req = urllib.request.Request(API + f"/api/v2/shop/admin/suppliers/{uuid}/import", method="POST", data=text.encode(),
+                                 headers={"Authorization": "Bearer " + ADMIN, "X-Namespace-Slug": "workstation",
+                                          "Content-Type": "text/csv"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+HEAD = "Part No,Description,Manufacturer,Trade Price,Stock,Lead Time\n"
+def feed_csv(cost_6000, include_6000=True):
+    rows = []
+    if include_6000:
+        rows.append(f'E2E-6000,"NVIDIA RTX PRO 6000 Blackwell (e2e)",PNY,"£{cost_6000/100:,.2f}",7,3 days')
+    rows += ['SUP-L40S,"NVIDIA L40S 48GB",PNY,6123.00,In stock,2 weeks',
+             'SUP-MOUSE,"Wireless mouse",Logi,19.99,100,',
+             'SUP-BAD,"RTX cable with no price",Generic,,5,']
+    return HEAD + "\n".join(rows) + "\n"
+
+feed(feed_csv(1130348))
+mapping = {"supplier_sku": "Part No", "name": "Description", "brand": "Manufacturer", "cost": "Trade Price",
+           "stock": "Stock", "lead_time_days": "Lead Time"}
+st, sup = admin("POST", "/suppliers", {"name": "E2E Distribution", "feed_format": "csv", "feed_url": "http://e2e-feed:8080/feed.csv",
+                                        "auth_type": "basic", "auth_username": "trade", "auth_secret": "wrong", "mapping": mapping,
+                                        "default_margin_pct": 15, "change_threshold_pct": 10})
+check("supplier: created", st == 201, sup)
+SUP = sup["data"]["uuid"]
+check("supplier: login stored but never returned", sup["data"]["has_auth_secret"] is True and "auth_secret" not in sup["data"]
+      and "auth_secret_encrypted" not in sup["data"] and "wrong" not in json.dumps(sup))
+st, r = admin("POST", "/suppliers", {"name": "x", "mapping": {"supplier_sku": "a", "name": "b"}})
+check("supplier: mapping must include cost", st == 400, r)
+st, r = admin("POST", f"/suppliers/{SUP}/sync")
+check("supplier: wrong password explained", st == 502 and "check the login" in r.get("error", ""), r)
+check("supplier: error recorded", admin("GET", f"/suppliers/{SUP}")[1]["data"]["last_status"] == "error")
+admin("PUT", f"/suppliers/{SUP}", {"auth_secret": "s3cret"})
+st, r = admin("POST", f"/suppliers/{SUP}/sync")
+sm = r.get("data", {})
+check("supplier: feed fetched and read", st == 200 and sm.get("records") == 4, r)
+check("supplier: non-NVIDIA item filtered out", sm.get("filtered_out") == 1, sm)
+check("supplier: row without a price skipped and explained", sm.get("invalid") == 1 and "no cost price" in sm["invalid_examples"][0], sm)
+check("supplier: two NVIDIA items stored", sm.get("kept") == 2 and sm.get("created") == 2, sm)
+check("supplier: item with our SKU linked automatically", sm.get("auto_linked") == 1, sm)
+pid_price = lambda: int(sql("select base_price_minor from shop_products where sku='E2E-6000'")[0])
+check("supplier: auto-link keeps manual pricing", sql("select pricing_source from shop_products where sku='E2E-6000'") == ["manual"]
+      and pid_price() == 1299900)
+st, items = admin("GET", f"/suppliers/{SUP}/items")
+it6000 = next(i for i in items["data"] if i["supplier_sku"] == "E2E-6000")
+check("supplier: item shows cost, stock and lead time", it6000["cost_minor"] == 1130348 and it6000["stock_qty"] == 7
+      and it6000["lead_time_days"] == 3 and it6000["product_sku"] == "E2E-6000", it6000)
+check("supplier: lead time follows the supplier", sql("select lead_time_days from shop_products where sku='E2E-6000'") == ["3"])
+
+# switch the product to supplier pricing: cost £11,303.48 × 1.15 = £12,999.00 = current price → unchanged
+prod_uuid = sql("select uuid from shop_products where sku='E2E-6000'")[0]
+st, r = admin("POST", f"/supplier-items/{it6000['uuid']}/link", {"product_uuid": prod_uuid, "pricing_source": "supplier"})
+check("pricing: switched to supplier pricing", st == 200 and r["data"]["pricing"]["unchanged"] == 1, r)
+# +5% cost → applied automatically
+feed(feed_csv(1186865))
+st, r = admin("POST", f"/suppliers/{SUP}/sync")
+check("pricing: +5% cost applied automatically", r["data"]["pricing"]["applied"] == 1 and pid_price() == 1364895, (r, pid_price()))
+ch = admin("GET", "/price-changes?status=applied")[1]["data"]
+check("pricing: change logged as applied", ch and ch[0]["new_price_minor"] == 1364895 and ch[0]["decided_by"] == "auto", ch[:1])
+check("pricing: shop price history updated", sql(
+    "select from_price_minor from shop_price_history h join shop_products p on p.id = h.product_id "
+    "where p.sku='E2E-6000' and day = (now() at time zone 'Europe/London')::date") == ["1364895"])
+st, pub = call("GET", "/products/rtx-pro-6000-blackwell-workstation")
+check("pricing: shop and quotes use the new price", pub["data"]["from_price_minor"] == 1364895, pub["data"].get("from_price_minor"))
+# +30% cost → waits for approval, shop price unchanged
+feed(feed_csv(1542925))
+st, r = admin("POST", f"/suppliers/{SUP}/sync")
+check("pricing: big rise held for approval", r["data"]["pricing"]["pending"] == 1 and pid_price() == 1364895, r["data"]["pricing"])
+check("pricing: big change counted", r["data"]["big_cost_changes"] == 1, r["data"])
+pend = admin("GET", "/price-changes?status=pending")[1]["data"]
+check("pricing: one pending change with the numbers", len(pend) == 1 and pend[0]["new_price_minor"] == 1774364
+      and round(pend[0]["change_pct"]) == 30, pend)
+st, r = admin("POST", f"/price-changes/{pend[0]['uuid']}/reject")
+check("approvals: reject leaves the price", st == 200 and r["data"]["status"] == "rejected" and pid_price() == 1364895, r)
+st, r = admin("POST", f"/price-changes/{pend[0]['uuid']}/approve")
+check("approvals: can't decide twice", st == 409, r)
+admin("POST", f"/suppliers/{SUP}/sync")  # still +30% → pending again
+admin("PUT", f"/suppliers/{SUP}", {"sync_hours": 1})
+pend = admin("GET", "/price-changes?status=pending")[1]["data"]
+check("approvals: next sync asks again", len(pend) == 1, pend)
+st, r = admin("POST", f"/price-changes/{pend[0]['uuid']}/approve")
+check("approvals: approve applies the price", st == 200 and r["data"]["status"] == "approved" and pid_price() == 1774364
+      and r["data"]["decided_by"] == "admin@e2e.invalid", r)
+# upload instead of URL; an item missing from the file is marked inactive
+st, r = upload(SUP, feed_csv(0, include_6000=False))
+check("upload: file imported", st == 200 and r["data"]["kept"] == 1, r)
+check("upload: missing item marked inactive", r["data"]["deactivated"] == 1, r["data"])
+check("upload: inactive item doesn't reprice its product", pid_price() == 1774364)
+hist = admin("GET", f"/supplier-items/{it6000['uuid']}/history")[1]["data"]
+check("history: daily cost recorded (one row per day)", len(hist) == 1 and hist[0]["cost_minor"] == 1542925, hist)
+st, bad_sup = admin("POST", "/suppliers", {"name": "Metadata", "feed_url": "http://169.254.169.254/latest/meta-data", "mapping": mapping})
+st, r = admin("POST", f"/suppliers/{bad_sup['data']['uuid']}/sync")
+check("security: cloud metadata address refused", st == 502 and "private address" in r.get("error", ""), r)
+st, r = admin("POST", "/suppliers/sync-due")
+check("cron: sync-due runs due suppliers", st == 200 and isinstance(r["data"], list), r)
 
 # --- webhook security ----------------------------------------------------------------------------------------------
 bad = urllib.request.Request(HOOK, method="POST", data=b'{"id":"evt_x","type":"invoice.paid","data":{"object":{}}}',
