@@ -216,6 +216,20 @@ function U.chars(s)
     return #s - select(2, s:gsub("[\128-\191]", ""))
 end
 
+--- At most n characters of a valid UTF-8 string (as U.clean leaves it).
+function U.cut(s, n)
+    if s == nil or #s <= n then return s end
+    local count = 0
+    for i = 1, #s do
+        local b = s:byte(i)
+        if b < 0x80 or b >= 0xC0 then
+            count = count + 1
+            if count > n then return s:sub(1, i - 1) end
+        end
+    end
+    return s
+end
+
 --- A git branch name we pass on: letters, digits, . _ / -, never starting with "-" (git would read an option, §25.7).
 function U.is_branch(v)
     return type(v) == "string" and v:match("^[%w%._/%-]+$") ~= nil and v:sub(1, 1) ~= "-"
