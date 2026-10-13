@@ -8,7 +8,8 @@
  * the similar-work warning that needs "Start anyway", an unavailable profile, and the Machines page with the
  * sessions the runner reported. §25: the runner's Access dialog saves "Everyone", a chained command is never offered
  * "Allow for this run", and nobody approves their own run (the spec's user is the only manager here, so its
- * approval run is refused and cancelled). The spec plays the PromptPilot
+ * approval run is refused and cancelled). §26: AI run settings saves "Track sessions started by hand" (this spec's
+ * project), and a busy session started by hand that the runner reports becomes a task Machines links to. The spec plays the PromptPilot
  * runner itself through the runner API (heartbeat / claim / status / events / permissions / turns with the
  * token the page showed), so no machine is needed.
  *
@@ -21,7 +22,8 @@
  *   CYPRESS_AIR_REPO        optional: the repo folder the fake runner reports (default /tmp/air-e2e-repo)
  *   npx cypress run --spec cypress/e2e/ai-runner.cy.ts
  * Each run registers a new runner and creates its own project and task, so it can be repeated. It sets the workspace's
- * deciders to "requester_or_managers" (the requester decides their own run's requests) and puts it back after.
+ * deciders to "requester_or_managers" (the requester decides their own run's requests) and switches session tracking
+ * on for its project, and puts both back after.
  */
 
 type Ns = { uuid: string; name: string; slug: string };
@@ -49,6 +51,8 @@ let reqUuid = '';
 let approvalRunUuid = '';
 let chainUuid = '';
 let deciders = ''; // the workspace's setting before this spec
+let tracking: Record<string, unknown> | null = null; // its session_tracking before this spec
+const trackSwitch = 'button[role="switch"][aria-label="Create a task for each session started by hand"]';
 // The runner's status reports carry an increasing seq (a report with a seq not above the last is ignored).
 let statusSeq = 0;
 const nextStatus = (status: string, extra: Record<string, unknown> = {}) => () => ({ seq: ++statusSeq, status, ...extra });
@@ -128,6 +132,7 @@ describe('AI Runs', () => {
     // Under "managers" a requester never decides their own run's requests (§25.1); this spec's user is both.
     asUser('GET', '/api/v2/ai-runner/settings').then((res) => {
       deciders = res.body.data.approval_policy.deciders;
+      tracking = res.body.data.session_tracking ?? null;
       return asUser('PUT', '/api/v2/ai-runner/settings', { approval_policy: { deciders: 'requester_or_managers' } });
     });
     asUser('POST', '/api/v2/kanban/projects', { name: `AI e2e ${stamp}` }, true).then((res) => {
@@ -145,6 +150,8 @@ describe('AI Runs', () => {
 
   after(() => {
     if (deciders) asUser('PUT', '/api/v2/ai-runner/settings', { approval_policy: { deciders } });
+    // Best effort: the project it pointed at may be gone since.
+    if (tracking) asUser('PUT', '/api/v2/ai-runner/settings', { session_tracking: tracking }, false, false);
   });
 
   beforeEach(() => cy.viewport(1280, 900));
@@ -348,6 +355,57 @@ describe('AI Runs', () => {
       cy.contains('tr', 'e2e: an idle session').should('not.exist');
       cy.contains('tr', 'e2e: tidy the README by hand');
     });
+  });
+
+  it('tracks sessions started by hand in AI run settings', () => {
+    visit('/dashboard/ai-runner/settings');
+    cy.contains('h3', 'Track sessions started by hand', { timeout: 20000 }).parent().within(() => {
+      cy.contains('share_manual_prompts: true');
+      cy.contains('inventory_roots');
+      cy.get(trackSwitch).then(($b) => { if ($b.attr('aria-checked') !== 'true') cy.wrap($b).click(); });
+      cy.get(`#air-s-track-project option[value="${projectUuid}"]`, { timeout: 20000 });
+      cy.get('#air-s-track-project').select(projectUuid);
+      // A column of the project's first board (a new project's default columns).
+      cy.get('select#air-s-track-column option', { timeout: 20000 }).should('contain', 'In Progress');
+      cy.get('#air-s-track-column').select('In Progress');
+      cy.get('#air-s-track-status').select('in_progress');
+    });
+    cy.screenshot('ai-runner-session-tracking', { capture: 'viewport' });
+    cy.contains('button', 'Save settings').click();
+    cy.contains('Settings saved');
+
+    cy.reload();
+    cy.get('#air-s-track-project', { timeout: 20000 }).should('have.value', projectUuid);
+    cy.get(trackSwitch).should('have.attr', 'aria-checked', 'true');
+    cy.get('select#air-s-track-column', { timeout: 20000 }).should('have.value', 'In Progress');
+    cy.get('#air-s-track-status').should('have.value', 'in_progress');
+  });
+
+  it('links a busy session started by hand to the task it became, on Machines', () => {
+    const now = () => new Date().toISOString();
+    const preview = `e2e: tracked latest prompt ${stamp}`;
+    // The runner shares first prompts (share_manual_prompts: true): the task is titled with it.
+    const title = `e2e: tidy the changelog by hand ${stamp}`;
+    // This heartbeat creates the task (tracking is on for this spec's project).
+    heartbeat(() => [
+      { key: 'e2e-tracked', tool: 'claude', status: 'busy', cwd: `${repo}-tracked`, branch: 'feature/tracked',
+        session_id: `e2e-tracked-${stamp}`, started_at: now(), updated_at: now(), prompt_preview: preview, first_prompt: title },
+    ]);
+    visit('/dashboard/ai-runner/machines');
+    cy.contains('h1', 'Machines', { timeout: 20000 });
+    cy.get('#air-m-runner', { timeout: 20000 }).select(runnerUuid);
+    cy.contains('h2', runnerName, { timeout: 20000 }).closest('section').within(() => {
+      cy.contains('tr', preview, { timeout: 20000 }).should('contain', 'Started by hand')
+        .find(`a[href^="/dashboard/projects/${projectUuid}/tasks/"]`).should(($a) => {
+          expect($a.text()).to.match(/^Task #\d+ →$/);
+          expect($a.attr('title')).to.eq(title);
+        });
+    });
+    cy.screenshot('ai-runner-machines-tracked', { capture: 'viewport' });
+    // It is an ordinary task of the project.
+    cy.contains('tr', preview).find('a').click();
+    cy.location('pathname', { timeout: 20000 }).should('match', new RegExp(`^/dashboard/projects/${projectUuid}/tasks/[0-9a-f-]{36}$`));
+    cy.contains('h1', title, { timeout: 20000 });
   });
 
   it("asks for a permission and hands the user's decision to the runner", () => {
