@@ -1,6 +1,6 @@
 /**
  * AI Runs (OpsAPI plugin projects/ai-runner) — typed client for the dashboard pages.
- * Contract: docs/AI_RUNNER.md §22.3, §23.3, §24, §25 and §26 (user API, session JWT). Requests go through apiClient
+ * Contract: docs/AI_RUNNER.md §22.3, §23.3, §24, §25, §26 and §27 (user API, session JWT). Requests go through apiClient
  * (auth + workspace headers). Writes carry `_replay: true` so they never sit in the offline
  * outbox: a run started or a token minted by a background replay later is worse than an error now.
  */
@@ -54,10 +54,24 @@ export interface RunnerAccess {
   users?: string[];
   projects?: string[];
 }
+/** §27.1: a runner runs tasks and reports sessions; a source only reports sessions (it can't claim runs). */
+export type ConnectionKind = 'runner' | 'source';
+/**
+ * §27.2: what a connection reports, narrowing what its machine owner allows (inventory_roots). Empty = everything
+ * the owner allows.
+ */
+export interface ReportFilter {
+  folders: string[];
+  exclude_folders: string[];
+  tools: string[];
+}
 export interface Runner {
   uuid: string;
   name: string;
   status: RunnerStatus;
+  /** Missing on connections registered before §27: a runner. */
+  kind?: ConnectionKind;
+  report_filter?: Partial<ReportFilter> | null;
   host?: string | null;
   os?: string | null;
   version?: string | null;
@@ -317,7 +331,18 @@ export interface Guards {
   daily_token_limit: number;
   retention_days: number;
 }
-/** §26: a busy session started by hand on a runner becomes an unassigned task in this project. */
+/** A kanban task status (task automation moves a run's task to one). */
+export type KanbanStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'completed' | 'cancelled';
+/** §27.4: move the run's task when a run starts / succeeds; column is a column name, null = leave it where it is. */
+export interface TaskMove {
+  enabled: boolean;
+  status: KanbanStatus;
+  column: string | null;
+}
+/**
+ * §26: a busy session started by hand on a runner becomes an unassigned task in this project — the default target
+ * when no routing rule matches (§27.3), plus the §27.4 tunables.
+ */
 export interface SessionTracking {
   enabled: boolean;
   /** A kanban project of the workspace; required when enabled. */
@@ -327,16 +352,105 @@ export interface SessionTracking {
   status: 'todo' | 'in_progress';
   /** Tell managers about each new task. */
   notify: boolean;
+  /** A tracked session nobody reports for this long has ended (1–1440). */
+  gone_after_minutes: number;
+  /** New tasks one heartbeat may create (1–100, and at most the platform's cap); the rest wait for the next. */
+  max_new_per_heartbeat: number;
+  /** Session statuses that don't count as busy. */
+  idle_statuses: string[];
+  /** tool → the name {{tool_label}} and default titles use. */
+  tool_labels: Record<string, string>;
+}
+/** §27.4: added to the built-in safety list and redaction; the built-in rules can't be removed. */
+export interface Safety {
+  /** Command prefixes or globs runners deny, like their built-in safety list. */
+  extra_denied_commands: string[];
+  /** Regular expressions the server masks, like its built-in secret patterns. */
+  extra_redactions: string[];
 }
 export interface Settings {
   output_mode: OutputMode;
   pr_draft: boolean;
   pr_base: string;
   max_run_minutes: number;
-  task_automation: { in_progress_on_start: boolean; review_on_success: boolean };
+  /** on_start / on_success (§27.4); the old booleans are still read when they are missing. */
+  task_automation: { on_start: TaskMove; on_success: TaskMove; in_progress_on_start?: boolean; review_on_success?: boolean };
   approval_policy: ApprovalPolicy;
   guards: Guards;
   session_tracking: SessionTracking;
+  safety: Safety;
+}
+
+/** §27.3: which sessions a routing rule applies to; an empty list matches any. */
+export interface TrackRuleMatch {
+  runner_uuids: string[];
+  tools: string[];
+  folder_globs: string[];
+  branch_globs: string[];
+  prompt_keywords: string[];
+}
+export type TrackNotify = 'managers' | 'assignees' | 'none' | 'users';
+export type TaskPriority = 'critical' | 'high' | 'medium' | 'low' | 'none';
+/** What happens to a matching session: a task (where, for whom, titled how, who hears) or nothing. */
+export interface TrackRuleAction {
+  type: 'create_task' | 'ignore';
+  project_uuid: string | null;
+  column: string | null;
+  status: 'todo' | 'in_progress';
+  priority: TaskPriority | null;
+  /** Empty = unassigned. */
+  assignee_uuids: string[];
+  /** Empty = the default title / description (§26.3). */
+  title_template: string;
+  description_template: string;
+  notify: TrackNotify;
+  notify_user_uuids: string[];
+}
+/** Rules are ordered per workspace; the first enabled one that matches wins. */
+export interface TrackRule {
+  uuid: string;
+  /** Optional, for people ("" = none). */
+  name?: string;
+  position?: number;
+  enabled: boolean;
+  match: TrackRuleMatch;
+  action: TrackRuleAction;
+}
+export type TrackRuleInput = Omit<TrackRule, 'uuid' | 'position'>;
+/** A sample session for the rule tester (as a heartbeat reports one). */
+export interface SampleSession {
+  tool?: string;
+  cwd?: string;
+  branch?: string;
+  first_prompt?: string;
+  runner_uuid?: string;
+}
+/** POST /track-rules/test: the rule that matched (null = none: the workspace default applies), and the task it makes. */
+export interface TrackRuleTest {
+  rule: TrackRule | null;
+  action: TrackRuleAction | null;
+  title: string | null;
+  description: string | null;
+}
+
+/** §27.5: platform-wide timings and limits — numbers, and the workspace guards' upper bounds under guard_max. */
+export type PlatformValues = Record<string, number | Record<string, number>>;
+export type Bounds = { min: number; max: number };
+export interface PlatformSettings {
+  values: PlatformValues;
+  /** As the server checks them; may be missing from an older server. */
+  defaults: PlatformValues;
+  bounds: Record<string, Bounds | Record<string, Bounds>>;
+  updated_at?: string | null;
+}
+function platform(d: Record<string, unknown>): PlatformSettings {
+  const { defaults, bounds, updated_at, ...rest } = d || {};
+  // Every number, and objects of numbers (guard_max); not updated_by.
+  const values = Object.fromEntries(Object.entries(rest).filter(([, x]) => typeof x === 'number' || (!!x && typeof x === 'object')));
+  return {
+    values: values as PlatformValues, defaults: (defaults ?? {}) as PlatformValues,
+    bounds: (bounds ?? {}) as PlatformSettings['bounds'], updated_at: updated_at as string | null,
+  };
 }
 
 /** GET /overview (§24.5): numbers for managers. */
@@ -448,13 +562,14 @@ const pendingStarts = new Map<string, { body: string; key: string }>();
 export const aiRunner = {
   // Runners
   listRunners: async () => list<Runner>((await get<Runner[]>('/runners')).data),
-  registerRunner: (name: string, labels?: string[]) =>
-    send<{ runner: Runner; token: string }>('post', '/runners', { name, labels }),
+  registerRunner: (name: string, kind: ConnectionKind = 'runner') =>
+    send<{ runner: Runner; token: string }>('post', '/runners', { name, kind }),
   rotateToken: (uuid: string) => send<{ token: string; runner?: Runner }>('post', `/runners/${id(uuid)}/rotate-token`),
   pauseRunner: (uuid: string) => send<Runner>('post', `/runners/${id(uuid)}/pause`),
   resumeRunner: (uuid: string) => send<Runner>('post', `/runners/${id(uuid)}/resume`),
   revokeRunner: (uuid: string) => send<unknown>('delete', `/runners/${id(uuid)}`),
   setRunnerAccess: (uuid: string, access: RunnerAccess) => send<Runner>('put', `/runners/${id(uuid)}/access`, access),
+  setReportFilter: (uuid: string, f: ReportFilter) => send<Runner>('put', `/runners/${id(uuid)}`, { report_filter: f }),
   runnerSessions: async (uuid: string) => list<RunnerSession>((await get<RunnerSession[]>(`/runners/${id(uuid)}/sessions`)).data),
   /** Phase 4: every session of every runner (Machines page). */
   sessions: async (f: SessionFilters = {}): Promise<Page<MachineSession>> =>
@@ -531,6 +646,19 @@ export const aiRunner = {
   saveProjectSettings: (projectUuid: string, s: ProjectSettings) => send<ProjectSettings>('put', `/projects/${id(projectUuid)}/settings`, s),
   getTemplate: async () => (await get<Template>('/template')).data,
   saveTemplate: (body: string) => send<Template>('put', '/template', { body }),
+
+  // §27.3 routing rules for sessions started by hand (ai_runs_settings.manage), in order.
+  listTrackRules: async () => list<TrackRule>((await get<TrackRule[]>('/track-rules')).data),
+  createTrackRule: (r: TrackRuleInput) => send<TrackRule>('post', '/track-rules', r),
+  updateTrackRule: (uuid: string, r: Partial<TrackRuleInput>) => send<TrackRule>('put', `/track-rules/${id(uuid)}`, r),
+  deleteTrackRule: (uuid: string) => send<unknown>('delete', `/track-rules/${id(uuid)}`),
+  orderTrackRules: (uuids: string[]) => send<TrackRule[]>('post', '/track-rules/order', { uuids }),
+  testTrackRules: (session: SampleSession) => send<TrackRuleTest>('post', '/track-rules/test', { session }),
+
+  // §27.5 platform settings (platform admins only).
+  getPlatformSettings: async () => platform((await get<Record<string, unknown>>('/platform/settings')).data),
+  /** Only the keys given change. */
+  savePlatformSettings: async (v: PlatformValues) => platform(await send<Record<string, unknown>>('put', '/platform/settings', v)),
 };
 
 export default aiRunner;
