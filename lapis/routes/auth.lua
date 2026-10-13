@@ -21,6 +21,8 @@ local Mail = require("helper.mail")
 local UserActivity = require("lib.user-activity")
 local Throttle = require("helper.auth-throttle")
 local AppleSignIn = require("helper.apple-signin")
+local ShopCustomerAuth = require("queries.ShopCustomerAuthQueries")
+local ShopCustomerAuthRules = require("lib.shop-customer-auth")
 
 -- 429 with Retry-After, for per-account limits (helper/auth-throttle.lua).
 local function locked_response(message, retry_after)
@@ -1065,7 +1067,13 @@ return function(app)
         else
             redirect_from = raw_state
         end
+        -- Shop customer sign-in: the state names a shop, not the dashboard (see lib/shop-customer-auth.lua).
+        local shop_state = ok_state and ShopCustomerAuthRules.from_state(state_data) or nil
 
+        if not code and shop_state then
+            local url = ShopCustomerAuth.errorUrl(self.params.error or "missing_code")
+            if url then return { redirect_to = url } end
+        end
         if not code then
             return {
                 status = 400,
@@ -1148,6 +1156,13 @@ return function(app)
                     error = "No email received from Google"
                 }
             }
+        end
+
+        -- A shop customer gets a one-time shop sign-in link, never a users row or namespace membership.
+        if shop_state then
+            local url = ShopCustomerAuth.finish(shop_state, google_user.email, google_user.verified_email == true)
+            if not url then return { status = 503, json = { error = "Shop sign-in is not configured" } } end
+            return { redirect_to = url }
         end
 
         -- Find or create user
@@ -1383,18 +1398,25 @@ return function(app)
         local state_project_code = nil
         local ok_state, state_data = pcall(cJson.decode, raw_state)
         if ok_state and type(state_data) == "table" then
-            redirect_from = state_data.from or "/"
-            state_frontend_url = state_data.frontend_url
+            redirect_from = type(state_data.from) == "string" and state_data.from or "/"
+            -- The token is sent here and anyone can forge `state`: only a trusted origin,
+            -- else FRONTEND_URL below (same rule as /auth/google/callback).
+            state_frontend_url = require("middleware.cors").trustedFrontend(state_data.frontend_url,
+                get_allowed_reset_origins())
             state_project_code = state_data.project_code
         else
             redirect_from = raw_state
         end
+        -- Shop customer sign-in: the state names a shop, not the dashboard (see lib/shop-customer-auth.lua).
+        local shop_state = ok_state and ShopCustomerAuthRules.from_state(state_data) or nil
 
         local err_frontend = state_frontend_url
             or Global.getEnvVar("FRONTEND_URL")
             or "http://127.0.0.1:3033"
 
         local function apple_error_redirect(code_name)
+            local shop_url = shop_state and ShopCustomerAuth.errorUrl(code_name)
+            if shop_url then return { redirect_to = shop_url } end
             return {
                 redirect_to = string.format(
                     "%s/login?error=%s&provider=apple",
@@ -1434,6 +1456,14 @@ return function(app)
         local email = claims.email
         if (not email or email == "") and user_form and user_form.email then
             email = user_form.email
+        end
+
+        -- A shop customer gets a one-time shop sign-in link, never a users row or namespace membership.
+        -- Apple only puts verified addresses (or private-relay addresses) in the id_token.
+        if shop_state then
+            local url = ShopCustomerAuth.finish(shop_state, claims.email, claims.email_verified == true)
+            if not url then return apple_error_redirect("shop_not_configured") end
+            return { redirect_to = url }
         end
 
         local first_name = (user_form and user_form.first_name) or ""

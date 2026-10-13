@@ -5,7 +5,7 @@ Usage: check.py <api_url> <shop_bff_key> <webhook_secret> <postgres_container> <
 Calls the public shop API as the shop BFF does, sends Stripe webhooks signed with the sandbox secret,
 reads the sign-in email from the SMTP sink and checks the database with psql in the sandbox Postgres.
 """
-import email, hashlib, hmac, json, re, subprocess, sys, time, urllib.request, urllib.error, secrets
+import email, hashlib, hmac, http.client, json, re, subprocess, sys, time, urllib.parse, urllib.request, urllib.error, secrets
 from email import policy
 
 API, KEY, WHSEC, PG, SMTP, ADMIN, FEED = sys.argv[1:8]
@@ -467,6 +467,78 @@ st, r = admin("POST", f"/suppliers/{bad_sup['data']['uuid']}/sync")
 check("security: cloud metadata address refused", st == 502 and "private address" in r.get("error", ""), r)
 st, r = admin("POST", "/suppliers/sync-due")
 check("cron: sync-due runs due suppliers", st == 200 and isinstance(r["data"], list), r)
+
+# --- customer sign-in (Google) → my quotes ----------------------------------------------------------------
+def raw(method, path, body=None, headers=None):
+    """One request with no redirect following → (status, Location, json-or-None)."""
+    u = urllib.parse.urlsplit(API)
+    c = http.client.HTTPConnection(u.hostname, u.port)
+    c.request(method, path, body=body, headers=headers or {})
+    r = c.getresponse()
+    data = r.read()
+    try:
+        js = json.loads(data or b"{}")
+    except ValueError:
+        js = None
+    return r.status, r.getheader("Location") or "", js
+
+NONCE = "e2e_nonce_" + secrets.token_urlsafe(12)
+P = "/api/v2/public/shop/workstation"
+st, _, _ = raw("POST", P + "/auth/start", json.dumps({"provider": "google", "nonce": NONCE}),
+               {"Content-Type": "application/json"})
+check("customer sign-in: start without the BFF key → 403", st == 403, st)
+st, a = call("POST", "/auth/start", {"provider": "facebook", "nonce": NONCE})
+check("customer sign-in: unsupported provider → 400", st == 400, a)
+st, a = call("POST", "/auth/start", {"provider": "google", "nonce": "short"})
+check("customer sign-in: bad nonce → 400", st == 400, a)
+st, a = call("POST", "/auth/start", {"provider": "google", "nonce": NONCE, "next": "https://evil.example/x"})
+url = a.get("data", {}).get("authorize_url", "")
+check("customer sign-in: start gives Google's authorize URL", st == 200 and url.startswith("https://accounts.google.com/"), a)
+state = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get("state", ["{}"])[0]
+sj = json.loads(state)
+check("customer sign-in: state names the shop, nonce, and a same-site next",
+      sj.get("shop") == {"ns": "workstation", "n": NONCE, "next": "/account"}, sj)
+
+users_before = sql("select count(*) from users")[0]
+members_before = sql("select count(*) from namespace_members")[0]
+q = urllib.parse.urlencode({"code": "verified:" + B.upper(), "state": state})
+st, loc, _ = raw("GET", "/auth/google/callback?" + q)
+check("customer sign-in: verified Google email → back to the shop's verify page",
+      st == 302 and loc.startswith("https://shop.e2e.test/account/verify?t="), (st, loc))
+lq = urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query)
+check("customer sign-in: landing carries the nonce and next", lq.get("n") == [NONCE] and lq.get("next") == ["/account"], lq)
+check("customer sign-in: no users row and no namespace membership for a customer",
+      sql("select count(*) from users")[0] == users_before
+      and sql("select count(*) from namespace_members")[0] == members_before)
+st, v = call("POST", "/member/verify", {"token": lq.get("t", [""])[0]})
+check("customer sign-in: link gives a session for the (normalised) email", st == 200 and v["data"]["email"] == B, v)
+csession = v.get("data", {}).get("session_token")
+
+st, mine = call("GET", "/customer/quotes", member=csession)
+uuids = {x["uuid"] for x in mine.get("data", [])}
+check("my quotes: every quote raised under my email, and only those",
+      st == 200 and {q1["uuid"], q2["uuid"], q4["uuid"]} <= uuids and q3["uuid"] not in uuids, (st, mine))
+check("my quotes: each links to its quote page",
+      all(x["url_path"].startswith("/quotes/" + x["uuid"] + "?t=") for x in mine.get("data", [])))
+st, _ = call("GET", "/customer/quotes")
+check("my quotes: signed out → 401", st == 401, st)
+
+q = urllib.parse.urlencode({"code": "unverified:someone-" + RUN + "@e2e.test", "state": state})
+st, loc, _ = raw("GET", "/auth/google/callback?" + q)
+check("customer sign-in: unverified Google email refused",
+      st == 302 and loc == "https://shop.e2e.test/login?error=email_unverified", (st, loc))
+st, loc, _ = raw("GET", "/auth/google/callback?" + urllib.parse.urlencode({"error": "access_denied", "state": state}))
+check("customer sign-in: cancelled at Google → shop sign-in page with the error",
+      st == 302 and loc == "https://shop.e2e.test/login?error=access_denied", (st, loc))
+
+form = {"Content-Type": "application/x-www-form-urlencoded"}
+st, loc, _ = raw("POST", "/auth/apple/callback", urllib.parse.urlencode({"error": "user_cancelled_authorize", "state": state}), form)
+check("apple callback: reachable without a JWT and returns a shop sign-in to the shop",
+      st == 302 and loc.startswith("https://shop.e2e.test/login?error="), (st, loc))
+evil = json.dumps({"from": "/", "frontend_url": "https://evil.example"})
+st, loc, _ = raw("POST", "/auth/apple/callback", urllib.parse.urlencode({"error": "x", "state": evil}), form)
+check("apple callback: never redirects to an untrusted frontend_url", st == 302 and "evil.example" not in loc, (st, loc))
+call("POST", "/member/logout", member=csession)
 
 # --- webhook security ----------------------------------------------------------------------------------------------
 bad = urllib.request.Request(HOOK, method="POST", data=b'{"id":"evt_x","type":"invoice.paid","data":{"object":{}}}',

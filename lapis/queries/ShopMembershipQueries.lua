@@ -483,6 +483,16 @@ local function may_sign_in(ns_id, email)
     return r and r.ok == true
 end
 
+--- One-time sign-in link token for an email (hash stored). Used by the emailed link and by
+-- Google / Apple shop sign-in (ShopCustomerAuthQueries), which vouch for the email themselves.
+function Q.issueSignInLink(ns_id, email)
+    local token = U.token(32)
+    db.query([[INSERT INTO shop_member_tokens (namespace_id, email, kind, token_hash, expires_at)
+               VALUES (?, ?, 'link', ?, NOW() + (? || ' minutes')::interval)]],
+        ns_id, email, U.sha256_hex(token), tostring(LINK_MINUTES))
+    return token
+end
+
 --- POST /member/login. Always answers the same way (no "is this a member?" oracle).
 -- Returns { sent = bool } — `sent` is for logs/tests only and is NOT returned to the browser.
 function Q.requestLogin(ns_id, body)
@@ -498,10 +508,7 @@ function Q.requestLogin(ns_id, body)
         ngx.log(ngx.ERR, "[shop-vip] SHOP_PUBLIC_URL is not set — cannot build sign-in links")
         return { sent = false }
     end
-    local token = U.token(32)
-    db.query([[INSERT INTO shop_member_tokens (namespace_id, email, kind, token_hash, expires_at)
-               VALUES (?, ?, 'link', ?, NOW() + (? || ' minutes')::interval)]],
-        ns_id, email, U.sha256_hex(token), tostring(LINK_MINUTES))
+    local token = Q.issueSignInLink(ns_id, email)
     local link = base:gsub("/+$", "") .. "/members/verify?t=" .. token
     local ok = send_mail(ns_id, email, "Your Workstation members sign-in link",
         "<p>Use this link to sign in to your Workstation VIP membership. It works once and expires in "

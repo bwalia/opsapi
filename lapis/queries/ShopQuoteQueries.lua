@@ -197,6 +197,27 @@ function ShopQuoteQueries.publicView(ns_id, uuid, token)
     return ShopQuoteQueries.shape(maybe_expire(q))
 end
 
+--- A signed-in customer's own quotes (GET /customer/quotes). `email` is the session's email, which
+-- an emailed link or Google / Apple verified, so matching the quote's customer email is ownership.
+function ShopQuoteQueries.forCustomer(ns_id, email, params)
+    params = params or {}
+    local limit = U.clamp(U.int(params.limit, 50), 1, 100)
+    local offset = math.max(0, U.int(params.offset, 0))
+    local rows = db.query("SELECT " .. QUOTE_COLS .. [[, o.uuid AS order_uuid, o.order_number, COUNT(*) OVER() AS total
+          FROM shop_quotes q LEFT JOIN shop_orders o ON o.id = q.order_id
+         WHERE q.namespace_id = ? AND lower(q.customer->>'email') = lower(?) AND q.status <> 'cancelled'
+         ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?]], ns_id, email, limit, offset)
+    local total = rows[1] and tonumber(rows[1].total) or 0
+    local out = {}
+    for _, r in ipairs(rows) do
+        local s = ShopQuoteQueries.shape(maybe_expire(r))
+        s.line_count = #s.lines
+        s.order_number = r.order_number or U.null
+        out[#out + 1] = s
+    end
+    return U.arr(out), { total = total, limit = limit, offset = offset }
+end
+
 --- Attach a new quote to the customer's CRM lead (one open lead per email; never fails the quote).
 local function capture_lead(ns_id, q, customer, total, chat_session)
     local lead = Leads.safeUpsert(ns_id, {
