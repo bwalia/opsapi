@@ -9,6 +9,8 @@
  * the server still decides (assignee, ai_runs.manage or project owner/admin).
  * §25.1: the runner list is only the runners this user may use, and a runner they can't use (its access changed
  * since) answers 403 "You can't use this runner", shown as such. Only ai_runs.manage may edit the prompt.
+ * §28: the built-in runner runs inside OpsAPI (no machine): it is listed last, so it is picked when no machine is
+ * online; its profiles are models and its "folders" are the connected GitHub repositories, or none.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -30,6 +32,7 @@ interface TaskRef {
 }
 
 const usable = (r: Runner) => r.status === 'online';
+const isBuiltin = (r?: Runner) => r?.kind === 'builtin';
 /** The runner's first profile that can take work (§24.3: a logged-out agent reports available: false). */
 const firstProfile = (r?: Runner) => r?.capabilities?.profiles?.find((p) => p.available !== false)?.key || '';
 const byOnline = (a: Runner, b: Runner) => Number(usable(b)) - Number(usable(a));
@@ -128,6 +131,8 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
   const models = chosen?.models || [];
   const repos = runner?.repos || [];
   const repoInfo = repos.find((r) => r.path === repo.trim());
+  const builtin = isBuiltin(runner);
+  const githubRepos = repos.filter((r) => r.path !== 'none');
 
   /** Preview for these inputs; with no folder yet, take the suggested one and preview again. */
   async function runPreview(r: string, p: string, folder: string) {
@@ -256,18 +261,26 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
         <p className="py-8 text-center text-sm text-secondary-500" role="status">Loading runners and the prompt…</p>
       ) : (
         <div className="space-y-4">
-          <Select id="air-runner" label="Runner" value={runnerUuid} onChange={(e) => { const r = runners.find((x) => x.uuid === e.target.value); setRunnerUuid(e.target.value); setProfile(firstProfile(r)); setModel(''); }}
-            helperText={runners.some(usable) ? undefined : 'No runner is online. Start PromptPilot on a machine registered under Runners.'} error={!runners.some(usable)}>
+          <Select id="air-runner" label="Runner" value={runnerUuid}
+            onChange={(e) => {
+              const r = runners.find((x) => x.uuid === e.target.value);
+              // The built-in runner's "folders" are repositories (or none); a machine's are its own paths.
+              if (isBuiltin(r) !== builtin) setRepo(isBuiltin(r) ? 'none' : '');
+              setRunnerUuid(e.target.value); setProfile(firstProfile(r)); setModel('');
+            }}
+            helperText={builtin ? 'Runs inside OpsAPI on an AI model: no machine needed. It can’t run code or tests.'
+              : runners.some(usable) ? undefined : 'No runner is online. Start PromptPilot on a machine registered under Runners.'}
+            error={!runners.some(usable)}>
             {!runnerUuid && <option value="">Choose a runner</option>}
             {runners.map((r) => (
               <option key={r.uuid} value={r.uuid} disabled={!usable(r)}>
-                {r.name}{r.host ? ` (${r.host})` : ''} — {reason(r)}
+                {r.name}{isBuiltin(r) ? ' (no machine needed)' : r.host ? ` (${r.host})` : ''} — {reason(r)}
               </option>
             ))}
           </Select>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Select id="air-profile" label="Agent profile" value={profile} onChange={(e) => { setProfile(e.target.value); setModel(''); }} disabled={!profiles.length}
+          <div className={builtin ? '' : 'grid gap-4 sm:grid-cols-2'}>
+            <Select id="air-profile" label={builtin ? 'AI model' : 'Agent profile'} value={profile} onChange={(e) => { setProfile(e.target.value); setModel(''); }} disabled={!profiles.length}
               error={profileDown}
               helperText={runner && !profiles.length ? 'This runner reports no agent profiles.'
                 : profileDown ? `Unavailable on this runner${chosen?.unavailable_reason ? `: ${chosen.unavailable_reason}` : ''}. Choose another profile.`
@@ -279,12 +292,23 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
                 </option>
               ))}
             </Select>
-            <Select id="air-model" label="Model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>
-              <option value="">{models.length ? "The profile's default" : 'No choice for this profile'}</option>
-              {models.map((m) => <option key={m} value={m}>{m}</option>)}
-            </Select>
+            {!builtin && (
+              <Select id="air-model" label="Model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>
+                <option value="">{models.length ? "The profile's default" : 'No choice for this profile'}</option>
+                {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </Select>
+            )}
           </div>
 
+          {builtin ? (
+            <Select id="air-repo" label="Repository" value={repo} onChange={(e) => setRepo(e.target.value)}
+              helperText={repo === 'none' ? 'It plans, answers and writes on the task (comments and subtasks); no code changes.'
+                : repoInfo ? `It reads the code and commits to its own branch from ${repoInfo.branch || 'the default branch'}, then opens a pull request. Nothing is merged.`
+                : undefined}>
+              {repos.map((r) => <option key={r.path} value={r.path}>{r.label || r.path}</option>)}
+              {!githubRepos.length && <option value="" disabled>Connect GitHub under Runners &amp; sources to work in a repository</option>}
+            </Select>
+          ) : (
           <div>
             <Input id="air-repo" label="Repo folder on that machine" value={repo} onChange={(e) => setRepo(e.target.value)} list="air-repos"
               placeholder="/Users/you/projects/my-repo" spellCheck={false} autoComplete="off" className="font-mono"
@@ -295,6 +319,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
               {repos.map((r) => <option key={r.path} value={r.path}>{r.branch ? `on ${r.branch}` : ''}</option>)}
             </datalist>
           </div>
+          )}
 
           {stale && (
             <p className="rounded-lg bg-info-500/10 p-3 text-sm text-info-700" role="status">
@@ -347,8 +372,13 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
           {preview && (
             <>
               <p className="text-sm text-secondary-600">
-                <span className="font-medium text-secondary-800">Output:</span> {outputModeLabel(preview.output_mode)}
-                {preview.output_mode === 'pull_request' && ' — the agent commits on its branch and opens a pull request; nothing is merged.'}
+                <span className="font-medium text-secondary-800">Output:</span>{' '}
+                {builtin && repo === 'none' ? 'Comments and subtasks on the task; its summary is posted there too.' : (
+                  <>
+                    {outputModeLabel(preview.output_mode)}
+                    {preview.output_mode === 'pull_request' && ' — the agent commits on its branch and opens a pull request; nothing is merged.'}
+                  </>
+                )}
               </p>
               {limits.info.length > 0 && <p className="text-sm text-secondary-600" data-testid="air-limits">{limits.info.join(' ')}</p>}
               {canEditPrompt ? (

@@ -18,7 +18,7 @@ import { Badge, Button, Card, ConfirmDialog, Input, Table, Textarea } from '@/co
 import { ErrorNote, Spinner } from '@/components/property-deals/ui';
 import {
   AiRunnerPage, BASE, PRODUCT, RequestWants, RunResult, RunStatusBadge, compact, cost, duration, outputModeLabel,
-  requestTarget, runView, useAiData, when,
+  isRepoRef, repoText, requestTarget, runView, useAiData, when,
 } from '@/components/ai-runner/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useAuthStore } from '@/store/auth.store';
@@ -376,7 +376,7 @@ function RunDetail({ uuid }: { uuid: string }) {
     ['Requested by', v.requester],
     ['Runner', v.runner],
     ['Profile', v.profile],
-    ['Folder', <span key="f" className="break-all font-mono text-xs">{run.repo_path}</span>],
+    [isRepoRef(run.repo_path) ? 'Repository' : 'Folder', <span key="f" className="break-all font-mono text-xs">{repoText(run.repo_path)}</span>],
     ['Branch', <span key="b" className="break-all font-mono text-xs">{run.work_branch || '—'}{run.base_branch ? ` (from ${run.base_branch})` : ''}</span>],
     ['Output', outputModeLabel(run.output_mode)],
     ['Result', <RunResult key="r" run={run} />],

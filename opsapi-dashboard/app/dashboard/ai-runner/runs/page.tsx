@@ -14,7 +14,7 @@ import { Badge, Button, Pagination, Select, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import {
   AiRunnerPage, useAiData, BASE, PRODUCT, RUN_STATUSES, RunResult, RunStatusBadge, ago, compact, cost, duration, elapsed,
-  requestTarget, runStatusLabel, runView, when,
+  repoText, requestTarget, runStatusLabel, runView, when,
 } from '@/components/ai-runner/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useAuthStore } from '@/store/auth.store';
@@ -230,7 +230,7 @@ function Runs() {
         return (
           <span className="block max-w-[11rem] text-xs">
             <span className="block truncate text-sm" title={`${v.runner} · ${v.profile}`}>{v.runner} · {v.profile}</span>
-            <span className="block truncate font-mono" title={r.repo_path}>{r.repo_path}</span>
+            <span className="block truncate font-mono" title={r.repo_path}>{repoText(r.repo_path)}</span>
             {r.work_branch && <span className="block truncate font-mono text-secondary-500" title={r.work_branch}>{r.work_branch}</span>}
           </span>
         );
