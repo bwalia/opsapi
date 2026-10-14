@@ -5,7 +5,8 @@
 --                                       objections, questions for what isn't known, playbook rules, objective (P02)
 --   GET  /coach/:opportunity_id         known vs assumed, questions to ask before any figure, the rules (P06)
 --   POST /knowledge/teach               { statement, title?, key?, scope?, domain?, triggers?, approve? } a manager
---                                       teaches a rule; approve = true approves it in the same step (scene 6)
+--                                       teaches a rule; approve = true approves it in the same step (scene 6).
+--                                       An AI agent may teach (propose) but never approve.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 for _, p in ipairs({ root, root and (root:match("^(.*)/[^/]+$") .. "/property-deals") }) do
     if p and not package.path:find(p .. "/?.lua", 1, true) then package.path = p .. "/?.lua;" .. package.path end
@@ -64,6 +65,8 @@ return function(app)
             domain = { type = "string", max = 40 }, rationale = { type = "text", max = 4000 }, approve = { type = "boolean" },
         })
         if not d then return sdk.error(422, "Validation failed", errors) end
+        local agent = K.is_agent(ns, me)
+        if d.approve and agent then return sdk.error(403, "An AI agent can't approve knowledge; a person must") end
         local manager = sdk.can(self, "property_pa_knowledge", "manage")
         local scope = d.scope or "company"
         if d.approve and scope ~= "personal" and not manager then
@@ -77,7 +80,7 @@ return function(app)
             if type(t) == "string" and t:match("^[a-z0-9_]+$") and #triggers < 20 then triggers[#triggers + 1] = t end
         end
         local p = K.propose(ns, { key = key, scope = scope, domain = d.domain or "general", title = title, rule = d.statement,
-            rationale = d.rationale, triggers = triggers }, me, false)
+            rationale = d.rationale, triggers = triggers }, me, agent)
         local out = p
         if d.approve then out = K.decide(ns, p.knowledge_uuid, p.version, true, me, manager) end
         return { status = 201, json = { success = true, data = out } }

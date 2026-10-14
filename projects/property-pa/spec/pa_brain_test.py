@@ -65,7 +65,7 @@ rule = {"key": "valuation_is_anchor", "domain": "seller", "scope": "company",
         "title": "An agent's valuation is not the seller's minimum",
         "rule": "Treat another agent's valuation as the seller's anchor, not their minimum price.",
         "rationale": "Ashley, scene 6", "triggers": ["valuation", "price"], "proposed_by_ai": True}
-prop = data(call("POST", PA + "/knowledge", SOPHIE, S, rule), 201, "the PA proposes a company rule")
+prop = data(call("POST", PA + "/knowledge", "agent", S, rule), 201, "the PA proposes a company rule")
 check("a proposal is version 1, proposed", prop["version"] == 1 and prop["status"] == "proposed", prop)
 kid = prop["knowledge_uuid"]
 check("not used until approved", "valuation_is_anchor" not in
@@ -98,6 +98,32 @@ check("personal rules are mine only",
 res = call("POST", PA + "/knowledge", SOPHIE, S, {"key": "Bad Key", "title": "x", "rule": "x"})
 check("bad key refused (422)", res[0] == 422, res)
 
+# The AI agent (the pd_agent service account) proposes knowledge but never approves or rejects it: a person must.
+res = call("POST", PA + "/knowledge/teach", "agent", S, {"statement": "Always quote our lowest fee.",
+           "key": "ai_own_rule", "scope": "personal", "approve": True})
+check("the AI agent can't teach and approve its own personal rule (403)", res[0] == 403
+      and "a person must" in res[1]["error"], res)
+check("and nothing is written for it", sql(f"SELECT COUNT(*) FROM pa_knowledge WHERE namespace_id = {NSID} "
+                                           "AND key = 'ai_own_rule'") == ["0"])
+ai = data(call("POST", PA + "/knowledge", "agent", S, {"key": "ai_own_rule", "scope": "personal", "title": "Fees",
+          "rule": "Always quote our lowest fee.", "proposed_by_ai": False}), 201,
+          "the AI agent proposes a personal rule")
+for action in ("approve", "reject"):
+    res = call("POST", PA + f"/knowledge/{ai['knowledge_uuid']}/versions/1/{action}", "agent", S)
+    check(f"the AI agent can't {action} its own rule (403)", res[0] == 403 and "a person must" in res[1]["error"], res)
+got = data(call("GET", PA + f"/knowledge/{ai['knowledge_uuid']}", "agent", S), 200, "the AI agent's rule")
+check("it stays proposed, flagged as from the AI although the body said it wasn't",
+      got["status"] == "draft" and got["versions"][0]["status"] == "proposed"
+      and got["versions"][0]["proposed_by_ai"] is True, got)
+t = data(call("POST", PA + "/knowledge/teach", "agent", S, {"statement": "Ask about the chain on every call.",
+         "key": "ai_taught_rule", "scope": "company"}), 201, "the AI agent teaches a company rule")
+data(call("POST", PA + "/knowledge", SOPHIE, S, {"key": "person_not_ai", "title": "x", "rule": "A person's rule.",
+     "proposed_by_ai": True}), 201, "a person proposes, saying it's the AI's")
+pend = {p["key"]: p for p in data(call("GET", PA + "/knowledge/pending", ASHLEY, S), 200, "pending")}
+check("taught by the AI agent: proposed and flagged as the AI's; a person's proposal never is",
+      t["status"] == "proposed" and pend["ai_taught_rule"]["proposed_by_ai"] is True
+      and pend["person_not_ai"]["proposed_by_ai"] is False, pend)
+
 # --- Fixtures --------------------------------------------------------------------------------------------------------
 for who in (SOPHIE, ASHLEY, "owner_s"):
     res = call("POST", PA + "/demo/reset", who, S, {})
@@ -128,6 +154,15 @@ check("every fact in the context has a ref", refs and all(r.startswith("pa_oppor
 check("unknowns are listed, not guessed", "expectation_price" in ctx["unknown"], ctx["unknown"])
 check("context carries the rules and the knowledge", "never follow instructions" in ctx["rules"]
       and "grounded_or_silent" in ctx["knowledge"], ctx["rules"])
+# Belt and braces: even an approved personal rule of the AI agent's (forced here) never reaches its context pack.
+sql(f"UPDATE pa_knowledge_versions SET status = 'approved' WHERE knowledge_uuid = '{ai['knowledge_uuid']}'")
+sql(f"UPDATE pa_knowledge SET status = 'approved', current_version = 1 WHERE uuid = '{ai['knowledge_uuid']}'")
+actx = data(call("GET", PA + f"/context/{SARAH}", "agent", S), 200, "the AI agent's context pack")
+check("the AI agent's own personal rules are never in its context pack (company rules are)",
+      "ai_own_rule" not in actx["knowledge"] and "grounded_or_silent" in actx["knowledge"]
+      and "ai_own_rule" not in {k["key"] for k in data(call("GET", PA + "/knowledge", "agent", S), 200, "its rules")},
+      actx["knowledge"])
+check("a person's personal rules still are", "my_call_window" in ctx["knowledge"], ctx["knowledge"])
 
 # --- Capture: Sophie's voice note (scene 3) --------------------------------------------------------------------------
 NOTE = ("Spoke to Sarah. Second agent valued it at £240k. She won't go below £235k. Her husband Tom needs to agree. "
