@@ -312,6 +312,38 @@ test("volunteered protected info is flagged and pasting noted", function()
     check(has_flag(e, "pasted"), "pasted")
 end)
 
+-- Grounding (answers to candidates' questions must come from the company facts)
+test("answers must come from the facts", function()
+    local facts = sample_kit().company_facts
+    local G = Engine.Guard
+    check(G.is_grounded("Monday to Friday, 9:00 to 17:30, hybrid with 2 days a week in the Leeds office.", facts), "hours")
+    check(G.is_grounded("The pay is £34,000 to £38,000 a year.", facts), "pay")
+    check(not G.is_grounded("Success in the first 90 days is measured by customer satisfaction scores and reduced escalation rates.", facts), "invented 1")
+    check(not G.is_grounded("The team uses a CRM and ticketing system, with monthly feedback sessions.", facts), "invented 2")
+    check(not G.is_grounded("Anything", ""), "no facts")
+end)
+
+test("ungrounded answers are forwarded and questions capped", function()
+    local c = clock()
+    local e = engine(no_eligibility(), c)
+    e:start()
+    for _ = 1, 3 do
+        e:receive({ type = "answer", text = "An answer.", input = "typed" })
+        e:apply({ action = "move_on", say = "Thanks.", flags = {} })
+    end
+    e:receive({ type = "answer", text = "How is success measured?", input = "typed" })
+    e:apply({ action = "answer", say = "Success is measured by customer satisfaction scores and escalation rates.", flags = {} })
+    eq(table.concat(e.session.forwarded_questions, "|"), "How is success measured?")
+    check(prefix(last(e).text, "I don't have that information"), "forwarded")
+    check(has_flag(e, "other", "The interviewer's answer wasn't in the company facts; the question was passed on instead."), "flag")
+    e:receive({ type = "answer", text = "What are the hours?", input = "typed" })
+    e:apply({ action = "answer", say = "Monday to Friday, 9:00 to 17:30, hybrid.", flags = {} })
+    check(prefix(last(e).text, "Monday to Friday"), "grounded answer")
+    e:receive({ type = "answer", text = "And the pension?", input = "typed" })
+    eq(e:apply({ action = "answer", say = "Pension matched up to 5%.", flags = {} }).type, "finished")
+    eq(e.session.state, "completed")
+end)
+
 -- Evaluation
 local function finished_session()
     local c = clock()

@@ -24,6 +24,8 @@ local Engine = {}
 Engine.__index = Engine
 
 Engine.MAX_ANSWER = 6000
+--- Candidate questions answered before closing.
+Engine.MAX_CANDIDATE_QUESTIONS = 3
 
 local FINISHED = { completed = true, human_requested = true, abandoned = true, expired = true, withdrawn = true }
 Engine.FLAG_KINDS = { adjustment = true, human_requested = true, distress = true, protected_info_volunteered = true,
@@ -271,6 +273,42 @@ function Guard.answer(text)
     return T.prefix(t, 800)
 end
 
+Guard.stop_words = {}
+for _, w in ipairs({
+    "about", "after", "also", "been", "before", "being", "between", "both", "could", "does", "each", "from", "have", "here",
+    "into", "just", "like", "more", "most", "much", "only", "other", "over", "same", "should", "some", "such", "than",
+    "that", "their", "them", "then", "there", "these", "they", "this", "those", "through", "very", "what", "when", "where",
+    "which", "while", "will", "with", "would", "your", "yours", "role", "team", "great", "question", "thanks", "thank",
+    "happy", "glad", "information", "know", "share", "help", "really", "well", "we're", "you're", "it's", "there's",
+}) do Guard.stop_words[w] = true end
+
+--- Meaningful words: letters, digits, ' £ $ % (any non-ASCII counts as a letter), 4+ characters, no stop words.
+function Guard.words(text)
+    local out = {}
+    for w in tostring(text or ""):lower():gmatch("[%w'%$%%\128-\255]+") do
+        if T.len(w) >= 4 and not Guard.stop_words[w] then out[#out + 1] = w end
+    end
+    return out
+end
+
+--- Whether an answer to a candidate's question comes from the company facts:
+-- most (60%) of its meaningful words must appear there.
+function Guard.is_grounded(answer, facts)
+    local fact_words = {}
+    local any = false
+    for _, w in ipairs(Guard.words(facts)) do
+        fact_words[w] = true
+        any = true
+    end
+    local words = Guard.words(answer)
+    if not any or #words == 0 then return false end
+    local found = 0
+    for _, w in ipairs(words) do
+        if fact_words[w] then found = found + 1 end
+    end
+    return found / #words >= 0.6
+end
+
 local NONE = {}
 for _, n in ipairs({ "no", "nope", "no thanks", "no thank you", "none", "nothing", "not really", "no questions",
     "no, thank you", "no, thanks", "i'm good", "im good", "that's all", "thats all", "no that's all" }) do
@@ -509,19 +547,33 @@ function Engine:apply(reply, raw_text)
         self:advance(Guard.acknowledgement(reply and reply.say or ""))
         return self:finished_or_wait()
     elseif step.kind == "candidate_questions" then
-        local action = reply and reply.action
-        if action == "answer" then
-            self:append("interviewer", Guard.answer(reply.say) .. " Do you have any other questions?", "answer")
-            return WAIT
-        elseif action == "forward" then
-            if last then s.forwarded_questions[#s.forwarded_questions + 1] = last.text end
-            self:append("interviewer", "I don't have that information, so I've passed your question to the hiring "
-                .. "team. Is there anything else you'd like to ask?", "answer")
-            return WAIT
+        local asked = 0
+        for _, t in ipairs(s.turns) do
+            if t.role == "candidate" and t.kind == "candidate_question" then asked = asked + 1 end
         end
-        s.step = s.step + 1
-        self:close()
-        return DONE
+        local more = asked < Engine.MAX_CANDIDATE_QUESTIONS and " Do you have any other questions?" or ""
+        local action = reply and reply.action
+        if action == "answer" and Guard.is_grounded(reply.say, s.kit.company_facts) then
+            self:append("interviewer", Guard.answer(reply.say) .. more, "answer")
+        elseif action == "answer" or action == "forward" then
+            -- An answer the company facts don't support is never given: it goes to the team.
+            if action == "answer" then
+                self:flag("other", "The interviewer's answer wasn't in the company facts; the question was passed on instead.")
+            end
+            if last then s.forwarded_questions[#s.forwarded_questions + 1] = last.text end
+            self:append("interviewer", "I don't have that information, so I've passed your question to the hiring team."
+                .. (more == "" and "" or " Is there anything else you'd like to ask?"), "answer")
+        else
+            s.step = s.step + 1
+            self:close()
+            return DONE
+        end
+        if more == "" then
+            s.step = s.step + 1
+            self:close()
+            return DONE
+        end
+        return WAIT
     end
     return WAIT
 end
