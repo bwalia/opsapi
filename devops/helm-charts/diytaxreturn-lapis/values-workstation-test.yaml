@@ -84,7 +84,7 @@ minio:
 # workstation.academy lets the Academy tenant's instructor dashboard
 # (test-teach.workstation.academy) call this shared API cross-origin;
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
-corsAllowedDomains: "workstation.co.uk,workstation.academy"
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com"
 
 # Workstation AI Shop (shop.workstation.co.uk, workstation-website/shop).
 # Plain config → SHOP_ALLOWED_ORIGINS / SHOP_PUBLIC_URL container env (see
