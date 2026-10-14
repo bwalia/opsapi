@@ -181,6 +181,7 @@ Rules enforced at load time:
 - Every `menu` entry needs a `label`, either a `resource` or a `page`, and a `module` that is one of the plugin's `modules`.
 - Every `pages` entry needs a unique `key`, a `label`, an `entry` under `ui/` ending in `.html`, and a `module`. Its optional `api` lists must start with `/api/`.
 - `publishes` names are lowercase. Each verb has a condition `{ column = value }` or `{ column = { value, value } }`, and can't be called `created`, `updated` or `deleted`.
+- `hide = "col,col"` leaves those columns out of the events and the audit trail (an update that only changes them sends nothing). Use it for message bodies, AI inputs and anything your retention settings delete: the audit trail is kept for a year.
 - `settings` names are lowercase. Types are `sdk.validate`'s except `json`. A `default` must pass its own rules. Only `string`, `text` and `url` settings can be `secret`, and a secret has no default.
 
 ---

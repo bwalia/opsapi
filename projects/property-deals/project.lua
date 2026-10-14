@@ -61,9 +61,10 @@ return {
                      verbs = { requested = { status = "pending" }, approved = { status = "approved" },
                                rejected = { status = "rejected" }, executed = { status = "executed" } },
                      emits = { "decided" } },
-        agent_run = { table = "property_deals_agent_runs",
+        -- Email text and what the AI read or wrote stay out of events and the audit trail: retention deletes them.
+        agent_run = { table = "property_deals_agent_runs", hide = "input_snapshot,steps,output,output_draft",
                       verbs = { succeeded = { status = "succeeded" }, failed = { status = "failed" } } },
-        inbound_message = { table = "property_deals_inbound_messages" },
+        inbound_message = { table = "property_deals_inbound_messages", hide = "body_text" },
         saved_search = { table = "property_deals_saved_searches" },
         scout_alert = { table = "property_deals_scout_alerts" },
         match = { table = "property_deals_matches",
