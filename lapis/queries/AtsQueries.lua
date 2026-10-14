@@ -10,6 +10,7 @@
     A person decides: the only write of stage = 'rejected' is Q.reject().
 ]]
 
+local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 local db = require("lapis.db")
 local J = require("lib.ats.json")
 local T = require("lib.ats.text")
@@ -66,7 +67,8 @@ function Q.audit_list(namespace_id, params)
     local total = db.query("SELECT count(*)::int AS n FROM ats_audit_log WHERE " .. where, unpack(args))[1].n
     args[#args + 1] = per
     args[#args + 1] = offset
-    local rows = db.query("SELECT uuid, actor, action, entity, entity_uuid, detail, created_at FROM ats_audit_log WHERE "
+    local rows = db.query("SELECT uuid, actor, action, entity, entity_uuid, detail, created_at "
+        .. "FROM ats_audit_log WHERE "
         .. where .. " ORDER BY id DESC LIMIT ? OFFSET ?", unpack(args))
     for _, r in ipairs(rows) do r.detail = decode(r.detail) or {} end
     return rows, meta(total, page, per)
@@ -77,7 +79,8 @@ end
 function Q.settings(namespace_id)
     local r = db.select("* FROM ats_settings WHERE namespace_id = ?", namespace_id)[1]
     if not r then
-        db.query("INSERT INTO ats_settings (namespace_id) VALUES (?) ON CONFLICT (namespace_id) DO NOTHING", namespace_id)
+        db.query("INSERT INTO ats_settings (namespace_id) VALUES (?) ON CONFLICT (namespace_id) DO NOTHING",
+            namespace_id)
         r = db.select("* FROM ats_settings WHERE namespace_id = ?", namespace_id)[1]
     end
     return { retention_days = r.retention_days, ratings_enabled = r.ratings_enabled,
@@ -126,7 +129,8 @@ local JOB_SELECT = [[
 ]]
 
 function Q.job_row(namespace_id, uuid)
-    return db.select("* FROM ats_jobs WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id, uuid or "")[1]
+    return db.select("* FROM ats_jobs WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id, uuid
+        or "")[1]
 end
 
 function Q.jobs(namespace_id, params)
@@ -144,21 +148,24 @@ function Q.jobs(namespace_id, params)
     args[#args + 1] = per
     args[#args + 1] = offset
     local out = {}
-    for _, r in ipairs(db.query(JOB_SELECT .. " WHERE " .. where .. " ORDER BY j.created_at DESC LIMIT ? OFFSET ?", unpack(args))) do
+    for _, r in ipairs(db.query(JOB_SELECT .. " WHERE " .. where .. " ORDER BY j.created_at DESC LIMIT ? OFFSET ?",
+        unpack(args))) do
         out[#out + 1] = job_out(r)
     end
     return J.array(out), meta(total, page, per)
 end
 
 function Q.job(namespace_id, uuid)
-    local r = db.query(JOB_SELECT .. " WHERE j.namespace_id = ? AND j.uuid = ? AND j.deleted_at IS NULL", namespace_id, uuid or "")[1]
+    local r = db.query(JOB_SELECT .. " WHERE j.namespace_id = ? AND j.uuid = ? AND j.deleted_at IS NULL",
+        namespace_id, uuid or "")[1]
     if not r then return nil, "Job not found" end
     return job_out(r)
 end
 
 local function kit_id_of(namespace_id, kit_uuid)
     if not str(kit_uuid) then return nil end
-    local k = db.select("id FROM ats_kits WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id, kit_uuid)[1]
+    local k = db.select("id FROM ats_kits WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id,
+        kit_uuid)[1]
     return k and k.id or false
 end
 
@@ -168,7 +175,8 @@ function Q.create_job(namespace_id, data, actor)
     local status = JOB_STATUSES[data.status] and data.status or "open"
     local kit_id = kit_id_of(namespace_id, data.kit_uuid)
     if kit_id == false then return nil, "Kit not found" end
-    local r = db.insert("ats_jobs", { namespace_id = namespace_id, title = title, department = str(data.department, 120),
+    local r = db.insert("ats_jobs", { namespace_id = namespace_id, title = title, department = str(data.department,
+        120),
         location = str(data.location, 200), employment_type = str(data.employment_type, 40),
         description = str(data.description, 20000), status = status, kit_id = kit_id, created_by_uuid = actor },
         { returning = "*" })[1]
@@ -213,10 +221,12 @@ end
 -- MARK: Applications
 
 local function application_out(r)
-    return { uuid = r.uuid, stage = r.stage, stage_changed_at = r.stage_changed_at, decision_reason = v(r.decision_reason),
+    return { uuid = r.uuid, stage = r.stage, stage_changed_at = r.stage_changed_at,
+        decision_reason = v(r.decision_reason),
         decided_by = v(r.decided_by_name), decided_at = v(r.decided_at), created_at = r.created_at,
         job = r.job_uuid and { uuid = r.job_uuid, title = r.job_title } or nil,
-        candidate = r.candidate_uuid and { uuid = r.candidate_uuid, name = r.candidate_name, email = v(r.candidate_email) } or nil,
+        candidate = r.candidate_uuid and { uuid = r.candidate_uuid, name = r.candidate_name,
+            email = v(r.candidate_email) } or nil,
         latest_interview = r.interview_uuid and { uuid = r.interview_uuid, state = r.interview_state,
             evaluation_status = r.evaluation_status, reviewed = v(r.interview_reviewed) == true } or nil }
 end
@@ -228,7 +238,8 @@ local APP_SELECT = [[
     FROM ats_applications a
     JOIN ats_jobs j ON j.id = a.job_id
     JOIN ats_candidates c ON c.id = a.candidate_id
-    LEFT JOIN LATERAL (SELECT * FROM ats_interviews x WHERE x.application_id = a.id ORDER BY x.id DESC LIMIT 1) i ON TRUE
+    LEFT JOIN LATERAL (SELECT * FROM ats_interviews x WHERE x.application_id = a.id
+                       ORDER BY x.id DESC LIMIT 1) i ON TRUE
 ]]
 
 function Q.application_row(namespace_id, uuid)
@@ -247,7 +258,8 @@ function Q.pipeline(namespace_id, job_uuid)
     if not job then return nil, "Job not found" end
     local columns = {}
     for _, s in ipairs(Q.STAGE_ORDER) do columns[s] = J.array({}) end
-    for _, r in ipairs(db.query(APP_SELECT .. " WHERE a.namespace_id = ? AND a.job_id = ? ORDER BY a.stage_changed_at DESC",
+    for _, r in ipairs(db.query(APP_SELECT
+        .. " WHERE a.namespace_id = ? AND a.job_id = ? ORDER BY a.stage_changed_at DESC",
         namespace_id, job.id)) do
         local col = columns[r.stage]
         col[#col + 1] = application_out(r)
@@ -267,7 +279,8 @@ function Q.create_application(namespace_id, job_uuid, candidate_uuid, actor, sta
     stage = (STAGES[stage] and stage ~= "rejected") and stage or "applied"
     local r = db.insert("ats_applications", { namespace_id = namespace_id, job_id = job.id, candidate_id = cand.id,
         stage = stage }, { returning = "*" })[1]
-    Q.audit(namespace_id, actor, "application_created", "application", r.uuid, { job = job.uuid, candidate = cand.uuid })
+    Q.audit(namespace_id, actor, "application_created", "application", r.uuid, { job = job.uuid,
+        candidate = cand.uuid })
     return Q.application(namespace_id, r.uuid)
 end
 
@@ -278,7 +291,8 @@ function Q.move_stage(namespace_id, uuid, stage, actor)
     local r = Q.application_row(namespace_id, uuid)
     if not r then return nil, "Application not found" end
     if r.stage ~= stage then
-        db.update("ats_applications", { stage = stage, stage_changed_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+        db.update("ats_applications", { stage = stage, stage_changed_at = db.raw("NOW()"),
+            updated_at = db.raw("NOW()") },
             { id = r.id })
         Q.audit(namespace_id, actor, "stage_changed", "application", uuid, { from = r.stage, to = stage })
     end
@@ -353,7 +367,8 @@ function Q.candidates(namespace_id, params)
     args[#args + 1] = offset
     local out = {}
     for _, r in ipairs(db.query([[SELECT c.*, (SELECT count(*) FROM ats_applications a WHERE a.candidate_id = c.id)::int
-        AS applications FROM ats_candidates c WHERE ]] .. where .. " ORDER BY c.created_at DESC LIMIT ? OFFSET ?", unpack(args))) do
+        AS applications FROM ats_candidates c WHERE ]] .. where .. " ORDER BY c.created_at DESC LIMIT ? OFFSET ?",
+        unpack(args))) do
         out[#out + 1] = candidate_out(r)
     end
     return J.array(out), meta(total, page, per)
@@ -366,7 +381,8 @@ function Q.find_or_create_candidate(namespace_id, data, actor, source)
     email = email and email:lower() or nil
     if not valid_email(email) then return nil, "That email address doesn't look right." end
     if email then
-        local r = db.query("SELECT * FROM ats_candidates WHERE namespace_id = ? AND lower(email) = ?", namespace_id, email)[1]
+        local r = db.query("SELECT * FROM ats_candidates WHERE namespace_id = ? AND lower(email) = ?", namespace_id,
+            email)[1]
         if r then return r, false end
     elseif name and str(data.reference) then
         local r = db.select("* FROM ats_candidates WHERE namespace_id = ? AND name = ? AND reference = ?",
@@ -384,7 +400,8 @@ end
 
 function Q.create_candidate(namespace_id, data, actor)
     local email = str(data.email, 254)
-    if email and db.query("SELECT 1 FROM ats_candidates WHERE namespace_id = ? AND lower(email) = ?", namespace_id, email:lower())[1] then
+    if email and db.query("SELECT 1 FROM ats_candidates WHERE namespace_id = ? AND lower(email) = ?", namespace_id,
+        email:lower())[1] then
         return nil, "A candidate with that email already exists."
     end
     local r, err = Q.find_or_create_candidate(namespace_id, data, actor, data.source or "dashboard")
@@ -398,12 +415,14 @@ function Q.candidate(namespace_id, uuid)
     if not r then return nil, "Candidate not found" end
     local out = candidate_out(r)
     local apps = {}
-    for _, a in ipairs(db.query(APP_SELECT .. " WHERE a.namespace_id = ? AND a.candidate_id = ? ORDER BY a.id DESC", namespace_id, r.id)) do
+    for _, a in ipairs(db.query(APP_SELECT .. " WHERE a.namespace_id = ? AND a.candidate_id = ? ORDER BY a.id DESC",
+        namespace_id, r.id)) do
         apps[#apps + 1] = application_out(a)
     end
     out.applications = J.array(apps)
     out.interviews = J.array(db.query([[SELECT i.uuid, i.state, i.source, i.evaluation_status, i.started_at, i.ended_at,
-        (i.review IS NOT NULL) AS reviewed, i.review->>'decision' AS decision, j.title AS job_title, a.uuid AS application_uuid
+        (i.review IS NOT NULL) AS reviewed, i.review->>'decision' AS decision, j.title AS job_title,
+        a.uuid AS application_uuid
         FROM ats_interviews i JOIN ats_applications a ON a.id = i.application_id JOIN ats_jobs j ON j.id = a.job_id
         WHERE i.namespace_id = ? AND a.candidate_id = ? ORDER BY i.id DESC]], namespace_id, r.id))
     out.notes = Q.notes(namespace_id, r.id)
@@ -464,13 +483,15 @@ end
 function Q.delete_candidate(namespace_id, uuid, actor)
     local r = Q.candidate_row(namespace_id, uuid)
     if not r then return nil, "Candidate not found" end
-    local keys = db.query([[SELECT i.self_id_key FROM ats_interviews i JOIN ats_applications a ON a.id = i.application_id
+    local keys = db.query([[SELECT i.self_id_key FROM ats_interviews i
+        JOIN ats_applications a ON a.id = i.application_id
         WHERE a.candidate_id = ? AND i.self_id_key IS NOT NULL]], r.id)
     local files = db.select("object_key FROM ats_attachments WHERE candidate_id = ?", r.id)
     db.query("BEGIN")
     local ok, err = pcall(function()
         for _, k in ipairs(keys) do db.query("DELETE FROM ats_self_id WHERE key = ?", k.self_id_key) end
-        db.query("DELETE FROM ats_candidates WHERE id = ?", r.id) -- cascades: applications, interviews, notes, attachments
+        db.query("DELETE FROM ats_candidates WHERE id = ?",
+            r.id) -- cascades: applications, interviews, notes, attachments
         Q.audit(namespace_id, actor, "candidate_deleted", "candidate", uuid, {})
     end)
     db.query(ok and "COMMIT" or "ROLLBACK")
@@ -498,21 +519,24 @@ end
 local KIT_SELECT = "SELECT k.*, j.uuid AS job_uuid FROM ats_kits k LEFT JOIN ats_jobs j ON j.id = k.job_id"
 
 function Q.kit_row(namespace_id, uuid)
-    return db.select("* FROM ats_kits WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id, uuid or "")[1]
+    return db.select("* FROM ats_kits WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL", namespace_id, uuid
+        or "")[1]
 end
 
 function Q.kits(namespace_id, params)
     local where = "k.namespace_id = ? AND k.deleted_at IS NULL"
     if params.approved == "true" then where = where .. " AND k.approved_at IS NOT NULL" end
     local out = {}
-    for _, r in ipairs(db.query(KIT_SELECT .. " WHERE " .. where .. " ORDER BY k.updated_at DESC LIMIT 500", namespace_id)) do
+    for _, r in ipairs(db.query(KIT_SELECT .. " WHERE " .. where .. " ORDER BY k.updated_at DESC LIMIT 500",
+        namespace_id)) do
         out[#out + 1] = kit_out(r, params.full == true)
     end
     return J.array(out)
 end
 
 function Q.kit(namespace_id, uuid)
-    local r = db.query(KIT_SELECT .. " WHERE k.namespace_id = ? AND k.uuid = ? AND k.deleted_at IS NULL", namespace_id, uuid or "")[1]
+    local r = db.query(KIT_SELECT .. " WHERE k.namespace_id = ? AND k.uuid = ? AND k.deleted_at IS NULL",
+        namespace_id, uuid or "")[1]
     if not r then return nil, "Kit not found" end
     return kit_out(r, true)
 end
@@ -593,13 +617,15 @@ function Q.create_token(namespace_id, name, actor)
     name = str(name, 120) or "Snazzy Pro"
     local raw = Q.TOKEN_PREFIX .. Hash.random_token()
     local r = db.insert("ats_integration_tokens", { namespace_id = namespace_id, name = name,
-        token_hash = Hash.sha256_hex(raw), token_prefix = raw:sub(1, 10), created_by_uuid = actor }, { returning = "*" })[1]
+        token_hash = Hash.sha256_hex(raw), token_prefix = raw:sub(1, 10), created_by_uuid = actor },
+            { returning = "*" })[1]
     Q.audit(namespace_id, actor, "token_created", "token", r.uuid, { name = name })
     return { uuid = r.uuid, name = name, token = raw, token_prefix = r.token_prefix, created_at = r.created_at }
 end
 
 function Q.revoke_token(namespace_id, uuid, actor)
-    local r = db.select("* FROM ats_integration_tokens WHERE namespace_id = ? AND uuid = ?", namespace_id, uuid or "")[1]
+    local r = db.select("* FROM ats_integration_tokens WHERE namespace_id = ? AND uuid = ?", namespace_id, uuid
+        or "")[1]
     if not r then return nil, "Token not found" end
     db.update("ats_integration_tokens", { revoked_at = db.raw("NOW()") }, { id = r.id })
     Q.audit(namespace_id, actor, "token_revoked", "token", uuid, {})
@@ -611,11 +637,13 @@ end
 function Q.verify_token(raw)
     if type(raw) ~= "string" or raw:sub(1, #Q.TOKEN_PREFIX) ~= Q.TOKEN_PREFIX or #raw > 100 then return nil end
     local h = Hash.sha256_hex(raw)
-    local r = db.query([[SELECT t.id, t.uuid, t.token_hash, t.namespace_id, n.name AS namespace_name, n.uuid AS namespace_uuid
+    local r = db.query([[SELECT t.id, t.uuid, t.token_hash, t.namespace_id, n.name AS namespace_name,
+        n.uuid AS namespace_uuid
         FROM ats_integration_tokens t JOIN namespaces n ON n.id = t.namespace_id
         WHERE t.token_hash = ? AND t.revoked_at IS NULL]], h)[1]
     if not r or not require("lib.stripe")._secure_compare(r.token_hash, h) then return nil end
-    db.query("UPDATE ats_integration_tokens SET last_used_at = NOW() WHERE id = ? AND (last_used_at IS NULL OR last_used_at < NOW() - interval '1 minute')", r.id)
+    db.query([[UPDATE ats_integration_tokens SET last_used_at = NOW()
+        WHERE id = ? AND (last_used_at IS NULL OR last_used_at < NOW() - interval '1 minute')]], r.id)
     return r
 end
 

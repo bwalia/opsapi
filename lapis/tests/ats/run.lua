@@ -470,6 +470,8 @@ test("notice says AI and person decides; hash is FNV-1a 64", function()
     check(n:find("a person at Example Ltd", 1, true), "person")
     check(n:find("does not analyse your face, voice", 1, true), "no analysis")
     eq(Hash.notice("hello"), "a430d84680aabd0b", "FNV-1a 64 test vector")
+    -- The same notice hashes the same in the Snazzy app (checked against InterviewPrompts.swift).
+    eq(Hash.notice(P.notice(sample_kit(), "Anthropic (Claude)")), "5de126d94618f8b1", "Swift parity")
     eq(Hash.notice(""), "cbf29ce484222325", "empty")
     check(Hash.notice(n) ~= Hash.notice(n .. "."), "differs")
 end)

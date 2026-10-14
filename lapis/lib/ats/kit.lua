@@ -5,6 +5,7 @@
     the recruiter decides.
 ]]
 
+local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 local T = require("lib.ats.text")
 local Topics = require("lib.ats.topics")
 local J = require("lib.ats.json")
@@ -43,7 +44,8 @@ end
 function Kit.normalise(k)
     k = type(k) == "table" and k or {}
     local out = {
-        id = str(k.id, nil), format = tonumber(J.val(k.format)) or Kit.FORMAT, version = tonumber(J.val(k.version)) or 0,
+        id = str(k.id, nil), format = tonumber(J.val(k.format)) or Kit.FORMAT, version = tonumber(J.val(k.version))
+            or 0,
         title = str(k.title, "Untitled role"), organisation = str(k.organisation, ""), summary = str(k.summary, ""),
         language = str(k.language, "en-GB"), job_description = str(k.job_description, ""),
         approved_at = str(k.approved_at, nil), approved_by = str(k.approved_by, nil),
@@ -184,7 +186,8 @@ function Kit.validate(kit)
         end
         if not asked then err("No question gathers evidence for “" .. c.name .. "”.", c.id) end
         for _, problem in ipairs(Topics.find(table.concat({ c.name, c.description, a["1"], a["3"], a["5"] }, " "))) do
-            warn("“" .. c.name .. "” mentions " .. problem .. ". Rubrics should describe what people did, not who they are.", c.id)
+            warn("“" .. c.name .. "” mentions " .. problem
+                .. ". Rubrics should describe what people did, not who they are.", c.id)
         end
     end
     for _, q in ipairs(kit.questions) do
@@ -192,7 +195,8 @@ function Kit.validate(kit)
         if not Kit.competency(kit, q.competency) then
             err("Question “" .. q.id .. "” isn't linked to a competency in this kit.", q.id)
         end
-        for _, problem in ipairs(Topics.find(q.text)) do err("Question “" .. q.id .. "” asks about " .. problem .. ".", q.id) end
+        for _, problem in ipairs(Topics.find(q.text)) do err("Question “" .. q.id .. "” asks about " .. problem
+            .. ".", q.id) end
         local _, marks = q.text:gsub("%?", "")
         if marks > 2 then
             warn("Question “" .. q.id .. "” asks several things at once; candidates answer better one at a time.", q.id)
@@ -213,8 +217,11 @@ function Kit.validate(kit)
     if T.trim(kit.company_facts) == "" then
         warn("Add company facts (hours, pay range, team, process) so the interviewer can answer candidates' questions.")
     end
-    if kit.settings.minutes < 10 or kit.settings.minutes > 60 then warn("Interviews between 10 and 60 minutes work best.") end
-    if kit.settings.max_follow_ups > 3 then warn("More than 3 follow-ups per question can feel like an interrogation.") end
+    if kit.settings.minutes < 10
+        or kit.settings.minutes > 60 then warn("Interviews between 10 and 60 minutes work best.") end
+    if kit.settings.max_follow_ups > 3 then
+        warn("More than 3 follow-ups per question can feel like an interrogation.")
+    end
     return issues
 end
 

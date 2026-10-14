@@ -20,7 +20,8 @@ local function run(premature)
         db.query(good and "COMMIT" or "ROLLBACK")
         if not good then error(res) end
         if res and (res.interviews > 0 or res.candidates > 0) then
-            ngx.log(ngx.NOTICE, "[ats-retention] deleted ", res.interviews, " interviews, ", res.candidates, " candidates")
+            ngx.log(ngx.NOTICE, "[ats-retention] deleted ", res.interviews, " interviews, ", res.candidates,
+                " candidates")
         end
     end)
     if not ok then ngx.log(ngx.ERR, "[ats-retention] ", tostring(err)) end

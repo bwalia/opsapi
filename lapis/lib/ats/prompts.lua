@@ -41,7 +41,8 @@ end
 
 function P.interviewer_system(kit, voice)
     local comps = {}
-    for _, c in ipairs(kit.competencies) do comps[#comps + 1] = "- " .. c.id .. ": " .. c.name .. ". " .. c.description end
+    for _, c in ipairs(kit.competencies) do comps[#comps + 1] = "- " .. c.id .. ": " .. c.name .. ". "
+        .. c.description end
     return P.render(P.template(P.INTERVIEWER), {
         organisation = kit.organisation == "" and "the hiring organisation" or kit.organisation,
         role_title = kit.title,
@@ -67,7 +68,8 @@ function P.interviewer_message(session, directive)
                 .. turn.text .. "\n</external_data>"
         end
     end
-    return "<transcript>\n" .. table.concat(parts, "\n\n") .. "\n</transcript>\n\n<engine>\n" .. directive .. "\n</engine>"
+    return "<transcript>\n" .. table.concat(parts, "\n\n") .. "\n</transcript>\n\n<engine>\n" .. directive
+        .. "\n</engine>"
 end
 
 function P.evaluator_prompt(session)
@@ -108,24 +110,25 @@ function P.notice(kit, provider)
     local org = kit.organisation == "" and "the hiring team" or kit.organisation
     local s = kit.settings
     return table.concat({
-        "This is a first-round interview for " .. kit.title .. " with " .. org .. ". The interviewer is an AI, not a person.",
-        "What happens: the AI asks every candidate for this role the same main questions in the same order, and may ask "
-            .. "short follow-up questions about your answers. It takes about " .. s.minutes .. " minutes. You can ask for any "
-            .. "question to be repeated or rephrased" .. (s.allow_pause and ", and you can pause" or "")
-            .. ". At the end you can ask your own questions.",
-        "Who decides: a person at " .. org .. " reads your answers and makes the decision. The AI does not decide, rank or "
-            .. "reject anyone. After the interview, the AI summarises the evidence in your answers against the skills the "
-            .. "role needs; the hiring team sees your answers alongside that summary.",
-        "What is not used: the AI does not analyse your face, voice, tone, emotions or typing. Only the words of your "
-            .. "answers are assessed. Personal details you mention (for example about health, family or religion) are "
-            .. "hidden from the assessment.",
+        "This is a first-round interview for " .. kit.title .. " with " .. org
+            .. ". The interviewer is an AI, not a person.",
+        "What happens: the AI asks every candidate for this role the same main questions in the same order, "
+            .. "and may ask short follow-up questions about your answers. It takes about " .. s.minutes
+            .. " minutes. You can ask for any question to be repeated or rephrased"
+            .. (s.allow_pause and ", and you can pause" or "") .. ". At the end you can ask your own questions.",
+        "Who decides: a person at " .. org .. " reads your answers and makes the decision. The AI does not "
+            .. "decide, rank or reject anyone. After the interview, the AI summarises the evidence in your answers "
+            .. "against the skills the role needs; the hiring team sees your answers alongside that summary.",
+        "What is not used: the AI does not analyse your face, voice, tone, emotions or typing. Only the words of "
+            .. "your answers are assessed. Personal details you mention (for example about health, family or "
+            .. "religion) are hidden from the assessment.",
         "Your data: your answers are processed by " .. provider .. " and kept by " .. org .. " for up to "
             .. s.retention_days .. " days after a decision, then deleted. You can ask " .. org
             .. " for a copy, a correction or deletion at any time.",
-        "Adjustments: tell us below if you need extra time, a pause, text instead of voice or anything else. Asking won't "
-            .. "count against you.",
-        "If you'd rather speak to a person instead, choose \"I'd prefer to speak to a person\". That won't count against "
-            .. "you either.",
+        "Adjustments: tell us below if you need extra time, a pause, text instead of voice or anything else. "
+            .. "Asking won't count against you.",
+        "If you'd rather speak to a person instead, choose \"I'd prefer to speak to a person\". That won't "
+            .. "count against you either.",
     }, "\n\n")
 end
 

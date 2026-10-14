@@ -6,7 +6,8 @@
       GET  /api/v2/public/ats/interviews/:token            the candidate's view (404 unknown, 410 expired)
       POST /api/v2/public/ats/interviews/:token/start      {notice_hash, adjustments[]}
       POST /api/v2/public/ats/interviews/:token/answer     {text, input: typed|spoken|pasted}
-      POST /api/v2/public/ats/interviews/:token/event      {type: repeat|rephrase|pause|resume|person|withdraw|adjustment, text?}
+      POST /api/v2/public/ats/interviews/:token/event      {type, text?}: repeat | rephrase | pause | resume |
+                                                           person | withdraw | adjustment
       POST /api/v2/public/ats/interviews/:token/self-id    {answers}: voluntary, after the interview
 
     Snazzy Pro desktop app (Authorization: Bearer snz_<token>, from Hiring › Settings):
@@ -75,7 +76,8 @@ local function interview(self, per_token)
     if busy then return nil, busy end
     local r, status = I.by_token(token)
     if not r then
-        if status == 410 then return nil, fail(410, "This interview link has expired. Please contact the hiring team.", "expired") end
+        if status == 410 then return nil, fail(410,
+            "This interview link has expired. Please contact the hiring team.", "expired") end
         return nil, fail(404, "This interview link isn't valid.", "not_found")
     end
     return r
@@ -86,7 +88,8 @@ local function action(fn, per_token)
         local r, err = interview(self, per_token)
         if not r then return err end
         local b, _, berr = body()
-        if not b then return fail(berr == "too_large" and 413 or 400, berr == "too_large" and "That's too long." or "Bad request.") end
+        if not b then return fail(berr == "too_large" and 413 or 400, berr == "too_large" and "That's too long."
+            or "Bad request.") end
         local view, verr, status = fn(r, b)
         if not view then return fail(status or 422, verr) end
         return ok(view)
@@ -134,7 +137,8 @@ function M.routes(app)
         local t, err = integration(self)
         if not t then return err end
         return ok({ namespace = t.namespace_name, namespace_uuid = t.namespace_uuid,
-            active = Activation.is_active(t.namespace_id), dashboard_url = Activation.public_url() .. "/dashboard/ats" })
+            active = Activation.is_active(t.namespace_id), dashboard_url = Activation.public_url()
+                .. "/dashboard/ats" })
     end)
 
     app:get("/api/v2/public/ats/integration/kits", function(self)

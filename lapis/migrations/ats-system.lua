@@ -114,8 +114,10 @@ return {
             decided_by_uuid TEXT,
             decided_by_name TEXT,
             decided_at TIMESTAMPTZ]])
-        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS ats_applications_pair_idx ON ats_applications (job_id, candidate_id)]])
-        db.query([[CREATE INDEX IF NOT EXISTS ats_applications_stage_idx ON ats_applications (namespace_id, job_id, stage)]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS ats_applications_pair_idx
+            ON ats_applications (job_id, candidate_id)]])
+        db.query([[CREATE INDEX IF NOT EXISTS ats_applications_stage_idx
+            ON ats_applications (namespace_id, job_id, stage)]])
 
         base("ats_notes", [[
             candidate_id BIGINT NOT NULL REFERENCES ats_candidates(id) ON DELETE CASCADE,
@@ -191,7 +193,8 @@ return {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         ]])
-        db.query([[CREATE INDEX IF NOT EXISTS ats_activations_sub_idx ON ats_module_activations (stripe_subscription_id)]])
+        db.query([[CREATE INDEX IF NOT EXISTS ats_activations_sub_idx
+            ON ats_module_activations (stripe_subscription_id)]])
 
         db.query([[
             CREATE TABLE IF NOT EXISTS ats_settings (
@@ -200,7 +203,8 @@ return {
                 retention_days INTEGER NOT NULL DEFAULT 180 CHECK (retention_days BETWEEN 1 AND 3650),
                 ratings_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 decline_reasons JSONB NOT NULL DEFAULT
-                    '["Doesn''t meet a requirement", "Other candidates were a closer match", "Role filled", "Candidate withdrew", "Other"]'::jsonb,
+                    '["Doesn''t meet a requirement", "Other candidates were a closer match", "Role filled",
+                      "Candidate withdrew", "Other"]'::jsonb,
                 legal_notice TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

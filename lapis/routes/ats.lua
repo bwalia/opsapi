@@ -83,15 +83,18 @@ return function(app)
         local ns = self.namespace.id
         local stages = {}
         for _, r in ipairs(db.query([[SELECT a.stage, count(*)::int AS n FROM ats_applications a
-            JOIN ats_jobs j ON j.id = a.job_id WHERE a.namespace_id = ? AND j.deleted_at IS NULL GROUP BY a.stage]], ns)) do
+            JOIN ats_jobs j ON j.id = a.job_id
+            WHERE a.namespace_id = ? AND j.deleted_at IS NULL GROUP BY a.stage]], ns)) do
             stages[r.stage] = r.n
         end
         local counts = db.query([[SELECT
-            (SELECT count(*) FROM ats_jobs WHERE namespace_id = ? AND status = 'open' AND deleted_at IS NULL)::int AS open_jobs,
+            (SELECT count(*) FROM ats_jobs WHERE namespace_id = ? AND status = 'open'
+               AND deleted_at IS NULL)::int AS open_jobs,
             (SELECT count(*) FROM ats_candidates WHERE namespace_id = ?)::int AS candidates,
             (SELECT count(*) FROM ats_interviews WHERE namespace_id = ? AND state IN ('completed','human_requested')
                AND review IS NULL)::int AS to_review,
-            (SELECT count(*) FROM ats_interviews WHERE namespace_id = ? AND state IN ('invited','in_progress','paused'))::int
+            (SELECT count(*) FROM ats_interviews WHERE namespace_id = ?
+               AND state IN ('invited','in_progress','paused'))::int
                AS in_progress]], ns, ns, ns, ns)[1]
         counts.stages = stages
         counts.activation = Activation.status(ns)
@@ -177,11 +180,13 @@ return function(app)
         if #jd < 40 then return fail(422, "Paste the job description (at least a few sentences).") end
         if #jd > 30000 then return fail(413, "That job description is too long.") end
         local text, label = L.complete("generator", "You draft structured interview kits. Reply with JSON only.",
-            P.kit_generator_prompt(jd, b.language or "en-GB"), { namespace_id = self.namespace.id, user_uuid = actor(self) })
+            P.kit_generator_prompt(jd, b.language or "en-GB"), { namespace_id = self.namespace.id,
+                user_uuid = actor(self) })
         if not text then return fail(502, "The AI didn't answer: " .. tostring(label)) end
         local kit = P.parse_generated_kit(text, jd)
         if not kit then return fail(502, "The AI's draft couldn't be read. Try again.") end
-        local k, err = Q.create_kit(self.namespace.id, { kit = kit, job_uuid = b.job_uuid, source = "generated" }, actor(self))
+        local k, err = Q.create_kit(self.namespace.id, { kit = kit, job_uuid = b.job_uuid, source = "generated" },
+            actor(self))
         if k then k.model = label end
         return result(k, err, k and 201)
     end))

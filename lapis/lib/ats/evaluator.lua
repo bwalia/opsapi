@@ -113,22 +113,26 @@ function Ev.parse(text, session)
         end
         local quotes = J.array({})
         for _, q in ipairs(item and type(J.val(item.evidence)) == "table" and item.evidence or {}) do
-            local quote = type(q) == "table" and { turn = tostring(J.val(q.turn) or ""), quote = tostring(J.val(q.quote) or "") }
+            local quote = type(q) == "table" and { turn = tostring(J.val(q.turn) or ""),
+                quote = tostring(J.val(q.quote) or "") }
             if quote and Ev.is_verbatim(quote, session) then quotes[#quotes + 1] = quote else dropped = dropped + 1 end
         end
         results[#results + 1] = {
             id = competency.id, evidence = quotes,
             level = #quotes > 0 and item and level_of(item.level) or nil,
-            reason = T.trim(item and J.val(item.reason) or ""), probe_next = T.trim(item and J.val(item.probe_next) or ""),
+            reason = T.trim(item and J.val(item.reason) or ""), probe_next = T.trim(item and J.val(item.probe_next)
+                or ""),
             agreed = true,
         }
     end
     local injection = J.array({})
     for _, q in ipairs(type(J.val(out.injection)) == "table" and out.injection or {}) do
         local turn = type(q) == "table" and turn_of(session, q.turn)
-        if turn and turn.role == "candidate" then injection[#injection + 1] = { turn = q.turn, quote = tostring(J.val(q.quote) or "") } end
+        if turn and turn.role == "candidate" then injection[#injection + 1] = { turn = q.turn,
+            quote = tostring(J.val(q.quote) or "") } end
     end
-    return { results = results, injection = injection, notes = T.trim(J.val(out.notes_for_reviewer) or ""), dropped = dropped }
+    return { results = results, injection = injection, notes = T.trim(J.val(out.notes_for_reviewer) or ""),
+        dropped = dropped }
 end
 
 --- Combines two independent runs (the second may be nil). Returns the evaluation table or nil.

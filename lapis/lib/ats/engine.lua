@@ -275,9 +275,11 @@ end
 
 Guard.stop_words = {}
 for _, w in ipairs({
-    "about", "after", "also", "been", "before", "being", "between", "both", "could", "does", "each", "from", "have", "here",
+    "about", "after", "also", "been", "before", "being", "between", "both", "could", "does", "each", "from", "have",
+        "here",
     "into", "just", "like", "more", "most", "much", "only", "other", "over", "same", "should", "some", "such", "than",
-    "that", "their", "them", "then", "there", "these", "they", "this", "those", "through", "very", "what", "when", "where",
+    "that", "their", "them", "then", "there", "these", "they", "this", "those", "through", "very", "what", "when",
+        "where",
     "which", "while", "will", "with", "would", "your", "yours", "role", "team", "great", "question", "thanks", "thank",
     "happy", "glad", "information", "know", "share", "help", "really", "well", "we're", "you're", "it's", "there's",
 }) do Guard.stop_words[w] = true end
@@ -354,7 +356,8 @@ function Engine.parse_reply(text)
         enough_evidence = J.val(obj.enough_evidence), flags = {} }
     for _, f in ipairs(type(J.val(obj.flags)) == "table" and obj.flags or {}) do
         if type(f) == "table" then
-            reply.flags[#reply.flags + 1] = { kind = tostring(J.val(f.kind) or "other"), detail = tostring(J.val(f.detail) or "") }
+            reply.flags[#reply.flags + 1] = { kind = tostring(J.val(f.kind) or "other"),
+                detail = tostring(J.val(f.detail) or "") }
         end
     end
     return reply
@@ -389,7 +392,8 @@ function Engine:start()
     local opening = hello .. ", and thank you for your time. I'm " .. kit.settings.interviewer_name
         .. ", an AI interviewer for " .. (kit.organisation == "" and "the hiring team" or kit.organisation)
         .. ", and this is a first-round interview for " .. kit.title .. ". I'll ask " .. #kit.questions
-        .. " main questions" .. (#kit.eligibility == 0 and "" or ", after a few quick ones about the role's requirements")
+        .. " main questions" .. (#kit.eligibility == 0 and ""
+            or ", after a few quick ones about the role's requirements")
         .. ", and you can ask me questions at the end. Take your time; you can ask me to repeat or rephrase any "
         .. "question. A person on the hiring team reviews everything and makes the decision."
     self:append("interviewer", opening, "opening")
@@ -436,7 +440,8 @@ function Engine:receive(event)
         if text == "" then return WAIT end
         local input = event.input
         if input ~= "typed" and input ~= "spoken" and input ~= "pasted" then input = "typed" end
-        local turn = self:append("candidate", text, kind_for_answer(self:current_step()), self:current_question_id(), input)
+        local turn = self:append("candidate", text, kind_for_answer(self:current_step()), self:current_question_id(),
+            input)
         if input == "pasted" then self:flag("pasted", "", turn.id) end
         for _, topic in ipairs(Topics.find(text)) do self:flag("protected_info_volunteered", topic, turn.id) end
         return self:after_answer(text)
@@ -547,18 +552,19 @@ function Engine:apply(reply, raw_text)
         self:advance(Guard.acknowledgement(reply and reply.say or ""))
         return self:finished_or_wait()
     elseif step.kind == "candidate_questions" then
-        local asked = 0
+        local questions = 0
         for _, t in ipairs(s.turns) do
-            if t.role == "candidate" and t.kind == "candidate_question" then asked = asked + 1 end
+            if t.role == "candidate" and t.kind == "candidate_question" then questions = questions + 1 end
         end
-        local more = asked < Engine.MAX_CANDIDATE_QUESTIONS and " Do you have any other questions?" or ""
+        local more = questions < Engine.MAX_CANDIDATE_QUESTIONS and " Do you have any other questions?" or ""
         local action = reply and reply.action
         if action == "answer" and Guard.is_grounded(reply.say, s.kit.company_facts) then
             self:append("interviewer", Guard.answer(reply.say) .. more, "answer")
         elseif action == "answer" or action == "forward" then
             -- An answer the company facts don't support is never given: it goes to the team.
             if action == "answer" then
-                self:flag("other", "The interviewer's answer wasn't in the company facts; the question was passed on instead.")
+                self:flag("other",
+                    "The interviewer's answer wasn't in the company facts; the question was passed on instead.")
             end
             if last then s.forwarded_questions[#s.forwarded_questions + 1] = last.text end
             self:append("interviewer", "I don't have that information, so I've passed your question to the hiring team."

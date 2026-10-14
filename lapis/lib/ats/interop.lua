@@ -149,15 +149,18 @@ function I.parse(raw)
                 comps[#comps + 1] = { id = c.id, evidence = quotes,
                     level = (#quotes > 0 and level and level >= 1 and level <= 5) and math.floor(level) or nil,
                     second_level = (second and second >= 1 and second <= 5) and math.floor(second) or nil,
-                    agreed = J.val(c.agreed) ~= false, reason = s(c.reason, 2000, ""), probe_next = s(c.probe_next, 1000, "") }
+                    agreed = J.val(c.agreed) ~= false, reason = s(c.reason, 2000, ""), probe_next = s(c.probe_next,
+                        1000, "") }
             end
         end
-        rec.evaluation = { competencies = comps, injection = J.array({}), notes_for_reviewer = s(ev.notes_for_reviewer, 2000, ""),
+        rec.evaluation = { competencies = comps, injection = J.array({}),
+            notes_for_reviewer = s(ev.notes_for_reviewer, 2000, ""),
             dropped_quotes = tonumber(J.val(ev.dropped_quotes)) or 0, model = s(ev.model, 200, ""),
             prompt_version = s(ev.prompt_version, 40, ""), at = iso(ev.at), source = "snazzy_desktop" }
         for _, q in ipairs(tbl(ev.injection) or {}) do
             if type(q) == "table" then
-                rec.evaluation.injection[#rec.evaluation.injection + 1] = { turn = s(q.turn, 16, ""), quote = s(q.quote, 500, "") }
+                rec.evaluation.injection[#rec.evaluation.injection + 1] = { turn = s(q.turn, 16, ""),
+                    quote = s(q.quote, 500, "") }
             end
         end
     end

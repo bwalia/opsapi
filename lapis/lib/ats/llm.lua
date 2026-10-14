@@ -12,7 +12,8 @@
 local L = {}
 
 local DEFAULTS = { interviewer = "claude-sonnet-5-5", evaluator = "claude-opus-5-5", generator = "claude-opus-5-5" }
-local ENV = { interviewer = "ATS_INTERVIEWER_MODEL", evaluator = "ATS_EVALUATOR_MODEL", generator = "ATS_EVALUATOR_MODEL" }
+local ENV = { interviewer = "ATS_INTERVIEWER_MODEL", evaluator = "ATS_EVALUATOR_MODEL",
+    generator = "ATS_EVALUATOR_MODEL" }
 
 local function env(name)
     local v = os.getenv(name)

@@ -8,6 +8,7 @@
     only lands if rev is unchanged (two tabs can't interleave answers).
 ]]
 
+local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 local db = require("lapis.db")
 local J = require("lib.ats.json")
 local T = require("lib.ats.text")
@@ -53,7 +54,8 @@ function I.invite(namespace_id, data, actor)
     local kit_row = Q.kit_row(namespace_id, data.kit_uuid)
     if not kit_row then
         local job = db.select("kit_id FROM ats_jobs WHERE id = ?", app.job_id)[1]
-        kit_row = job and v(job.kit_id) and db.select("* FROM ats_kits WHERE id = ? AND deleted_at IS NULL", job.kit_id)[1]
+        kit_row = job and v(job.kit_id) and db.select("* FROM ats_kits WHERE id = ? AND deleted_at IS NULL",
+            job.kit_id)[1]
     end
     if not kit_row then return nil, "Choose an interview kit (the job has none)." end
     if not v(kit_row.approved_at) then return nil, "Approve the kit before inviting candidates." end
@@ -64,7 +66,8 @@ function I.invite(namespace_id, data, actor)
     local cand = db.select("* FROM ats_candidates WHERE id = ?", app.candidate_id)[1]
     local days = math.min(30, math.max(1, math.floor(tonumber(data.expires_in_days) or 7)))
     local token = Hash.random_token()
-    local session = Engine.new_session(kit, { name = cand.name, email = v(cand.email) or "", reference = v(cand.reference) or "" }, now())
+    local session = Engine.new_session(kit, { name = cand.name, email = v(cand.email) or "",
+        reference = v(cand.reference) or "" }, now())
     session.channel = "hosted"
     session.rev = 0
     session.models = { interviewer = L.label("interviewer") }
@@ -72,8 +75,10 @@ function I.invite(namespace_id, data, actor)
         kit_version = kit_row.version, source = "hosted", state = "invited", session = J.encode(session),
         link_token_hash = Hash.sha256_hex(token), link_expires_at = db.raw(("NOW() + interval '%d days'"):format(days)),
         invited_by_uuid = actor, delete_after = ts_sql(session.delete_after_ts) }, { returning = "*" })[1]
-    if EARLY_STAGES[app.stage] and app.stage ~= "interview" then Q.move_stage(namespace_id, app.uuid, "interview", actor) end
-    Q.audit(namespace_id, actor, "interview_invited", "interview", r.uuid, { application = app.uuid, kit_version = kit_row.version })
+    if EARLY_STAGES[app.stage] and app.stage ~= "interview" then Q.move_stage(namespace_id, app.uuid, "interview",
+        actor) end
+    Q.audit(namespace_id, actor, "interview_invited", "interview", r.uuid, { application = app.uuid,
+        kit_version = kit_row.version })
     return { uuid = r.uuid, url = Activation.public_url() .. "/i/" .. token, expires_at = r.link_expires_at,
         note = "Copy this link now: it isn't shown again." }
 end
@@ -92,7 +97,8 @@ local LIST_SELECT = [[
     SELECT i.uuid, i.state, i.source, i.evaluation_status, i.started_at, i.ended_at, i.created_at, i.link_expires_at,
       i.review->>'decision' AS decision, (i.review IS NOT NULL) AS reviewed,
       jsonb_array_length(COALESCE(i.session->'flags', '[]'::jsonb)) AS flag_count,
-      c.uuid AS candidate_uuid, c.name AS candidate_name, j.uuid AS job_uuid, j.title AS job_title, a.uuid AS application_uuid
+      c.uuid AS candidate_uuid, c.name AS candidate_name, j.uuid AS job_uuid, j.title AS job_title,
+      a.uuid AS application_uuid
     FROM ats_interviews i JOIN ats_applications a ON a.id = i.application_id
     JOIN ats_candidates c ON c.id = a.candidate_id JOIN ats_jobs j ON j.id = a.job_id
 ]]
@@ -105,17 +111,20 @@ function I.list(namespace_id, params)
         where = where .. " AND i.state = ?"
         args[#args + 1] = params.state
     end
-    if params.to_review == "true" then where = where .. " AND i.state IN ('completed','human_requested') AND i.review IS NULL" end
+    if params.to_review == "true" then where = where
+        .. " AND i.state IN ('completed','human_requested') AND i.review IS NULL" end
     if params.job_uuid and params.job_uuid ~= "" then
         where = where .. " AND j.uuid = ?"
         args[#args + 1] = params.job_uuid
     end
-    local total = db.query([[SELECT count(*)::int AS n FROM ats_interviews i JOIN ats_applications a ON a.id = i.application_id
+    local total = db.query([[SELECT count(*)::int AS n FROM ats_interviews i
+        JOIN ats_applications a ON a.id = i.application_id
         JOIN ats_jobs j ON j.id = a.job_id WHERE ]] .. where, unpack(args))[1].n
     args[#args + 1] = per
     args[#args + 1] = (page - 1) * per
     local rows = db.query(LIST_SELECT .. " WHERE " .. where .. " ORDER BY i.id DESC LIMIT ? OFFSET ?", unpack(args))
-    return J.array(rows), { total = total, page = page, per_page = per, total_pages = math.max(1, math.ceil(total / per)) }
+    return J.array(rows), { total = total, page = page, per_page = per, total_pages = math.max(1,
+        math.ceil(total / per)) }
 end
 
 function I.detail(namespace_id, uuid)
@@ -218,10 +227,12 @@ end
 function I.on_finished(r, s)
     local app = db.select("* FROM ats_applications WHERE id = ?", r.application_id)[1]
     if app and EARLY_STAGES[app.stage] and s.state == "completed" then
-        db.update("ats_applications", { stage = "review", stage_changed_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+        db.update("ats_applications", { stage = "review", stage_changed_at = db.raw("NOW()"),
+            updated_at = db.raw("NOW()") },
             { id = app.id })
     end
-    Q.audit(r.namespace_id, "candidate", "interview_ended", "interview", r.uuid, { state = s.state, reason = s.end_reason })
+    Q.audit(r.namespace_id, "candidate", "interview_ended", "interview", r.uuid, { state = s.state,
+        reason = s.end_reason })
     if s.state == "completed" then I.evaluate_async(r.namespace_id, r.uuid, "engine") end
 end
 
@@ -340,7 +351,8 @@ function I.evaluate_now(namespace_id, uuid)
     end
     db.update("ats_interviews", { evaluation = J.encode(ev), evaluation_status = "done", updated_at = db.raw("NOW()") },
         { id = r.id })
-    Q.audit(namespace_id, "engine", "evaluated", "interview", uuid, { model = label, dropped_quotes = ev.dropped_quotes })
+    Q.audit(namespace_id, "engine", "evaluated", "interview", uuid, { model = label,
+        dropped_quotes = ev.dropped_quotes })
     return ev
 end
 
@@ -379,10 +391,12 @@ function I.review(namespace_id, uuid, data, actor, actor_name)
         n = tonumber(n)
         if Kit.competency(s.kit, k) and n and n >= 0 and n <= 5 then levels[k] = math.floor(n) end
     end
-    local review = { reviewer = actor_name or actor, reviewer_uuid = actor, decision = DECISIONS[decision] and decision or nil,
+    local review = { reviewer = actor_name or actor, reviewer_uuid = actor, decision = DECISIONS[decision]
+        and decision or nil,
         reason = reason, note = type(data.note) == "string" and T.prefix(data.note, 4000) or "", levels = levels,
         at = T.iso(now()) }
-    db.update("ats_interviews", { review = J.encode(review), reviewed_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+    db.update("ats_interviews", { review = J.encode(review), reviewed_at = db.raw("NOW()"),
+        updated_at = db.raw("NOW()") },
         { id = r.id })
     Q.audit(namespace_id, actor, "reviewed", "interview", uuid, { decision = review.decision, levels = levels })
     local app = db.select("uuid FROM ats_applications WHERE id = ?", r.application_id)[1]
@@ -391,7 +405,9 @@ function I.review(namespace_id, uuid, data, actor, actor_name)
     end
     local settings = Q.settings(namespace_id)
     if review.decision then
-        db.query("UPDATE ats_candidates SET delete_after = GREATEST(COALESCE(delete_after, NOW()), NOW() + (? || ' days')::interval) WHERE id = (SELECT candidate_id FROM ats_applications WHERE id = ?)",
+        db.query([[UPDATE ats_candidates
+            SET delete_after = GREATEST(COALESCE(delete_after, NOW()), NOW() + (? || ' days')::interval)
+            WHERE id = (SELECT candidate_id FROM ats_applications WHERE id = ?)]],
             tostring(settings.retention_days), r.application_id)
         db.query("UPDATE ats_interviews SET delete_after = NOW() + (? || ' days')::interval WHERE id = ?",
             tostring(settings.retention_days), r.id)
@@ -419,13 +435,16 @@ function I.import(namespace_id, rec, actor, source)
             external_kit_id = kit_ext, source = "snazzy_desktop", created_by_uuid = actor }, { returning = "*" })[1]
     end
     -- The job: matched by the kit's id, else by title, else created.
-    local job = db.select("* FROM ats_jobs WHERE namespace_id = ? AND external_kit_id = ? AND deleted_at IS NULL LIMIT 1",
+    local job = db.select(
+        "* FROM ats_jobs WHERE namespace_id = ? AND external_kit_id = ? AND deleted_at IS NULL LIMIT 1",
         namespace_id, kit_ext)[1]
         or db.select("* FROM ats_jobs WHERE namespace_id = ? AND title = ? AND deleted_at IS NULL ORDER BY id LIMIT 1",
             namespace_id, kit.title)[1]
     if not job then
-        job = db.insert("ats_jobs", { namespace_id = namespace_id, title = kit.title, status = "open", kit_id = kit_row.id,
-            external_kit_id = kit_ext, description = kit.summary ~= "" and kit.summary or nil, created_by_uuid = actor },
+        job = db.insert("ats_jobs", { namespace_id = namespace_id, title = kit.title, status = "open",
+            kit_id = kit_row.id,
+            external_kit_id = kit_ext, description = kit.summary ~= "" and kit.summary or nil,
+                created_by_uuid = actor },
             { returning = "*" })[1]
         Q.audit(namespace_id, actor, "job_created", "job", job.uuid, { source = source })
     elseif not v(job.external_kit_id) then
@@ -450,16 +469,20 @@ function I.import(namespace_id, rec, actor, source)
         rev = 0,
     }
     local settings = Q.settings(namespace_id)
-    local existing = db.select("* FROM ats_interviews WHERE namespace_id = ? AND external_id = ?", namespace_id, rec.external_id)[1]
+    local existing = db.select("* FROM ats_interviews WHERE namespace_id = ? AND external_id = ?", namespace_id,
+        rec.external_id)[1]
     local created = existing == nil
     if created then
-        existing = db.insert("ats_interviews", { namespace_id = namespace_id, application_id = app.id, kit_id = kit_row.id,
+        existing = db.insert("ats_interviews", { namespace_id = namespace_id, application_id = app.id,
+            kit_id = kit_row.id,
             kit_version = kit_row.version, source = source, external_id = rec.external_id, state = rec.state,
             session = J.encode(session), started_at = rec.started_at or db.NULL, ended_at = rec.ended_at or db.NULL,
             evaluation = rec.evaluation and J.encode(rec.evaluation) or db.NULL,
             evaluation_status = rec.evaluation and "done" or "none",
-            delete_after = db.raw(("NOW() + interval '%d days'"):format(settings.retention_days)) }, { returning = "*" })[1]
-        Q.audit(namespace_id, actor, "interview_imported", "interview", existing.uuid, { source = source, app = rec.app })
+            delete_after = db.raw(("NOW() + interval '%d days'"):format(settings.retention_days)) },
+                { returning = "*" })[1]
+        Q.audit(namespace_id, actor, "interview_imported", "interview", existing.uuid, { source = source,
+            app = rec.app })
     else
         local old = decode(existing.session) or {}
         local f = { updated_at = db.raw("NOW()") }
@@ -483,7 +506,8 @@ function I.import(namespace_id, rec, actor, source)
             local review = { reviewer = rec.review.reviewer .. " (via Snazzy Pro)", decision = rec.review.decision,
                 reason = rec.review.reason, note = rec.review.note, levels = rec.review.levels, at = rec.review.at,
                 via = "Snazzy Pro" }
-            db.update("ats_interviews", { review = J.encode(review), reviewed_at = db.raw("NOW()") }, { id = existing.id })
+            db.update("ats_interviews", { review = J.encode(review), reviewed_at = db.raw("NOW()") },
+                { id = existing.id })
             Q.audit(namespace_id, actor, "reviewed", "interview", existing.uuid,
                 { decision = review.decision, reviewer = review.reviewer })
             if review.decision == "decline" and app.stage ~= "rejected" then
@@ -492,7 +516,8 @@ function I.import(namespace_id, rec, actor, source)
             end
         end
     end
-    return { interview_uuid = existing.uuid, application_uuid = app.uuid, candidate_uuid = cand.uuid, job_uuid = job.uuid,
+    return { interview_uuid = existing.uuid, application_uuid = app.uuid, candidate_uuid = cand.uuid,
+        job_uuid = job.uuid,
         created = created, dashboard_url = I.dashboard_url(existing.uuid) }
 end
 
@@ -503,7 +528,8 @@ function I.fairness(namespace_id, params)
     local valid = false
     for _, q in ipairs(F.QUESTIONS) do if q.id == question then valid = true end end
     if not valid then return nil, "Unknown self-ID question" end
-    local where, args = "i.namespace_id = ? AND i.self_id_key IS NOT NULL AND i.review->>'decision' IS NOT NULL", { namespace_id }
+    local where, args = "i.namespace_id = ? AND i.self_id_key IS NOT NULL AND i.review->>'decision' IS NOT NULL",
+        { namespace_id }
     if params.job_uuid and params.job_uuid ~= "" then
         where = where .. " AND j.uuid = ?"
         args[#args + 1] = params.job_uuid
