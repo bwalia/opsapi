@@ -485,14 +485,19 @@ function E.retarget(ns, deal_uuid, actor)
     local ctx = E.context(ns, deal_uuid)
     if not ctx then return end
     local tasks = Template.tasks_by_key(ctx.def)
+    local _, done = by_key(ns, deal_uuid)
     for _, t in ipairs(deal_tasks(ns, deal_uuid)) do
         local tdef = t.template_key and tasks[t.template_key] and tasks[t.template_key].task
         if tdef and t.pd_status ~= "done" and t.pd_status ~= "cancelled" and tdef.due
             and (tdef.due.from == "target_exchange" or tdef.due.from == "target_completion") then
             local due = E.due_at(ctx, tdef, Days.now())
-            require("property_deals.tasks").update(ns, t.task_uuid, {
-                due_at = due or db.NULL, sla_warned_at = db.NULL, sla_breached_at = db.NULL,
-            }, actor)
+            local changes = { due_at = due or db.NULL, sla_warned_at = db.NULL, sla_breached_at = db.NULL }
+            -- Made before the target date was known, it had no clock: start it now unless it still waits on others.
+            local no_clock = t.sla_started_at == nil or t.sla_started_at == db.NULL
+            if due and no_clock and #unmet(prerequisites(tdef), done) == 0 then
+                changes.sla_started_at = db.raw("NOW()")
+            end
+            require("property_deals.tasks").update(ns, t.task_uuid, changes, actor)
         end
     end
 end

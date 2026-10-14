@@ -189,8 +189,9 @@ function D.run(ns, settings, force)
             end
             Notify.send(ns, { user }, { kind = "daily_digest", event = "property_deals.digest.daily", route = "digest",
                 uuid = today, title = "Your day", body = prose or D.summary(d) })
-            local u = U.one("SELECT email FROM users WHERE uuid = ?", user)
-            if (settings == nil or settings.digest_email ~= false) and Notify.allowed(ns, user, "daily_digest", "email") then
+            -- Only while they're still an active member (Notify.send checks the same for in-app and push).
+            local u = Notify.member(ns, user)
+            if u and (settings == nil or settings.digest_email ~= false) and Notify.allowed(ns, user, "daily_digest", "email") then
                 Notify.email(u and u.email, "Your property deals today — " .. today, html(d), prose or D.summary(d))
             end
             sent = sent + 1

@@ -28,8 +28,9 @@ local function jobshout_sweep(ns, out)
         WHERE a.namespace_id = ? AND a.status = 'pending' AND a.jobshout_approval_id IS NOT NULL
     ]], ns)
     local providers = {}
-    for _, r in ipairs(runs) do providers[r.provider_uuid] = true end
-    for _, a in ipairs(mirrored) do providers[a.pu] = true end
+    -- (a link deleted since leaves its runs and approvals without one)
+    for _, r in ipairs(runs) do if U.is_uuid(r.provider_uuid) then providers[r.provider_uuid] = true end end
+    for _, a in ipairs(mirrored) do if U.is_uuid(a.pu) then providers[a.pu] = true end end
     for puuid in pairs(providers) do
         local row = U.one("SELECT * FROM namespace_ai_providers WHERE namespace_id = ? AND uuid = ?", ns, puuid)
         if row then
@@ -153,6 +154,23 @@ function Tick.run(ns, settings)
     ]], ns)) do
         require("property_deals.approvals").back_to_todo(ns, r.task_uuid ~= db.NULL and r.task_uuid or nil,
             "AI couldn't finish: it timed out.", nil)
+        out.timed_out = out.timed_out + 1
+    end
+    -- A JobShout run that goes quiet for 2 hours (no run id, a status we don't know) gives its task back too.
+    -- Quiet = nothing waiting for a person, and no approval of it touched since.
+    for _, r in ipairs(db.query([[
+        UPDATE property_deals_agent_runs r SET status = 'failed', error = 'timed out', finished_at = NOW(),
+            updated_at = NOW()
+        WHERE r.namespace_id = ? AND r.provider = 'jobshout' AND r.status IN ('queued', 'running')
+          AND NOT EXISTS (SELECT 1 FROM property_deals_approvals a WHERE a.namespace_id = r.namespace_id
+                          AND a.agent_run_uuid = r.uuid AND a.status IN ('pending', 'approved'))
+          AND GREATEST(COALESCE(r.started_at, r.created_at), COALESCE((SELECT MAX(a.updated_at)
+              FROM property_deals_approvals a WHERE a.namespace_id = r.namespace_id AND a.agent_run_uuid = r.uuid),
+              r.created_at)) < NOW() - interval '2 hours'
+        RETURNING r.task_uuid
+    ]], ns)) do
+        require("property_deals.approvals").back_to_todo(ns, r.task_uuid ~= db.NULL and r.task_uuid or nil,
+            "JobShout didn't finish in 2 hours; run it again or do the task by hand.", nil)
         out.timed_out = out.timed_out + 1
     end
     -- Safe to retry: each send is recorded as it happens (executor steps), so a retry never repeats one.

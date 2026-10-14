@@ -27,20 +27,29 @@ function S.tick(ns, settings)
     local managers
     local stats = { warned = 0, overdue = 0, escalated = 0 }
 
+    -- A task whose deadline had already passed when its clock started (counted back from a near target date,
+    -- or from when the deal was created) is timed as if it started one SLA window before the deadline: it is
+    -- overdue at once and escalates like any other. Tasks of a deal on hold wait (one that fell through has none open).
     local rows = db.query([[
-        SELECT d.task_uuid, d.deal_uuid, d.owner_user_uuid, d.escalation_level, d.sla_warned_at, d.sla_breached_at,
-               t.title, cd.name AS deal_name,
-               EXTRACT(EPOCH FROM (NOW() - d.sla_started_at)) * 100.0
-                 / EXTRACT(EPOCH FROM (d.due_at - d.sla_started_at)) AS pct
-        FROM property_deals_task_details d
-        JOIN kanban_tasks t ON t.uuid = d.task_uuid
-        LEFT JOIN property_deals_deals dl ON dl.uuid = d.deal_uuid
-        LEFT JOIN crm_deals cd ON cd.uuid = dl.crm_deal_uuid
-        WHERE d.namespace_id = ? AND d.pd_status NOT IN ('done', 'cancelled')
-          AND d.due_at IS NOT NULL AND d.sla_started_at IS NOT NULL AND d.due_at > d.sla_started_at
-          AND (d.snoozed_until IS NULL OR d.snoozed_until < NOW())
-          AND d.escalation_level < 3
-          AND NOW() >= d.sla_started_at + (d.due_at - d.sla_started_at) * (? / 100.0)
+        SELECT task_uuid, deal_uuid, owner_user_uuid, escalation_level, sla_warned_at, sla_breached_at, title,
+               deal_name,
+               EXTRACT(EPOCH FROM (NOW() - started)) * 100.0 / EXTRACT(EPOCH FROM (due_at - started)) AS pct
+        FROM (
+            SELECT d.task_uuid, d.deal_uuid, d.owner_user_uuid, d.escalation_level, d.sla_warned_at, d.sla_breached_at,
+                   d.due_at, t.title, cd.name AS deal_name,
+                   CASE WHEN d.due_at > d.sla_started_at THEN d.sla_started_at
+                        ELSE d.due_at - make_interval(mins => GREATEST(COALESCE(d.sla_minutes, 1), 1)) END AS started
+            FROM property_deals_task_details d
+            JOIN kanban_tasks t ON t.uuid = d.task_uuid
+            LEFT JOIN property_deals_deals dl ON dl.uuid = d.deal_uuid
+            LEFT JOIN crm_deals cd ON cd.uuid = dl.crm_deal_uuid
+            WHERE d.namespace_id = ? AND d.pd_status NOT IN ('done', 'cancelled')
+              AND d.due_at IS NOT NULL AND d.sla_started_at IS NOT NULL
+              AND (d.snoozed_until IS NULL OR d.snoozed_until < NOW())
+              AND d.escalation_level < 3
+              AND (dl.uuid IS NULL OR dl.status IN ('active', 'completed'))
+        ) s
+        WHERE NOW() >= started + (due_at - started) * (? / 100.0)
     ]], ns, warn)
 
     for _, r in ipairs(rows) do

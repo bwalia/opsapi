@@ -17,6 +17,10 @@ local CATEGORIES = { "title", "lease", "survey", "valuation", "epc", "searches",
 local CATEGORY = {}
 for _, c in ipairs(CATEGORIES) do CATEGORY[c] = true end
 
+-- Identity and money papers: only people who work compliance see them (not builders, for example).
+local SENSITIVE = { id = true, proof_of_funds = true, aml = true }
+local SENSITIVE_SQL = "category NOT IN ('id', 'proof_of_funds', 'aml')"
+
 local MAX_BYTES = 25 * 1024 * 1024
 
 local function sha256_hex(content)
@@ -42,6 +46,7 @@ return function(app)
             if U.is_uuid(p[col]) then where[#where + 1] = col .. " = " .. db.escape_literal(p[col]) end
         end
         if CATEGORY[p.category] then where[#where + 1] = "category = " .. db.escape_literal(p.category) end
+        if not sdk.can(self, "property_deals_compliance", "read") then where[#where + 1] = SENSITIVE_SQL end
         local page, per_page, offset = sdk.page(p)
         local w = table.concat(where, " AND ")
         local rows = db.query("SELECT * FROM property_deals_documents WHERE " .. w
@@ -63,6 +68,9 @@ return function(app)
         if not data then return sdk.error(422, "Validation failed", errors) end
         if not data.deal_uuid and not data.property_uuid then
             return sdk.error(422, "Validation failed", { deal_uuid = "give deal_uuid or property_uuid" })
+        end
+        if SENSITIVE[data.category] and not sdk.can(self, "property_deals_compliance", "create") then
+            return sdk.error(403, "Identity, AML and proof-of-funds documents need compliance access")
         end
         local ns = sdk.namespace_id(self)
         local ns_uuid = self.namespace.uuid
@@ -92,7 +100,9 @@ return function(app)
 
     app:get("/documents/:id", sdk.handler({ permission = "property_deals_properties.read" }, function(self)
         local doc = get(sdk.namespace_id(self), self.params.id)
-        if not doc then return sdk.not_found("Document") end
+        if not doc or (SENSITIVE[doc.category] and not sdk.can(self, "property_deals_compliance", "read")) then
+            return sdk.not_found("Document")
+        end
         doc.download_url = minio():getPresignedUrl(doc.object_key, 300, doc.bucket, true)
         return sdk.ok(doc)
     end))
@@ -100,7 +110,9 @@ return function(app)
     app:delete("/documents/:id", sdk.handler({ permission = "property_deals_properties.delete" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local doc = get(ns, self.params.id)
-        if not doc then return sdk.not_found("Document") end
+        if not doc or (SENSITIVE[doc.category] and not sdk.can(self, "property_deals_compliance", "delete")) then
+            return sdk.not_found("Document")
+        end
         db.query("DELETE FROM property_deals_documents WHERE namespace_id = ? AND uuid = ?", ns, doc.uuid)
         minio():delete(doc.object_key, doc.bucket)
         return sdk.ok()

@@ -275,6 +275,12 @@ sql(f"""UPDATE property_deals_stage_history SET entered_at = NOW() - interval '5
 stg = data(call("GET", P + "/reports/stage-times", "operator_s", S), 200, "stage times")
 check("report: time per stage (completed) and current", any(r["stage_key"] == "offer_sent" and r["avg_days"] == 3 for r in stg["completed_stages"])
       and any(r["avg_days_so_far"] >= 5 for r in stg["current"]), stg)
+res = call("PUT", P + f"/deals/{D}", "operator_s", S, {"status": "completed"})
+check("completing a deal that isn't at its last stage is refused (409)", res[0] == 409, res)
+# Fast-forward: the deal is at Completion with nothing blocking left.
+sql(f"""UPDATE property_deals_deals SET stage_key = 'completion' WHERE uuid = '{D}';
+        UPDATE property_deals_task_details SET pd_status = 'done' WHERE deal_uuid = '{D}' AND blocking
+          AND pd_status NOT IN ('done', 'cancelled')""")
 data(call("PUT", P + f"/deals/{D}", "operator_s", S, {"status": "completed"}), 200, "complete the deal (target was 2026-09-01)")
 late = data(call("GET", P + "/reports/late-days", "operator_s", S), 200, "late days")
 check("report: late days and penalty cost (capped at 20 days × £100)", late["completed"] == 1 and late["late"] == 1

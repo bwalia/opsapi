@@ -1,5 +1,6 @@
 -- Map / deal finder (SPEC §3.6):
---   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings   (leads: property_deals_leads.read)
+--   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings
+--       (leads need property_deals_leads.read; holdings, buyers' names, need property_deals_buyers.read)
 --   GET /map?polygon=lat,lng;lat,lng;lat,lng&layers=...
 --   GET /properties/:id/card    the map's property card: summary, deal, yield/discount, top 3 matching buyers
 -- Radius: bounding-box prefilter on (namespace_id, lat, lng), then exact haversine
@@ -118,7 +119,7 @@ return function(app)
                 WHERE ld.namespace_id = ]] .. ns .. [[ AND p.lat IS NOT NULL AND ]] .. where .. [[
                 ORDER BY distance_miles NULLS LAST LIMIT ]] .. MAX_FEATURES))
         end
-        if p.layers.holdings then
+        if p.layers.holdings and sdk.can(self, "property_deals_buyers", "read") then
             local hw, hd = area(p, "(h->>'lat')::float8", "(h->>'lng')::float8")
             add("holdings", db.query([[
                 SELECT b.uuid, (h->>'lat')::float8 AS lat, (h->>'lng')::float8 AS lng,

@@ -514,14 +514,23 @@ return function(app)
         response = Task, errors = E422 })
     sdk.doc(app, "PUT /tasks/:id", { summary = "Update a task (do it, assign, snooze...)", permission = "property_deals_tasks.update",
         path = tid, response = Task, errors = { ["404"] = "Not found", ["422"] = "Validation failed — compliance tasks "
-            .. "need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid" },
+            .. "need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid",
+            ["403"] = "Only a manager changes approval_rule or compliance; the AI account can't close a task with a rule",
+            ["409"] = "The task's approval rule needs sign-off (use request-completion), or an approval is waiting" },
         body = OBJ({ pd_status = ENUM(PD_STATUS), title = S(), description = S(), priority = S(), owner_user_uuid = UUID(),
             due_at = DT(), sla_minutes = INT(), blocking = BOOL(), compliance = BOOL(), agent_eligible = BOOL(), agent_key = S(),
             approval_rule = S(), snoozed_until = DT(), snooze_reason = S(), evidence = ANY("Object") }),
-        description = "Finishing a task starts its dependants, closes tasks whose condition now holds and repeats "
+        description = "A task's approval_rule covers closing it: manager needs approvals.manage, two_person always "
+            .. "goes through request-completion. Finishing a task starts its dependants, closes tasks whose condition now holds and repeats "
             .. "repeating tasks. From the PA (X-OpsAPI-Agent), a task on a lead closes only with evidence.chase_uuid: the chase (call / "
             .. "message) logged for that lead that did the work; the chase is linked to the task, so it closes one "
             .. "task." })
+    sdk.doc(app, "POST /tasks/:id/request-completion", { summary = "Ask for a task to be signed off under its rule",
+        permission = "property_deals_tasks.update", path = tid, body = OBJ({ note = S(), evidence = ANY("Object") }),
+        response = Approval, errors = { ["404"] = "Not found", ["409"] = "Already done, or already waiting for approval",
+            ["422"] = "A compliance task needs a note or evidence" },
+        description = "Creates an approval (action complete_task) with the task's own rule; the task waits in "
+            .. "awaiting_approval and is done, with the note and evidence, once it is approved." })
     local Dep = OBJ({ depends_on_task_uuid = UUID(), title = S(), pd_status = S() })
     sdk.doc(app, "GET /tasks/:id/dependencies", { summary = "What a task waits for", permission = "property_deals_tasks.read",
         path = tid, response = ARR(Dep), errors = E404 })

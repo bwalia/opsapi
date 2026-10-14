@@ -125,6 +125,11 @@ function Approvals.decide(ns, id, me, input, can_manage)
                 { payload_version = tonumber(a.payload_version), payload_sha256 = a.payload_sha256 })
         end
         if a.requested_by_user_uuid == me then U.fail(403, "You can't decide your own request") end
+        -- JobShout only hears approve or reject, then sends what its own agent wrote: an edit here would never go out.
+        if input.payload and a.jobshout_approval_id and a.jobshout_approval_id ~= db.NULL then
+            U.fail(409, "A draft from JobShout can't be edited here (JobShout sends its own version). "
+                .. "Reject it with a note to get a new draft.")
+        end
         if a.rule == "manager" and not can_manage then U.fail(403, "This needs a manager's approval") end
         local decisions = U.json(a.decisions) or {}
         for _, d in ipairs(decisions) do
