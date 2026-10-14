@@ -953,6 +953,12 @@ function Tools.http_call(ctx, method, path, query, body)
         headers["Content-Type"] = "application/json"
         payload = cjson_safe.encode(body)
     end
+    -- The same write twice in one run (a model repeating itself) replays the first answer instead of making a
+    -- second record (routes with idempotent creates honour it). A new request is a new run, so a new key.
+    if method ~= "GET" and ctx.run_uuid then
+        headers["Idempotency-Key"] = "agent-"
+            .. ngx.md5(ctx.run_uuid .. " " .. method .. " " .. clean .. " " .. (payload or ""))
+    end
 
     local httpc = http.new()
     httpc:set_timeout(30000)

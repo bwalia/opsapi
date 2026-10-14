@@ -47,6 +47,7 @@ docker run -d --name pd-api-$ID --network "$NET" -p 127.0.0.1::80 -v "$W/src/lap
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=property -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e OPSAPI_AI_ALLOW_PRIVATE=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e AI_FALLBACK_PROVIDER=none \
+  -e PLUGIN_PROPERTY_DEALS_OPEN_DATA_URL=http://pd-mock:8080/open \
   -e AI_USER_DAILY_TOKEN_LIMIT=100000000 \
   -e VOICE_URL=http://pd-mock:8080/voice \
   -e GHL_API_URL=http://pd-mock:8080/ghl -e OPSAPI_INTEGRATIONS_ALLOW_PRIVATE=true \
@@ -78,7 +79,7 @@ export PD_API="http://127.0.0.1:$PORT" PD_JWT_SECRET="$JWT_SECRET" PD_PSQL="dock
 export PD_MOCK="http://127.0.0.1:$MOCK_PORT"
 # ONLY=ai_test (etc.) runs one suite while iterating.
 # Suites not found here are looked up in the Property PA plugin's spec (projects/property-pa/spec).
-SUITES=${ONLY:-api_test scenario_test fixes_test research_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test pa_brain_test pa_week2_test pa_week3_test pa_week4_test pa_story_test perf_test}
+SUITES=${ONLY:-api_test scenario_test fixes_test research_test assistant_test contract_test ai_test data_test phase7_test renovation_test signals_test followup_test pa_test pa_brain_test pa_week2_test pa_week3_test pa_week4_test pa_story_test perf_test}
 ( for s in $SUITES; do f="$HERE/$s.py"; [ -f "$f" ] || f="$ROOT/projects/property-pa/spec/$s.py"
     python3 -I "$f" || exit 1; done ) || {
   echo "--- server errors ---"

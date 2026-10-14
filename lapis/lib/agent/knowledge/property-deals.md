@@ -3,8 +3,8 @@ title: Property Deals
 pages: /dashboard/property-deals
 api: /api/v2/property-deals
 modules: property_deals_deals, property_deals_leads, property_deals_tasks, property_deals_approvals, property_deals_properties, property_deals_buyers, property_deals_suppliers, property_deals_compliance, property_deals_reports
-suggestions: What's most urgent today? | Why is this deal red? | What's waiting for my approval?
-readonly: true
+suggestions: Create a deal for 12 Brick Lane, London E1 6AN, we're buying, offer £610k | What's most urgent today? | Why is this deal red? | What's waiting for my approval?
+readonly: false
 ---
 # Property Deals
 Deals for buying and selling homes, from first lead to completion. Rules (not AI) set deadlines, urgency, deal health and money at risk. AI agents only draft; nothing is sent, booked or signed until a person approves it in Approvals.
@@ -20,7 +20,7 @@ Deals for buying and selling homes, from first lead to completion. Rules (not AI
 - **Deal finder**: map with a pin and radius (5-50 miles), layers (including Suppliers: conveyancers and other firms near the pin), a property card with comparables and the top buyers, saved searches with daily alerts.
 - **Buyers**, **Suppliers** (Book nearest), **Compliance** (a named person signs off), **Deal reports** (export CSV/JSON), **Deals settings** (templates, SLA and urgency, AI providers and agents, data connectors, mailboxes, my notifications).
 
-## Read-only answers
+## Answers
 - My tasks and the day: `GET /api/v2/property-deals/today`
 - What's due soon (deal tasks + renovation jobs): `GET /api/v2/property-deals/due?days=7`
 - Leads to call now (hot replies): `GET /api/v2/property-deals/hot-leads`
@@ -31,8 +31,16 @@ Deals for buying and selling homes, from first lead to completion. Rules (not AI
 - Why a deal is red: `GET /api/v2/property-deals/deals/{uuid}/health`
 - What blocks the next stage: `GET /api/v2/property-deals/deals/{uuid}/gate`
 - Approvals I can decide: `GET /api/v2/property-deals/approvals/inbox`
-- The AI's research on a deal (area notes, nearby firms, quote requests): `GET /api/v2/property-deals/deals/{uuid}/research`
+- The AI's research on a deal (official area data, area notes, nearby firms, quote requests): `GET /api/v2/property-deals/deals/{uuid}/research`
+
+## Create a deal (only when the user asks for one)
+- You need the address (line 1 and town) and the postcode, written like E1 6AN. No postcode: ask_user once; never invent one. Deal type: buying (buy), selling (sell), buy and assign (buy_and_assign) or sourcing; ask if it isn't clear.
+- Look first: `GET /api/v2/property-deals/properties?q=E1 6AN` and, if the home is there, `GET /api/v2/property-deals/deals?property_uuid={uuid}`. An open deal on it already: show it and don't create another.
+- A new home: `POST /api/v2/property-deals/properties` with {"address_line1": "12 Brick Lane", "town": "London", "postcode": "E1 6AN", "tenure": "unknown"} (tenure freehold or leasehold when the user says so).
+- Then `POST /api/v2/property-deals/deals` with {"property_uuid": "<uuid of that property>", "deal_type": "buy", "offer_amount": 610000} and, when given, "name", "agreed_price", "target_completion_date" (YYYY-MM-DD) and "notes". Money as plain numbers (£610k is 610000). Call each once.
+- Then reply with a link [the address](/dashboard/property-deals/deals/{uuid}) and say the autopilot is pinning it on the map and researching the area (official planning, flood, crime and price data; a Google search when the workspace has Gemini; SRA conveyancers, whose quote requests wait in Approvals).
 
 ## Rules
 - Never approve, reject, send or move stages for the user: explain where the button is.
+- Create a deal only when the user asks for one; never change or close a deal here.
 - Compliance checks are passed or waived only by a named person.

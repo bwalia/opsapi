@@ -189,6 +189,23 @@ export interface ResearchQuote {
   decided_at?: string | null;
   executed_at?: string | null;
 }
+export interface AreaFacts {
+  place?: { district?: string | null; ward?: string | null; region?: string | null } | null;
+  planning?: {
+    at_the_home: { dataset: string; name?: string | null; reference?: string | null; level?: string | null; url?: string | null }[];
+    listed_buildings: { count: number; nearest: { name?: string | null; grade?: string | null }[] };
+    brownfield: { count: number; sites: { name?: string | null; notes?: string | null }[] };
+  } | null;
+  flood?: { warnings: { severity?: string | null; area?: string | null; raised?: string | null }[]; alert_areas_within_1km: number; alert_areas: string[] } | null;
+  crime?: { month?: string | null; within_1_mile: number; top: { category: string; count: number }[] } | null;
+  prices?: {
+    area: string; month: string; average: number; annual_change_pct?: number | null;
+    detached?: number | null; semi_detached?: number | null; terraced?: number | null; flat?: number | null;
+  } | null;
+  sources: string[];
+  missing: string[];
+}
+export interface ResearchNearby { kind?: string | null; title: string; date?: string | null; where?: string | null; detail?: string | null }
 export interface DealResearch {
   gemini: boolean;
   gemini_hint?: string | null;
@@ -208,6 +225,14 @@ export interface DealResearch {
   postcode_found?: string | null;
   suppliers: ResearchSupplier[];
   quotes: ResearchQuote[];
+  /** Official data (planning, flood, crime, prices): for the whole team. */
+  facts?: AreaFacts | null;
+  /** What's going on nearby, from the Google search (shown only to the person who ran it). */
+  nearby?: ResearchNearby[];
+  /** Someone else ran the Google search: its results are theirs to see (Google's terms). */
+  web_hidden?: boolean;
+  /** The run whose Google results are shown (actions on its firms name it). */
+  web_run_uuid?: string | null;
   property: { uuid: string; lat?: number | string | null; lng?: number | string | null; postcode?: string | null } | null;
 }
 

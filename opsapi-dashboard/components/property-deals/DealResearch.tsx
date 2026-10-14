@@ -21,9 +21,11 @@ import {
 } from '@/services/property-deals.service';
 import { BASE, ContactLinks, ErrorNote, ExtLink, Spinner, dateText, kindText, label } from './ui';
 import { usePdData, usePdMe } from './usePd';
+import AreaFacts from './AreaFacts';
 
 const STEP_NAME: Record<string, string> = {
   pin: 'Pin the home on the map',
+  facts: 'Official data: planning, flood, crime, prices',
   research: 'Google search: the area and firms nearby',
   register: 'Conveyancers from the SRA register',
   quotes: 'Quote requests',
@@ -151,7 +153,8 @@ function Hint({ text, href, link }: { text: string; href: string; link: string }
 
 function Body({ dealId, dealType, d, onChanged }: { dealId: string; dealType?: string; d: Research; onChanged: () => void }) {
   const area = AREA.filter(([k]) => d.area?.[k]);
-  const google = area.length > 0 || d.firms.length > 0;
+  const nearby = d.nearby || [];
+  const google = area.length > 0 || d.firms.length > 0 || nearby.length > 0;
   return (
     <div className="mt-4 space-y-4">
       {!d.run && !d.gemini && !d.sra && (
@@ -188,6 +191,19 @@ function Body({ dealId, dealType, d, onChanged }: { dealId: string; dealType?: s
             );
           })}
         </ul>
+      )}
+
+      {d.facts && (
+        <Section title="Official data near this home">
+          <AreaFacts facts={d.facts} />
+        </Section>
+      )}
+
+      {d.web_hidden && (
+        <p className="mt-4 flex items-start gap-2 rounded-lg bg-secondary-50 p-2 text-sm text-secondary-600">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          Someone else ran the Google search on this deal, and Google&apos;s results are shown only to the person who ran it. Use Research again to see your own.
+        </p>
       )}
 
       {d.suppliers.length > 0 && <RegisterFirms dealId={dealId} dealType={dealType} suppliers={d.suppliers} attribution={d.attribution} />}
@@ -230,7 +246,22 @@ function Body({ dealId, dealType, d, onChanged }: { dealId: string; dealType?: s
               ))}
             </dl>
           )}
-          {d.firms.length > 0 && d.run && <WebFirms dealId={dealId} runUuid={d.run.uuid} firms={d.firms} onChanged={onChanged} />}
+          {nearby.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-sm font-semibold text-secondary-900">Going on nearby</h4>
+              <ul className="mt-1 space-y-2 text-sm">
+                {nearby.map((n, i) => (
+                  <li key={i}>
+                    <span className="font-medium text-secondary-900">{n.title}</span>
+                    {n.kind && <Badge size="sm" variant="secondary" className="ml-2">{n.kind}</Badge>}
+                    <div className="text-secondary-600">{[n.date, n.where].filter(Boolean).join(' · ')}</div>
+                    {n.detail && <div className="text-secondary-700">{n.detail}</div>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {d.firms.length > 0 && d.run && <WebFirms dealId={dealId} runUuid={d.web_run_uuid || d.run.uuid} firms={d.firms} onChanged={onChanged} />}
           {d.suggestions && (
             // Google's Search Suggestions, exactly as given: sandboxed (no scripts, no access to this page). The base
             // target only makes a chip open Google in a new tab instead of inside this small frame.

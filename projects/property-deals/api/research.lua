@@ -15,7 +15,7 @@ local Research = require("property_deals.research")
 
 return function(app)
     app:get("/deals/:id/research", sdk.handler({ permission = "property_deals_deals.read" }, function(self)
-        local view = Research.view(sdk.namespace_id(self), self.params.id)
+        local view = Research.view(sdk.namespace_id(self), self.params.id, sdk.user(self).uuid)
         if not view then return sdk.not_found("Deal") end
         return sdk.ok(view)
     end))

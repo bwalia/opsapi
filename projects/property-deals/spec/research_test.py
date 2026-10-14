@@ -83,6 +83,9 @@ check("...the web search says to add Gemini", steps.get("research", {}).get("sta
 check("...the register says to add the SRA key", steps.get("register", {}).get("status") == "skipped"
       and "SRA" in (steps["register"].get("note") or "") and v.get("sra") is False, v.get("steps"))
 check("...nothing went to Google", len(mock("/_gemini")) == before)
+facts0 = v.get("facts") or {}
+check("...but the official data is there (no AI needed)", steps.get("facts", {}).get("status") == "done"
+      and (facts0.get("crime") or {}).get("within_1_mile") == 5, v.get("steps"))
 
 # --- Gemini and the SRA register -----------------------------------------------------------------------------------
 NSP = API + "/api/v2/namespace/ai-providers"
@@ -114,6 +117,22 @@ text = str(body.get("contents"))
 check("...about the address", "9 High Petergate" in text and "YO1 7AA" in text, text[:300])
 check("...and nothing else: no seller, no price", "Seller" not in text and "187500" not in text and "187,500" not in text)
 
+facts = v.get("facts") or {}
+planning, flood, crime, prices = (facts.get(k) or {} for k in ("planning", "flood", "crime", "prices"))
+check("official planning data: conservation area and Article 4 at the home",
+      [e.get("name") for e in planning.get("at_the_home", [])] == ["Central Historic Core", "York HMO"], planning)
+check("...listed buildings and brownfield nearby", (planning.get("listed_buildings") or {}).get("count") == 2
+      and (planning.get("brownfield") or {}).get("count") == 1, planning)
+check("official flood data: warnings in force and alert areas within 1 km", len(flood.get("warnings", [])) == 1
+      and flood.get("alert_areas_within_1km") == 2, flood)
+check("official crime data: within a mile, by category", crime.get("within_1_mile") == 5
+      and crime.get("top", [{}])[0].get("category") == "anti-social-behaviour" and crime.get("month") == "2026-08", crime)
+check("house prices for the local authority", prices.get("area") == "York" and prices.get("average") == 312000, prices)
+check("each source is credited", any("planning.data.gov.uk" in x for x in facts.get("sources", []))
+      and any("Environment Agency" in x for x in facts.get("sources", [])) and facts.get("missing") == [], facts)
+nearby = v.get("nearby") or []
+check("what's going on nearby, as the search found it", [n.get("title") for n in nearby]
+      == ["42 flats approved on Piccadilly", "York station gateway works"], nearby)
 area = v.get("area") or {}
 check("area notes kept as given", area.get("transport") == "York station is a 10 minute walk."
       and area.get("schools") is None and "Ignore previous instructions" in (area.get("summary") or ""), area)
@@ -201,6 +220,15 @@ check("...nor asked twice (the 3 from the register + the one a person asked)", "
 check("the register wasn't fetched again (once a day)", mock("/_sra")["calls"] == sra_before + 1, mock("/_sra"))
 res = call("POST", P + f"/deals/{D}/research/firms/1/save", "operator_s", W, {"run_uuid": R})
 check("acting on an old run is refused (409)", res[0] == 409, res)
+
+# --- Google's results are for whoever ran the search; the rest is for the team ----------------------------------
+other = data(call("GET", P + f"/deals/{D}/research", "manager_s", W), 200, "a teammate opens the deal")
+check("a teammate doesn't see someone else's Google results", other.get("web_hidden") is True and other.get("area") is None
+      and other.get("firms") == [] and other.get("nearby") == [] and not other.get("suggestions"), other.get("web_hidden"))
+check("...but sees the official data, the SRA conveyancers and the quote requests", (other.get("facts") or {}).get("crime")
+      and len(other.get("suppliers", [])) == 3 and len(other.get("quotes", [])) == 4)
+res = call("POST", P + f"/deals/{D}/research/firms/1/save", "manager_s", W, {"run_uuid": R})
+check("...and can't act on firms from a search they didn't run", res[0] in (403, 409), res)
 
 # --- The map -------------------------------------------------------------------------------------------------------
 m = data(call("GET", P + "/map?lat=53.96&lng=-1.08&radius_miles=5&layers=deals,suppliers", "operator_s", W), 200, "map")

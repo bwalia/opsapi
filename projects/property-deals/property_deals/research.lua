@@ -5,6 +5,8 @@
 --      nearby. Google's terms: the answer is shown as it came, with Google's Search Suggestions, kept at most two
 --      years as the deal's research, and never stored or crawled automatically. So a firm from it reaches Suppliers,
 --      or gets asked for a quote, only when a person clicks (R.save_firm / R.quote_firm);
+--   2b. official data (property_deals/area.lua, Open Government Licence, no key): planning constraints, flood
+--      warnings and alert areas, crime, local prices — stored on the deal for the whole team;
 --   3. with the SRA register (a free key per workspace, property_deals/register.lua), adds the nearest firms doing
 --      residential property work to Suppliers (their data may be reused, with the SRA's attribution) and drafts a
 --      quote request to the nearest 3. Drafts wait in Approvals: nothing is sent until a person approves
@@ -14,6 +16,8 @@
 --   notes from real facts only: the postcode's place (postcodes.io) and the Land Registry sales near the home. They
 --   are labelled as written without a web search, and that model never lists firms: it would invent their details.
 -- Only the address goes to Google: no seller, buyer, price or notes. The model calls nothing; its answer is data.
+-- Google's terms also say grounded results are shown only to the person who asked: the deal page shows the web
+-- part of a run to whoever ran it (for a deal's own run, the deal's owner); others see the rest and can run their own.
 -- A run is a property_deals_agent_runs row (agent_key deal_research): it counts toward the workspace's daily
 -- AI budget and shows in reports, and ai_usage meters its tokens. Google bills searches on top (its pricing).
 local cjson = require("cjson")
@@ -47,10 +51,15 @@ local function prompt(p, miles)
         .. "or solicitors doing residential conveyancing), surveyor (RICS surveyors), epc_assessor (domestic energy "
         .. "assessors), estate_agent or letting_agent. For each: kind, name, website (the firm's own site, not a "
         .. "directory), email, phone, address, postcode, accreditation (e.g. SRA or CLC number, RICS, an accreditation "
-        .. "scheme), fees (a published price, if any), notes (one sentence: why it fits).\n\n"
+        .. "scheme), fees (a published price, if any), notes (one sentence: why it fits).\n"
+        .. "4. nearby: up to 10 things going on near this home in the last 12 months that matter to a buyer, investor "
+        .. "or broker: planning applications and decisions, new-build developments, transport or regeneration schemes, "
+        .. "HMO or selective licensing, local news. For each: kind (planning, development, transport, regeneration, "
+        .. "licensing, news), title, date, where (a street or distance), detail (one sentence).\n\n"
         .. 'JSON: {"postcode": "", "area": {"summary": "", "transport": "", "schools": "", "amenities": "", '
         .. '"flood_risk": "", "planning": "", "market": ""}, "suppliers": [{"kind": "", "name": "", "website": "", '
-        .. '"email": "", "phone": "", "address": "", "postcode": "", "accreditation": "", "fees": "", "notes": ""}]}'
+        .. '"email": "", "phone": "", "address": "", "postcode": "", "accreditation": "", "fees": "", "notes": ""}], '
+        .. '"nearby": [{"kind": "", "title": "", "date": "", "where": "", "detail": ""}]}'
 end
 
 -- ---------------------------------------------------------------------------
@@ -213,11 +222,14 @@ local function local_chain(ns)
 end
 
 --- Real facts about the home: the property, its postcode's place, and the recorded sales within a mile.
-local function home_facts(ns, p)
+local function home_facts(ns, p, official)
     local f = { address = p.address_line1, town = p.town, postcode = p.postcode, tenure = p.tenure,
         property_type = p.property_type, bedrooms = p.bedrooms, epc_rating = p.epc_rating }
     for k, v in pairs(f) do if not has(v) then f[k] = nil end end
     if has(p.postcode) then f.place = require("property_deals.connectors").postcode_facts(ns, p.postcode) end
+    if type(official) == "table" then
+        f.official = { planning = official.planning, flood = official.flood, crime = official.crime, prices = official.prices }
+    end
     if has(p.lat) and has(p.lng) then
         local lat, lng = tonumber(p.lat), tonumber(p.lng)
         f.sales_within_1_mile_24_months = require("property_deals.market").comps(ns, lat, lng, { radius_miles = 1 })
@@ -231,12 +243,12 @@ local function home_facts(ns, p)
 end
 
 --- Notes on the area from the workspace's own model. @return area, info (provider, model, usage) | nil, reason
-local function local_notes(ns, run, p, chain)
+local function local_notes(ns, run, p, chain, official)
     local keys = {}
     for _, k in ipairs(AREA_KEYS) do keys[#keys + 1] = '"' .. k .. '": ""' end
     local msg, info = require("lib.ai-providers").chat(ns, chain, {
         { role = "system", content = LOCAL_SYSTEM },
-        { role = "user", content = "Facts:\n" .. cjson.encode(home_facts(ns, p)) .. "\n\nWrite 1-3 sentences for each: "
+        { role = "user", content = "Facts:\n" .. cjson.encode(home_facts(ns, p, official)) .. "\n\nWrite 1-3 sentences for each: "
             .. "summary, transport, schools, amenities, flood_risk, planning, market (use the sales given).\n"
             .. "JSON: {" .. table.concat(keys, ", ") .. "}" },
     }, nil, { feature = "property_deals_research", run_uuid = run.uuid, json = true, max_tokens = 2048,
@@ -379,8 +391,25 @@ function R.run(ns, run_uuid)
         return finish("succeeded")
     end
     local p = ctx.property
+    -- Google's results are shown to whoever asked: a deal's own run is the deal owner's.
+    if not has(run.triggered_by_user_uuid) and has(ctx.deal.owner_user_uuid) then
+        run.triggered_by_user_uuid = ctx.deal.owner_user_uuid
+        db.update("property_deals_agent_runs", { triggered_by_user_uuid = run.triggered_by_user_uuid }, { id = run.id })
+    end
     step("pin", pin(ns, p))
     local radius = math.max(1, math.min(50, tonumber(settings.autopilot_radius_miles) or 10))
+
+    -- Official data about the area (planning, flood, crime, prices): no key, no AI, shown to the whole team.
+    local function official()
+        if out.facts or not has(p.lat) then return end
+        local place = has(p.postcode) and require("property_deals.connectors").postcode_facts(ns, p.postcode) or nil
+        local f = require("property_deals.area").collect(tonumber(p.lat), tonumber(p.lng), place and place.district)
+        f.place = place
+        out.facts = f
+        step("facts", "done", "Planning, flood, crime and local prices from official data"
+            .. (#f.missing > 0 and (" (not available now: " .. table.concat(f.missing, ", ") .. ")") or ""))
+    end
+    official()
 
     -- Gemini: notes on the area and firms nearby, shown as Google returned them.
     local row, cfg = R.provider(ns)
@@ -404,7 +433,7 @@ function R.run(ns, run_uuid)
             -- No web search: the workspace's own model writes the notes from real facts (no firms).
             local chain = local_chain(ns)
             local area, info = nil, nil
-            if chain then area, info = local_notes(ns, run, p, chain) end
+            if chain then area, info = local_notes(ns, run, p, chain, out.facts) end
             if area then
                 out.area, out.area_source, out.area_model = area, "model", info.model
                 usage = { input = usage.input + (tonumber(info.usage.input) or 0),
@@ -435,15 +464,26 @@ function R.run(ns, run_uuid)
                 local f = as_given(x)
                 if f and #out.firms < 40 then out.firms[#out.firms + 1] = f end
             end
+            out.nearby = {}
+            for _, x in ipairs(type(a.nearby) == "table" and a.nearby or {}) do
+                if type(x) == "table" and #out.nearby < 15 then
+                    local n = {}
+                    for _, k in ipairs({ "kind", "title", "date", "where", "detail" }) do n[k] = clean(x[k], 400) end
+                    if n.title then out.nearby[#out.nearby + 1] = n end
+                end
+            end
+            out.nearby = U.array(out.nearby)
             out.area, out.searches, out.suggestions = area, U.array(got.searches), got.suggestions
             save_progress({ sources = cjson.encode(U.array(got.sources)) })
-            step("research", "done", #out.firms .. " firms and " .. #got.sources .. " web pages found")
+            step("research", "done", #out.firms .. " firms, " .. #out.nearby .. " things going on nearby and "
+                .. #got.sources .. " web pages found")
             -- The postcode it found puts a home without one on the map (and its event fetches EPC / sold prices).
             local found_pc = postcode(a.postcode)
             if found_pc and not has(p.postcode) then
                 db.update("property_deals_properties", { postcode = found_pc, updated_at = db.raw("NOW()") }, { id = p.id })
                 p.postcode, out.postcode_found = found_pc, found_pc
                 step("pin", pin(ns, p))
+                official()
             end
         end
     end
@@ -544,14 +584,20 @@ end
 -- What people see and do
 -- ---------------------------------------------------------------------------
 
-local function latest(ns, deal_uuid)
+local function latest(ns, deal_uuid, by)
     return U.one([[SELECT * FROM property_deals_agent_runs WHERE namespace_id = ? AND deal_uuid = ? AND agent_key = ?
-        ORDER BY created_at DESC, id DESC LIMIT 1]], ns, deal_uuid, R.AGENT)
+        AND (?::text IS NULL OR triggered_by_user_uuid = ?) ORDER BY created_at DESC, id DESC LIMIT 1]],
+        ns, deal_uuid, R.AGENT, by or db.NULL, by or db.NULL)
+end
+
+local function web_of(run)
+    local out = run and U.json(run.output) or {}
+    return (out.area_source or (type(out.area) == "table" and "web")) == "web" and out or nil
 end
 
 --- What the deal page shows: the latest run, the answer as Google returned it (with its Search Suggestions and
 -- pages), the conveyancers from the SRA register with their distance, and every quote request drafted here.
-function R.view(ns, deal_uuid)
+function R.view(ns, deal_uuid, me)
     local ctx = context(ns, deal_uuid)
     if not ctx then return nil end
     local run = latest(ns, deal_uuid)
@@ -562,6 +608,7 @@ function R.view(ns, deal_uuid)
         sra = require("property_deals.connectors").of_kind(ns, "sra") ~= nil,
         run = cjson.null, steps = U.array({}), area = cjson.null, firms = U.array({}), suggestions = cjson.null,
         sources = U.array({}), searches = U.array({}), suppliers = U.array({}), quotes = U.array({}),
+        nearby = U.array({}), facts = cjson.null, web_hidden = false,
         property = ctx.property and { uuid = ctx.property.uuid, lat = ctx.property.lat, lng = ctx.property.lng,
             postcode = ctx.property.postcode } or cjson.null }
     if not run then return view end
@@ -570,6 +617,24 @@ function R.view(ns, deal_uuid)
         started_at = run.started_at, finished_at = run.finished_at, cost_usd = run.cost_usd,
         tokens = (tonumber(run.tokens_in) or 0) + (tonumber(run.tokens_out) or 0) }
     view.steps = U.array(U.json(run.steps) or {})
+    view.facts = type(out.facts) == "table" and out.facts or cjson.null
+    -- Google's grounded results only for the person who ran the search (Gemini terms): from this person's own latest
+    -- run. Notes the workspace's model wrote, official data, suppliers and quotes are for everyone (latest run).
+    local web_run = nil
+    if web_of(run) then
+        web_run = run.triggered_by_user_uuid == me and run or latest(ns, deal_uuid, me)
+        local mine = web_run and web_of(web_run)
+        if mine then
+            out.area, out.firms, out.suggestions, out.searches, out.nearby = mine.area, mine.firms, mine.suggestions,
+                mine.searches, mine.nearby
+            out.area_source, run.sources = "web", web_run.sources
+        else
+            view.web_hidden, web_run = true, nil
+            out.area, out.firms, out.suggestions, out.searches, out.nearby, run.sources = nil, nil, nil, nil, nil, nil
+        end
+    end
+    view.web_run_uuid = web_run and web_run.uuid or nil
+    view.nearby = U.array(type(out.nearby) == "table" and out.nearby or {})
     view.area = type(out.area) == "table" and out.area or cjson.null
     -- "web": Google's grounded answer (shown as given, with its Search Suggestions); "model": the workspace's own
     -- model wrote the notes without a web search.
@@ -623,10 +688,11 @@ end
 
 -- The firm a person picked from the latest run (index as listed). @return ctx, firm (ready to save), run
 -- | nil, message, status
-local function picked(ns, deal_uuid, run_uuid, index)
+local function picked(ns, deal_uuid, run_uuid, index, me)
     local ctx = context(ns, deal_uuid)
     if not ctx then return nil, "Deal not found", 404 end
-    local run = latest(ns, deal_uuid)
+    -- Only this person's own latest search (Google's results are shown to whoever ran it).
+    local run = latest(ns, deal_uuid, me)
     if not run or run.uuid ~= run_uuid then
         return nil, "The research has been run again since you looked; reload it", 409
     end
@@ -639,7 +705,7 @@ end
 
 --- A person saves one firm from the research to Suppliers. @return supplier uuid, created | nil, message, status
 function R.save_firm(ns, deal_uuid, run_uuid, index, user_uuid)
-    local ctx, s, run = picked(ns, deal_uuid, run_uuid, index)
+    local ctx, s, run = picked(ns, deal_uuid, run_uuid, index, user_uuid)
     if not ctx then return nil, s, run end
     local point = s.postcode and require("property_deals.connectors").geocode(ns, { s.postcode })[s.postcode] or nil
     s.source, s.source_url = "ai_research", s.website
@@ -648,7 +714,7 @@ end
 
 --- A person asks one firm from the research for a quote: a draft in Approvals. @return approval | nil, message, status
 function R.quote_firm(ns, deal_uuid, run_uuid, index, user_uuid)
-    local ctx, s, run = picked(ns, deal_uuid, run_uuid, index)
+    local ctx, s, run = picked(ns, deal_uuid, run_uuid, index, user_uuid)
     if not ctx then return nil, s, run end
     if not s.email then return nil, "No email for that firm", 422 end
     local a = draft_quote(ns, ctx, s, run.uuid, user_uuid)

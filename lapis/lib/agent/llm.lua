@@ -341,7 +341,9 @@ local function openai_chat(cfg, messages, tools, opts)
             local calls = {}
             for j, tc in ipairs(m.tool_calls) do
                 calls[j] = { id = tc.id, type = "function", ["function"] = {
-                    name = tc["function"].name, arguments = cjson.encode(tc["function"].arguments or {}) or "{}" } }
+                    name = tc["function"].name, arguments = cjson.encode(tc["function"].arguments or {}) or "{}" },
+                    -- Gemini 3 (OpenAI-compatible endpoint) needs its thought signature back with each call.
+                    extra_content = tc.extra_content }
             end
             wire[i] = { role = "assistant", content = text_of(m.content), tool_calls = calls }
         elseif m.attachments and #m.attachments > 0 then
@@ -393,7 +395,9 @@ local function openai_chat(cfg, messages, tools, opts)
         out.tool_calls = {}
         for i, tc in ipairs(msg.tool_calls) do
             local fn = tc["function"] or {}
-            out.tool_calls[i] = { id = tc.id or ("call_" .. i), ["function"] = { name = fn.name or "", arguments = args_table(fn.arguments) } }
+            out.tool_calls[i] = { id = tc.id or ("call_" .. i),
+                ["function"] = { name = fn.name or "", arguments = args_table(fn.arguments) },
+                extra_content = type(tc.extra_content) == "table" and tc.extra_content or nil }
         end
     end
     return out

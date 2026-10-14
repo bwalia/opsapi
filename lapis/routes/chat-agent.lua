@@ -636,10 +636,12 @@ return function(app)
 
             -- The request's auth/RBAC context is captured here; the timer runs
             -- after this response is sent, independent of the browser.
+            local ctx = request_ctx(self, ns, user, scope, tool_names)
+            ctx.run_uuid = run_uuid -- keys the run's writes (Tools.http_call: Idempotency-Key)
             local ok, terr = ngx.timer.at(0, run_in_background, {
                 run_uuid = run_uuid,
                 cfg = cfg,
-                ctx = request_ctx(self, ns, user, scope, tool_names),
+                ctx = ctx,
                 page_path = page_path,
                 tools = tools,
                 system = (page_path and scope.key ~= "general")
