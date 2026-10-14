@@ -192,6 +192,16 @@ def model_reply(body):
             {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args or {})}}]}}],
             "usage": usage}
 
+    # Deal research without a web search: notes from the facts given (postcode place, recorded sales).
+    if "notes on a UK home's area" in system:
+        facts = json.loads(allt.split("Facts:\n", 1)[1].split("\n\nWrite", 1)[0])
+        sales = facts.get("sales_within_1_mile_24_months") or {}
+        place = facts.get("place") or {}
+        return say({"summary": "A home in %s, %s." % (place.get("ward") or facts.get("town"), place.get("district") or ""),
+                    "transport": "not known", "schools": "not known", "amenities": "not known",
+                    "flood_risk": "not known", "planning": "not known",
+                    "market": "%d recorded sales within a mile in two years." % (sales.get("count") or 0)})
+
     agent = re.search(r"\[agent:(\w+)\]", system)
     agent = agent.group(1) if agent else None
     rec = records_of(messages)
@@ -489,6 +499,15 @@ class Http(BaseHTTPRequestHandler):
                 res.append({"query": q, "result": {"postcode": q, "latitude": g[0], "longitude": g[1],
                                                    "admin_district": "York"} if g else None})
             return self.send(200, {"status": 200, "result": res})
+        if p.startswith("/pc/postcodes/") and method == "GET":
+            from urllib.parse import unquote
+            q = unquote(p[len("/pc/postcodes/"):]).upper()
+            g = POSTCODES.get(q)
+            if not g:
+                return self.send(404, {"status": 404, "error": "Postcode not found"})
+            return self.send(200, {"status": 200, "result": {"postcode": q, "latitude": g[0], "longitude": g[1],
+                "admin_district": "York", "admin_ward": "Guildhall", "admin_county": None,
+                "region": "Yorkshire and The Humber", "country": "England", "parliamentary_constituency": "York Central"}})
         if p.startswith("/pc/postcodes?"):
             return self.send(200, {"status": 200, "result": [{"postcode": "YO1 7AA", "latitude": 53.96, "longitude": -1.08}]})
         if p.startswith("/epc/api/v1/domestic/search"):

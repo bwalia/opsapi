@@ -218,6 +218,24 @@ call("POST", P + f"/deals/{D}/research", "operator_s", W)
 v3 = research(W, D)
 check("a failed call says why", (v3.get("run") or {}).get("status") == "failed"
       and "HTTP 500" in ((v3.get("run") or {}).get("error") or ""), v3.get("run"))
+
+# Gemini failing (a rate limit, an empty quota): the workspace's own model writes the notes, from real facts only.
+data(call("POST", NSP, "owner_a", W, {"name": "Office Ollama", "provider_type": "openai_compatible", "is_local": True,
+     "base_url": M + "/v1", "default_model": "qwen-local", "secret": "sk-local"}), 201, "add a local model")
+call("POST", P + f"/deals/{D}/research", "operator_s", W)
+v5 = research(W, D)
+steps = {s["key"]: s for s in v5.get("steps", [])}
+check("Gemini failing: the run still succeeds", (v5.get("run") or {}).get("status") == "succeeded", v5.get("run"))
+check("...with notes from the local model, labelled as such", v5.get("area_source") == "model"
+      and v5.get("area_model") == "qwen-local" and "without a web search" in (steps.get("research", {}).get("note") or "")
+      and "HTTP 500" in (steps["research"]["note"] or ""), steps.get("research"))
+check("...written from real facts (the postcode's place, the recorded sales)",
+      "Guildhall" in ((v5.get("area") or {}).get("summary") or "") and "recorded sales" in ((v5.get("area") or {}).get("market") or ""),
+      v5.get("area"))
+check("...and no firms (the local model would invent their details)", v5.get("firms") == [] and not v5.get("suggestions"))
+row = sql(f"""SELECT COUNT(*) FROM ai_usage WHERE run_uuid = '{(v5.get("run") or {}).get("uuid")}'
+              AND feature = 'property_deals_research' AND ok""")
+check("...metered in ai_usage", row and int(row[0]) >= 1, row)
 mock("/_ctl", {"gemini_mode": "ok"})
 res = call("GET", P + f"/deals/{D}/research", "owner_b", W)
 check("another workspace's user can't read it", res[0] in (403, 404), res[0])

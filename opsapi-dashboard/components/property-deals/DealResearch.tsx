@@ -213,9 +213,12 @@ function Body({ dealId, dealType, d, onChanged }: { dealId: string; dealType?: s
       )}
 
       {google && (
-        <Section title="From a Google search">
+        <Section title={d.area_source === 'model' ? 'From your AI model (no web search)' : 'From a Google search'}>
           <p className="flex items-start gap-2 rounded-lg bg-warning-500/10 p-2 text-sm text-warning-700">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Found with Google Search — check before relying on it.
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            {d.area_source === 'model'
+              ? `Written by ${d.area_model || 'your AI model'} from the postcode and the recorded sales nearby, without a web search — check before relying on it.`
+              : 'Found with Google Search — check before relying on it.'}
           </p>
           {area.length > 0 && (
             <dl className="mt-3 space-y-2 text-sm">

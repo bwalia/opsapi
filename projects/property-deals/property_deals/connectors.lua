@@ -225,6 +225,18 @@ function C.geocode(ns, postcodes)
     return out
 end
 
+--- What postcodes.io knows about a postcode's place: { district, ward, county, region, country, constituency } | nil
+function C.postcode_facts(ns, postcode)
+    local code = pc(postcode)
+    if not code or code == "" then return nil end
+    local data = H.json(base(C.of_kind(ns, "postcodes"), "https://api.postcodes.io") .. "/postcodes/" .. ngx.escape_uri(code))
+    local r = data and type(data.result) == "table" and data.result or nil
+    if not r then return nil end
+    local function s(v) return type(v) == "string" and v ~= "" and v or nil end
+    return { district = s(r.admin_district), ward = s(r.admin_ward), county = s(r.admin_county), region = s(r.region),
+        country = s(r.country), constituency = s(r.parliamentary_constituency) }
+end
+
 --- Nearest postcode to a point (to fetch data around a saved search's pin).
 function C.reverse_geocode(ns, lat, lng)
     local conn = C.of_kind(ns, "postcodes")

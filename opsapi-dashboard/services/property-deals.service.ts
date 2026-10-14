@@ -200,6 +200,9 @@ export interface DealResearch {
   firms: ResearchFirm[];
   /** Google's Search Suggestions (HTML): render unchanged, in a sandboxed iframe. */
   suggestions: string | null;
+  /** 'web': Google's grounded answer (shown as given); 'model': the workspace's own model, without a web search. */
+  area_source?: 'web' | 'model' | null;
+  area_model?: string | null;
   sources: { url: string; title?: string | null }[];
   searches: string[];
   postcode_found?: string | null;

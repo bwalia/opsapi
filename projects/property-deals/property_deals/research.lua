@@ -9,6 +9,10 @@
 --      residential property work to Suppliers (their data may be reused, with the SRA's attribution) and drafts a
 --      quote request to the nearest 3. Drafts wait in Approvals: nothing is sent until a person approves
 --      (setting autopilot_quote_requests).
+--   When the web search can't run (no Gemini provider, or it failed: a rate limit, an empty quota...), the
+--   workspace's own model (its "summarise" route, local models first: Ollama, the platform model...) writes the area
+--   notes from real facts only: the postcode's place (postcodes.io) and the Land Registry sales near the home. They
+--   are labelled as written without a web search, and that model never lists firms: it would invent their details.
 -- Only the address goes to Google: no seller, buyer, price or notes. The model calls nothing; its answer is data.
 -- A run is a property_deals_agent_runs row (agent_key deal_research): it counts toward the workspace's daily
 -- AI budget and shows in reports, and ai_usage meters its tokens. Google bills searches on top (its pricing).
@@ -61,6 +65,8 @@ local function clean(v, max)
     if v == "" or l == "not found" or l == "n/a" or l == "none" or l == "unknown" then return nil end
     return v
 end
+
+local function has(v) return v ~= nil and v ~= db.NULL and v ~= "" end
 
 local function postcode(v)
     v = clean(v, 12)
@@ -183,10 +189,74 @@ local function ask(ns, run, cfg, p, miles)
 end
 
 -- ---------------------------------------------------------------------------
--- Suppliers and quote requests
+-- Without a web search: the workspace's own model, on real facts only
 -- ---------------------------------------------------------------------------
 
-local function has(v) return v ~= nil and v ~= db.NULL and v ~= "" end
+local LOCAL_SYSTEM = [[You write short notes on a UK home's area for a property company's back office.
+Use only the facts given and what you reliably know about the place. When you don't know, write "not known".
+Never name businesses, people, phone numbers, emails or websites. Answer with one JSON object and nothing else.]]
+
+local AREA_KEYS = { "summary", "transport", "schools", "amenities", "flood_risk", "planning", "market" }
+
+--- The workspace's own models for notes without a web search: its "summarise" route, else every enabled provider,
+-- local first (never Gemini, which just failed, nor JobShout). @return chain | nil
+local function local_chain(ns)
+    local Providers = require("lib.ai-providers")
+    local chain = {}
+    for _, c in ipairs(require("property_deals.ai.config").route(ns, "summarise").chain or {}) do
+        local row = Providers.get(ns, c.provider_uuid)
+        if row and row.enabled and row.provider_type ~= "gemini" and row.provider_type ~= "jobshout" then
+            chain[#chain + 1] = c
+        end
+    end
+    return #chain > 0 and chain or nil
+end
+
+--- Real facts about the home: the property, its postcode's place, and the recorded sales within a mile.
+local function home_facts(ns, p)
+    local f = { address = p.address_line1, town = p.town, postcode = p.postcode, tenure = p.tenure,
+        property_type = p.property_type, bedrooms = p.bedrooms, epc_rating = p.epc_rating }
+    for k, v in pairs(f) do if not has(v) then f[k] = nil end end
+    if has(p.postcode) then f.place = require("property_deals.connectors").postcode_facts(ns, p.postcode) end
+    if has(p.lat) and has(p.lng) then
+        local lat, lng = tonumber(p.lat), tonumber(p.lng)
+        f.sales_within_1_mile_24_months = require("property_deals.market").comps(ns, lat, lng, { radius_miles = 1 })
+        local dlat, dlng = 1 / 69.0, 1 / math.max(0.01, 69.0 * math.cos(math.rad(lat)))
+        f.recent_sales_nearby = U.array(db.query([[SELECT price, event_date::text AS date, property_type, tenure
+            FROM property_deals_market_records WHERE namespace_id = ? AND record_type = 'sold_price' AND price IS NOT NULL
+              AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? ORDER BY event_date DESC NULLS LAST LIMIT 8]],
+            ns, lat - dlat, lat + dlat, lng - dlng, lng + dlng))
+    end
+    return f
+end
+
+--- Notes on the area from the workspace's own model. @return area, info (provider, model, usage) | nil, reason
+local function local_notes(ns, run, p, chain)
+    local keys = {}
+    for _, k in ipairs(AREA_KEYS) do keys[#keys + 1] = '"' .. k .. '": ""' end
+    local msg, info = require("lib.ai-providers").chat(ns, chain, {
+        { role = "system", content = LOCAL_SYSTEM },
+        { role = "user", content = "Facts:\n" .. cjson.encode(home_facts(ns, p)) .. "\n\nWrite 1-3 sentences for each: "
+            .. "summary, transport, schools, amenities, flood_risk, planning, market (use the sales given).\n"
+            .. "JSON: {" .. table.concat(keys, ", ") .. "}" },
+    }, nil, { feature = "property_deals_research", run_uuid = run.uuid, json = true, max_tokens = 2048,
+        temperature = 0.2, timeout_ms = 300000 })
+    if not msg then return nil, info end
+    local a = require("property_deals.ai.guard").json_object(type(msg.content) == "string" and msg.content or "")
+    if type(a) ~= "table" then return nil, "The AI's answer couldn't be read" end
+    local area, n = {}, 0
+    for _, k in ipairs(AREA_KEYS) do
+        area[k] = clean(a[k], 1200)
+        if area[k] then n = n + 1 end
+    end
+    if n == 0 then return nil, "The AI's answer was empty" end
+    info.usage = msg.usage or {}
+    return area, info
+end
+
+-- ---------------------------------------------------------------------------
+-- Suppliers and quote requests
+-- ---------------------------------------------------------------------------
 
 --- Add a firm to the directory, or reuse the one already there (same register number, same website, or same name
 -- + postcode). People's own entries are never overwritten; a new kind is added. @return supplier uuid, created?
@@ -315,22 +385,48 @@ function R.run(ns, run_uuid)
     -- Gemini: notes on the area and firms nearby, shown as Google returned them.
     local row, cfg = R.provider(ns)
     local Config = require("property_deals.ai.config")
-    local over = row and Config.over_budget(ns, Config.caps(settings))
-    local failed
-    if not row then
-        step("research", "skipped", cfg)
-    elseif over then
+    local over = Config.over_budget(ns, Config.caps(settings))
+    local failed, got, web_why
+    if over then
         step("research", "skipped", over)
     else
-        model = cfg.model
-        local got, why, used = ask(ns, run, cfg, p, radius)
-        usage = got and got.usage or used or usage
-        cost = require("lib.ai-providers").cost(row, usage)
+        if row then
+            model = cfg.model
+            local why, used
+            got, why, used = ask(ns, run, cfg, p, radius)
+            usage = got and got.usage or used or usage
+            cost = require("lib.ai-providers").cost(row, usage)
+            web_why = not got and why or nil
+        else
+            web_why = cfg
+        end
         if not got then
-            step("research", "failed", why)
-            failed = why
+            -- No web search: the workspace's own model writes the notes from real facts (no firms).
+            local chain = local_chain(ns)
+            local area, info = nil, nil
+            if chain then area, info = local_notes(ns, run, p, chain) end
+            if area then
+                out.area, out.area_source, out.area_model = area, "model", info.model
+                usage = { input = usage.input + (tonumber(info.usage.input) or 0),
+                    output = usage.output + (tonumber(info.usage.output) or 0) }
+                cost, model = cost + (tonumber(info.cost_usd) or 0), info.model
+                step("research", "done", "Notes on the area from " .. tostring(info.provider_name or "your AI model")
+                    .. " (" .. tostring(info.model) .. ") without a web search"
+                    .. (row and ("; Google search: " .. tostring(web_why)) or "")
+                    .. ". Firms come from the web search or the SRA register.")
+            elseif row then
+                step("research", "failed", web_why .. (chain and ("; your own model: " .. tostring(info)) or ""))
+                failed = web_why
+            elseif chain then
+                step("research", "failed", "Your AI model couldn't write the notes: " .. tostring(info))
+                failed = tostring(info)
+            else
+                step("research", "skipped", web_why .. ", or any AI provider (e.g. the platform model or Ollama) "
+                    .. "for notes without a web search")
+            end
         else
             local a = got.answer
+            out.area_source = "web"
             local area = {}
             for _, k in ipairs({ "summary", "transport", "schools", "amenities", "flood_risk", "planning", "market" }) do
                 area[k] = type(a.area) == "table" and clean(a.area[k], 1200) or nil
@@ -475,6 +571,10 @@ function R.view(ns, deal_uuid)
         tokens = (tonumber(run.tokens_in) or 0) + (tonumber(run.tokens_out) or 0) }
     view.steps = U.array(U.json(run.steps) or {})
     view.area = type(out.area) == "table" and out.area or cjson.null
+    -- "web": Google's grounded answer (shown as given, with its Search Suggestions); "model": the workspace's own
+    -- model wrote the notes without a web search.
+    view.area_source = out.area_source or (type(out.area) == "table" and "web" or cjson.null)
+    view.area_model = out.area_model
     view.suggestions = type(out.suggestions) == "string" and out.suggestions or cjson.null
     view.sources = U.array(U.json(run.sources) or {})
     view.searches = U.array(type(out.searches) == "table" and out.searches or {})
