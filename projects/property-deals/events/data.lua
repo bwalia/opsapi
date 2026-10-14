@@ -1,8 +1,9 @@
 -- Map data and matching reacting to Property Deals' own events (background, at
 -- least once; every handler is safe to repeat):
---   property created / its postcode changed  -> EPC register + sold prices lookup (when the
---                                               workspace has those connectors), so a valid EPC
---                                               closes the booking task by itself (SPEC §5 #2)
+--   property created / its postcode changed  -> on the map (postcode -> point, always), then the EPC
+--                                               register + sold prices lookup (when the workspace has
+--                                               those connectors), so a valid EPC closes the booking
+--                                               task by itself (SPEC §5 #2)
 --   property or buyer profile changed        -> re-score its matches (SPEC §3.7)
 local root = debug.getinfo(1, "S").source:match("^@(.+)/events/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -16,11 +17,9 @@ end
 local function enrich(event)
     local ns, id = event.namespace_id, event.data and event.data.uuid
     if not ns or type(id) ~= "string" then return end
-    local C = require("property_deals.connectors")
-    if C.of_kind(ns, "epc") or C.of_kind(ns, "price_paid") then
-        local ok, err = pcall(require("property_deals.market").enrich_property, ns, id)
-        if not ok then ngx.log(ngx.WARN, "[property_deals] enrich ", id, ": ", tostring(err)) end
-    end
+    -- The pin needs no connector (postcodes.io is free); EPC and sold prices only run when set up.
+    local ok, err = pcall(require("property_deals.market").enrich_property, ns, id)
+    if not ok then ngx.log(ngx.WARN, "[property_deals] enrich ", id, ": ", tostring(err)) end
 end
 
 return {

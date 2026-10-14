@@ -174,6 +174,17 @@ return {
                                      .. "below become new leads. Empty = off. Needs a Companies House connector." },
         ch_new_company_sic = { type = "string", label = "SIC codes for new property companies",
                                default = "68100,68209,68320,41100" },
+        -- Deal autopilot (property_deals/research.lua): research every new deal with the workspace's Google Gemini.
+        autopilot_on_new_deal = { type = "boolean", label = "AI autopilot: research every new deal", default = true,
+                                  description = "Puts the home on the map and, with a Google Gemini provider, finds "
+                                      .. "conveyancers, surveyors, EPC assessors and estate agents nearby and notes on "
+                                      .. "the area. Only the address goes to Google." },
+        autopilot_radius_miles = { type = "integer", label = "AI autopilot: look for firms within (miles)", default = 10,
+                                   min = 1, max = 50 },
+        autopilot_quote_requests = { type = "boolean", label = "AI autopilot: draft quote requests to the nearest 3 "
+                                         .. "conveyancers", default = true,
+                                     description = "Only firms whose email was found on their own website. The emails "
+                                         .. "wait in Approvals: nothing is sent until a person approves." },
         followup_auto_on_news = { type = "boolean", label = "Draft a personal follow-up when a lead has news",
                                   default = true, description = "The AI drafts it; a person approves before it is sent. "
                                       .. "Needs an AI provider; only leads with an owner." },

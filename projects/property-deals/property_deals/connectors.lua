@@ -9,6 +9,9 @@
 --   companies_house  Companies House (Ltd/SPV buyers, lead   base_url?                   API key
 --                    news watch, new property companies)
 --   postcodes        postcode → lat/lng (postcodes.io)       base_url?                   —
+--   sra              SRA register of solicitors' firms       base_url?                   subscription key (free:
+--                    (conveyancers for the deal autopilot,                               www.sra.org.uk/datasharing)
+--                    property_deals/register.lua)
 --   csv              auction catalogues, agent feeds         record_type?                —
 --   ntfy             staff alerts (open-source push)         base_url?                   access token?
 --   telegram         staff alerts (Telegram bot)             base_url?                   bot token
@@ -100,6 +103,7 @@ C.KINDS.price_paid = {
 
 C.KINDS.companies_house = { label = "Companies House", secret = true, lookup = true }
 C.KINDS.postcodes = { label = "Postcode lookup (postcodes.io)", lookup = true }
+C.KINDS.sra = { label = "SRA register of solicitors (free key)", secret = true, lookup = true }
 C.KINDS.csv = { label = "CSV import" }
 -- Staff alert channels (property_deals.messaging): free / open-source, not run.
 C.KINDS.ntfy = { label = "ntfy (open-source push alerts)", secret = true, lookup = true }

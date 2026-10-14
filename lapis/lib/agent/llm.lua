@@ -533,6 +533,12 @@ local function record(cfg, u, user, ns, msg, err, ms)
     if not ok then ngx.log(ngx.ERR, "[llm] usage not recorded: ", tostring(ierr)) end
 end
 
+--- Meter a call made outside Llm.chat (e.g. a provider's own API): cfg { provider, model }, u { feature,
+-- run_uuid, scope? }, msg { usage = { input, output } } or nil with err, ms. Never fails.
+function Llm.meter(cfg, u, user, ns, msg, err, ms)
+    record(cfg, u or {}, user, ns, msg, err, ms)
+end
+
 local function over_limit(user)
     if not DAILY_LIMIT or not user then return false end
     local ok, rows = pcall(function()

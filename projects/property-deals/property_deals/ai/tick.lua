@@ -183,6 +183,7 @@ function Tick.run(ns, settings)
     ]], ns)
     jobshout_sweep(ns, out)
     auto_pickup(ns, settings, out)
+    out.research_timed_out = require("property_deals.research").sweep(ns)
     return out
 end
 
