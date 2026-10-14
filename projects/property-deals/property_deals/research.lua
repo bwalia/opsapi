@@ -459,9 +459,10 @@ function R.view(ns, deal_uuid)
     local ctx = context(ns, deal_uuid)
     if not ctx then return nil end
     local run = latest(ns, deal_uuid)
-    local _, why = R.provider(ns)
+    -- R.provider returns the provider's config (with its key) on success: only its reason may leave here.
+    local gemini, why = R.provider(ns)
     local Reg = require("property_deals.register")
-    local view = { gemini = why == nil, gemini_hint = why, attribution = Reg.ATTRIBUTION,
+    local view = { gemini = gemini ~= nil, gemini_hint = not gemini and why or nil, attribution = Reg.ATTRIBUTION,
         sra = require("property_deals.connectors").of_kind(ns, "sra") ~= nil,
         run = cjson.null, steps = U.array({}), area = cjson.null, firms = U.array({}), suggestions = cjson.null,
         sources = U.array({}), searches = U.array({}), suppliers = U.array({}), quotes = U.array({}),
@@ -488,6 +489,9 @@ function R.view(ns, deal_uuid)
             JOIN crm_accounts a ON a.uuid = s.account_uuid WHERE s.namespace_id = ? AND lower(a.website) LIKE ? LIMIT 1]],
             ns, "%" .. s.host .. "%")
         f.saved_supplier_uuid = saved and saved.uuid or nil
+        f.quote_asked = f.can_quote and U.one([[SELECT 1 FROM property_deals_approvals WHERE namespace_id = ?
+            AND deal_uuid = ? AND action = 'send_email' AND lower(payload ->> 'to') = ?
+            AND status IN ('pending', 'approved', 'executed')]], ns, deal_uuid, s.email) ~= nil
         view.firms[#view.firms + 1] = f
     end
     local ids, by_id = {}, {}

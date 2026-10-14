@@ -507,7 +507,8 @@ return function(app)
     local WebFirm = OBJ({ index = INT("Use it in /research/firms/{n}/save or /quote"), kind = S(), name = S(),
         website = S(), email = S(), phone = S(), address = S(), postcode = S(), accreditation = S(), fees = S(),
         notes = S(), can_save = BOOL(), can_quote = BOOL("A conveyancer with an email"),
-        saved_supplier_uuid = UUID("Already in Suppliers") }, nil, "As the web search returned it")
+        saved_supplier_uuid = UUID("Already in Suppliers"), quote_asked = BOOL("Already asked for a quote on this deal") },
+        nil, "As the web search returned it")
     local Research = schema("DealResearch", OBJ({
         gemini = BOOL("The workspace has a Google Gemini provider (the web search needs one)"), gemini_hint = S(),
         sra = BOOL("The workspace has an SRA register connector (conveyancers need one)"),

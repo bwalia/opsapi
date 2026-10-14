@@ -100,6 +100,8 @@ v = research(W, D)
 run = v.get("run") or {}
 steps = {s["key"]: s for s in v.get("steps", [])}
 check("a new deal is researched by itself", run.get("status") == "succeeded" and run.get("trigger") == "auto", run)
+check("Gemini is set up, and its key never reaches the browser", v.get("gemini") is True and v.get("gemini_hint") is None
+      and "gem-key" not in json.dumps(v), v.get("gemini_hint"))
 check("every step done", all(steps.get(k, {}).get("status") == "done" for k in ("pin", "research", "register", "quotes")),
       v.get("steps"))
 
@@ -184,8 +186,9 @@ check("...nor ask twice (409)", res[0] == 409, res)
 res = call("POST", P + f"/deals/{D}/research/firms/3/quote", "operator_s", W, {"run_uuid": R})
 check("a firm without an email can't be asked (422)", res[0] == 422, res)
 v = research(W, D)
-check("the deal shows the saved firm", next((f for f in v.get("firms", []) if f["index"] == 1), {}).get(
-      "saved_supplier_uuid") == saved.get("supplier_uuid"))
+one = next((f for f in v.get("firms", []) if f["index"] == 1), {})
+check("the deal shows the firm saved and asked", one.get("saved_supplier_uuid") == saved.get("supplier_uuid")
+      and one.get("quote_asked") is True, one)
 
 # --- Again: no duplicates, the register not fetched again ----------------------------------------------------------
 res = call("POST", P + f"/deals/{D}/research", "operator_s", W)
