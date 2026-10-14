@@ -87,12 +87,13 @@ Every table has `id BIGSERIAL`, `uuid TEXT UNIQUE`, `namespace_id` (FK, cascade)
 | `ats_notes` | `application_id` / `candidate_id`, `body`, `author_uuid` |
 | `ats_attachments` | `candidate_id`, `name`, `content_type`, `size`, `object_key` (MinIO) |
 | `ats_kits` | `job_id` (nullable), `title`, `kit` JSONB (the contract), `version`, `approved_at`, `approved_by` |
-| `ats_interviews` | `application_id`, `kit_snapshot` JSONB, `kit_version`, `state`, `step`, `follow_ups`, `turns` JSONB, `flags` JSONB, `eligibility_answers` JSONB, `adjustments` JSONB, `forwarded_questions` JSONB, `notice_hash`, `notice_accepted_at`, `started_at`, `ended_at`, `end_reason`, `paused_seconds`, `paused_at`, `link_token_hash` (unique), `link_expires_at`, `models` JSONB, `evaluation` JSONB, `evaluation_status`, `review` JSONB, `self_id_key`, `delete_after` |
+| `ats_interviews` | `application_id`, `kit_id`, `kit_version`, `source` (`hosted`, `snazzy_desktop`, `snazzy_file`), `external_id` (the app's session id, unique per namespace), `state`, `session` JSONB (the engine state: kit snapshot, turns, flags, eligibility answers, adjustments, forwarded questions, times, `rev`), `link_token_hash` (unique), `link_expires_at`, `started_at`, `ended_at`, `evaluation` JSONB, `evaluation_status`, `review` JSONB, `reviewed_at`, `self_id_key`, `delete_after` |
 | `ats_self_id` | `key` (opaque, unique), `answers` JSONB. No FK to interviews |
 | `ats_audit_log` | `actor_uuid` (or `candidate`/`engine`), `action`, `entity`, `entity_uuid`, `detail` JSONB |
 | `ats_module_activations` | `namespace_id` (unique), `status`, `source`, `stripe_customer_id`, `stripe_subscription_id`, `activated_at`, `expires_at`, `lapsed_at` |
 | `ats_settings` | `namespace_id` (unique): `retention_days`, `ratings_enabled`, `decline_reasons` JSONB, `legal_notice` (extra text for candidates), `interviews_per_month` |
 | `ats_stripe_events` | `event_id` (unique), for webhook idempotency |
+| `ats_integration_tokens` | `name`, `token_hash` (SHA-256, unique), `token_prefix`, `created_by_uuid`, `last_used_at`, `revoked_at`: tokens for the Snazzy Pro desktop app |
 
 The tables don't depend on the tax/billing tables, so `ats` works with any preset.
 
@@ -136,6 +137,13 @@ The tables don't depend on the tax/billing tables, so `ats` works with any prese
 
   A criminal-record question needs `Legal basis for criminal record question:` in
   the company facts.
+- **Answers to candidates' questions** come only from the kit's company facts.
+  - An `answer` is given only when at least 60% of its meaningful words (four or
+    more characters, not stop words) appear in the company facts.
+  - Otherwise the question is forwarded to the team and flagged `other`.
+  - At most 3 candidate questions, then the interview closes.
+- **Concurrency:** each save bumps `session.rev` and only lands if `rev` is
+  unchanged, so two tabs can't interleave answers.
 - **`llm.lua`:** Anthropic Messages API.
   - Models: `ATS_INTERVIEWER_MODEL` (default `claude-sonnet-5-5`) and
     `ATS_EVALUATOR_MODEL` (default `claude-opus-5-5`); `anthropic-version: 2023-06-01`.
@@ -178,6 +186,8 @@ The tables don't depend on the tax/billing tables, so `ats` works with any prese
 | `POST /api/v2/ats/admin/purge` | Platform admin: run the retention purge now |
 
 **Public API**, under `/api/v2/public/ats/…`:
+- OpsAPI's global filter treats `/api/v2/<code>/public/…` as public only for
+  registered plugins, so core public routes live under `/api/v2/public/`.
 - There's no auth: core public routes must live under `/api/v2/public/`.
 - Rate-limited per IP and per token.
 - The namespace comes from the interview row, never from the client.
@@ -190,6 +200,13 @@ The tables don't depend on the tax/billing tables, so `ats` works with any prese
 | `POST …/:token/event` | `{type: repeat\|rephrase\|pause\|resume\|person\|withdraw\|adjustment, text?}` |
 | `POST …/:token/self-id` | Voluntary answers, after the interview only |
 | `POST /api/v2/public/ats/billing/webhook` | Stripe events (signature verified, idempotent) → activation |
+| `GET /api/v2/public/ats/integration/ping` | Snazzy Pro: `{namespace, active, dashboard_url}` for its token |
+| `GET /api/v2/public/ats/integration/kits` | Snazzy Pro: approved kits, as the app's RoleKit JSON |
+| `POST /api/v2/public/ats/integration/interviews` | Snazzy Pro: an interview run in the app (see §6a) |
+
+The recruiter API also has `POST /api/v2/ats/interviews/import` (a
+`.snazzy_interview` file, see §6a) and `GET/POST /api/v2/ats/settings/tokens`,
+`DELETE /api/v2/ats/settings/tokens/:uuid` (needs `ats_settings` manage).
 
 ## 5. Dashboard (UI/UX)
 
@@ -241,6 +258,71 @@ Section **Hiring** in the sidebar (backend-driven menu), with pages under
   - Reading, reviewing, exporting and deleting always work.
   - An interview already started is allowed to finish.
 - Platform admins can activate by hand (`source = manual`), for trials and invoices.
+
+## 6a. Desktop integration (Snazzy Pro)
+
+Snazzy Pro on the Mac runs **Auto Interviews** itself, and keeps working
+offline: a deck, spoken questions and on-device speech. It sends each result
+here as soon as it can, or saves it as a file.
+
+**Tokens:**
+- **Hiring › Settings › Snazzy Pro app** creates a token. It is
+  `snz_` + 256 random bits, shown once; only its SHA-256 is stored.
+- Each token can be revoked, and its last use is shown.
+- A token can only read approved kits and send interviews.
+- The app sends `Authorization: Bearer snz_…`. The server looks the token up
+  by hash and compares it in constant time.
+- Rate limits: 120 requests a minute per IP and 600 per token. 20 bad tokens
+  from one IP lock that IP out for 15 minutes.
+
+**Interview payload:** the app's `InterviewSession` JSON (snake_case, as
+`InterviewSession.swift`):
+- `id`, `kit` (a RoleKit), `candidate {name, email, reference}`, `channel`, `state`;
+- `turns`, `flags`, `eligibility_answers`, `adjustments`;
+- `notice_hash`, `notice_accepted_at`, `started_at`, `ended_at`, `end_reason`;
+- `models`, `evaluation`, `review`, `audit`, `created`, `delete_after`.
+
+There is no `link_token_hash`. The maximum size is 1 MB, and no media is sent.
+
+**`.snazzy_interview` files:** when OpsAPI isn't connected, the app saves
+
+```json
+{"format": "snazzy-interview", "version": 1, "exported_at": "<ISO 8601>",
+ "app": "Snazzy Pro <version>", "interview": <InterviewSession>}
+```
+
+The integration endpoint accepts this wrapper as well as a bare session. The
+**Interviews** page has "Import .snazzy_interview files" (several at once),
+which posts each file to `POST /api/v2/ats/interviews/import`. The server
+rejects a file with:
+- the wrong `format`;
+- a `version` other than 1;
+- more than 1 MB.
+
+**Upsert** (`AtsInterviewQueries.import`, shared by both paths):
+1. **Kit:** the snapshot is stored as a kit version keyed by the app's kit id
+   and version (`source = snazzy_desktop`).
+2. **Job:** matched by the kit's id, else by the kit's title, else created.
+3. **Candidate:** matched by email, else by name + reference, else created.
+4. **Application:** created in stage `review` if new.
+5. **Interview:** keyed by `(namespace, external_id = session id)`, so posting
+   the same interview again updates it rather than duplicating it. The
+   transcript is replaced only when it has at least as many turns. The
+   evaluation and review are replaced only when theirs is newer.
+
+**Rules for desktop data:**
+- **Everything in the payload is untrusted.** Only known fields and values are
+  kept, sizes are capped, and every evaluation quote is checked against the
+  transcript again.
+- **A decision is recorded only if `review.decision` is present.** It was made
+  by a person in the app; it is recorded with the reviewer's name
+  "(via Snazzy Pro)". A `decline` moves the application to `rejected` through
+  the same person-only reject function.
+- **Writes need the module active.** When it has lapsed, the API returns 402
+  with a clear message.
+
+The response is `{interview_uuid, application_uuid, candidate_uuid, job_uuid,
+created, dashboard_url}`.
 
 ## 7. Retention and deletion
 
