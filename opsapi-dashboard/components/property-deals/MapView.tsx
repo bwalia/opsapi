@@ -44,6 +44,8 @@ export default function MapView({ center, radiusMiles, features, onPick, onSelec
             center={[f.lat, f.lng]}
             radius={f.layer === 'deals' || f.layer === 'properties' ? 8 : 6}
             pathOptions={{ color: colour, fillColor: colour, fillOpacity: 0.8, weight: 1 }}
+            // A dot's click must not reach the map too: that moves the pin and clears the card it just opened.
+            bubblingMouseEvents={false}
             eventHandlers={{ click: () => onSelect(f) }}
           >
             <Tooltip>{f.title}{f.price ? ` · £${Number(f.price).toLocaleString('en-GB')}` : ''}</Tooltip>

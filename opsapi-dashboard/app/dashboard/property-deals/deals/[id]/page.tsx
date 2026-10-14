@@ -4,7 +4,7 @@
  * Property Deals — the deal page (SPEC §3.8 #3): header with stage, health and why, target
  * dates, money at risk and the slip forecast; tabs for Tasks, Enquiries & blockers, Chase log,
  * Documents, Compliance, Buyers/matches, Renovation (kanban build board) and Timeline. One call fills the page
- * (GET /deals/{id}/overview); tabs load their own lists.
+ * (GET /deals/{id}/overview); tabs load their own lists. The AI research card (deal autopilot) loads its own.
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
@@ -18,6 +18,7 @@ import {
 } from '@/components/property-deals/ui';
 import TaskActions from '@/components/property-deals/TaskActions';
 import MatchRow from '@/components/property-deals/MatchRow';
+import DealResearch from '@/components/property-deals/DealResearch';
 import { usePdData, usePdMe } from '@/components/property-deals/usePd';
 import { cn } from '@/lib/utils';
 
@@ -144,6 +145,8 @@ function Deal() {
           <p className="mt-2 text-xs text-secondary-500">Before {label(next)}: {o.stage.next_gate.missing.slice(0, 3).map((m) => m.message).join(' · ')}{o.stage.next_gate.missing.length > 3 ? ` · +${o.stage.next_gate.missing.length - 3} more` : ''}</p>
         )}
       </Card>
+
+      <DealResearch dealId={id} dealType={d.deal_type} />
 
       <Tabs<TabKey>
         value={tab}

@@ -1,6 +1,9 @@
 'use client';
 
-/** Property Deals — Settings (SPEC §3.8 #9): playbook, templates, SLA & urgency, AI, connectors, mailboxes, my notifications. */
+/**
+ * Property Deals — Settings (SPEC §3.8 #9): playbook, templates, SLA & urgency, AI, connectors, mailboxes, my notifications.
+ * ?tab=ai|data|… opens a tab (the deal page's autopilot hints link here).
+ */
 import React, { useState } from 'react';
 import { Settings } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -14,6 +17,7 @@ import PlaybookEditor from '@/components/property-deals/settings/PlaybookEditor'
 import { DataConnectors, Mailboxes, MyNotifications } from '@/components/property-deals/settings/Connections';
 
 type Tab = 'playbook' | 'templates' | 'rules' | 'ai' | 'data' | 'mail' | 'me';
+const TABS: Tab[] = ['playbook', 'templates', 'rules', 'ai', 'data', 'mail', 'me'];
 
 export default function SettingsPage() {
   return (
@@ -25,7 +29,11 @@ export default function SettingsPage() {
 
 function SettingsBody() {
   const { can } = usePdMe();
-  const [tab, setTab] = useState<Tab>(can('settings', 'read') ? 'templates' : 'me');
+  const [tab, setTab] = useState<Tab>(() => {
+    const want = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('tab') as Tab;
+    if (!can('settings', 'read')) return 'me';
+    return TABS.includes(want) ? want : 'templates';
+  });
   const canEdit = can('settings', 'update');
   // AI providers and plugin settings are core workspace APIs: namespace.update (read: namespace.read).
   const canEditWorkspace = usePermissions().hasPermission('namespace', 'update');

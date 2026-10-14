@@ -124,6 +124,90 @@ export interface PlaybookSection {
   position: number;
   updated_at?: string | null;
 }
+/** Where a supplier came from: typed in, the SRA register, or saved by a person from the AI's web search. */
+export type SupplierSource = 'manual' | 'sra' | 'ai_research';
+
+// Deal autopilot (api/research.lua, schema DealResearch). Hand-written until the next generate run.
+export interface ResearchRun {
+  uuid: string;
+  status: 'running' | 'succeeded' | 'failed';
+  trigger?: string | null;
+  model?: string | null;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  cost_usd?: number | string | null;
+  tokens?: number | null;
+}
+export interface ResearchStep {
+  key: 'pin' | 'research' | 'register' | 'quotes';
+  status: 'done' | 'skipped' | 'waiting' | 'failed';
+  note?: string | null;
+}
+export type ResearchAreaKey = 'summary' | 'transport' | 'schools' | 'amenities' | 'flood_risk' | 'planning' | 'market';
+/** A firm from the Google search, as Google returned it (shown unchanged). */
+export interface ResearchFirm {
+  index: number;
+  kind?: string | null;
+  name: string;
+  website?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  postcode?: string | null;
+  accreditation?: string | null;
+  fees?: string | null;
+  notes?: string | null;
+  can_save: boolean;
+  can_quote: boolean;
+  saved_supplier_uuid?: string | null;
+  /** Already asked for a quote on this deal (pending, approved or sent). */
+  quote_asked?: boolean;
+}
+export interface ResearchSupplier {
+  uuid: string;
+  kind: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address_line1?: string | null;
+  postal_code?: string | null;
+  distance_miles?: number | string | null;
+  source?: SupplierSource | null;
+  register_ref?: string | null;
+  accreditations?: string[] | null;
+  notes?: string | null;
+  account_uuid: string;
+  created_by_this_run?: boolean;
+}
+export interface ResearchQuote {
+  uuid: string;
+  title: string;
+  status: string;
+  sent_to?: string | null;
+  decided_at?: string | null;
+  executed_at?: string | null;
+}
+export interface DealResearch {
+  gemini: boolean;
+  gemini_hint?: string | null;
+  sra: boolean;
+  attribution: string;
+  run: ResearchRun | null;
+  steps: ResearchStep[];
+  area: Partial<Record<ResearchAreaKey, string | null>> | null;
+  firms: ResearchFirm[];
+  /** Google's Search Suggestions (HTML): render unchanged, in a sandboxed iframe. */
+  suggestions: string | null;
+  sources: { url: string; title?: string | null }[];
+  searches: string[];
+  postcode_found?: string | null;
+  suppliers: ResearchSupplier[];
+  quotes: ResearchQuote[];
+  property: { uuid: string; lat?: number | string | null; lng?: number | string | null; postcode?: string | null } | null;
+}
+
 export interface DueList {
   days: number;
   everyone: boolean;
@@ -144,7 +228,8 @@ export type Lead = S['PropertyDealsLead'];
 export type LeadDetailsUpdate = S['PropertyDealsLeadDetailsUpdate'];
 export type Property = S['PropertyDealsProperty'];
 export type BuyerProfile = S['PropertyDealsBuyerProfile'];
-export type Supplier = S['PropertyDealsSupplier'];
+// source / register_ref: hand-written until the next generate run.
+export type Supplier = S['PropertyDealsSupplier'] & { source?: SupplierSource | null; register_ref?: string | null };
 export type SupplierWrite = S['PropertyDealsSupplierWrite'];
 export type Booking = S['PropertyDealsBooking'];
 export type Enquiry = S['PropertyDealsEnquiry'];
@@ -156,7 +241,16 @@ export type ApprovalDecision = S['PropertyDealsApprovalDecision'];
 export type WorkflowTemplate = S['PropertyDealsWorkflowTemplate'];
 export type WorkflowTemplateVersion = S['PropertyDealsWorkflowTemplateVersion'];
 export type MapResult = S['PropertyDealsMapResult'];
-export type MapFeature = S['PropertyDealsMapFeature'];
+// The suppliers layer: hand-written until the next generate run.
+export type MapFeature = Omit<S['PropertyDealsMapFeature'], 'layer'> & {
+  layer: S['PropertyDealsMapFeature']['layer'] | 'suppliers';
+  kinds?: string[];
+  register_ref?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  rating?: number | null;
+};
 export type PropertyCard = S['PropertyDealsPropertyCard'];
 export type Digest = S['PropertyDealsDigest'];
 export type TimelineItem = S['PropertyDealsTimelineItem'];
@@ -302,6 +396,13 @@ export const pdService = {
   health: (id: string) => get<DealHealth>(`/deals/${id}/health`),
   parties: (dealUuid: string) => get<unknown[]>('/deal-parties', { deal_uuid: dealUuid, per_page: 100 }),
   addParty: (body: Record<string, unknown>) => send<unknown>('post', '/deal-parties', body),
+  // Deal autopilot: the AI's research (pin, Google search, SRA register, quote requests)
+  research: (dealId: string) => get<DealResearch>(`/deals/${dealId}/research`),
+  startResearch: (dealId: string) => send<{ uuid: string; status: string }>('post', `/deals/${dealId}/research`),
+  saveResearchFirm: (dealId: string, n: number, runUuid: string) =>
+    send<{ supplier_uuid: string; created: boolean }>('post', `/deals/${dealId}/research/firms/${n}/save`, { run_uuid: runUuid }),
+  quoteResearchFirm: (dealId: string, n: number, runUuid: string) =>
+    send<Approval>('post', `/deals/${dealId}/research/firms/${n}/quote`, { run_uuid: runUuid }),
 
   // Tasks
   tasks: (params?: Record<string, unknown>) => get<Task[]>('/tasks', params),

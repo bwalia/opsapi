@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Data connectors (EPC register, Price Paid, Companies House, postcodes, paid-feed stubs, and the free
+ * Data connectors (EPC register, Price Paid, Companies House, postcodes, the SRA register, paid-feed stubs, and the free
  * staff alert channels ntfy / Telegram / Android SMS Gateway),
  * mailboxes the legal chaser reads (IMAP / Gmail / Microsoft 365), and my notification
  * preferences. Secrets: write-only ("set" + Replace).
@@ -19,6 +19,7 @@ const KINDS: { value: string; label: string; secret?: string; fields: { name: st
   { value: 'price_paid', label: 'HM Land Registry Price Paid', fields: [{ name: 'base_url', label: 'API base URL (optional)' }], hint: 'Open data — no key.' },
   { value: 'companies_house', label: 'Companies House', secret: 'API key', fields: [{ name: 'base_url', label: 'API base URL (optional)' }] },
   { value: 'postcodes', label: 'Postcode lookup (postcodes.io)', fields: [{ name: 'base_url', label: 'API base URL (optional)' }], hint: 'Free — places postcodes on the map.' },
+  { value: 'sra', label: 'SRA register of solicitors', secret: 'Subscription key', fields: [{ name: 'base_url', label: 'API base URL (optional)' }], hint: 'Free. Register at www.sra.org.uk/datasharing (API portal → Products → SRA Data Share API Version V1 → Subscribe → Profile → Show key). The deal autopilot uses it to find conveyancers near each deal.' },
   { value: 'csv', label: 'CSV import (auction catalogues, agent feeds)', fields: [] },
   { value: 'propertydata', label: 'PropertyData (stub)', secret: 'API key', fields: [], hint: 'No adapter yet: import their CSV export.' },
   { value: 'searchland', label: 'Searchland (stub)', secret: 'API key', fields: [], hint: 'No adapter yet: import their CSV export.' },
