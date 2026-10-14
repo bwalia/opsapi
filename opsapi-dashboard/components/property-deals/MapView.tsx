@@ -4,8 +4,8 @@
  * Leaflet + OpenStreetMap view for the Deal finder: click to drop the pin, the radius circle,
  * one coloured dot per feature (by layer; deals by health). Loaded client-side only.
  */
-import React from 'react';
-import { MapContainer, TileLayer, Circle, CircleMarker, Tooltip, useMapEvents } from 'react-leaflet';
+import React, { useEffect } from 'react';
+import { MapContainer, TileLayer, Circle, CircleMarker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MapFeature } from '@/services/property-deals.service';
 import { LAYER_COLOURS } from './mapColours';
@@ -24,6 +24,15 @@ function Clicks({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   return null;
 }
 
+// The view follows the pin when it lands off screen (a saved search, the first deal); a click inside the view doesn't jump.
+function Follow({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map.getBounds().contains([lat, lng])) map.setView([lat, lng], map.getZoom());
+  }, [map, lat, lng]);
+  return null;
+}
+
 export default function MapView({ center, radiusMiles, features, onPick, onSelect }: {
   center: { lat: number; lng: number };
   radiusMiles: number;
@@ -35,6 +44,7 @@ export default function MapView({ center, radiusMiles, features, onPick, onSelec
     <MapContainer center={[center.lat, center.lng]} zoom={10} className="h-[60vh] min-h-[420px] w-full rounded-xl" scrollWheelZoom>
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
       <Clicks onPick={onPick} />
+      <Follow lat={center.lat} lng={center.lng} />
       <Circle center={[center.lat, center.lng]} radius={radiusMiles * 1609.344} pathOptions={{ color: '#6366f1', weight: 1, fillOpacity: 0.05 }} />
       {features.map((f) => {
         const colour = f.layer === 'deals' && f.deal_health ? HEALTH[f.deal_health] : LAYER_COLOURS[f.layer] || '#334155';

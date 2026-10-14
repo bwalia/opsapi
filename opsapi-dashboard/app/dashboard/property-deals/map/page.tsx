@@ -6,7 +6,7 @@
  * breakdown), saved searches for the deal scout and its alerts. Deep link: ?lat=&lng=&layers=deals,suppliers
  * (the deal page's "Show on map").
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { MapPin, Save, Bell, Play, Trash2 } from 'lucide-react';
@@ -52,6 +52,16 @@ function Finder() {
   const { can } = usePdMe();
   const [linked] = useState(fromUrl);
   const [center, setCenter] = useState(linked.center || { lat: 53.96, lng: -1.08 });
+  // No pin in the link: start at the most recent deal that is on the map (the default is for a workspace with none).
+  useEffect(() => {
+    if (linked.center) return;
+    let gone = false;
+    pdService.deals({ sort: 'newest', per_page: 20 }).then((r) => {
+      const d = (r.data || []).find((x) => x.lat != null && x.lng != null);
+      if (d && !gone) setCenter({ lat: Number(d.lat), lng: Number(d.lng) });
+    }).catch(() => {});
+    return () => { gone = true; };
+  }, [linked.center]);
   const [radius, setRadius] = useState(25);
   const [layers, setLayers] = useState<string[]>(linked.layers || ['properties', 'deals', 'sold_prices', 'listings']);
   const [selected, setSelected] = useState<MapFeature | null>(null);
