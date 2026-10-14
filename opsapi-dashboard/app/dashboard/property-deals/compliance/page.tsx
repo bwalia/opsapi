@@ -102,6 +102,12 @@ function SignOff({ check, onClose, onSaved }: { check: ComplianceCheck; onClose:
     expires_at: check.expires_at ? check.expires_at.slice(0, 10) : '', evidence_document_uuid: check.evidence_document_uuid || '',
   });
   const [busy, setBusy] = useState(false);
+  // Evidence is picked from the deal's documents (ids are never shown anywhere).
+  const docs = usePdData(
+    async () => (check.deal_uuid ? (await pdService.documents({ deal_uuid: check.deal_uuid, per_page: 100 })).data : []),
+    [check.deal_uuid],
+  );
+  const current = check.evidence_document_uuid;
   const notes = ((check.data as { assistant_notes?: string[] } | undefined)?.assistant_notes) || [];
   return (
     <Modal isOpen onClose={onClose} title={`${label(check.check_type)}${check.party_role ? ` — ${label(check.party_role)}` : ''}`} description={check.checked_at ? `Signed off ${dateText(check.checked_at)}` : 'Not signed off yet'} size="lg">
@@ -114,7 +120,13 @@ function SignOff({ check, onClose, onSaved }: { check: ComplianceCheck; onClose:
           {['low', 'medium', 'high'].map((s) => <option key={s} value={s}>{label(s)}</option>)}
         </Select>
         <Input label="Expires" type="date" value={f.expires_at} onChange={(e) => setF({ ...f, expires_at: e.target.value })} />
-        <Input label="Evidence document id (from the deal's Documents)" value={f.evidence_document_uuid} onChange={(e) => setF({ ...f, evidence_document_uuid: e.target.value })} />
+        <Select label="Evidence document" value={f.evidence_document_uuid} onChange={(e) => setF({ ...f, evidence_document_uuid: e.target.value })}>
+          <option value="">No document</option>
+          {current && !docs.data?.some((d) => d.uuid === current) && <option value={current}>Current document</option>}
+          {docs.data?.map((d) => (
+            <option key={d.uuid} value={d.uuid}>{d.filename} · {label(d.category)} · {dateText(d.created_at)}</option>
+          ))}
+        </Select>
       </div>
       <Textarea className="mt-3" label={f.status === 'waived' ? 'Why it is waived (required)' : 'Notes'} rows={3} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
       {notes.length > 0 && (
@@ -130,7 +142,7 @@ function SignOff({ check, onClose, onSaved }: { check: ComplianceCheck; onClose:
           try {
             await pdService.updateCheck(check.uuid, {
               status: f.status, notes: f.notes || undefined, risk_rating: f.risk_rating || undefined,
-              expires_at: f.expires_at ? `${f.expires_at}T23:59:59Z` : undefined, evidence_document_uuid: f.evidence_document_uuid || undefined,
+              expires_at: f.expires_at ? `${f.expires_at}T23:59:59Z` : undefined, evidence_document_uuid: f.evidence_document_uuid || (current ? null : undefined),
             });
             toast.success(f.status === 'passed' || f.status === 'waived' ? 'Signed off in your name' : 'Saved');
             onSaved();

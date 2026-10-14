@@ -293,7 +293,8 @@ export const pdService = {
   deals: (params?: Record<string, unknown>) => get<Deal[]>('/deals', params),
   deal: (id: string) => get<Deal>(`/deals/${id}`),
   createDeal: (body: DealCreate) => send<Deal>('post', '/deals', body),
-  updateDeal: (id: string, body: Partial<Deal>) => send<Deal>('put', `/deals/${id}`, body),
+  // Only send what changed: a target date re-times the tasks that count from it. "" clears a number/date.
+  updateDeal: (id: string, body: Record<string, unknown>) => send<Deal>('put', `/deals/${id}`, body),
   overview: (id: string) => get<DealOverview>(`/deals/${id}/overview`),
   timeline: (id: string, page = 1) => get<TimelineItem[]>(`/deals/${id}/timeline`, { page, per_page: 50 }),
   gate: (id: string, to?: string) => get<Gate>(`/deals/${id}/gate`, { to }),
@@ -307,6 +308,9 @@ export const pdService = {
   task: (id: string) => get<Task>(`/tasks/${id}`),
   createTask: (body: Record<string, unknown>) => send<Task>('post', '/tasks', body),
   updateTask: (id: string, body: TaskUpdate) => send<Task>('put', `/tasks/${id}`, body),
+  // Close a task that needs someone else's sign-off (its approval_rule); approved = done.
+  requestCompletion: (id: string, body: { note?: string; evidence?: Record<string, unknown> }) =>
+    send<Approval>('post', `/tasks/${id}/request-completion`, body),
   agentRun: (id: string, note?: string) => send<AgentRun>('post', `/tasks/${id}/agent-run`, note ? { note } : {}),
   run: (id: string) => get<AgentRun>(`/agent-runs/${id}`),
   cancelRun: (id: string) => send<AgentRun>('post', `/agent-runs/${id}/cancel`),

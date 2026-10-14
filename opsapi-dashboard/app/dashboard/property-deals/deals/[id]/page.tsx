@@ -9,10 +9,10 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, CheckCircle2, Circle, CircleDot, FileUp, Plus, AlertTriangle, Download } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, Circle, CircleDot, FileUp, Plus, AlertTriangle, Download, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Card, Input, Modal, Select, Textarea, buttonClass } from '@/components/ui';
-import { pdService, pdErrorText, type DealOverview, type Gate } from '@/services/property-deals.service';
+import { pdService, pdError, pdErrorText, type Deal as DealRow, type DealOverview, type Gate } from '@/services/property-deals.service';
 import {
   PdPage, HealthBadge, Tabs, gbp, dateText, dueText, Spinner, ErrorNote, Empty, UrgencyScore, TaskStatusBadge, BASE, label,
 } from '@/components/property-deals/ui';
@@ -41,6 +41,7 @@ function Deal() {
   const [gateFor, setGateFor] = useState<string | undefined>(undefined);
   const [pick, setPick] = useState('');
   const [moving, setMoving] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   if (ov.loading && !ov.data) return <Spinner />;
   if (ov.error) return <ErrorNote error={ov.error} />;
@@ -81,6 +82,10 @@ function Deal() {
               <h1 className="text-2xl font-bold text-secondary-900">{d.name}</h1>
               <HealthBadge health={o.health.health} reasons={o.health.reasons} />
               <span className="rounded-full bg-secondary-100 px-2.5 py-0.5 text-xs font-medium text-secondary-700">{label(d.stage_key)}</span>
+              {d.status !== 'active' && <span className="rounded-full bg-warning-500/10 px-2.5 py-0.5 text-xs font-medium text-warning-700">{label(d.status)}</span>}
+              {can('deals', 'update') && (
+                <Button size="sm" variant="outline" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit deal</Button>
+              )}
             </div>
             <p className="mt-1 text-sm text-secondary-500">
               {label(d.deal_type)} · {[d.address_line1, d.town, d.postcode].filter(Boolean).join(', ') || 'No property yet'}
@@ -165,6 +170,8 @@ function Deal() {
         {tab === 'timeline' && <TimelineTab dealId={id} />}
       </div>
 
+      {editing && <EditDealModal deal={d} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); ov.refresh(); }} />}
+
       <Modal isOpen={!!gate} onClose={() => setGate(null)} title={`Not ready for ${label(gateFor)} yet`} description="These are missing:">
         <ul className="list-disc space-y-1 pl-5 text-sm text-secondary-700">
           {gate?.missing.map((m) => <li key={`${m.type}:${m.key}`}>{m.message}</li>)}
@@ -172,6 +179,74 @@ function Deal() {
         <div className="mt-4 flex justify-end"><Button onClick={() => setGate(null)}>OK</Button></div>
       </Modal>
     </div>
+  );
+}
+
+// Deals.UPDATABLE fields a person edits here (property, fees and stage have their own flows).
+const DEAL_FIELDS = [
+  'name', 'offer_amount', 'agreed_price', 'target_exchange_date', 'target_completion_date',
+  'late_penalty_per_day', 'late_penalty_cap_days', 'finance_route', 'status', 'notes',
+] as const;
+
+function EditDealModal({ deal, onClose, onSaved }: { deal: DealRow; onClose: () => void; onSaved: () => void }) {
+  const [initial] = useState(() =>
+    Object.fromEntries(DEAL_FIELDS.map((k) => [k, String(deal[k] ?? '').slice(0, k.endsWith('_date') ? 10 : undefined)])) as Record<string, string>,
+  );
+  const [f, setF] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [missing, setMissing] = useState<Gate['missing']>([]);
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
+  async function save() {
+    // Only what changed: a target date re-times the tasks that count from it.
+    const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => v !== initial[k]));
+    if (!Object.keys(changed).length) return onClose();
+    setBusy(true);
+    setMissing([]);
+    try {
+      await pdService.updateDeal(deal.uuid, changed);
+      toast.success('Deal saved');
+      onSaved();
+    } catch (e) {
+      const err = pdError(e);
+      const m = (err.details as { missing?: Gate['missing'] } | undefined)?.missing;
+      if (err.status === 409 && m?.length) setMissing(m);
+      else toast.error(pdErrorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal isOpen onClose={onClose} title="Edit deal" description="Changing a target date re-times the tasks that count from it." size="lg">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input label="Deal name" value={f.name} onChange={set('name')} required />
+        <Select label="Status" value={f.status} onChange={set('status')}>
+          {['active', 'on_hold', 'fell_through', 'completed'].map((s) => <option key={s} value={s}>{label(s)}</option>)}
+        </Select>
+        {f.status === 'fell_through' && initial.status !== 'fell_through' && (
+          <p className="text-xs text-warning-700 sm:col-span-2">Its open tasks will be cancelled and drafts waiting for approval dropped.</p>
+        )}
+        <Input label="Offer (£)" type="number" min={0} value={f.offer_amount} onChange={set('offer_amount')} />
+        <Input label="Agreed price (£)" type="number" min={0} value={f.agreed_price} onChange={set('agreed_price')} />
+        <Input label="Target exchange" type="date" value={f.target_exchange_date} onChange={set('target_exchange_date')} />
+        <Input label="Target completion" type="date" value={f.target_completion_date} onChange={set('target_completion_date')} />
+        <Input label="Late penalty per day (£)" type="number" min={0} value={f.late_penalty_per_day} onChange={set('late_penalty_per_day')} />
+        <Input label="Penalty cap (days)" type="number" min={0} step={1} value={f.late_penalty_cap_days} onChange={set('late_penalty_cap_days')} />
+        <Input label="Finance route" maxLength={30} placeholder="e.g. cash, mortgage, bridging" value={f.finance_route} onChange={set('finance_route')} />
+      </div>
+      <Textarea className="mt-3" label="Notes" rows={3} value={f.notes} onChange={set('notes')} />
+      {missing.length > 0 && (
+        <div className="mt-3 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700" role="alert">
+          <div className="font-medium">Can&apos;t mark it {label(f.status).toLowerCase()} yet — these are missing:</div>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {missing.map((m) => <li key={`${m.type}:${m.key}`}>{m.message}</li>)}
+          </ul>
+        </div>
+      )}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button onClick={save} isLoading={busy} disabled={!f.name.trim()}>Save</Button>
+      </div>
+    </Modal>
   );
 }
 

@@ -259,9 +259,16 @@ function Detail({ a, onDone }: { a: Approval; onDone: () => void }) {
           <Button variant="danger" leftIcon={<X className="h-4 w-4" />} disabled={!note} isLoading={busy === 'reject'} onClick={() => decide('reject')}>
             Reject
           </Button>
-          {!editing ? (
+          {a.from_jobshout ? (
+            // JobShout sends its own original, so an edited version is refused (409).
+            <span className="self-center text-xs text-secondary-500">Drafted in JobShout — reject with a note to get a new draft</span>
+          ) : !editing ? (
             <Button variant="outline" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit</Button>
-          ) : null}
+          ) : (
+            <Button variant="ghost" onClick={() => { setDraft(payload); setJson(JSON.stringify(payload, null, 2)); setEditing(false); }}>
+              Cancel edit
+            </Button>
+          )}
           <Button leftIcon={<Check className="h-4 w-4" />} isLoading={busy === 'approve'} onClick={() => decide('approve')}>
             {edited ? 'Approve edited version' : 'Approve'}
           </Button>

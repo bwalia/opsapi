@@ -140,7 +140,11 @@ function RenovationCard({ r }: { r: Renovation }) {
 
 function StartRenovation({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const deals = usePdData(async () => (await pdService.deals({ per_page: 100 })).data, []);
-  const members = usePdData(async () => (await namespaceService.getMembers({ perPage: 100, status: 'active' })).data || [], []);
+  // The members route reads per_page (snake case; perPage is ignored → 10), which PaginationParams doesn't declare.
+  const members = usePdData(
+    async () => (await namespaceService.getMembers({ per_page: 100, status: 'active' } as Parameters<typeof namespaceService.getMembers>[0])).data || [],
+    [],
+  );
   const [f, setF] = useState({ deal_uuid: '', name: '', budget: '', start_date: '', target_end_date: '' });
   const [builders, setBuilders] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
