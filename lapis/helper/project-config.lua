@@ -45,6 +45,7 @@ ProjectConfig.FEATURES = {
     SHOP = "shop",                     -- AI hardware shop: configurable catalogue, carts, quotes, Stripe checkout, RAG
     BILLING = "billing",               -- Billing & Entitlements: apps, flat-tier plans, entitlements, licences (docs/BILLING_ENTITLEMENTS.md)
     FORMS = "forms",                   -- Form builder: public forms, responses, records from them (docs/FORMS.md)
+    ATS = "ats",                       -- Hiring: jobs, candidates, AI first-round interviews (docs/plans/PROMPT_ATS_INTERVIEWS.md)
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -77,6 +78,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.SHOP,
         ProjectConfig.FEATURES.BILLING,
         ProjectConfig.FEATURES.FORMS,
+        ProjectConfig.FEATURES.ATS,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -247,6 +249,13 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.FORMS,
     },
+
+    -- Hiring (ATS + AI interviews): FEATURE-ONLY, so any deployment can opt in
+    -- with ",ats" (e.g. PROJECT_CODE=tax_copilot,ats).
+    ats = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.ATS,
+    },
 }
 
 -- Project codes that ONLY contribute features (and their migrations) and must
@@ -256,6 +265,7 @@ ProjectConfig.PROJECT_FEATURES = {
 ProjectConfig.FEATURE_ONLY_CODES = {
     services = true,
     forms = true,
+    ats = true,
 }
 
 --- Is this project code feature-only (no dedicated tenant)?
@@ -606,6 +616,16 @@ ProjectConfig.PROJECT_MODULES = {
     forms = {
         { machine_name = "forms", name = "Forms", description = "Build forms, share a public link and collect responses",
           category = "Content" },
+    },
+
+    -- Hiring: ATS and AI first-round interviews (docs/plans/PROMPT_ATS_INTERVIEWS.md)
+    ats = {
+        { machine_name = "ats_jobs", name = "Hiring: jobs", description = "Jobs and their hiring pipeline", category = "Hiring" },
+        { machine_name = "ats_candidates", name = "Hiring: candidates", description = "Candidates, applications, notes and files", category = "Hiring" },
+        { machine_name = "ats_interviews", name = "Hiring: interviews", description = "AI first-round interviews, review and decisions", category = "Hiring" },
+        { machine_name = "ats_kits", name = "Hiring: interview kits", description = "Interview kits: competencies, rubrics and questions", category = "Hiring" },
+        { machine_name = "ats_reports", name = "Hiring: reports", description = "Fairness reports and the audit log", category = "Hiring" },
+        { machine_name = "ats_settings", name = "Hiring: settings", description = "Activation, retention, decline reasons and integration tokens", category = "Hiring" },
     },
 
     -- Theme system (platform-level; always on)

@@ -117,6 +117,9 @@ local invitation_source_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE
 -- Form builder (docs/FORMS.md)
 local forms_migrations = load_if_enabled(ProjectConfig.FEATURES.FORMS, "migrations.forms") or {}
 
+-- Hiring: ATS + AI interviews (docs/plans/PROMPT_ATS_INTERVIEWS.md)
+local ats_migrations = load_if_enabled(ProjectConfig.FEATURES.ATS, "migrations.ats-system") or {}
+
 -- Chat
 local chat_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system") or {}
 local chat_production_migrations = load_if_enabled(ProjectConfig.FEATURES.CHAT, "migrations.chat-system-production") or
@@ -2685,6 +2688,9 @@ local _migrations = {
     ['zzform4_forms_uploads_stats'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 4),
     ['zzform5_forms_workspace_settings'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 5),
     ['zzform6_forms_custom_domains'] = conditional_array(ProjectConfig.FEATURES.FORMS, forms_migrations, 6),
+    -- Hiring: tables, then the RBAC modules + menu (migrations/ats-system.lua)
+    ['zzats1_tables'] = conditional_array(ProjectConfig.FEATURES.ATS, ats_migrations, 1),
+    ['zzats2_modules_menu'] = conditional_array(ProjectConfig.FEATURES.ATS, ats_migrations, 2),
     ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
     -- My Tasks sidebar item, right after Dashboard (migrations/my-tasks.lua)
     ['zzmt1_my_tasks_menu'] = conditional_array(ProjectConfig.FEATURES.KANBAN, my_tasks_migrations, 1),

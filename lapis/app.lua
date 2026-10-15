@@ -709,6 +709,10 @@ safe_load_routes("routes.invitations-public")
 load_if("forms", "routes.forms")
 load_if("forms", "routes.forms-public")
 
+-- HIRING (ATS + AI first-round interviews; docs/plans/PROMPT_ATS_INTERVIEWS.md)
+load_if("ats", "routes.ats")
+load_if("ats", "routes.ats-public")
+
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)
 -- ============================================

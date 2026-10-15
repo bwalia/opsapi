@@ -1,0 +1,110 @@
+{
+  "approved_at" : "2026-10-14T09:00:00Z",
+  "approved_by" : "Sample Recruiter",
+  "company_facts" : "Hours: Monday to Friday, 9:00 to 17:30, hybrid (2 days a week in the Leeds office).\nPay: £34,000 to £38,000 a year.\nBenefits: 25 days' holiday plus bank holidays, pension matched up to 5%.\nTeam: 8 support advisers, reporting to the Head of Customer Experience.\nProcess: this interview, then a 45-minute video call with the hiring manager, then an offer. Most people hear back within 5 working days.",
+  "competencies" : [
+    {
+      "anchors" : {
+        "1" : "Describes reacting to problems as they come, with no example of guiding or developing others.",
+        "3" : "Gives an example of coaching an adviser or sharing work fairly, with a clear action and some result.",
+        "5" : "Gives specific examples of developing several people, setting expectations and following up, with measurable results for the team."
+      },
+      "description" : "Guides and develops a small team so that it works well together.",
+      "id" : "c1",
+      "name" : "Leading a team",
+      "source" : "Lead a team of 8 support advisers day to day.",
+      "weight" : 35
+    },
+    {
+      "anchors" : {
+        "1" : "Handles difficult customers by passing them on, or can't describe what they did.",
+        "3" : "Describes calming a difficult customer and resolving the issue, with the steps taken.",
+        "5" : "Describes resolving a complex complaint end to end, balancing the customer's needs with policy, and preventing it from happening again."
+      },
+      "description" : "Resolves difficult customer situations calmly and fairly.",
+      "id" : "c2",
+      "name" : "Handling difficult customers",
+      "source" : "Handle escalated complaints.",
+      "weight" : 35
+    },
+    {
+      "anchors" : {
+        "1" : "Mentions numbers without saying how they were used.",
+        "3" : "Uses one or two measures (response time, satisfaction) to spot a problem and change something.",
+        "5" : "Uses several measures to find causes, makes changes and shows the effect on the measures."
+      },
+      "description" : "Uses support measures to find and fix problems.",
+      "id" : "c3",
+      "name" : "Using data to improve",
+      "source" : "Report weekly on response times and satisfaction, and improve them.",
+      "weight" : 30
+    }
+  ],
+  "created" : "2026-10-14T08:00:00Z",
+  "eligibility" : [
+    {
+      "accepted" : [ "Yes" ],
+      "id" : "e1",
+      "kind" : "yes_no",
+      "options" : [ ],
+      "text" : "Do you have the right to work in the UK for this role?"
+    },
+    {
+      "accepted" : [ "Yes" ],
+      "id" : "e2",
+      "kind" : "yes_no",
+      "options" : [ ],
+      "text" : "The role is hybrid, with 2 days a week in our Leeds office. Does that work for you?"
+    }
+  ],
+  "format" : 1,
+  "id" : "6F1D2C3B-8A7E-4B5C-9D0E-1F2A3B4C5D6E",
+  "job_description" : "Customer Support Team Lead (Leeds, hybrid). Lead a team of 8 support advisers day to day. Handle escalated complaints. Report weekly on response times and satisfaction, and improve them. £34,000 to £38,000.",
+  "language" : "en-GB",
+  "organisation" : "Example Ltd",
+  "questions" : [
+    {
+      "competency" : "c1",
+      "id" : "q1",
+      "kind" : "behavioural",
+      "text" : "Tell me about a time you helped someone in your team get better at their job. What did you do?"
+    },
+    {
+      "competency" : "c2",
+      "id" : "q2",
+      "kind" : "behavioural",
+      "text" : "Tell me about the most difficult customer situation you've handled. What happened, and what did you do?"
+    },
+    {
+      "competency" : "c3",
+      "id" : "q3",
+      "kind" : "situational",
+      "text" : "Imagine response times in your team have got worse for three weeks in a row. What would you do?"
+    }
+  ],
+  "settings" : {
+    "allow_pause" : true,
+    "allow_voice" : true,
+    "allowed_adjustments" : [
+      "extra time",
+      "a pause",
+      "questions repeated or rephrased",
+      "text instead of voice",
+      "voice instead of text",
+      "large text or high contrast"
+    ],
+    "interviewer_name" : "Snazzy Interviewer",
+    "max_follow_ups" : 2,
+    "minutes" : 25,
+    "next_steps" : "The hiring team reviews every interview and will contact you within 5 working days.",
+    "ratings_enabled" : true,
+    "retention_days" : 180,
+    "seconds_per_answer" : 0,
+    "written_communication" : false
+  },
+  "summary" : "A team lead for an 8-person customer support team: coaching advisers, handling escalated complaints and improving response times and satisfaction.",
+  "title" : "Customer Support Team Lead",
+  "updated" : "2026-10-14T09:00:00Z",
+  "version" : 1,
+  "warnings" : [ ]
+}
