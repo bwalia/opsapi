@@ -101,7 +101,7 @@ local chart = "devops/helm-charts/diytaxreturn-lapis/"
 local dep = read(chart .. "templates/deployment.yaml")
 check("chart refuses replicaCount > 1 without Redis", has(dep, "(gt (int .Values.replicaCount) 1)") and has(dep, "fail "))
 check("chart wires Redis + CHAT_REQUIRE_REDIS into the app", has(dep, "name: CHAT_REQUIRE_REDIS")
-    and has(dep, 'value: "{{ .Release.Name }}-redis"'))
+    and has(dep, 'value: "{{ .Release.Name }}-redis.{{ .Release.Namespace }}.svc.cluster.local"'))
 check("chart's Redis has a password", has(read(chart .. "templates/redis.yaml"), "--requirepass"))
 
 print(failures == 0 and "\nall chat pub/sub checks passed" or ("\n" .. failures .. " check(s) FAILED"))
