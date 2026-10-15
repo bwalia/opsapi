@@ -13,7 +13,8 @@ host: acc-opsapi.workstation.co.uk
 
 projectCode: all
 
-frontendUrl: "https://acc.diytaxreturn.co.uk"
+# Password-reset / invite links → the workstation admin UI for this ring.
+frontendUrl: "https://acc-opsapi-ui.workstation.co.uk"
 
 image:
   repository: bwalia/opsapi
@@ -31,11 +32,12 @@ service:
   type: ClusterIP
   port: 80
 
-# Dedicated Ingress — className `wslproxy`, plain HTTP :80 (TLS at the edge,
-# no cert-manager on k3s1). See values-workstation-int.yaml.
+# Dedicated Ingress — className `traefik-edge`, plain HTTP :80 (TLS at the edge,
+# no cert-manager on k3s1). MUST match int/prod: `wslproxy` returns bare 404
+# (controller cannot program its OpenResty data plane). See -int for detail.
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik-edge
   annotations: {}
   hosts:
     - host: acc-opsapi.workstation.co.uk
@@ -44,23 +46,44 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Empty map (NOT unset) so the ExternalSecret's `.Values.database.host` lookup
-# resolves to nil and falls back to Vault's POSTGRES_HOST. See -int for detail.
-database: {}
+# Same LAN amd64 pool as int — reaches the Zalando DB and avoids the
+# cloud<->LAN WireGuard mesh. See values-workstation-int.yaml.
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64
+
+# Dedicated Zalando Postgres (devops/k8s/workstation-db-acc.yaml). Apply that
+# manifest + run devops/vault/copy-workstation-opsapi-secrets.sh acc before
+# the first deploy so Vault has POSTGRES_PASSWORD matching Zalando's pguser.
+database:
+  name: workstation_opsapi
+  host: workstation-opsapi-db.acc.svc.cluster.local
+
+# Zalando Spilo pg_hba rejects hostnossl — pgmoon must use SSL.
+postgresSsl: "true"
 
 externalSecret:
   enabled: true
+  # Same WSL Vault store as int/prod (HC Vault seal blips used to strand ESO).
+  secretStore: wslvault-backend
+  vaultPath: workstation-opsapi/acc/config
 
 setup:
   adminEmail: ""
   adminPassword: ""
-  namespaceSlug: ""
+  namespaceSlug: "workstation"
+
+# Shared int MinIO for now (separate bucket opsapi-acc via Vault).
+minio:
+  endpoint: http://workstation-minio.int.svc.cluster.local:9000
+  externalUrl: https://int-minio.workstation.co.uk
+  credsSecret: workstation-minio-creds
 
 # Browser CORS allow-list (consumed by middleware/cors.lua) — git-owned here.
 # workstation.academy lets the Academy tenant's instructor dashboard
 # (acc-teach.workstation.academy) call this shared API cross-origin;
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
-corsAllowedDomains: "workstation.co.uk,workstation.academy"
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk"
 
 # Workstation AI Shop (shop.workstation.co.uk, workstation-website/shop).
 # Plain config → SHOP_ALLOWED_ORIGINS / SHOP_PUBLIC_URL container env (see

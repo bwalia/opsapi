@@ -164,6 +164,11 @@ function Agent.run(opts)
             cfg = opts.cfg,  -- the workspace's own choice of model for the assistant, when it set one
         })
         if not msg then
+            -- What was already done stays visible: the run lists it instead of only "unavailable".
+            if #actions > 0 then
+                local why = err == Llm.LIMIT_MESSAGE and err or "I couldn't finish: the AI model stopped answering."
+                return { reply = why .. " What I did before that is listed below.", actions = actions, incomplete = true }
+            end
             return nil, err
         end
 

@@ -9,6 +9,9 @@
 --   companies_house  Companies House (Ltd/SPV buyers, lead   base_url?                   API key
 --                    news watch, new property companies)
 --   postcodes        postcode → lat/lng (postcodes.io)       base_url?                   —
+--   sra              SRA register of solicitors' firms       base_url?                   subscription key (free:
+--                    (conveyancers for the deal autopilot,                               www.sra.org.uk/datasharing)
+--                    property_deals/register.lua)
 --   csv              auction catalogues, agent feeds         record_type?                —
 --   ntfy             staff alerts (open-source push)         base_url?                   access token?
 --   telegram         staff alerts (Telegram bot)             base_url?                   bot token
@@ -100,6 +103,7 @@ C.KINDS.price_paid = {
 
 C.KINDS.companies_house = { label = "Companies House", secret = true, lookup = true }
 C.KINDS.postcodes = { label = "Postcode lookup (postcodes.io)", lookup = true }
+C.KINDS.sra = { label = "SRA register of solicitors (free key)", secret = true, lookup = true }
 C.KINDS.csv = { label = "CSV import" }
 -- Staff alert channels (property_deals.messaging): free / open-source, not run.
 C.KINDS.ntfy = { label = "ntfy (open-source push alerts)", secret = true, lookup = true }
@@ -131,7 +135,9 @@ function C.get(ns, id)
 end
 
 --- The workspace's enabled connector of a kind (first by name), or nil.
+-- Without a namespace, free public adapters (postcodes.io) still work via defaults.
 function C.of_kind(ns, kind)
+    if not ns then return nil end
     return U.one("SELECT * FROM property_deals_connectors WHERE namespace_id = ? AND kind = ? AND enabled ORDER BY name LIMIT 1",
         ns, kind)
 end
@@ -196,6 +202,43 @@ end
 -- Postcode lookup (postcodes.io, or the workspace's own postcodes connector)
 -- ---------------------------------------------------------------------------
 
+--- Google Geocoding API key (server-side). Same project key as the dashboard's
+-- Maps JS key is fine if Geocoding API is enabled. Empty → skip Google.
+local function google_geocode_key()
+    local k = os.getenv("GOOGLE_MAPS_GEOCODING_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY") or ""
+    if k == "" then return nil end
+    return k
+end
+
+--- Street-level geocode via Google when a key is set.
+-- @return { lat, lng, formatted_address?, source = "google" } | nil
+function C.geocode_address(ns, parts)
+    local key = google_geocode_key()
+    if not key then return nil end
+    local line = {}
+    for _, k in ipairs({ "address_line1", "address_line2", "town", "county", "postcode", "country" }) do
+        local v = parts and parts[k]
+        if type(v) == "string" and v:match("%S") then line[#line + 1] = v end
+    end
+    if #line == 0 then return nil end
+    local q = table.concat(line, ", ")
+    local url = "https://maps.googleapis.com/maps/api/geocode/json?"
+        .. H.query({ address = q, region = "uk", key = key })
+    local data, err = H.json(url)
+    if not data then
+        ngx.log(ngx.WARN, "[property_deals] google geocode: ", tostring(err))
+        return nil
+    end
+    if data.status ~= "OK" or type(data.results) ~= "table" or not data.results[1] then
+        ngx.log(ngx.INFO, "[property_deals] google geocode status=", tostring(data.status), " for ", q)
+        return nil
+    end
+    local loc = data.results[1].geometry and data.results[1].geometry.location
+    local lat, lng = loc and tonumber(loc.lat), loc and tonumber(loc.lng)
+    if not lat or not lng then return nil end
+    return { lat = lat, lng = lng, formatted_address = data.results[1].formatted_address, source = "google" }
+end
+
 --- { ["YO1 7AA"] = { lat, lng, district } } for a list of postcodes (unknown ones are left out).
 function C.geocode(ns, postcodes)
     local list, seen = {}, {}
@@ -219,6 +262,18 @@ function C.geocode(ns, postcodes)
         end
     end
     return out
+end
+
+--- What postcodes.io knows about a postcode's place: { district, ward, county, region, country, constituency } | nil
+function C.postcode_facts(ns, postcode)
+    local code = pc(postcode)
+    if not code or code == "" then return nil end
+    local data = H.json(base(C.of_kind(ns, "postcodes"), "https://api.postcodes.io") .. "/postcodes/" .. ngx.escape_uri(code))
+    local r = data and type(data.result) == "table" and data.result or nil
+    if not r then return nil end
+    local function s(v) return type(v) == "string" and v ~= "" and v or nil end
+    return { district = s(r.admin_district), ward = s(r.admin_ward), county = s(r.admin_county), region = s(r.region),
+        country = s(r.country), constituency = s(r.parliamentary_constituency) }
 end
 
 --- Nearest postcode to a point (to fetch data around a saved search's pin).

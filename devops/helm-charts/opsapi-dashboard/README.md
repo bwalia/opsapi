@@ -3,12 +3,15 @@
 Deploys the OpsAPI admin UI (Next.js, `opsapi-dashboard/`) for
 `*.workstation.co.uk`, talking to the `workstation-opsapi` API.
 
-- **Release:** `workstation-opsapi-dashboard` (namespace `int`)
-- **Public host:** https://int-opsapi-ui.workstation.co.uk → API
-  https://int-opsapi.workstation.co.uk
+- **Release:** `workstation-opsapi-dashboard` (namespace = ring: int|test|acc|prod)
+- **Public hosts:**
+  - int  https://int-opsapi-ui.workstation.co.uk  → https://int-opsapi.workstation.co.uk
+  - test https://test-opsapi-ui.workstation.co.uk → https://test-opsapi.workstation.co.uk
+  - acc  https://acc-opsapi-ui.workstation.co.uk  → https://acc-opsapi.workstation.co.uk
+  - prod https://opsapi-ui.workstation.co.uk      → https://opsapi.workstation.co.uk
 - **Deployed by:** `.github/workflows/deploy-workstation-dashboard.yml`
-  (build image → Cloudflare DNS → WSL Proxy vhost → helm upgrade). No manual
-  steps.
+  (build image → Cloudflare DNS → WSL Proxy vhost → helm upgrade), or via
+  Ring Promoter app `workstation-opsapi-ui`.
 
 ## Build-time API URL (important)
 
@@ -20,11 +23,12 @@ means a **rebuild**, not just a values edit.
 
 ## Routing (mirrors the API)
 
-`ingress.className: wslproxy` — identical to the `workstation-opsapi` API and the
-working beacon `*.workstation.co.uk` hosts. TLS terminates at the WSL Proxy edge;
-traefik serves plain HTTP :80 behind it and routes by Host header. The edge
-vhost is a stub under `.github/wslproxy/data/servers/prod/` reusing the
-`opsapi-prod-default` rule (same k3s ingress backend as the API).
+`ingress.className: traefik-edge` — identical to the working `workstation-opsapi`
+API hosts. TLS terminates at the WSL Proxy edge; traefik-edge serves plain HTTP
+:80 behind it and routes by Host header. Do **not** use `wslproxy` (bare 404 —
+controller cannot program its OpenResty data plane). The edge vhost is a stub
+under `.github/wslproxy/data/servers/prod/` reusing the `opsapi-prod-default`
+rule (same k3s ingress backend as the API); prod UI uses `opsapi-prod-cloud003`.
 
 ## Adding an environment
 

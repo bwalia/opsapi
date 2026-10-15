@@ -7,7 +7,7 @@
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Info, Lock, Power, Loader2 } from 'lucide-react';
+import { AlertTriangle, Info, Lock, Power, Loader2, Phone, Mail, Globe } from 'lucide-react';
 import { Badge, Button, Card } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import type { UrgencyFactor } from '@/services/property-deals.service';
@@ -80,6 +80,53 @@ export function TaskStatusBadge({ status }: { status?: string }) {
 export function label(v?: string | null): string {
   if (!v) return '—';
   return v.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+}
+
+/** A supplier kind in words ("epc_assessor" → "EPC assessor"). */
+export function kindText(k?: string | null): string {
+  return k === 'epc_assessor' || k === 'energy_assessor' ? 'EPC assessor' : label(k);
+}
+
+/** A link out of the app: only http(s) URLs become links (new tab, no referrer); anything else is plain text. */
+export function ExtLink({ href, children, className }: { href?: string | null; children?: React.ReactNode; className?: string }) {
+  if (!href) return null;
+  if (!/^https?:\/\//i.test(href)) return <span className={cn('break-all', className)}>{children ?? href}</span>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cn('break-all text-primary-600 hover:underline', className)}>
+      {children ?? href}
+    </a>
+  );
+}
+
+const EMAIL = /^[^\s@?&]+@[^\s@?&]+\.[a-z]{2,}$/i;
+
+/** Phone (tel:), email (mailto:) and website as links; text that doesn't look like one stays plain. */
+export function ContactLinks({ phone, email, website }: { phone?: string | null; email?: string | null; website?: string | null }) {
+  if (!phone && !email && !website) return null;
+  const dial = phone?.replace(/[^\d+]/g, '') || '';
+  const link = 'inline-flex min-w-0 items-center gap-1 text-primary-600 hover:underline';
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      {phone && (dial.length >= 10
+        ? <a className={link} href={`tel:${dial}`}><Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />{phone}</a>
+        : <span>{phone}</span>)}
+      {email && (EMAIL.test(email)
+        ? <a className={cn(link, 'break-all')} href={`mailto:${email}`}><Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />{email}</a>
+        : <span className="break-all">{email}</span>)}
+      {website && (
+        <ExtLink href={website} className="inline-flex min-w-0 items-center gap-1">
+          <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />{website}
+        </ExtLink>
+      )}
+    </div>
+  );
+}
+
+/** Where a supplier came from: the SRA register, or a person saved it from the AI's web search (manual: nothing). */
+export function SupplierSourceBadge({ source }: { source?: string | null }) {
+  if (source === 'sra') return <Badge size="sm" variant="info">SRA register</Badge>;
+  if (source === 'ai_research') return <Badge size="sm" variant="secondary">From a web search</Badge>;
+  return null;
 }
 
 /** The urgency score; the "why" shows on hover and on keyboard focus. */

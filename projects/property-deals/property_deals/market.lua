@@ -113,15 +113,31 @@ function M.enrich_property(ns, property_uuid)
     local Connectors = require("property_deals.connectors")
     local p = U.one("SELECT * FROM property_deals_properties WHERE namespace_id = ? AND uuid = ?", ns, property_uuid)
     if not p then return nil, "Property not found" end
-    if p.postcode == db.NULL or not p.postcode then return nil, "The property has no postcode" end
     local out = { sold_prices = 0 }
-    -- On the map: a property with a postcode but no point gets the postcode's centre.
+    -- On the map: prefer Google street-level geocode, else the postcode centre (postcodes.io).
     if p.lat == db.NULL or p.lng == db.NULL or not p.lat or not p.lng then
-        local g = Connectors.geocode(ns, { p.postcode })[tostring(p.postcode):upper():gsub("%s+", " ")]
+        local g = Connectors.geocode_address(ns, {
+            address_line1 = p.address_line1 ~= db.NULL and p.address_line1 or nil,
+            address_line2 = p.address_line2 ~= db.NULL and p.address_line2 or nil,
+            town = p.town ~= db.NULL and p.town or nil,
+            county = p.county ~= db.NULL and p.county or nil,
+            postcode = p.postcode ~= db.NULL and p.postcode or nil,
+            country = p.country ~= db.NULL and p.country or "GB",
+        })
+        if not g and p.postcode and p.postcode ~= db.NULL then
+            g = Connectors.geocode(ns, { p.postcode })[tostring(p.postcode):upper():gsub("%s+", " ")]
+            if g then g.source = "postcodes.io" end
+        end
         if g then
             db.update("property_deals_properties", { lat = g.lat, lng = g.lng, updated_at = db.raw("NOW()") }, { id = p.id })
             out.geocoded = true
+            out.geocode_source = g.source
+            p.lat, p.lng = g.lat, g.lng
         end
+    end
+    if p.postcode == db.NULL or not p.postcode then
+        if out.geocoded then return out end
+        return nil, "The property has no postcode"
     end
     local pp = Connectors.of_kind(ns, "price_paid")
     if pp then

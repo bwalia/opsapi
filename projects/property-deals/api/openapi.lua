@@ -500,6 +500,52 @@ return function(app)
         errors = { ["404"] = "Not found", ["409"] = "Gate not met, or already at the last stage" } })
     sdk.doc(app, "GET /deals/:id/health", { summary = "Deal health and forecast (recomputed now)",
         permission = "property_deals_deals.read", response = Health, path = id, errors = E404 })
+    local ResearchSupplier = OBJ({ uuid = UUID(), kind = S("conveyancer"), name = S(), email = S(), phone = S(),
+        website = S(), address_line1 = S(), postal_code = S(), distance_miles = NUM(),
+        source = S("sra (the SRA register), ai_research (a person saved it from the web search) or manual"),
+        register_ref = S("sra:<SRA number>"), accreditations = ANY("Array"), notes = S(), created_by_this_run = BOOL() })
+    local WebFirm = OBJ({ index = INT("Use it in /research/firms/{n}/save or /quote"), kind = S(), name = S(),
+        website = S(), email = S(), phone = S(), address = S(), postcode = S(), accreditation = S(), fees = S(),
+        notes = S(), can_save = BOOL(), can_quote = BOOL("A conveyancer with an email"),
+        saved_supplier_uuid = UUID("Already in Suppliers"), quote_asked = BOOL("Already asked for a quote on this deal") },
+        nil, "As the web search returned it")
+    local Research = schema("DealResearch", OBJ({
+        gemini = BOOL("The workspace has a Google Gemini provider (the web search needs one)"), gemini_hint = S(),
+        sra = BOOL("The workspace has an SRA register connector (conveyancers need one)"),
+        attribution = S("The SRA's attribution, shown with its data"),
+        run = OBJ({ uuid = UUID(), status = S("running, succeeded, failed"),
+            trigger = S("auto, property_changed or manual"), model = S(), error = S(), started_at = DT(),
+            finished_at = DT(), cost_usd = NUM(), tokens = INT() }),
+        steps = ARR(OBJ({ key = S("pin, research, register, quotes"), status = S("done, skipped, waiting, failed"),
+            note = S() })),
+        area = OBJ({ summary = S(), transport = S(), schools = S(), amenities = S(), flood_risk = S(), planning = S(),
+            market = S() }, nil, "As the web search returned it"),
+        firms = ARR(WebFirm),
+        suggestions = S("Google's Search Suggestions (HTML): show them with the web search's answer, unchanged"),
+        sources = ARR(OBJ({ url = S(), title = S() })), searches = ARR(S()), postcode_found = S(),
+        suppliers = ARR(ResearchSupplier),
+        quotes = ARR(OBJ({ uuid = UUID(), title = S(), status = S(), sent_to = S(), decided_at = DT(), executed_at = DT() })),
+        property = OBJ({ uuid = UUID(), lat = NUM(), lng = NUM(), postcode = S() }),
+    }))
+    sdk.doc(app, "GET /deals/:id/research", { summary = "The AI's research on a deal (deal autopilot)",
+        permission = "property_deals_deals.read", response = Research, path = id, errors = E404,
+        description = "When a deal is added (setting autopilot_on_new_deal) the home is pinned on the map; with a Google "
+            .. "Gemini provider the web is searched around the address (area notes and firms nearby, shown as Google "
+            .. "returned them, with its Search Suggestions); with an SRA connector the nearest firms doing residential "
+            .. "property work are added to Suppliers and the nearest 3 get a quote request that waits in Approvals." })
+    sdk.doc(app, "POST /deals/:id/research", { summary = "Research a deal again", permission = "property_deals_ai.create",
+        path = id, response = OBJ({ uuid = UUID(), status = S() }),
+        errors = { ["404"] = "Not found", ["409"] = "The AI is already researching this deal" } })
+    local Firm = { id = UUID(), n = INT("The firm's index in the run") }
+    local FirmErrors = { ["404"] = "Not found", ["409"] = "The research ran again since (reload), or already asked",
+        ["422"] = "That firm can't be used (no name, an unknown kind, no email)" }
+    sdk.doc(app, "POST /deals/:id/research/firms/:n/save", { summary = "Add a firm from the web search to Suppliers",
+        permission = "property_deals_suppliers.create", path = Firm, body = OBJ({ run_uuid = UUID() }, { "run_uuid" }),
+        response = OBJ({ supplier_uuid = UUID(), created = BOOL("false: it was there already") }), errors = FirmErrors })
+    sdk.doc(app, "POST /deals/:id/research/firms/:n/quote", { summary = "Ask a firm from the web search for a quote",
+        permission = "property_deals_approvals.create", path = Firm, body = OBJ({ run_uuid = UUID() }, { "run_uuid" }),
+        response = Approval, errors = FirmErrors,
+        description = "Drafts the quote request in Approvals; it is sent once another person approves it." })
 
     sdk.doc(app, "GET /tasks", { summary = "List deal tasks", permission = "property_deals_tasks.read", paginated = true,
         response = ARR(Task), query = { deal_uuid = UUID(), pd_status = S("Comma list"), owner_user_uuid = S(),
@@ -514,14 +560,23 @@ return function(app)
         response = Task, errors = E422 })
     sdk.doc(app, "PUT /tasks/:id", { summary = "Update a task (do it, assign, snooze...)", permission = "property_deals_tasks.update",
         path = tid, response = Task, errors = { ["404"] = "Not found", ["422"] = "Validation failed — compliance tasks "
-            .. "need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid" },
+            .. "need evidence to close; snoozing needs a reason; the PA closes a lead's task only with evidence.chase_uuid",
+            ["403"] = "Only a manager changes approval_rule or compliance; the AI account can't close a task with a rule",
+            ["409"] = "The task's approval rule needs sign-off (use request-completion), or an approval is waiting" },
         body = OBJ({ pd_status = ENUM(PD_STATUS), title = S(), description = S(), priority = S(), owner_user_uuid = UUID(),
             due_at = DT(), sla_minutes = INT(), blocking = BOOL(), compliance = BOOL(), agent_eligible = BOOL(), agent_key = S(),
             approval_rule = S(), snoozed_until = DT(), snooze_reason = S(), evidence = ANY("Object") }),
-        description = "Finishing a task starts its dependants, closes tasks whose condition now holds and repeats "
+        description = "A task's approval_rule covers closing it: manager needs approvals.manage, two_person always "
+            .. "goes through request-completion. Finishing a task starts its dependants, closes tasks whose condition now holds and repeats "
             .. "repeating tasks. From the PA (X-OpsAPI-Agent), a task on a lead closes only with evidence.chase_uuid: the chase (call / "
             .. "message) logged for that lead that did the work; the chase is linked to the task, so it closes one "
             .. "task." })
+    sdk.doc(app, "POST /tasks/:id/request-completion", { summary = "Ask for a task to be signed off under its rule",
+        permission = "property_deals_tasks.update", path = tid, body = OBJ({ note = S(), evidence = ANY("Object") }),
+        response = Approval, errors = { ["404"] = "Not found", ["409"] = "Already done, or already waiting for approval",
+            ["422"] = "A compliance task needs a note or evidence" },
+        description = "Creates an approval (action complete_task) with the task's own rule; the task waits in "
+            .. "awaiting_approval and is done, with the note and evidence, once it is approved." })
     local Dep = OBJ({ depends_on_task_uuid = UUID(), title = S(), pd_status = S() })
     sdk.doc(app, "GET /tasks/:id/dependencies", { summary = "What a task waits for", permission = "property_deals_tasks.read",
         path = tid, response = ARR(Dep), errors = E404 })
@@ -598,8 +653,9 @@ return function(app)
         response = MapResult, errors = { ["422"] = "Bad area or layer" }, query = {
             lat = NUM(), lng = NUM(), radius_miles = NUM("1–100, default 25"),
             polygon = S("lat,lng;lat,lng;… (3–200 points) instead of lat/lng/radius"),
-            layers = S("Comma list: properties, deals, leads, holdings, sold_prices, epc, listings, auction_lots "
-                .. "(default properties,deals). leads needs property_deals_leads.read, else it is left out") } })
+            layers = S("Comma list: properties, deals, leads, holdings, suppliers, sold_prices, epc, listings, "
+                .. "auction_lots (default properties,deals). leads needs property_deals_leads.read, holdings "
+                .. "property_deals_buyers.read and suppliers property_deals_suppliers.read, else they are left out") } })
     sdk.doc(app, "GET /properties/:id/card", { summary = "Map property card", permission = "property_deals_properties.read",
         response = Card, path = { id = UUID() }, errors = E404 })
 

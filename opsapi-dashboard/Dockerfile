@@ -36,8 +36,9 @@ ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
 ARG NEXT_PUBLIC_BUILD_VERSION=dev
 ARG NEXT_PUBLIC_BUILD_SHA=
 ARG NEXT_PUBLIC_BUILD_TIME=
-# Map tiles for the deal finder (empty = OpenStreetMap's own server, light use only).
-# e.g. https://tiles.example.com/{z}/{x}/{y}.png and its attribution HTML.
+# Google Maps (Deal finder). Maps JavaScript API key, baked into the browser bundle.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
+# Legacy OSM tile overrides (unused when Google Maps is configured).
 ARG NEXT_PUBLIC_MAP_TILE_URL=
 ARG NEXT_PUBLIC_MAP_TILE_ATTRIBUTION=
 # The OpsAPI MCP server's HTTP URL (e.g. https://mcp.example.com/mcp), shown on My API keys; unset = hidden.
@@ -46,6 +47,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_BUILD_VERSION=$NEXT_PUBLIC_BUILD_VERSION \
     NEXT_PUBLIC_BUILD_SHA=$NEXT_PUBLIC_BUILD_SHA \
     NEXT_PUBLIC_BUILD_TIME=$NEXT_PUBLIC_BUILD_TIME \
+    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY \
     NEXT_PUBLIC_MAP_TILE_URL=$NEXT_PUBLIC_MAP_TILE_URL \
     NEXT_PUBLIC_MAP_TILE_ATTRIBUTION=$NEXT_PUBLIC_MAP_TILE_ATTRIBUTION \
     NEXT_PUBLIC_MCP_URL=$NEXT_PUBLIC_MCP_URL \

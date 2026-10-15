@@ -604,7 +604,8 @@ function PluginEvents.syncPlugin(manifest)
     local entities = {}
     for name, spec in pairs(manifest.publishes) do
         -- By convention (make:resource) a table's RBAC module shares its name.
-        PluginEvents.upsertSource(prefix .. name, spec.table, manifest.code, nil, nil, nil,
+        -- `hide` (comma-separated columns) keeps text out of event payloads and the audit trail.
+        PluginEvents.upsertSource(prefix .. name, spec.table, manifest.code, spec.hide, nil, nil,
             modules[spec.table] and spec.table or nil, spec.verbs, spec.emits)
         entities[#entities + 1] = d.escape_literal(prefix .. name)
     end

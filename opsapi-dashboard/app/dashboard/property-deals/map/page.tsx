@@ -3,9 +3,10 @@
 /**
  * Property Deals — Map / Deal finder (SPEC §3.6): drop a pin, radius 5–50 miles (default 25),
  * layer toggles, a property card with comparables and the top 3 matching buyers (score
- * breakdown), saved searches for the deal scout and its alerts.
+ * breakdown), saved searches for the deal scout and its alerts. Deep link: ?lat=&lng=&layers=deals,suppliers
+ * (the deal page's "Show on map").
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { MapPin, Save, Bell, Play, Trash2 } from 'lucide-react';
@@ -13,7 +14,9 @@ import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Badge } from '@/components/ui';
 import { pdService, pdErrorText, type MapFeature, type MatchWithBreakdown } from '@/services/property-deals.service';
-import { PdPage, ErrorNote, Spinner, gbp, dateText, label, BASE, HealthBadge } from '@/components/property-deals/ui';
+import {
+  PdPage, ErrorNote, Spinner, gbp, dateText, label, BASE, HealthBadge, ContactLinks, SupplierSourceBadge, kindText,
+} from '@/components/property-deals/ui';
 import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import MatchRow from '@/components/property-deals/MatchRow';
 import { LAYER_COLOURS } from '@/components/property-deals/mapColours';
@@ -22,7 +25,7 @@ const MapView = dynamic(() => import('@/components/property-deals/MapView'), { s
 
 const LAYERS = [
   ['properties', 'My properties'], ['deals', 'Deals'], ['leads', 'Seller leads'], ['holdings', "Buyers' holdings"],
-  ['sold_prices', 'Sold prices'], ['epc', 'EPC ratings'], ['listings', 'Listings'], ['auction_lots', 'Auction lots'],
+  ['suppliers', 'Suppliers'], ['sold_prices', 'Sold prices'], ['epc', 'EPC ratings'], ['listings', 'Listings'], ['auction_lots', 'Auction lots'],
 ] as const;
 
 export default function MapPage() {
@@ -33,18 +36,41 @@ export default function MapPage() {
   );
 }
 
+/** The pin and layers from ?lat=&lng=&layers= (this page only renders in the browser, after /me). */
+function fromUrl(): { center?: { lat: number; lng: number }; layers?: string[] } {
+  const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+  const lat = Number(q.get('lat') || NaN);
+  const lng = Number(q.get('lng') || NaN);
+  const layers = (q.get('layers') || '').split(',').filter((k) => LAYERS.some(([l]) => l === k));
+  return {
+    center: Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : undefined,
+    layers: layers.length ? layers : undefined,
+  };
+}
+
 function Finder() {
   const { can } = usePdMe();
-  const [center, setCenter] = useState({ lat: 53.96, lng: -1.08 });
+  const [linked] = useState(fromUrl);
+  const [center, setCenter] = useState(linked.center || { lat: 53.96, lng: -1.08 });
+  // No pin in the link: start at the most recent deal that is on the map (the default is for a workspace with none).
+  useEffect(() => {
+    if (linked.center) return;
+    let gone = false;
+    pdService.deals({ sort: 'newest', per_page: 20 }).then((r) => {
+      const d = (r.data || []).find((x) => x.lat != null && x.lng != null);
+      if (d && !gone) setCenter({ lat: Number(d.lat), lng: Number(d.lng) });
+    }).catch(() => {});
+    return () => { gone = true; };
+  }, [linked.center]);
   const [radius, setRadius] = useState(25);
-  const [layers, setLayers] = useState<string[]>(['properties', 'deals', 'sold_prices', 'listings']);
+  const [layers, setLayers] = useState<string[]>(linked.layers || ['properties', 'deals', 'sold_prices', 'listings']);
   const [selected, setSelected] = useState<MapFeature | null>(null);
   const radiusQ = useDebounced(radius, 400); // the circle follows the slider; the search waits for it to settle
   const map = usePdData(async () => (await pdService.map({ lat: center.lat, lng: center.lng, radius_miles: radiusQ, layers: layers.join(',') })).data, [center.lat, center.lng, radiusQ, layers.join(',')]);
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Deal finder" description="Click the map to drop a pin. Everything within the radius shows below." icon={<MapPin className="h-6 w-6" />} />
+      <PageHeader title="Deal finder" description="Google Map — click to drop a search pin. Deals with an address appear as pins within the radius." icon={<MapPin className="h-6 w-6" />} />
       <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
         <div className="space-y-3">
           <Card padding="sm" data-tour="map-controls">
@@ -91,7 +117,15 @@ function Selected({ f, canSend, onClose }: { f: MapFeature; canSend: boolean; on
         </div>
         <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
       </div>
-      {!isOwn ? (
+      {f.layer === 'suppliers' ? (
+        <div className="mt-3 space-y-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-secondary-700">{(f.kinds || []).map(kindText).join(', ') || 'Supplier'}</span>
+            <SupplierSourceBadge source={f.source} />
+          </div>
+          <ContactLinks phone={f.phone} email={f.email} website={f.website} />
+        </div>
+      ) : !isOwn ? (
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
           {f.price !== undefined && <><dt className="text-secondary-500">Price</dt><dd>{gbp(f.price)}{f.previous_price ? <span className="ml-1 text-xs text-success-600">was {gbp(f.previous_price)}</span> : null}</dd></>}
           {f.event_date && <><dt className="text-secondary-500">Date</dt><dd>{dateText(f.event_date)}</dd></>}

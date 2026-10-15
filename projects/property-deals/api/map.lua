@@ -1,5 +1,7 @@
 -- Map / deal finder (SPEC §3.6):
---   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings   (leads: property_deals_leads.read)
+--   GET /map?lat=&lng=&radius_miles=25&layers=properties,deals,leads,holdings,suppliers
+--       (leads need property_deals_leads.read; holdings, buyers' names, need property_deals_buyers.read;
+--        suppliers, the directory's firms with their contact details, need property_deals_suppliers.read)
 --   GET /map?polygon=lat,lng;lat,lng;lat,lng&layers=...
 --   GET /properties/:id/card    the map's property card: summary, deal, yield/discount, top 3 matching buyers
 -- Radius: bounding-box prefilter on (namespace_id, lat, lng), then exact haversine
@@ -15,7 +17,7 @@ local cjson = require("cjson")
 local U = require("property_deals.util")
 
 local MAX_FEATURES = 2000
-local LAYERS = { properties = true, deals = true, leads = true, holdings = true,
+local LAYERS = { properties = true, deals = true, leads = true, holdings = true, suppliers = true,
     sold_prices = "sold_price", epc = "epc", listings = "listing", auction_lots = "auction_lot" }
 
 --- Parse "lat,lng;lat,lng;..." into a list of {lat,lng} (3..200 points).
@@ -54,7 +56,8 @@ local function params(self)
     local p = { layers = {} }
     for name in tostring(q.layers or "properties,deals"):gmatch("[%w_]+") do
         if not LAYERS[name] then
-            return nil, { layers = "unknown layer '" .. name .. "' (properties, deals, leads, holdings, sold_prices, epc, "
+            return nil, { layers = "unknown layer '" .. name .. "' (properties, deals, leads, holdings, suppliers, "
+                .. "sold_prices, epc, "
                 .. "listings, auction_lots)" }
         end
         p.layers[name] = true
@@ -118,7 +121,7 @@ return function(app)
                 WHERE ld.namespace_id = ]] .. ns .. [[ AND p.lat IS NOT NULL AND ]] .. where .. [[
                 ORDER BY distance_miles NULLS LAST LIMIT ]] .. MAX_FEATURES))
         end
-        if p.layers.holdings then
+        if p.layers.holdings and sdk.can(self, "property_deals_buyers", "read") then
             local hw, hd = area(p, "(h->>'lat')::float8", "(h->>'lng')::float8")
             add("holdings", db.query([[
                 SELECT b.uuid, (h->>'lat')::float8 AS lat, (h->>'lng')::float8 AS lng,
@@ -130,6 +133,19 @@ return function(app)
                 LEFT JOIN crm_contacts c ON c.uuid = b.contact_uuid LEFT JOIN crm_accounts a ON a.uuid = b.account_uuid
                 WHERE b.namespace_id = ]] .. ns .. [[ AND (h->>'lat') IS NOT NULL AND (h->>'lng') IS NOT NULL AND ]] .. hw .. [[
                 LIMIT ]] .. MAX_FEATURES))
+        end
+        -- Conveyancers, surveyors... near the pin (source: sra = the SRA register, ai_research = saved from a web search).
+        if p.layers.suppliers and sdk.can(self, "property_deals_suppliers", "read") then
+            local sw, sd = area(p, "s.base_lat", "s.base_lng")
+            local rows = db.query([[
+                SELECT s.uuid, s.base_lat AS lat, s.base_lng AS lng, a.name AS title,
+                       COALESCE(a.address_line1, a.postal_code) AS subtitle, s.kinds, s.source, s.register_ref,
+                       a.email, a.phone, a.website, s.rating, ]] .. sd .. [[ AS distance_miles
+                FROM property_deals_suppliers s JOIN crm_accounts a ON a.uuid = s.account_uuid
+                WHERE s.namespace_id = ]] .. ns .. [[ AND s.active AND s.base_lat IS NOT NULL AND ]] .. sw .. [[
+                ORDER BY distance_miles NULLS LAST LIMIT ]] .. MAX_FEATURES)
+            for _, r in ipairs(rows) do r.kinds = U.json(r.kinds) end
+            add("suppliers", rows)
         end
         for name, record_type in pairs(LAYERS) do
             if p.layers[name] and type(record_type) == "string" then

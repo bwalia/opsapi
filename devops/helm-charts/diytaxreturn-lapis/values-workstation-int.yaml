@@ -34,10 +34,9 @@ extraEnv:
   VOICE_URL: "http://192.168.1.177:8014"
   VOICE_TTS_VOICE: "bf_emma"
 
-# Password-reset email link target (the Next.js dashboard, unchanged — the
-# API moving to workstation.co.uk does not move the frontend). Migration 489
-# bootstraps namespaces.allowed_redirect_origins from this.
-frontendUrl: "https://int.diytaxreturn.co.uk"
+# Password-reset / invite links → the workstation admin UI for this ring.
+# Migration 489 bootstraps namespaces.allowed_redirect_origins from this.
+frontendUrl: "https://int-opsapi-ui.workstation.co.uk"
 
 image:
   repository: bwalia/opsapi
@@ -171,7 +170,7 @@ setup:
 # of this shared opsapi: its instructor dashboard (int-teach.workstation.academy)
 # is a cross-origin browser client of this API. Additive — the existing
 # workstation.co.uk origins are unaffected.
-corsAllowedDomains: "workstation.co.uk,workstation.academy"
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk"
 
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.

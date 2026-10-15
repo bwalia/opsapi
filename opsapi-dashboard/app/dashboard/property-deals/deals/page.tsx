@@ -249,7 +249,12 @@ function NewDealModal({ templates, onClose, onCreated }: { templates: { key: str
   async function create() {
     setBusy(true);
     try {
-      const prop = (await pdService.createProperty({ address_line1: f.address, postcode: f.postcode || undefined, town: f.town || undefined, tenure: f.tenure || 'unknown' })).data;
+      const prop = (await pdService.createProperty({
+        address_line1: f.address,
+        postcode: f.postcode.trim(),
+        town: f.town || undefined,
+        tenure: f.tenure || 'unknown',
+      })).data;
       const deal = (
         await pdService.createDeal({
           property_uuid: prop.uuid,
@@ -262,7 +267,10 @@ function NewDealModal({ templates, onClose, onCreated }: { templates: { key: str
           late_penalty_cap_days: f.cap ? Number(f.cap) : undefined,
         })
       ).data;
-      toast.success('Deal created — its first tasks are ready');
+      const pinned = prop.lat != null && prop.lng != null;
+      toast.success(pinned
+        ? 'Deal created — pinned on the Deal finder map'
+        : 'Deal created — add a valid UK postcode so it can appear on the map');
       onCreated();
       router.push(`${BASE}/deals/${deal.uuid}`);
     } catch (e) {
@@ -272,10 +280,10 @@ function NewDealModal({ templates, onClose, onCreated }: { templates: { key: str
     }
   }
   return (
-    <Modal isOpen onClose={onClose} title="New deal" description="To start from a lead, open it on the Leads page and use “Create deal”." size="lg">
+    <Modal isOpen onClose={onClose} title="New deal" description="Address and postcode are pinned on the Deal finder map. To start from a lead, open it on the Leads page and use “Create deal”." size="lg">
       <div className="grid gap-3 sm:grid-cols-2">
         <Input label="Address" value={f.address || ''} onChange={set('address')} required />
-        <Input label="Postcode" value={f.postcode || ''} onChange={set('postcode')} />
+        <Input label="Postcode" value={f.postcode || ''} onChange={set('postcode')} required placeholder="e.g. YO1 7HH" />
         <Input label="Town" value={f.town || ''} onChange={set('town')} />
         <Select label="Tenure" value={f.tenure || ''} onChange={set('tenure')}>
           <option value="">Unknown</option>
@@ -302,7 +310,7 @@ function NewDealModal({ templates, onClose, onCreated }: { templates: { key: str
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={create} isLoading={busy} disabled={!f.address}>Create deal</Button>
+        <Button onClick={create} isLoading={busy} disabled={!f.address || !(f.postcode || '').trim()}>Create deal</Button>
       </div>
     </Modal>
   );

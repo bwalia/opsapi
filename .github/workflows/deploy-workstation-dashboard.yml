@@ -4,10 +4,14 @@ name: Deploy Workstation Dashboard
 # https://int-opsapi-ui.workstation.co.uk, fully from GitHub. The UI calls the
 # workstation-opsapi API at https://int-opsapi.workstation.co.uk.
 #
-# PROD: dispatch with TARGET_ENV=prod → https://opsapi-ui.workstation.co.uk
-# (namespace prod, pinned to cloud003 next to the prod API + DB, edge vhost
-# host:opsapi-ui.workstation.co.uk via the opsapi-prod-cloud003 rule). Pushes
-# to main only ever auto-deploy int.
+# Rings (values-workstation-<env>.yaml):
+#   int  → https://int-opsapi-ui.workstation.co.uk   (auto on push to main)
+#   test → https://test-opsapi-ui.workstation.co.uk  (dispatch / Ring Promoter)
+#   acc  → https://acc-opsapi-ui.workstation.co.uk   (dispatch / Ring Promoter)
+#   prod → https://opsapi-ui.workstation.co.uk       (dispatch / Ring Promoter;
+#          namespace prod, pinned to cloud003 next to the prod API + DB, edge
+#          vhost via the opsapi-prod-cloud003 rule).
+# Pushes to main only ever auto-deploy int.
 #
 # Mirrors deploy-k3s.yml (which deploys the API): same k3s1 cluster
 # (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> lon1.pop0.uk +
@@ -28,15 +32,20 @@ on:
       - "opsapi-dashboard/**"
       - "devops/helm-charts/opsapi-dashboard/**"
       - ".github/workflows/deploy-workstation-dashboard.yml"
-      # matches both int-opsapi-ui... and the bare prod host opsapi-ui...
+      # matches int/test/acc-opsapi-ui... and the bare prod host opsapi-ui...
       - ".github/wslproxy/data/servers/prod/host:*opsapi-ui.workstation.co.uk.json"
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment (values-workstation-<env>.yaml)"
-        required: false
+        description: "Environment (values-workstation-<env>.yaml) — int → test → acc → prod"
+        required: true
         default: "int"
-        type: string
+        type: choice
+        options:
+          - int
+          - test
+          - acc
+          - prod
       VERSION:
         # Ring Promoter sends the release it promotes (a git tag, e.g. 1.0.184):
         # the image is built from exactly that code for the target ring (the
@@ -47,7 +56,8 @@ on:
         type: string
 
 concurrency:
-  group: deploy-workstation-dashboard-${{ github.ref }}
+  # Per-env so promoting test/acc does not serialise behind an int rebuild.
+  group: deploy-workstation-dashboard-${{ github.event.inputs.TARGET_ENV || 'int' }}
   cancel-in-progress: false
 
 permissions:
@@ -142,6 +152,9 @@ jobs:
             NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.IMAGE_TAG }}
             NEXT_PUBLIC_BUILD_SHA=${{ steps.meta.outputs.BUILD_SHA }}
             NEXT_PUBLIC_BUILD_TIME=${{ steps.meta.outputs.BUILD_TIME }}
+            # Deal finder Google Map (Maps JavaScript API). Same key can serve
+            # Geocoding on the API if GOOGLE_MAPS_API_KEY is in Vault.
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}

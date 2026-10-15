@@ -13,6 +13,7 @@
 --   POST   /interactions                   log a call / email / note / voice note (text stored as data)
 --   GET    /interactions/:id
 --   POST   /events                         valuation, price reduction, promise, appointment, deadline...
+--   PUT    /events/:id                     { done?, title?, at?, details? } e.g. a promise kept (history kept)
 --   POST   /offers                         record an offer (the person recording it is the authority)
 --   PUT    /offers/:id                     { response, response_note? }
 --   POST   /next-actions                   { title, due_at, reason, opportunity_uuid?, owner_user_uuid? }
@@ -273,6 +274,33 @@ return function(app)
         local r = db.insert("pa_events", d, { returning = { "uuid", "kind", "at", "title", "details", "opportunity_uuid" } })[1]
         r.details = U.json(r.details)
         return { status = 201, json = { success = true, data = r } }
+    end)))
+
+    -- Mark an event done (a promise kept, a deadline met) or correct it. Each change goes in the event's history.
+    app:put("/events/:id", sdk.handler({ permission = "property_pa_records.update" }, U.guard(function(self)
+        local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+        if not U.is_uuid(self.params.id) then return sdk.not_found("Event") end
+        local body = body_or_fail(self)
+        -- required + partial: only the fields sent are checked, and none of them may be cleared.
+        local d = valid(body, { done = { type = "boolean", required = true },
+            title = { type = "string", required = true }, at = { type = "datetime", required = true },
+            details = { type = "json", required = true } }, true)
+        if not next(d) then U.fail(422, "Validation failed", { done = "send done, title, at or details" }) end
+        local set = { updated_at = db.raw("NOW()") }
+        for k, v in pairs(d) do set[k] = v end
+        if d.details then set.details = db.raw(db.escape_literal(d.details) .. "::jsonb") end
+        U.tx(function()
+            local res = db.update("pa_events", set, { namespace_id = ns, uuid = self.params.id })
+            if (res.affected_rows or 0) == 0 then U.fail(404, "Event not found") end
+            for k, v in pairs(d) do
+                F.record(ns, { target_table = "pa_events", target_uuid = self.params.id, field = k,
+                    value = k == "details" and body.details or v, source = "human", confirmed_by = me })
+            end
+        end)
+        local r = U.one([[SELECT uuid, kind, at, title, details, done, opportunity_uuid FROM pa_events
+            WHERE namespace_id = ? AND uuid = ?::uuid]], ns, self.params.id)
+        r.details = U.json(r.details)
+        return sdk.ok(r)
     end)))
 
     app:post("/offers", sdk.handler({ permission = "property_pa_records.create" }, U.guard_create(function(self)

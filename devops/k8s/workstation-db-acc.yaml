@@ -1,0 +1,51 @@
+# workstation-opsapi-db (ACC) — Zalando Postgres for the workstation-opsapi
+# release in namespace `acc`. See workstation-db-test.yaml for the full rationale.
+#
+# App wiring (values-workstation-acc.yaml):
+#   database.host: workstation-opsapi-db.acc.svc.cluster.local
+#   database.name: workstation_opsapi
+#   postgresSsl: "true"
+#
+# Apply (before first acc deploy):
+#   kubectl create namespace acc --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f devops/k8s/workstation-db-acc.yaml
+#   kubectl -n acc wait postgresql/workstation-opsapi-db --for=jsonpath='{.status.PostgresClusterStatus}'=Running --timeout=300s
+---
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: workstation-opsapi-db
+  namespace: acc
+  labels:
+    app: workstation-opsapi
+    ring: acc
+spec:
+  teamId: ops
+  numberOfInstances: 1
+  postgresql:
+    version: "15"
+  databases:
+    workstation_opsapi: pguser
+  users:
+    pguser: []
+  volume:
+    size: 5Gi
+    storageClass: longhorn
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: net-region
+              operator: In
+              values: ["home"]
+            - key: kubernetes.io/arch
+              operator: In
+              values: ["amd64"]

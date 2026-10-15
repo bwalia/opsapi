@@ -30,6 +30,16 @@ export interface NextAction {
   created_from_interaction_uuid?: string | null;
 }
 
+export interface OppEvent {
+  uuid: string;
+  kind: string;
+  at: string;
+  title: string;
+  done: boolean;
+  details?: Record<string, unknown> | null;
+  opportunity_uuid?: string | null;
+}
+
 export interface Opportunity {
   uuid: string;
   kind: 'sell' | 'buy';
@@ -52,7 +62,7 @@ export interface Opportunity {
   updated_at?: string;
   facts?: Record<string, Fact>;
   offers?: { uuid: string; amount: number | string; response: string; made_at: string; conditions?: string | null }[];
-  events?: { uuid: string; kind: string; at: string; title: string; done: boolean }[];
+  events?: OppEvent[];
   next_actions?: NextAction[];
   pending_updates?: ProposedUpdate[];
 }
@@ -363,6 +373,10 @@ export const paService = {
   },
   async timeline(id: string) {
     return (await apiClient.get<Env<TimelineItem[]>>(`${BASE}/opportunities/${id}/timeline`)).data.data;
+  },
+  /** Mark an event done (a promise kept) or correct it; the change goes in the event's history. */
+  async updateEvent(id: string, body: { done?: boolean; title?: string; at?: string; details?: Record<string, unknown> }) {
+    return (await apiClient.put<Env<OppEvent>>(`${BASE}/events/${id}`, body, JSON_HDR)).data.data;
   },
   async history(table: string, id: string, field?: string) {
     const q = field ? `?field=${encodeURIComponent(field)}` : '';

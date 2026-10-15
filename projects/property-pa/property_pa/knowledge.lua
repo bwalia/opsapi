@@ -1,12 +1,16 @@
 -- Versioned, approved knowledge (build prompt rule 9). A rule (pa_knowledge) has versions; only an approved
 -- version is used by the PA. Anyone may propose (the PA too, flagged proposed_by_ai); company and team rules are
 -- approved by a manager (property_pa_knowledge.manage); a personal rule by its owner. Approving a version
--- supersedes the previous approved one, so the history is never lost.
+-- supersedes the previous approved one, so the history is never lost. An AI agent (the pd_agent service account)
+-- may propose but never approve or reject: only a person does.
 local cjson = require("cjson")
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
 local K = {}
+
+--- Is the caller the agents' service account (pd_agent)?
+function K.is_agent(ns, user_uuid) return require("property_deals.approvals").is_agent(ns, user_uuid) end
 
 local SELECT = [[
     SELECT k.uuid, k.key, k.domain, k.scope, k.owner_user_uuid, k.status, k.current_version,
@@ -54,6 +58,8 @@ end
 function K.list(ns, user_uuid, params)
     params = params or {}
     local where = { "k.namespace_id = " .. db.escape_literal(ns), visible(user_uuid) }
+    -- Belt and braces: an agent's own personal rules are never used (only a person approves knowledge).
+    if K.is_agent(ns, user_uuid) then where[#where + 1] = "k.scope <> 'personal'" end
     if params.status ~= "all" then where[#where + 1] = "k.status = 'approved'" end
     if params.domain and params.domain:match("^[a-z_]+$") then where[#where + 1] = "k.domain = " .. db.escape_literal(params.domain) end
     if params.trigger and params.trigger:match("^[a-z0-9_]+$") then
@@ -114,6 +120,9 @@ end
 
 --- Approve or reject a proposed version. can_manage = caller has property_pa_knowledge.manage.
 function K.decide(ns, uuid, version, approve, user_uuid, can_manage)
+    if K.is_agent(ns, user_uuid) then
+        U.fail(403, "An AI agent can't " .. (approve and "approve" or "reject") .. " knowledge; a person must")
+    end
     local k = U.is_uuid(uuid) and U.one("SELECT uuid, scope, owner_user_uuid FROM pa_knowledge WHERE namespace_id = ? AND uuid = ?::uuid",
         ns, uuid)
     if not k then U.fail(404, "Knowledge not found") end

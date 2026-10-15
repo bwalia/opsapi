@@ -12,8 +12,8 @@ local sdk = require("helper.plugin-sdk")
 local db = require("lapis.db")
 local U = require("property_deals.util")
 
-local KINDS = "solicitor, surveyor, epc_assessor, broker, bridging_lender, builder, letting_agent, auction_house, "
-    .. "freeholder, managing_agent, council, searches_provider"
+local KINDS = "solicitor, conveyancer, surveyor, epc_assessor, broker, bridging_lender, builder, estate_agent, "
+    .. "letting_agent, auction_house, freeholder, managing_agent, council, searches_provider"
 
 local FIELDS = {
     kinds = { type = "json", label = "Kinds (" .. KINDS .. ")" },

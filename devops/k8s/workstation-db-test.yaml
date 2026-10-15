@@ -1,0 +1,64 @@
+# workstation-opsapi-db (TEST) — Zalando Postgres for the workstation-opsapi
+# release in namespace `test`. Mirrors fishers-*/ring-promoter-db (acid.zalan.do).
+#
+# Why Zalando here (int/prod use a plain StatefulSet)
+# ----------------------------------------------------
+# int/prod already have `workstation-db` StatefulSets. test/acc are new rings;
+# the cluster already runs the Zalando Postgres operator, so we use it for
+# managed users/passwords + longhorn volume. Spilo ships pgvector (CREATE
+# EXTENSION vector) — required by the tax-classifier migration.
+#
+# App wiring (values-workstation-test.yaml):
+#   database.host: workstation-opsapi-db.test.svc.cluster.local
+#   database.name: workstation_opsapi
+#   postgresSsl: "true"   # Zalando pg_hba rejects hostnossl
+#
+# Credentials: Zalando mints `pguser.workstation-opsapi-db.credentials…`;
+# devops/vault/copy-workstation-opsapi-secrets.sh copies int's WSL Vault blob
+# to workstation-opsapi/test/config and overwrites POSTGRES_* from that secret.
+#
+# Apply (before first test deploy):
+#   kubectl create namespace test --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f devops/k8s/workstation-db-test.yaml
+#   kubectl -n test wait postgresql/workstation-opsapi-db --for=jsonpath='{.status.PostgresClusterStatus}'=Running --timeout=300s
+---
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: workstation-opsapi-db
+  namespace: test
+  labels:
+    app: workstation-opsapi
+    ring: test
+spec:
+  teamId: ops
+  numberOfInstances: 1
+  postgresql:
+    version: "15"
+  databases:
+    workstation_opsapi: pguser
+  users:
+    pguser: []
+  volume:
+    size: 5Gi
+    storageClass: longhorn
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # Prefer LAN amd64 (same pool as the API pods) so traffic stays off the
+  # cloud↔LAN WireGuard mesh.
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: net-region
+              operator: In
+              values: ["home"]
+            - key: kubernetes.io/arch
+              operator: In
+              values: ["amd64"]
