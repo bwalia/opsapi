@@ -70,7 +70,7 @@ function Finder() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Deal finder" description="Click the map to drop a pin. Everything within the radius shows below." icon={<MapPin className="h-6 w-6" />} />
+      <PageHeader title="Deal finder" description="Google Map — click to drop a search pin. Deals with an address appear as pins within the radius." icon={<MapPin className="h-6 w-6" />} />
       <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
         <div className="space-y-3">
           <Card padding="sm" data-tour="map-controls">

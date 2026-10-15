@@ -152,6 +152,9 @@ jobs:
             NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.IMAGE_TAG }}
             NEXT_PUBLIC_BUILD_SHA=${{ steps.meta.outputs.BUILD_SHA }}
             NEXT_PUBLIC_BUILD_TIME=${{ steps.meta.outputs.BUILD_TIME }}
+            # Deal finder Google Map (Maps JavaScript API). Same key can serve
+            # Geocoding on the API if GOOGLE_MAPS_API_KEY is in Vault.
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}

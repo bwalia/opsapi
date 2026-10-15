@@ -27,7 +27,7 @@ Textarea, Switch, Pagination), `PageHeader`, toasts, `next-themes` dark mode, re
 | `/dashboard/property-deals/deals` | Kanban by stage (drag → gate check, blocked reason) + list | `/deals/board`, `/deals`, `/deals/{id}/gate`, `/deals/{id}/stage` |
 | `/dashboard/property-deals/deals/[id]` | Deal page: header (stage, health, dates, £ at risk, slip) + tabs Tasks, Enquiries, Chase log, Documents, Compliance, Buyers, Timeline | `/deals/{id}/overview`, `/timeline`, `/tasks`, `/documents`, `/properties/{id}/matches` |
 | `/dashboard/property-deals/approvals` | Inbox: draft, sources, tool calls, edit with diff, approve / edit & approve / reject with note | `/approvals/inbox`, `/approvals/{id}/decide` |
-| `/dashboard/property-deals/map` | Leaflet + OSM, pin, radius 5–50, layers, card with top 3 buyers, save search, scout alerts | `/map`, `/properties/{id}/card`, `/saved-searches`, `/scout-alerts` |
+| `/dashboard/property-deals/map` | Google Maps, pin, radius 5–50, layers, card with top 3 buyers, save search, scout alerts | `/map`, `/properties/{id}/card`, `/saved-searches`, `/scout-alerts` |
 | `/dashboard/property-deals/buyers` | Profiles, proof of funds, matches + breakdown, send deal pack, company check | `/buyer-profiles`, `/buyer-profiles/{id}/matches`, `/matches/{id}/send` |
 | `/dashboard/property-deals/suppliers` | Directory, kind/area filters, speed stats, book nearest | `/suppliers`, `/suppliers/nearest`, `/tasks` |
 | `/dashboard/property-deals/compliance` | All checks, status, evidence, expiring soon, sign-off | `/compliance-checks` |
