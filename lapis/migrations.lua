@@ -2404,6 +2404,31 @@ local _migrations = {
         print("[zzh_hospital_namespace_id] hospitals without a namespace (platform-admin only): "
             .. tostring(left and left[1] and left[1].n or 0))
     end),
+    -- Care-management backfill: 442-453 sort BEFORE 47_create_hospitals_table, so on
+    -- a fresh DB their require_hospitals guard skipped them — and lapis recorded them
+    -- as applied, so they never ran again (care routes then hit missing tables).
+    -- This key sorts after 47, and creates only the tables that are still missing.
+    ['zzhc_hospital_care_tables_backfill'] = conditional(ProjectConfig.FEATURES.HOSPITAL, function()
+        local tables = {
+            "departments", "wards", "rooms_beds", "care_plans", "care_logs", "medications",
+            "patient_access_controls", "family_members", "dementia_assessments", "daily_logs",
+            "patient_alerts", "patient_audit_logs",
+        }
+        for i, name in ipairs(tables) do
+            local found = db.query("SELECT to_regclass(?) IS NOT NULL AS present", name)
+            if not (found and found[1] and found[1].present) then
+                hospital_care_mgmt_migrations[i]()
+                print("[zzhc_hospital_care_tables_backfill] created " .. name)
+            end
+        end
+    end),
+    -- hospitals' contact columns were created NOT NULL, but the dashboard form only
+    -- requires name + license_number, so "Add care home" failed with a 500.
+    ['zzhd_hospitals_optional_contact_fields'] = conditional(ProjectConfig.FEATURES.HOSPITAL, function()
+        for _, col in ipairs({ "address", "city", "state", "postal_code", "country", "phone", "email" }) do
+            db.query("ALTER TABLE hospitals ALTER COLUMN " .. db.escape_identifier(col) .. " DROP NOT NULL")
+        end
+    end),
     -- Chat AI agent: server-side conversation + background runs (routes/chat-agent.lua)
     ['2000_create_chat_agent_runs'] = conditional(ProjectConfig.FEATURES.CHAT, function()
         db.query([[

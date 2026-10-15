@@ -26,8 +26,9 @@ end
 
 -- Guard: hospital-crm migrations (47-53) create `hospitals` but sort AFTER
 -- these (442-453) lexicographically. If `hospitals` isn't there yet, skip so
--- the migrator doesn't abort on the FK — hospital-crm will run next, and a
--- subsequent deploy (or PROJECT_CODE=all on a clean DB) brings these in.
+-- the migrator doesn't abort on the FK. Lapis still records a skipped key as
+-- applied, so the tables are created later by the `zzhc_hospital_care_tables_backfill`
+-- migration in migrations.lua (keep its table list in the same order as this file).
 local function require_hospitals(fn)
     return function(...)
         if not table_exists("hospitals") then
