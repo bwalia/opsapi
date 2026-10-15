@@ -34,10 +34,9 @@ extraEnv:
   VOICE_URL: "http://192.168.1.177:8014"
   VOICE_TTS_VOICE: "bf_emma"
 
-# Password-reset email link target (the Next.js dashboard, unchanged — the
-# API moving to workstation.co.uk does not move the frontend). Migration 489
-# bootstraps namespaces.allowed_redirect_origins from this.
-frontendUrl: "https://int.diytaxreturn.co.uk"
+# Password-reset / invite links → the workstation admin UI for this ring.
+# Migration 489 bootstraps namespaces.allowed_redirect_origins from this.
+frontendUrl: "https://int-opsapi-ui.workstation.co.uk"
 
 image:
   repository: bwalia/opsapi

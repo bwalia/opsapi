@@ -1,0 +1,29 @@
+# ── OpsAPI Dashboard on workstation.co.uk — ACCEPTANCE ──────────────────────
+# Helm RELEASE: workstation-opsapi-dashboard   Namespace: acc   Cluster: k3s1
+# Public host: https://acc-opsapi-ui.workstation.co.uk
+#   → calls the API at https://acc-opsapi.workstation.co.uk (workstation-opsapi)
+#
+# Layered on top of values.yaml by deploy-workstation-dashboard.yml. Only the
+# fields that differ from the base defaults (or that other jobs read) live here.
+env: acc
+
+# The API this UI calls. Baked into the browser bundle at BUILD time
+# (--build-arg NEXT_PUBLIC_API_URL) by the deploy workflow.
+apiUrl: https://acc-opsapi.workstation.co.uk
+
+# Single source of truth for the DNS + wslproxy jobs (read via awk). MUST equal
+# ingress.hostname below.
+host: acc-opsapi-ui.workstation.co.uk
+
+# traefik-edge, not wslproxy — same reason as values-workstation-int.yaml.
+ingress:
+  enabled: true
+  className: traefik-edge
+  hostname: acc-opsapi-ui.workstation.co.uk
+  annotations: {}
+  tls: []
+
+# LAN amd64 pool (no single-host pin): avoids cloud edge nodes and the arm64 Pi.
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64
