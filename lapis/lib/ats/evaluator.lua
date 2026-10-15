@@ -90,6 +90,36 @@ function Ev.is_verbatim(quote, session)
     return T.contains(Ev.normalise(turn.text), q)
 end
 
+-- MARK: Injection
+
+local B, E = T.B, T.E
+-- Lua patterns have no alternation, so each Swift alternative is its own pattern.
+local INSTRUCTION = {
+    B .. "ignore" .. E, B .. "instruction", B .. "prompt" .. E, B .. "rate me" .. E, B .. "score me" .. E,
+    B .. "disregard" .. E, B .. "you are now" .. E, "<%/?engine", "<%/?external_data", "<%/?system",
+    B .. "system%s*:", B .. "system%s*message%s*:", B .. "system%s*prompt%s*:",
+}
+for _, w in ipairs({ "5", "five", "top", "full" }) do
+    INSTRUCTION[#INSTRUCTION + 1] = B .. "give me " .. w
+    INSTRUCTION[#INSTRUCTION + 1] = B .. "give me a " .. w
+end
+for _, who in ipairs({ "ai", "model", "evaluator" }) do INSTRUCTION[#INSTRUCTION + 1] = B .. "as the " .. who .. E end
+for _, what in ipairs({ "level", "rating", "score" }) do
+    for _, n in ipairs({ "5", "five" }) do
+        INSTRUCTION[#INSTRUCTION + 1] = B .. what .. " " .. n .. E
+        INSTRUCTION[#INSTRUCTION + 1] = B .. what .. " of " .. n .. E
+    end
+end
+
+--- Whether a quote reads as an attempt to direct the AI (Evaluation.swift looksLikeInstruction).
+function Ev.looks_like_instruction(text)
+    local t = tostring(text or ""):lower()
+    for _, p in ipairs(INSTRUCTION) do
+        if t:find(p) then return true end
+    end
+    return false
+end
+
 -- MARK: Parsing and combining
 
 local function level_of(v)
@@ -125,11 +155,14 @@ function Ev.parse(text, session)
             agreed = true,
         }
     end
+    -- Only quotes that really try to direct the AI (models over-report this).
     local injection = J.array({})
     for _, q in ipairs(type(J.val(out.injection)) == "table" and out.injection or {}) do
-        local turn = type(q) == "table" and turn_of(session, q.turn)
-        if turn and turn.role == "candidate" then injection[#injection + 1] = { turn = q.turn,
-            quote = tostring(J.val(q.quote) or "") } end
+        local quote = type(q) == "table" and { turn = tostring(J.val(q.turn) or ""),
+            quote = tostring(J.val(q.quote) or "") }
+        if quote and Ev.is_verbatim(quote, session) and Ev.looks_like_instruction(quote.quote) then
+            injection[#injection + 1] = quote
+        end
     end
     return { results = results, injection = injection, notes = T.trim(J.val(out.notes_for_reviewer) or ""),
         dropped = dropped }
