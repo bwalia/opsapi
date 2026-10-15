@@ -47,7 +47,8 @@ Topics.list = {
 Topics.benign = {
     "health and safety", "health & safety", "health check", "healthcheck", "system health", "service health",
     "race condition", "data race", "race to", "office politics", "european union", "union of", "union type",
-    "sexual harassment policy", "faith in the team",
+    "sexual harassment policy", "faith in the team", "team health", "account health", "customer health",
+    "health score", "health metrics", "health of the", "healthy", "data health", "pipeline health", "code health",
 }
 
 --- The banned topics a text touches (names only).

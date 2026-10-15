@@ -527,7 +527,11 @@ function Engine:apply(reply, raw_text)
     local last = self:last_candidate()
     for _, f in ipairs(reply and reply.flags or {}) do
         local kind = Engine.FLAG_KINDS[f.kind] and f.kind or "other"
-        self:flag(kind, T.prefix(f.detail, 200), last and last.id)
+        -- Personal topics come only from the engine's own screen of each answer
+        -- (receive): models over-report them, and a true one is already flagged.
+        if kind ~= "protected_info_volunteered" then
+            self:flag(kind, T.prefix(f.detail, 200), last and last.id)
+        end
     end
     if not reply and raw_text and raw_text ~= "" then
         self:flag("technical", "The interviewer's reply couldn't be read; moved on.")
