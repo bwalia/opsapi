@@ -261,7 +261,14 @@ return function(app)
         end
         for i = first, #turns do
             local m = turns[i]
-            if is_system_reply(m) then goto next_turn end
+            if is_system_reply(m) then
+                -- Not in the assistant's words, but the model must know it wasn't done: with the notice simply
+                -- gone it saw several questions in a row and acted on the oldest one instead of the latest.
+                conversation[#conversation + 1] = { role = "system", content = "That request was not carried out "
+                    .. "(the assistant was unavailable). Answer the user's latest message; do that earlier request "
+                    .. "only if the latest message asks for it (e.g. \"try again\")." }
+                goto next_turn
+            end
             conversation[#conversation + 1] = { role = m.role, content = m.content }
             if m.actions and recent[i] then
                 local summary = {}

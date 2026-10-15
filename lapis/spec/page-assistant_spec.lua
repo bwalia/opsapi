@@ -125,8 +125,9 @@ check("JSON bodies never parse as form args", app:find("ngx.req.get_post_args = 
 check("model chosen by env (AI_PROVIDER) and declared to nginx",
     read("lapis/nginx.conf"):find("env AI_PROVIDER;", 1, true) ~= nil
     and read("lapis/lib/agent/llm.lua"):find('env("AI_PROVIDER")', 1, true) ~= nil)
-check("server failure notices are hidden from the model",
-    read("lapis/routes/chat-agent.lua"):find("is_system_reply(m) then goto next_turn", 1, true) ~= nil)
+check("server failure notices are hidden from the model; a note says the request wasn't done",
+    read("lapis/routes/chat-agent.lua"):find("is_system_reply(m) then", 1, true) ~= nil
+    and read("lapis/routes/chat-agent.lua"):find("That request was not carried out", 1, true) ~= nil)
 local tools = read("lapis/lib/agent/tools.lua")
 check("DELETE waits for confirmation", tools:find("needs_confirmation = true", 1, true) ~= nil)
 check("auth/keys/secrets are never callable", tools:find('"api%-keys", "secret", "vault"', 1, true) ~= nil)
