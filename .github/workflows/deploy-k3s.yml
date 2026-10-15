@@ -61,7 +61,8 @@ permissions:
 # already reached the deploy job should be allowed to finish rather than be
 # torn down halfway through a helm upgrade.
 concurrency:
-  group: deploy-k3s-${{ github.ref }}
+  # Per-env so int/test/acc/prod deploys do not serialise on the same ref.
+  group: deploy-k3s-${{ github.event.inputs.TARGET_ENV || 'int' }}
   cancel-in-progress: false
 
 env:
