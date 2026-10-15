@@ -200,6 +200,43 @@ end
 -- Postcode lookup (postcodes.io, or the workspace's own postcodes connector)
 -- ---------------------------------------------------------------------------
 
+--- Google Geocoding API key (server-side). Same project key as the dashboard's
+-- Maps JS key is fine if Geocoding API is enabled. Empty → skip Google.
+local function google_geocode_key()
+    local k = os.getenv("GOOGLE_MAPS_GEOCODING_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY") or ""
+    if k == "" then return nil end
+    return k
+end
+
+--- Street-level geocode via Google when a key is set.
+-- @return { lat, lng, formatted_address?, source = "google" } | nil
+function C.geocode_address(ns, parts)
+    local key = google_geocode_key()
+    if not key then return nil end
+    local line = {}
+    for _, k in ipairs({ "address_line1", "address_line2", "town", "county", "postcode", "country" }) do
+        local v = parts and parts[k]
+        if type(v) == "string" and v:match("%S") then line[#line + 1] = v end
+    end
+    if #line == 0 then return nil end
+    local q = table.concat(line, ", ")
+    local url = "https://maps.googleapis.com/maps/api/geocode/json?"
+        .. H.query({ address = q, region = "uk", key = key })
+    local data, err = H.json(url)
+    if not data then
+        ngx.log(ngx.WARN, "[property_deals] google geocode: ", tostring(err))
+        return nil
+    end
+    if data.status ~= "OK" or type(data.results) ~= "table" or not data.results[1] then
+        ngx.log(ngx.INFO, "[property_deals] google geocode status=", tostring(data.status), " for ", q)
+        return nil
+    end
+    local loc = data.results[1].geometry and data.results[1].geometry.location
+    local lat, lng = loc and tonumber(loc.lat), loc and tonumber(loc.lng)
+    if not lat or not lng then return nil end
+    return { lat = lat, lng = lng, formatted_address = data.results[1].formatted_address, source = "google" }
+end
+
 --- { ["YO1 7AA"] = { lat, lng, district } } for a list of postcodes (unknown ones are left out).
 function C.geocode(ns, postcodes)
     local list, seen = {}, {}
