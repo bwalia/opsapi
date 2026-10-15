@@ -35,6 +35,9 @@
     "host:acc-opsapi.workstation.co.uk",
     "host:int-opsapi-ui.workstation.co.uk",
     "host:test-opsapi-ui.workstation.co.uk",
-    "host:acc-opsapi-ui.workstation.co.uk"
+    "host:acc-opsapi-ui.workstation.co.uk",
+    "host:int-api.tenthmatrix.com",
+    "host:test-api.tenthmatrix.com",
+    "host:acc-api.tenthmatrix.com"
   ]
 }
