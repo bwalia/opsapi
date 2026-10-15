@@ -175,8 +175,11 @@ spec:
             # wins over any REDIS_* in the Vault secret (envFrom).
             - name: REDIS_ENABLED
               value: "true"
+            # FQDN required: OpenResty cosocket `resolver local=on` does not
+            # apply kube DNS search domains, so the short Service name fails
+            # with "Host not found" and /ready stays 503 (chat subscriber down).
             - name: REDIS_HOST
-              value: "{{ .Release.Name }}-redis"
+              value: "{{ .Release.Name }}-redis.{{ .Release.Namespace }}.svc.cluster.local"
             - name: REDIS_PORT
               value: "6379"
             - name: REDIS_DB
