@@ -58,15 +58,21 @@ local CRUD_OPTS = {
 }
 
 --- Fill lat/lng on the create payload when the client omitted them.
-local function pin_if_needed(data)
+-- Never raises: a geocode failure must not block creating the property/deal.
+local function pin_if_needed(ns, data)
     if data.lat and data.lng then return data end
-    local Connectors = require("property_deals.connectors")
-    local g = Connectors.geocode_address(nil, data)
-    if not g and data.postcode then
-        local hit = Connectors.geocode(nil, { data.postcode })
-        g = hit[tostring(data.postcode):upper():gsub("%s+", " ")]
+    local ok, err = pcall(function()
+        local Connectors = require("property_deals.connectors")
+        local g = Connectors.geocode_address(ns, data)
+        if not g and data.postcode then
+            local hit = Connectors.geocode(ns, { data.postcode })
+            g = hit[tostring(data.postcode):upper():gsub("%s+", " ")]
+        end
+        if g then data.lat, data.lng = g.lat, g.lng end
+    end)
+    if not ok then
+        ngx.log(ngx.WARN, "[property_deals] pin_if_needed: ", tostring(err))
     end
-    if g then data.lat, data.lng = g.lat, g.lng end
     return data
 end
 
@@ -80,7 +86,7 @@ return function(app)
             if not body then return sdk.error(400, err) end
             local data, errors = sdk.validate(body, FIELDS)
             if not data then return sdk.error(422, "Validation failed", errors) end
-            pin_if_needed(data)
+            pin_if_needed(self.namespace.id, data)
             local row, status, msg = R.create(self.namespace.id, data)
             if not row then return sdk.error(status, msg) end
             return sdk.created(row)

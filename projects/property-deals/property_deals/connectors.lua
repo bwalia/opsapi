@@ -135,7 +135,9 @@ function C.get(ns, id)
 end
 
 --- The workspace's enabled connector of a kind (first by name), or nil.
+-- Without a namespace, free public adapters (postcodes.io) still work via defaults.
 function C.of_kind(ns, kind)
+    if not ns then return nil end
     return U.one("SELECT * FROM property_deals_connectors WHERE namespace_id = ? AND kind = ? AND enabled ORDER BY name LIMIT 1",
         ns, kind)
 end
