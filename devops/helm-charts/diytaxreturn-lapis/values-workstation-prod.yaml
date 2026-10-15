@@ -99,7 +99,7 @@ setup:
 # workstation.academy lets the Academy tenant's instructor dashboard
 # (teach.workstation.academy) call this shared API cross-origin;
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
-corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com"
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk"
 
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.
