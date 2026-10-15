@@ -302,6 +302,29 @@ jobs:
           kubectl -n "${TARGET_ENV}" rollout status "deploy/${RELEASE_NAME}" --timeout=300s || true
           kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
 
+      # Ring Promoter health-checks the public /login URL. Helm --wait only
+      # proves the in-cluster pod is Ready; the wslproxy edge can still
+      # redirect-loop for a short window after first install. Fail the job
+      # unless the public host answers 200 without a redirect storm.
+      - name: Public URL probe
+        run: |
+          set -euo pipefail
+          HOST=$(awk '/^host:/{print $2; exit}' "${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml")
+          URL="https://${HOST}/login"
+          echo "Probing ${URL} ..."
+          ok=0
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 --max-redirs 3 -L "$URL" || echo 000)
+            redirs=$(curl -sS -o /dev/null -w '%{num_redirects}' --max-time 10 --max-redirs 3 -L "$URL" || echo 99)
+            echo "  attempt $i: HTTP ${code} redirects=${redirs}"
+            if [ "$code" = "200" ] && [ "${redirs:-99}" -le 2 ]; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$ok" = "1" ] || { echo "::error::public ${URL} never returned 200 with ≤2 redirects"; exit 1; }
+
       - name: Summary
         if: always()
         run: |
