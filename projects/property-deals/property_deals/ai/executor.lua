@@ -286,6 +286,11 @@ X.actions.compliance_notes = function(ns, a, p, actor)
 end
 
 --- Personal follow-up to a lead (lead_followup agent), after a person approved the exact text.
+-- A person asked to close a task whose rule needs sign-off (POST /tasks/:id/request-completion): approved, it's done.
+X.actions.complete_task = function(ns, a, p, actor)
+    return { result = { note = p.note, evidence = p.evidence }, task_status = "done" }
+end
+
 X.actions.send_lead_followup = function(ns, a, p, actor)
     if not U.is_uuid(p.lead_uuid) and type(p.lead_uuid) ~= "string" then U.fail(422, "No lead in the draft") end
     local lead = U.one([[

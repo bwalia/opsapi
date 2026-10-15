@@ -5,6 +5,7 @@
   * P02 Prepare Me: every fact maps to a record (checked by the grounding check), unknowns become questions
   * P06 Coach suggests questions, never a higher offer; a coach answer that suggests paying more is withheld
   * Scene 6: Ashley teaches "a valuation is an anchor, not a minimum"; it appears in Sophie's next brief on Sarah
+  * A kept promise is marked done: it stops ranking the opportunity on Today and leaves Prepare Me's open promises
 """
 import datetime
 import os
@@ -12,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pa_common import ASHLEY, PA, SOPHIE, data, mock, pa_answer, setup  # noqa: E402
-from pdtest import USERS, call, check, finish, sql  # noqa: E402
+from pdtest import API, USERS, call, check, expect, finish, sql, workspace  # noqa: E402
 import scenes  # noqa: E402
 
 S, fx = setup("PA Think", "pa-think", jobshout=True)
@@ -151,5 +152,39 @@ got = data(call("GET", PA + f"/ask/{run['uuid']}", SOPHIE, S), 200, "coach answe
 check("P06: a coach answer with questions (and a cited figure) is shown", got["output"]["grounded"] is True, got["output"])
 launch = mock("GET", "/_js")["launches"] + mock("GET", "/_js")["task_runs"]
 check("coach runs use the coach skill", launch[-1]["skill_slugs"] == ["pa-coach"], launch[-1])
+
+# --- A promise kept: PUT /events/:id {done: true} ---------------------------------------------------------------------
+def sarah_signals():
+    cards = data(call("GET", PA + "/today", SOPHIE, S), 200, "Sophie's Today")["cards"]
+    return next(c for c in cards if c["opportunity_uuid"] == SARAH)["signals"]
+
+
+due = [s for s in sarah_signals() if s["key"] == "promise_due"]
+check("a past-due promise ranks Sarah with the promise_due signal", len(due) == 1 and "(due now)" in due[0]["text"]
+      and due[0]["ref"].startswith("pa_events:"), due)
+EV = due[0]["ref"].split(":")[1] if due else "00000000-0000-4000-8000-000000000000"
+res = call("PUT", PA + f"/events/{EV}", "agent", S, {"done": True})
+check("the AI agent (records: read only) can't mark it done (403)", res[0] == 403, res)
+res = call("PUT", PA + f"/events/{EV}", SOPHIE, S, {})
+check("nothing to change is refused (422)", res[0] == 422, res)
+res = call("PUT", PA + f"/events/{EV}", SOPHIE, S, {"done": None})
+check("done can't be cleared (422)", res[0] == 422, res)
+res = call("PUT", PA + "/events/not-a-uuid", SOPHIE, S, {"done": True})
+check("a malformed id is a 404", res[0] == 404, res)
+B = workspace("owner_b", "PA Think Other", "pa-think-other")
+for code in ("property_deals", "property_pa"):
+    expect(f"enable {code} in B", call("PUT", API + f"/api/v2/namespace/plugins/{code}", "owner_b", B,
+                                       {"enabled": True}), 200)
+res = call("PUT", PA + f"/events/{EV}", "owner_b", B, {"done": True})
+check("another workspace can't mark it done (404)", res[0] == 404 and res[1].get("error") == "Event not found", res)
+ev = data(call("PUT", PA + f"/events/{EV}", SOPHIE, S, {"done": True}), 200, "Sophie marks the promise kept")
+check("the promise is done", ev["done"] is True and ev["kind"] == "promise" and ev["opportunity_uuid"] == SARAH, ev)
+check("a kept promise no longer ranks Sarah (no promise_due)", all(s["key"] != "promise_due" for s in sarah_signals()))
+p = data(call("GET", PA + f"/prepare/{SARAH}", SOPHIE, S), 200, "Prepare me after the promise is kept")
+check("nor is it an open promise in Prepare Me", all(i["ref"] != "pa_events:" + EV for i in p["promises"]),
+      p["promises"])
+h = data(call("GET", PA + f"/history/pa_events/{EV}", SOPHIE, S), 200, "the promise's history")
+check("marking it done is in its history, by Sophie", any(c["field"] == "done" and c["value"] is True
+      and c["source"] == "human" and c["confirmed_by_user_uuid"] == USERS[SOPHIE][0] for c in h), h)
 
 sys.exit(finish())

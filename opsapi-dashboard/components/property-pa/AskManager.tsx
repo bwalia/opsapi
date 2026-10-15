@@ -27,7 +27,8 @@ export default function AskManager({ opportunity }: { opportunity: Opportunity }
 
   useEffect(() => {
     if (!open) return;
-    namespaceService.getMembers({ perPage: 100 } as never).then((r) => {
+    // The members route reads per_page (snake case), which PaginationParams doesn't declare.
+    namespaceService.getMembers({ per_page: 100 } as Parameters<typeof namespaceService.getMembers>[0]).then((r) => {
       const list = (r.data || []).filter((m) => m.user?.uuid && m.user.uuid !== me
         && (m.is_owner || (m.roles || []).some((x) => MANAGER_ROLES.has(x.role_name))));
       setManagers(list);

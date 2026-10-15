@@ -261,7 +261,14 @@ return function(app)
         end
         for i = first, #turns do
             local m = turns[i]
-            if is_system_reply(m) then goto next_turn end
+            if is_system_reply(m) then
+                -- Not in the assistant's words, but the model must know it wasn't done: with the notice simply
+                -- gone it saw several questions in a row and acted on the oldest one instead of the latest.
+                conversation[#conversation + 1] = { role = "system", content = "That request was not carried out "
+                    .. "(the assistant was unavailable). Answer the user's latest message; do that earlier request "
+                    .. "only if the latest message asks for it (e.g. \"try again\")." }
+                goto next_turn
+            end
             conversation[#conversation + 1] = { role = m.role, content = m.content }
             if m.actions and recent[i] then
                 local summary = {}
@@ -636,10 +643,12 @@ return function(app)
 
             -- The request's auth/RBAC context is captured here; the timer runs
             -- after this response is sent, independent of the browser.
+            local ctx = request_ctx(self, ns, user, scope, tool_names)
+            ctx.run_uuid = run_uuid -- keys the run's writes (Tools.http_call: Idempotency-Key)
             local ok, terr = ngx.timer.at(0, run_in_background, {
                 run_uuid = run_uuid,
                 cfg = cfg,
-                ctx = request_ctx(self, ns, user, scope, tool_names),
+                ctx = ctx,
                 page_path = page_path,
                 tools = tools,
                 system = (page_path and scope.key ~= "general")

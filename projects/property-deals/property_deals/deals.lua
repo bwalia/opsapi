@@ -222,9 +222,39 @@ Deals.UPDATABLE = {
     name = { type = "string" },
 }
 
+--- What stops marking the deal completed: it must have reached its last stage, with no blocking task open
+-- (so a task that needs a manager or two people, like "Funds moved", is approved first).
+function Deals.completion_missing(ns, deal)
+    local E = require("property_deals.engine")
+    local missing = {}
+    local ctx = E.context(ns, deal.uuid)
+    local nxt = ctx and E.next_stage(ctx)
+    if nxt then
+        local stage = require("property_deals.template").stage(ctx.def, nxt)
+        missing[#missing + 1] = { type = "stage", key = nxt,
+            message = "The deal hasn't reached " .. (stage and stage.name or nxt) .. " yet" }
+    end
+    for _, t in ipairs(db.query([[
+        SELECT d.task_uuid, t.title FROM property_deals_task_details d JOIN kanban_tasks t ON t.uuid = d.task_uuid
+        WHERE d.namespace_id = ? AND d.deal_uuid = ? AND d.blocking AND d.pd_status NOT IN ('done', 'cancelled')
+        ORDER BY d.due_at NULLS LAST, d.id LIMIT 20
+    ]], ns, deal.uuid)) do
+        missing[#missing + 1] = { type = "task", key = t.task_uuid, message = t.title .. " is not done" }
+    end
+    return missing
+end
+
 function Deals.update(ns, uuid, data, actor_uuid)
     local deal = Deals.get(ns, uuid)
     if not deal then return nil end
+    if data.status == "completed" and deal.status ~= "completed" then
+        local missing = Deals.completion_missing(ns, deal)
+        if #missing > 0 then
+            local lines = {}
+            for _, m in ipairs(missing) do lines[#lines + 1] = m.message end
+            U.fail(409, "Can't mark the deal completed: " .. table.concat(lines, "; "), { missing = U.array(missing) })
+        end
+    end
     return U.tx(function()
         local crm = {}
         if data.name ~= nil then crm.name, data.name = data.name, nil end
@@ -241,6 +271,20 @@ function Deals.update(ns, uuid, data, actor_uuid)
         end
         if data.status == "completed" or data.status == "fell_through" then
             db.query("UPDATE property_deals_stage_history SET left_at = NOW() WHERE deal_uuid = ? AND left_at IS NULL", uuid)
+        end
+        if data.status == "fell_through" and deal.status ~= "fell_through" then
+            -- Nothing is left to do on a dead deal: its tasks stop, and drafts waiting for approval can't be sent.
+            local Tasks = require("property_deals.tasks")
+            for _, t in ipairs(db.query([[
+                SELECT task_uuid FROM property_deals_task_details
+                WHERE namespace_id = ? AND deal_uuid = ? AND pd_status NOT IN ('done', 'cancelled')
+            ]], ns, uuid)) do
+                Tasks.update(ns, t.task_uuid, { pd_status = "cancelled" }, actor_uuid)
+            end
+            db.query([[
+                UPDATE property_deals_approvals SET status = 'cancelled', decided_at = NOW(), updated_at = NOW()
+                WHERE namespace_id = ? AND deal_uuid = ? AND status = 'pending'
+            ]], ns, uuid)
         end
         if next(crm) then
             crm.updated_at = db.raw("NOW()")

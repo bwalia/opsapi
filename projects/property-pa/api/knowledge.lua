@@ -3,8 +3,8 @@
 --   GET  /knowledge/pending                proposed versions waiting for me (managers: company + team)
 --   GET  /knowledge/:id                    the rule + every version
 --   POST /knowledge                        propose a rule or a new version { key, scope?, domain?, title, rule,
---                                          rationale?, triggers?, proposed_by_ai? }
---   POST /knowledge/:id/versions/:version/approve | reject
+--                                          rationale?, triggers? } (proposed_by_ai = the caller is the AI agent)
+--   POST /knowledge/:id/versions/:version/approve | reject      a person only, never the AI agent
 --   POST /knowledge/:id/retire
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 for _, p in ipairs({ root, root and (root:match("^(.*)/[^/]+$") .. "/property-deals") }) do
@@ -41,7 +41,6 @@ return function(app)
             key = { type = "string", max = 80, required = true }, scope = { enum = { "personal", "team", "company" } },
             domain = { type = "string", max = 40 }, title = { type = "string", required = true },
             rule = { type = "text", max = 4000, required = true }, rationale = { type = "text", max = 4000 },
-            proposed_by_ai = { type = "boolean" },
         })
         if not d then return sdk.error(422, "Validation failed", errors) end
         if not d.key:match("^[a-z0-9_]+$") then return sdk.error(422, "Validation failed", { key = "lowercase letters, digits and _" }) end
@@ -59,7 +58,9 @@ return function(app)
             end
         end
         d.triggers = triggers
-        local out = K.propose(sdk.namespace_id(self), d, sdk.user(self).uuid, d.proposed_by_ai == true)
+        -- From who the caller is, never from the body: a person can't pass a rule off as the AI's, nor the reverse.
+        local ns, me = sdk.namespace_id(self), sdk.user(self).uuid
+        local out = K.propose(ns, d, me, K.is_agent(ns, me))
         return { status = 201, json = { success = true, data = out } }
     end)))
 

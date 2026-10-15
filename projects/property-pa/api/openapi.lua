@@ -122,6 +122,13 @@ return function(app)
         path = { id = S() }, response = Interaction, errors = E404 })
     doc("POST /events", { summary = "Record an event (valuation, promise, deadline...)", permission = "property_pa_records.create",
         status = 201, body = OBJ({}), response = OBJ({}) })
+    doc("PUT /events/:id", { summary = "Mark an event done (a promise kept) or correct it (history kept)",
+        description = "A done promise no longer counts as due on Today nor as open in Prepare Me. "
+            .. "Send at least one field; none can be cleared. Each change is in GET /history/pa_events/:id.",
+        permission = "property_pa_records.update", path = id,
+        body = OBJ({ done = BOOL(), title = S(), at = DT(), details = OBJ({}) }),
+        response = OBJ({ uuid = UUID(), kind = S(), at = DT(), title = S(), details = OBJ({}), done = BOOL(),
+            opportunity_uuid = UUID() }), errors = { ["404"] = E404["404"], ["422"] = E422["422"] } })
     doc("POST /offers", { summary = "Record an offer (the caller is the authority)", permission = "property_pa_records.create",
         status = 201, body = OBJ({ amount = NUM(), opportunity_uuid = UUID(), deal_uuid = UUID(), conditions = S() }),
         response = OBJ({}) })
@@ -188,14 +195,15 @@ return function(app)
         path = id, response = Knowledge, errors = E404 })
     doc("POST /knowledge", { summary = "Propose a rule or a new version", permission = "property_pa_knowledge.create",
         status = 201, body = OBJ({ key = S("snake_case"), scope = ENUM({ "personal", "team", "company" }), domain = S(),
-            title = S(), rule = S(), rationale = S(), triggers = ARR(S()), proposed_by_ai = BOOL() },
-            { "key", "title", "rule" }), response = OBJ({ knowledge_uuid = UUID(), version = INT(), status = S() }),
-        errors = E422 })
+            title = S(), rule = S(), rationale = S(), triggers = ARR(S()) }, { "key", "title", "rule" }),
+        description = "proposed_by_ai is set from the caller: true when it is the AI agent's service account.",
+        response = OBJ({ knowledge_uuid = UUID(), version = INT(), status = S() }), errors = E422 })
     for _, a in ipairs({ "approve", "reject" }) do
         doc("POST /knowledge/:id/versions/:version/" .. a, { summary = a:sub(1, 1):upper() .. a:sub(2) .. " a version "
             .. "(company/team: managers; personal: the owner)", permission = "property_pa_knowledge.read",
             path = { id = UUID(), version = INT() }, response = Knowledge,
-            errors = { ["403"] = "Not a manager", ["409"] = "Already decided" } })
+            errors = { ["403"] = "Not a manager, or the AI agent (only a person decides)",
+                ["409"] = "Already decided" } })
     end
     doc("POST /knowledge/:id/retire", { summary = "Retire a rule (history kept)", permission = "property_pa_knowledge.read",
         path = id, response = Knowledge })
@@ -230,7 +238,7 @@ return function(app)
         permission = "property_pa_knowledge.create", status = 201, body = OBJ({ statement = S(), title = S(), key = S(),
             scope = ENUM({ "personal", "team", "company" }), domain = S(), rationale = S(), triggers = ARR(S()),
             approve = BOOL() }, { "statement" }), response = Knowledge,
-        errors = { ["403"] = "Only managers approve company or team rules" } })
+        errors = { ["403"] = "Only managers approve company or team rules; the AI agent never approves" } })
     local Item = OBJ({ opportunity_uuid = UUID(), title = S(), owner_user_uuid = S(), text = S(), ref = S() })
     doc("GET /manager/today", { summary = "Manager Today: exceptions only (scene 10, P08)", permission = "property_pa_handoffs.read",
         description = "Managers only (property_pa_knowledge.manage).",

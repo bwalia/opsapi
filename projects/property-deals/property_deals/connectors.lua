@@ -9,6 +9,9 @@
 --   companies_house  Companies House (Ltd/SPV buyers, lead   base_url?                   API key
 --                    news watch, new property companies)
 --   postcodes        postcode → lat/lng (postcodes.io)       base_url?                   —
+--   sra              SRA register of solicitors' firms       base_url?                   subscription key (free:
+--                    (conveyancers for the deal autopilot,                               www.sra.org.uk/datasharing)
+--                    property_deals/register.lua)
 --   csv              auction catalogues, agent feeds         record_type?                —
 --   ntfy             staff alerts (open-source push)         base_url?                   access token?
 --   telegram         staff alerts (Telegram bot)             base_url?                   bot token
@@ -100,6 +103,7 @@ C.KINDS.price_paid = {
 
 C.KINDS.companies_house = { label = "Companies House", secret = true, lookup = true }
 C.KINDS.postcodes = { label = "Postcode lookup (postcodes.io)", lookup = true }
+C.KINDS.sra = { label = "SRA register of solicitors (free key)", secret = true, lookup = true }
 C.KINDS.csv = { label = "CSV import" }
 -- Staff alert channels (property_deals.messaging): free / open-source, not run.
 C.KINDS.ntfy = { label = "ntfy (open-source push alerts)", secret = true, lookup = true }
@@ -219,6 +223,18 @@ function C.geocode(ns, postcodes)
         end
     end
     return out
+end
+
+--- What postcodes.io knows about a postcode's place: { district, ward, county, region, country, constituency } | nil
+function C.postcode_facts(ns, postcode)
+    local code = pc(postcode)
+    if not code or code == "" then return nil end
+    local data = H.json(base(C.of_kind(ns, "postcodes"), "https://api.postcodes.io") .. "/postcodes/" .. ngx.escape_uri(code))
+    local r = data and type(data.result) == "table" and data.result or nil
+    if not r then return nil end
+    local function s(v) return type(v) == "string" and v ~= "" and v or nil end
+    return { district = s(r.admin_district), ward = s(r.admin_ward), county = s(r.admin_county), region = s(r.region),
+        country = s(r.country), constituency = s(r.parliamentary_constituency) }
 end
 
 --- Nearest postcode to a point (to fetch data around a saved search's pin).

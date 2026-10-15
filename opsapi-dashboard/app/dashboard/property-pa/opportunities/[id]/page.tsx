@@ -2,13 +2,14 @@
 
 /**
  * Property PA — one opportunity: the facts (stated vs inferred, where each came from), changes waiting for
- * confirmation, next actions with their reasons, offers and events, the timeline, and each field's change
- * history (P10: source, model, prompt version, who confirmed; P11: corrections keep the history).
+ * confirmation, next actions with their reasons, open promises and deadlines (mark them done), offers, the timeline,
+ * and each field's change history (P10: source, model, prompt version, who confirmed; P11: corrections keep it).
  */
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { ArrowLeft, History, NotebookPen } from 'lucide-react';
+import { ArrowLeft, Check, History, NotebookPen } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, Card, Modal, buttonClass } from '@/components/ui';
 import { ErrorNote, Spinner, dateText, dueText } from '@/components/property-deals/ui';
@@ -17,6 +18,7 @@ import { valueText } from '@/components/property-pa/ConfirmSheet';
 import PaPanels, { type Panel } from '@/components/property-pa/PaPanels';
 import AskManager from '@/components/property-pa/AskManager';
 import { paService, type Change, type Fact, type Opportunity } from '@/services/property-pa.service';
+import { pdErrorText } from '@/services/property-deals.service';
 import PaPage, { usePaCan } from '@/components/property-pa/PaPage';
 
 const FIELDS: { key: keyof Opportunity & string; label: string }[] = [
@@ -76,12 +78,29 @@ function OpportunityView() {
   const { id } = useParams<{ id: string }>();
   const { can } = usePaCan();
   const panel = useSearchParams().get('panel');
-  const { data: o, error, loading } = usePdData(() => paService.opportunity(id), [id], 30_000);
+  const { data: o, error, loading, refresh } = usePdData(() => paService.opportunity(id), [id], 30_000);
   const { data: tl } = usePdData(() => paService.timeline(id), [id], 30_000);
   const [hist, setHist] = useState<{ field: string; label: string } | null>(null);
+  const [marking, setMarking] = useState<string | null>(null);
+
+  // A kept promise or met deadline stops counting on Today and in Prepare Me.
+  const markDone = async (eventId: string) => {
+    setMarking(eventId);
+    try {
+      await paService.updateEvent(eventId, { done: true });
+      toast.success('Marked done');
+      await refresh();
+    } catch (e) {
+      toast.error(pdErrorText(e));
+    } finally {
+      setMarking(null);
+    }
+  };
 
   if (loading && !o) return <Spinner />;
   if (!o) return <ErrorNote product="Property PA" error={error} />;
+  const openEvents = (o.events || []).filter((e) => !e.done && (e.kind === 'promise' || e.kind === 'deadline'))
+    .sort((a, b) => a.at.localeCompare(b.at));
   const waiting = new Map<string, number>();
   for (const p of o.pending_updates || []) {
     if (p.source_interaction_uuid) waiting.set(p.source_interaction_uuid, (waiting.get(p.source_interaction_uuid) || 0) + 1);
@@ -148,6 +167,30 @@ function OpportunityView() {
               );
             })}
           </ul>
+          {openEvents.length > 0 && (
+            <>
+              <h3 className="pt-2 font-semibold text-secondary-900">Promises and deadlines</h3>
+              <ul className="space-y-2">
+                {openEvents.map((e) => {
+                  const d = dueText(e.at);
+                  return (
+                    <li key={e.uuid} className="flex items-start justify-between gap-2 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium text-secondary-900">{e.title}</p>
+                        <p className={d.overdue ? 'text-xs text-error-600' : 'text-xs text-secondary-500'}>
+                          {e.kind === 'promise' ? 'Promise' : 'Deadline'} · {dateText(e.at, true)} ({d.text})
+                        </p>
+                      </div>
+                      {can('property_pa_records', 'update') && (
+                        <Button size="sm" variant="outline" leftIcon={<Check className="h-4 w-4" />}
+                          isLoading={marking === e.uuid} disabled={marking !== null} onClick={() => markDone(e.uuid)}>Done</Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
           {(o.offers || []).length > 0 && (
             <>
               <h3 className="pt-2 font-semibold text-secondary-900">Offers</h3>

@@ -11,11 +11,11 @@ import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Modal, Select, Table } from '@/components/ui';
 import { pdService, pdErrorText, type Supplier } from '@/services/property-deals.service';
-import { PdPage, ErrorNote, label } from '@/components/property-deals/ui';
+import { PdPage, ErrorNote, label, SupplierSourceBadge } from '@/components/property-deals/ui';
 import { useDebounced, usePdData, usePdMe } from '@/components/property-deals/usePd';
 import type { TableColumn } from '@/types';
 
-const KINDS = ['epc_assessor', 'surveyor', 'solicitor', 'broker', 'bridging_lender', 'builder', 'letting_agent', 'auction_house', 'managing_agent', 'searches_provider'];
+const KINDS = ['epc_assessor', 'surveyor', 'solicitor', 'conveyancer', 'broker', 'bridging_lender', 'builder', 'estate_agent', 'letting_agent', 'auction_house', 'managing_agent', 'searches_provider'];
 const SERVICE_TASK: Record<string, string> = { epc_assessor: 'Book an EPC assessor', surveyor: 'Book survey or lender valuation' };
 
 export default function SuppliersPage() {
@@ -36,7 +36,12 @@ function Suppliers() {
   const [adding, setAdding] = useState(false);
   const [nearest, setNearest] = useState(false);
   const cols: TableColumn<Supplier>[] = [
-    { key: 'name', header: 'Supplier', render: (s) => <span className="font-medium text-secondary-900">{s.name}</span> },
+    { key: 'name', header: 'Supplier', render: (s) => (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <span className="font-medium text-secondary-900">{s.name}</span>
+        <SupplierSourceBadge source={s.source} />
+      </span>
+    ) },
     { key: 'kinds', header: 'Does', render: (s) => (s.kinds || []).map(label).join(', ') },
     { key: 'avg_turnaround_hours', header: 'Avg turnaround', render: (s) => (s.avg_turnaround_hours ? `${Math.round(Number(s.avg_turnaround_hours))} h` : '—') },
     { key: 'on_time_pct', header: 'On time', render: (s) => (s.on_time_pct !== undefined && s.on_time_pct !== null ? `${Math.round(Number(s.on_time_pct))}%` : '—') },

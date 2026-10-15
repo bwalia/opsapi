@@ -160,15 +160,19 @@ local captured_env = {}
 --- Snapshot PLUGIN_* environment variables. nginx strips every variable not
 -- declared with an `env` line from its workers, and plugins can't add those
 -- lines — so nginx.conf's init_by_lua (the master, before workers fork)
--- calls this.
+-- calls this. It reads the C `environ`, not /proc/self/environ: nginx writes
+-- its process title over the latter, so after a reload (HUP runs init_by_lua
+-- again) that holds no variables.
 function sdk.capture_env()
-    local f = io.open("/proc/self/environ", "rb")
-    if not f then return end
-    for entry in f:read("*a"):gmatch("[^%z]+") do
-        local name, value = entry:match("^(PLUGIN_[%w_]+)=(.*)$")
+    local ffi = require("ffi")
+    pcall(ffi.cdef, "extern char **environ;")
+    local env = ffi.C.environ
+    local i = 0
+    while env ~= nil and env[i] ~= nil do
+        local name, value = ffi.string(env[i]):match("^(PLUGIN_[%w_]+)=(.*)$")
         if name then captured_env[name] = value end
+        i = i + 1
     end
-    f:close()
 end
 
 --- A deployment setting for a plugin: set PLUGIN_<CODE>_<NAME> (e.g.

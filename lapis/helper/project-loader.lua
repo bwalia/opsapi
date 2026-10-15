@@ -255,7 +255,11 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
             end
             emits[#emits + 1] = e
         end
-        publishes[name] = { table = spec.table, verbs = spec.verbs or {}, emits = emits }
+        -- hide: columns kept out of the events and the audit trail ("body,raw_input").
+        if spec.hide ~= nil and (type(spec.hide) ~= "string" or not spec.hide:match("^[a-z_][a-z0-9_,]*$")) then
+            return nil, manifest_path .. ": publishes." .. name .. ".hide must be column names, comma-separated"
+        end
+        publishes[name] = { table = spec.table, verbs = spec.verbs or {}, emits = emits, hide = spec.hide }
     end
     manifest.publishes = publishes
 

@@ -148,6 +148,16 @@ check("assistant tool_calls carry JSON-string arguments", type(b.messages[3].too
 check("tool result keeps tool_call_id", b.messages[4].role == "tool" and b.messages[4].tool_call_id == "call_1")
 check("null content parsed as empty", msg.content == "")
 check("string arguments decoded to a table", msg.tool_calls[1]["function"].arguments.path == "/y")
+responses = { { body = { choices = { { message = { content = "", tool_calls = {
+    { id = "g1", type = "function", ["function"] = { name = "call_api", arguments = "{}" },
+      extra_content = { google = { thought_signature = "sig-abc" } } } } } } } } } }
+msg = Llm.chat(CONVO, TOOLS, {})
+check("Gemini 3's thought signature is kept on the tool call",
+    msg.tool_calls[1].extra_content and msg.tool_calls[1].extra_content.google.thought_signature == "sig-abc")
+responses = { { body = { choices = { { message = { content = "done" } } } } } }
+Llm.chat({ { role = "user", content = "x" }, { role = "assistant", content = "", tool_calls = msg.tool_calls },
+    { role = "tool", tool_call_id = "g1", content = "{}" } }, TOOLS, {})
+check("...and sent back with it", captured.body.messages[2].tool_calls[1].extra_content.google.thought_signature == "sig-abc")
 
 print("ollama (default):")
 Llm = load_llm({ OLLAMA_URL = "https://ollama.example", OLLAMA_API_KEY = "signing-secret" })

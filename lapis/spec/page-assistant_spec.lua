@@ -103,6 +103,14 @@ check("timesheets and projects never share a thread",
     Scopes.resolve("/dashboard/timesheets").key ~= Scopes.resolve("/dashboard/projects").key)
 
 print("Guide-only pages expose no API:")
+-- Property Deals: the assistant creates a home and a deal when asked (the deal autopilot takes it from there).
+for _, page in ipairs({ "/dashboard/property-deals/deals", "/dashboard/property-deals/today" }) do
+    local pd = Scopes.resolve(page)
+    check(page .. ": may create a property and a deal", not pd.readonly
+        and Scopes.allows_api(pd, "/api/v2/property-deals/properties", "POST")
+        and Scopes.allows_api(pd, "/api/v2/property-deals/deals", "POST"))
+    check(page .. ": but not delete a deal", not Scopes.allows_api(pd, "/api/v2/property-deals/deals/" .. U, "DELETE"))
+end
 local filing = Scopes.resolve("/dashboard/tax/file")
 check("tax filing wizard is guide-only", #filing.api == 0, filing.key)
 local keys = Scopes.resolve("/dashboard/namespace/api-keys")
@@ -117,8 +125,9 @@ check("JSON bodies never parse as form args", app:find("ngx.req.get_post_args = 
 check("model chosen by env (AI_PROVIDER) and declared to nginx",
     read("lapis/nginx.conf"):find("env AI_PROVIDER;", 1, true) ~= nil
     and read("lapis/lib/agent/llm.lua"):find('env("AI_PROVIDER")', 1, true) ~= nil)
-check("server failure notices are hidden from the model",
-    read("lapis/routes/chat-agent.lua"):find("is_system_reply(m) then goto next_turn", 1, true) ~= nil)
+check("server failure notices are hidden from the model; a note says the request wasn't done",
+    read("lapis/routes/chat-agent.lua"):find("is_system_reply(m) then", 1, true) ~= nil
+    and read("lapis/routes/chat-agent.lua"):find("That request was not carried out", 1, true) ~= nil)
 local tools = read("lapis/lib/agent/tools.lua")
 check("DELETE waits for confirmation", tools:find("needs_confirmation = true", 1, true) ~= nil)
 check("auth/keys/secrets are never callable", tools:find('"api%-keys", "secret", "vault"', 1, true) ~= nil)
