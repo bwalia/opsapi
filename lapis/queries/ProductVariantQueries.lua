@@ -30,11 +30,17 @@ function ProductVariantQueries.show(id)
     return ProductVariantModel:find({ uuid = id })
 end
 
-function ProductVariantQueries.update(id, params)
+-- What an update may change: never the product it belongs to, nor its ids.
+local UPDATABLE = { "title", "option1", "option2", "option3", "sku", "price", "compare_price", "inventory_quantity",
+    "weight", "image_url", "is_active", "position" }
+
+function ProductVariantQueries.update(id, request)
     local record = ProductVariantModel:find({ uuid = id })
     if not record then return nil end
-    params.id = record.id
-    return record:update(params, { returning = "*" })
+    local params = Global.pick(request, UPDATABLE)
+    if next(params) == nil then return record end
+    record:update(params, { returning = "*" })
+    return record
 end
 
 function ProductVariantQueries.destroy(id)

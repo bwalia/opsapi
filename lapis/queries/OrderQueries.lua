@@ -73,7 +73,8 @@ function OrderQueries.update(id, params)
     local record = OrderModel:find({ uuid = id })
     if not record then return nil end
     params.id = record.id
-    return record:update(params, { returning = "*" })
+    record:update(params, { returning = "*" })
+    return record
 end
 
 function OrderQueries.destroy(id)

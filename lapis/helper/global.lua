@@ -9,6 +9,16 @@ local Global = {}
 
 --- A random (version 4) UUID. See helper/uuid.lua for why this no longer hashes
 -- math.random(): that produced duplicate, guessable ids across processes.
+--- Only the named fields of a request's params (absent ones left out). Updates use it so a request can't set
+-- columns the route doesn't name: the tenant, the owner, a price or total, a status, ids.
+function Global.pick(params, fields)
+    local out = {}
+    for _, k in ipairs(fields) do
+        if params[k] ~= nil then out[k] = params[k] end
+    end
+    return out
+end
+
 function Global.generateUUID()
     return Uuid.generate()
 end

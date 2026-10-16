@@ -9,25 +9,10 @@ local SecretQueries = require "queries.SecretQueries"
 local AuthMiddleware = require("middleware.auth")
 
 return function(app)
-    -- Helper to check if user is admin
+    -- Platform admins only: the exact "administrative" role, checked against the database too (AdminCheck).
+    -- It used to match any role whose name contains "admin" (e.g. tax_admin) and trusted the token alone.
     local function is_admin(user)
-        if not user then return false end
-
-        -- Check roles array
-        if user.roles then
-            if type(user.roles) == "string" then
-                return user.roles:lower():find("admin") ~= nil
-            elseif type(user.roles) == "table" then
-                for _, role in ipairs(user.roles) do
-                    local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
-                    if role_name:lower():find("admin") then
-                        return true
-                    end
-                end
-            end
-        end
-
-        return false
+        return require("helper.admin-check").isPlatformAdmin(user)
     end
 
     -- List all secrets (Admin only)
@@ -103,6 +88,9 @@ return function(app)
         end
 
         local secret = SecretQueries.update(tostring(self.params.id), self.params)
+        if not secret then
+            return { json = { error = "Secret not found" }, status = 404 }
+        end
         return {
             json = secret,
             status = 200
@@ -118,7 +106,9 @@ return function(app)
             }
         end
 
-        SecretQueries.destroy(tostring(self.params.id))
+        if not SecretQueries.destroy(tostring(self.params.id)) then
+            return { json = { error = "Secret not found" }, status = 404 }
+        end
         return {
             json = { message = "Secret deleted successfully" },
             status = 200

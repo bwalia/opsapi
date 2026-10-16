@@ -59,6 +59,16 @@ local function target_user(self, user_uuid)
     return row
 end
 
+-- May the caller change or delete this person? Only someone they could manage as a member: an admin can't edit the
+-- owner's email (then reset the owner's password) or anyone whose permissions they don't hold (helper/rbac-guard).
+local function may_manage(self, target)
+    if self.is_platform_admin or target.id == nil then return true end
+    local member = db.query("SELECT id, is_owner FROM namespace_members WHERE user_id = ? AND namespace_id = ? LIMIT 1",
+        target.id, self.namespace.id)[1]
+    if not member then return false, "User not found" end
+    return require("helper.rbac-guard").can_manage_member(self, member)
+end
+
 local SHARED_ACCOUNT = "This person also belongs to other workspaces (or is a platform admin), so only they "
     .. "or a platform admin can change their email, username or active status, or delete the account. "
     .. "To take away their access here, remove them from this workspace instead."
@@ -312,6 +322,10 @@ return function(app)
                 and user_id ~= self.current_user.uuid then
                 return error_response(403, SHARED_ACCOUNT)
             end
+            if user_id ~= self.current_user.uuid then
+                local may, why = may_manage(self, target)
+                if not may then return error_response(403, why) end
+            end
 
             local ok, result = pcall(UserQueries.update, user_id, update_data)
 
@@ -358,6 +372,8 @@ return function(app)
             if not self.is_platform_admin and not target.exclusive then
                 return error_response(403, SHARED_ACCOUNT)
             end
+            local may, why = may_manage(self, target)
+            if not may then return error_response(403, why) end
 
             local ok, result = pcall(UserQueries.destroy, user_id)
 
@@ -380,10 +396,11 @@ return function(app)
     ))
 
     ----------------- SCIM User Routes --------------------
-    -- SCIM routes require authentication but use their own authorization model
-    -- These are typically used for enterprise SSO/identity provider integrations
+    -- Provisioning from an identity provider: platform admins only, like SCIM Groups (routes/groups.lua). They used
+    -- to need just any sign-in, so anyone could list every account, create one with role=administrative, or delete
+    -- any account.
     app:match("scim_users", "/scim/v2/Users", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
+        GET = AuthMiddleware.requireRole("administrative", function(self)
             self.params.timestamp = true
             local users = UserQueries.SCIMall(self.params)
             return {
@@ -391,7 +408,7 @@ return function(app)
                 status = 200
             }
         end),
-        POST = AuthMiddleware.requireAuth(function(self)
+        POST = AuthMiddleware.requireRole("administrative", function(self)
             local user = UserQueries.SCIMcreate(self.params)
             return {
                 json = user,
@@ -401,7 +418,7 @@ return function(app)
     }))
 
     app:match("edit_scim_user", "/scim/v2/Users/:id", respond_to({
-        before = AuthMiddleware.requireAuth(function(self)
+        before = AuthMiddleware.requireRole("administrative", function(self)
             self.user = UserQueries.show(tostring(self.params.id))
             if not self.user then
                 self:write({
@@ -415,14 +432,14 @@ return function(app)
                 })
             end
         end),
-        GET = AuthMiddleware.requireAuth(function(self)
+        GET = AuthMiddleware.requireRole("administrative", function(self)
             local user = UserQueries.show(tostring(self.params.id))
             return {
                 json = user,
                 status = 200
             }
         end),
-        PUT = AuthMiddleware.requireAuth(function(self)
+        PUT = AuthMiddleware.requireRole("administrative", function(self)
             local content_type = self.req.headers["content-type"]
             local body = self.params
             if content_type == "application/json" then
@@ -435,7 +452,7 @@ return function(app)
                 status = status
             }
         end),
-        DELETE = AuthMiddleware.requireAuth(function(self)
+        DELETE = AuthMiddleware.requireRole("administrative", function(self)
             local user = UserQueries.destroy(tostring(self.params.id))
             return {
                 json = user,

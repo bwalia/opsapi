@@ -1,7 +1,7 @@
 --[[
     Store Product Routes
 
-    SECURITY: All endpoints require JWT auth AND a namespace context. Data is
+    SECURITY: All endpoints require JWT auth, a namespace context and the role's products permission. Data is
     scoped to self.namespace.id — the list is filtered and every :id operation
     verifies the product belongs to the caller's namespace, so one tenant can
     never read/modify another tenant's products.
@@ -26,26 +26,26 @@ end
 
 return function(app)
     app:match("storeproducts", "/api/v2/storeproducts", respond_to({
-        GET = AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        GET = AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("products", "read", function(self)
             self.params.namespace_id = self.namespace.id
             return { json = StoreproductQueries.all(self.params) }
         end)),
-        POST = AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        POST = AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("products", "create", function(self)
             self.params.namespace_id = self.namespace.id
             return { json = StoreproductQueries.create(self.params), status = 201 }
         end)),
     }))
 
     app:match("edit_storeproduct", "/api/v2/storeproducts/:id", respond_to({
-        GET = AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        GET = AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("products", "read", function(self)
             local denied = load_owned(self); if denied then return denied end
             return { json = self.storeproduct, status = 200 }
         end)),
-        PUT = AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        PUT = AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("products", "update", function(self)
             local denied = load_owned(self); if denied then return denied end
             return { json = StoreproductQueries.update(self.params.id, self.params), status = 200 }
         end)),
-        DELETE = AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(function(self)
+        DELETE = AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("products", "delete", function(self)
             local denied = load_owned(self); if denied then return denied end
             StoreproductQueries.destroy(self.params.id)
             return { json = { message = "Store product deleted successfully" }, status = 200 }

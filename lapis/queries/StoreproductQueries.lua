@@ -296,9 +296,16 @@ function StoreproductQueries.show(id)
     return StoreproductModel:find({ uuid = id })
 end
 
-function StoreproductQueries.update(id, params)
+-- What an update may change. Never the tenant, the store, ratings, ids or the computed min/max/total fields.
+local UPDATABLE = { "name", "description", "short_description", "slug", "sku", "barcode", "price", "compare_price",
+    "cost_price", "track_inventory", "inventory_quantity", "low_stock_threshold", "weight", "dimensions", "images",
+    "variants", "tags", "is_active", "is_featured", "is_digital", "requires_shipping", "seo_title", "seo_description",
+    "sort_order", "meta_title", "meta_description", "vendor", "product_type", "published_at", "category_id" }
+
+function StoreproductQueries.update(id, request)
     local record = StoreproductModel:find({ uuid = id })
     if not record then return nil end
+    local params = Global.pick(request, UPDATABLE)
 
     -- Sanitize numeric fields - convert "null" string to actual nil
     if params.weight == "null" or params.weight == "" then
@@ -333,7 +340,8 @@ function StoreproductQueries.update(id, params)
     if params.category_id and params.category_id ~= "" then
         local CategoryModel = require "models.CategoryModel"
         local category = CategoryModel:find({ uuid = params.category_id })
-        if category then
+        -- Only a category of the product's own workspace.
+        if category and tostring(category.namespace_id) == tostring(record.namespace_id) then
             params.category_id = category.id
         else
             params.category_id = nil
