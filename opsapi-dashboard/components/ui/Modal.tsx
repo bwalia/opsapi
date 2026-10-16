@@ -109,6 +109,7 @@ const Modal: React.FC<ModalProps> = ({
             </div>
             {showClose && (
               <button
+                type="button"
                 onClick={onClose}
                 className="-mr-1.5 shrink-0 p-2 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded-lg transition-colors flex items-center justify-center"
                 aria-label="Close dialog"
@@ -166,10 +167,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <h3 className="text-lg font-semibold text-secondary-900 mb-2">{title}</h3>
         <p id="confirm-message" className="text-secondary-600 mb-6">{message}</p>
         <div className="flex gap-3 justify-center">
-          <Button variant="ghost" onClick={onClose} disabled={isLoading}>
+          {/* type="button": a dialog opened inside a <form> must not submit it. */}
+          <Button type="button" variant="ghost" onClick={onClose} disabled={isLoading}>
             {cancelText}
           </Button>
           <Button
+            type="button"
             variant={buttonVariants[variant]}
             onClick={onConfirm}
             isLoading={isLoading}
