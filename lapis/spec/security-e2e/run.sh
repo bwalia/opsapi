@@ -33,17 +33,33 @@ docker run -d --name sec-api-$$ --network "$NET" --network-alias sec-api -v "$W/
   -e E2E_OTP_PEEK_ENABLED=true -e E2E_OTP_PEEK_SECRET="$(cat "$W/peek_secret")" -e 'OTP_SUPPRESS_FOR_EMAIL_REGEX=@sec\.test$' \
   lapis-lapis >/dev/null
 sleep 7; docker exec -w /app sec-api-$$ lapis migrate >/dev/null 2>&1; docker restart sec-api-$$ >/dev/null; sleep 7
-# Users: alice and bob own a workspace each; carol, dave and gail sign in with a password; eve and frank are staff.
+# Users: alice and bob own a workspace each; carol, dave and gail sign in with a password; eve and frank are staff;
+# ivy and hank sign in for the workspace MFA checks (hank is a platform admin).
 HASH=$(docker exec -e PW="$(cat "$W/user_password")" sec-api-$$ /usr/local/openresty/luajit/bin/luajit -e 'print(require("bcrypt").digest(os.getenv("PW"), 10))')
 echo '{' > "$W/users.json"; sep=""
-for who in alice bob carol dave eve frank gail; do
+for who in alice bob carol dave eve frank gail ivy hank; do
   id=$(python3 -c 'import uuid; print(uuid.uuid4())')
   docker exec sec-pg-$$ psql -U postgres -d sec -qc "INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) VALUES ('$id', '$who', 'Sec', '$who@sec.test', '$who', '$HASH', true, now(), now())"
   printf '%s"%s": {"uuid": "%s", "email": "%s@sec.test"}' "$sep" "$who" "$id" "$who" >> "$W/users.json"; sep=","
 done
 echo '}' >> "$W/users.json"
+docker exec sec-pg-$$ psql -U postgres -d sec -qc "INSERT INTO user__roles (uuid, user_id, role_id, created_at, updated_at) SELECT md5(random()::text), u.id, r.id, now(), now() FROM users u, roles r WHERE u.username = 'hank' AND r.role_name = 'administrative'"
 cp "$HERE/check.py" "$W/"
 docker run --rm --network "$NET" -v "$W:/sec" python:3.12-alpine python -I /sec/check.py
+# Workspace MFA on a database that isn't migrated yet (an app such as DIY Tax Return running the new image first):
+# with MFA off everywhere eve signs in without a code; without the mfa_required column she is asked for one.
+eve_login() { docker run --rm --network "$NET" -v "$W:/sec" python:3.12-alpine python -I -c '
+import json, urllib.request
+u = json.load(open("/sec/users.json"))["eve"]; pw = open("/sec/user_password").read().strip()
+data = ("username=" + urllib.request.quote(u["email"]) + "&password=" + urllib.request.quote(pw)).encode()
+r = urllib.request.Request("http://sec-api/auth/login", data=data, method="POST",
+    headers={"Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "198.51.100.77"})
+b = json.loads(urllib.request.urlopen(r, timeout=30).read())
+print("code" if b.get("requires_2fa") else ("token" if b.get("token") else "other"))'; }
+docker exec sec-pg-$$ psql -U postgres -d sec -qc "UPDATE namespaces SET mfa_required = FALSE"
+got=$(eve_login); [ "$got" = token ] && echo "  ok   MFA off in all her workspaces: eve signs in without a code" || echo "  FAIL MFA off everywhere, eve got: $got"
+docker exec sec-pg-$$ psql -U postgres -d sec -qc "ALTER TABLE namespaces DROP COLUMN mfa_required"
+got=$(eve_login); [ "$got" = code ] && echo "  ok   database without the mfa_required column: a code is still asked" || echo "  FAIL without the column, eve got: $got"
 # OTP codes are stored hashed: no plain code for the user who just signed in.
 plain=$(docker exec sec-pg-$$ psql -U postgres -d sec -Atc "SELECT count(*) FROM admin_otp_codes o JOIN users u ON u.id = o.user_id WHERE u.uuid = '$(cat "$W/out/otp_user.txt")' AND o.code IS NOT NULL")
 total=$(docker exec sec-pg-$$ psql -U postgres -d sec -Atc "SELECT count(*) FROM admin_otp_codes o JOIN users u ON u.id = o.user_id WHERE u.uuid = '$(cat "$W/out/otp_user.txt")'")

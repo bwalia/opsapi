@@ -5,6 +5,7 @@ local UserQueries = require "queries.UserQueries"
 local Global = require "helper.global"
 local JWTHelper = require "helper.jwt-helper"
 local NamespaceQueries = require "queries.NamespaceQueries"
+local AdminCheck = require("helper.admin-check")
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local NamespaceAssignment = require "helper.namespace_assignment"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
@@ -446,7 +447,17 @@ return function(app)
         local user_record = db.select("id FROM users WHERE uuid = ?", userWithRoles.uuid)
         local user_id = user_record and user_record[1] and user_record[1].id
 
-        -- All users require 2FA — send OTP and return partial response (no JWT)
+        -- MFA: a sign-in code unless every active workspace this person belongs to has turned it off
+        -- (NamespaceQueries.mfaRequiredForUser). Platform admins can reach every workspace: always asked.
+        if not AdminCheck.isPlatformAdmin(userWithRoles) and not NamespaceQueries.mfaRequiredForUser(user_id) then
+            local device_info = ngx.req.get_headers()["user-agent"]
+            if device_info and #device_info > 255 then device_info = device_info:sub(1, 255) end
+            local body = build_login_response(self, userWithRoles, user_id, device_info)
+            UserActivity.auth("login", { method = "password", user = userWithRoles, reason = "mfa_off" })
+            return { status = 200, json = body }
+        end
+
+        -- A sign-in code: send OTP and return partial response (no JWT)
         -- Accept optional branding from the frontend (SaaS: each frontend sends its own brand)
         local brand = {
             app_name = self.params.app_name or self.params.brand_name,

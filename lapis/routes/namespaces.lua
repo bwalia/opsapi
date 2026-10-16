@@ -539,6 +539,9 @@ return function(app)
                     params.max_stores = nil
                 end
 
+                -- MFA is changed only through PUT /api/v2/namespace/security (owner only, audited).
+                params.mfa_required = nil
+
                 -- Encode settings if provided as table
                 if type(params.settings) == "table" then
                     params.settings = cjson.encode(params.settings)
@@ -562,6 +565,43 @@ return function(app)
                 })
             end)
         )
+    }))
+
+    -- Workspace security: whether members are asked for a sign-in code (MFA) when they sign in with a password.
+    -- On by default. Anyone in the workspace can read it; only the owner (or a platform admin) changes it.
+    -- Sign-in asks for a code unless every workspace a person belongs to has it off
+    -- (NamespaceQueries.mfaRequiredForUser), and always for platform admins.
+    app:match("namespace_security", "/api/v2/namespace/security", respond_to({
+        GET = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requireNamespace(function(self)
+                return success_response({
+                    mfa_required = NamespaceQueries.mfaRequired(self.namespace.id),
+                    can_change = self.is_namespace_owner == true or self.is_platform_admin == true,
+                })
+            end)
+        ),
+
+        PUT = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requireOwner(function(self)
+                local value = RequestParser.parse_request(self).mfa_required
+                if value == "true" then value = true elseif value == "false" then value = false end
+                if type(value) ~= "boolean" then
+                    return error_response(400, "mfa_required must be true or false")
+                end
+                local before = NamespaceQueries.mfaRequired(self.namespace.id)
+                local ok, err = pcall(db.update, "namespaces", { mfa_required = value, updated_at = db.raw("NOW()") },
+                    { id = self.namespace.id })
+                if not ok then
+                    ngx.log(ngx.ERR, "[namespace] mfa_required update failed: ", tostring(err))
+                    return error_response(503, "This setting isn't available until the database is updated")
+                end
+                if before ~= value then
+                    audit(self, value and "mfa.enabled" or "mfa.disabled", "namespace", self.namespace.id,
+                        { mfa_required = before }, { mfa_required = value })
+                end
+                return success_response({ mfa_required = value, can_change = true })
+            end)
+        ),
     }))
 
     -- ============================================================

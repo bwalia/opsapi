@@ -13,6 +13,7 @@ import {
 import { Button, Card, Badge } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import NamespaceFormFields, { type NamespaceFieldValues } from '@/components/namespace/NamespaceFormFields';
+import MfaSettingCard from '@/components/namespace/MfaSettingCard';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import toast from 'react-hot-toast';
@@ -110,6 +111,8 @@ export default function NamespaceSettingsPage() {
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-6">
         <NamespaceFormFields values={values} onChange={set} slug={currentNamespace.slug} disabled={isSaving} />
+
+        <MfaSettingCard />
 
         {/* Plan & limits (read-only) */}
         <Card className="p-6">

@@ -2624,6 +2624,11 @@ local _migrations = {
     -- Workspace SMTP + email templates (core).
     ['zznm1_namespace_mail_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 1),
     ['zznm2_namespace_email_templates'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 2),
+    -- Workspace setting: ask its members for a sign-in code (MFA). On by default, so every existing workspace, and
+    -- every app on OpsAPI (e.g. DIY Tax Return), keeps MFA unless its owner turns it off.
+    ['zznm3_namespace_mfa_required'] = conditional(ProjectConfig.FEATURES.CORE, function()
+        db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS mfa_required BOOLEAN NOT NULL DEFAULT TRUE")
+    end),
 
     ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
     ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),

@@ -978,4 +978,32 @@ function NamespaceQueries.createWithOwner(user_id, data)
     }
 end
 
+
+-- ---------------------------------------------------------------------------
+-- MFA (a sign-in code by email): a workspace setting, namespaces.mfa_required, on by default. Only the owner
+-- changes it (PUT /api/v2/namespace/security). Anything uncertain (no such workspace, a database not migrated
+-- yet) counts as required, so an app on an older schema (e.g. DIY Tax Return) keeps asking.
+-- ---------------------------------------------------------------------------
+
+--- Does this workspace ask its members for a sign-in code?
+function NamespaceQueries.mfaRequired(namespace_id)
+    local ok, rows = pcall(db.query, "SELECT mfa_required FROM namespaces WHERE id = ?", namespace_id)
+    if not ok or not rows or not rows[1] then return true end
+    return rows[1].mfa_required ~= false
+end
+
+--- Is this person asked for a sign-in code? Yes unless EVERY active workspace they belong to has turned it off:
+-- one sign-in covers all their workspaces (switching needs no new sign-in), so the strictest one decides.
+-- Someone in no workspace is asked. (Platform admins are always asked: routes/auth.lua.)
+function NamespaceQueries.mfaRequiredForUser(user_id)
+    if not user_id then return true end
+    local ok, rows = pcall(db.query, [[
+        SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE n.mfa_required) AS required
+        FROM namespace_members m JOIN namespaces n ON n.id = m.namespace_id
+        WHERE m.user_id = ? AND m.status = 'active' AND n.status = 'active'
+    ]], user_id)
+    if not ok or not rows or not rows[1] then return true end
+    return (tonumber(rows[1].total) or 0) == 0 or (tonumber(rows[1].required) or 0) > 0
+end
+
 return NamespaceQueries

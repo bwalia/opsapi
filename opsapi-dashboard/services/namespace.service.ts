@@ -32,6 +32,11 @@ const USER_NAMESPACE_SETTINGS_KEY = 'user_namespace_settings';
  * Namespace Service
  * Handles all namespace-related API calls and local storage management
  */
+export interface NamespaceSecurity {
+  mfa_required: boolean;
+  can_change: boolean;
+}
+
 export const namespaceService = {
   // ============================================
   // User Namespace Settings (USER-FIRST Architecture)
@@ -174,6 +179,23 @@ export const namespaceService = {
       toFormData(data as unknown as Record<string, unknown>)
     );
     return response.data.namespace;
+  },
+
+  /**
+   * Workspace security: whether members are asked for a sign-in code (MFA). Only the owner can change it.
+   */
+  async getSecurity(): Promise<NamespaceSecurity> {
+    const response = await apiClient.get<NamespaceSecurity>('/api/v2/namespace/security');
+    return response.data;
+  },
+
+  async setMfaRequired(mfa_required: boolean): Promise<NamespaceSecurity> {
+    const response = await apiClient.put<NamespaceSecurity>(
+      '/api/v2/namespace/security',
+      JSON.stringify({ mfa_required }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
   },
 
   /**

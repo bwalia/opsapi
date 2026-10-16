@@ -879,6 +879,7 @@ local Scopes = require("lib.agent.scopes")
 local BLOCKED_PATHS = {
     "^/auth", "^/api/v2/auth", "^/api/chat/agent", "api%-keys", "secret", "vault", "stripe",
     "billing", "password", "/2fa", "/otp", "/impersonat",
+    "^/api/v2/namespace/security", -- sign-in security (MFA): only ever changed by a person, on the settings page
 }
 local METHODS = { GET = true, POST = true, PUT = true, PATCH = true, DELETE = true }
 local MAX_RESULT_CHARS = 6000
