@@ -82,14 +82,16 @@ function I.invite(namespace_id, data, actor)
         actor) end
     Q.audit(namespace_id, actor, "interview_invited", "interview", r.uuid, { application = app.uuid,
         kit_version = kit_row.version })
-    local url = Activation.public_url() .. "/i/" .. token
+    -- ?api= tells the Snazzy Pro app where the API is when the candidate pastes this link
+    -- (the browser page ignores it).
+    local url = Activation.public_url() .. "/i/" .. token .. "?api=" .. ngx.escape_uri(Activation.api_url())
     return { uuid = r.uuid, url = url, app_url = pack_id and I.app_url(url) or nil, expires_at = r.link_expires_at,
         note = "Copy this link now: it isn't shown again." }
 end
 
 --- The link that opens an invite in the Snazzy Pro app (for interviews with a pack).
 function I.app_url(url)
-    return "snazzypro://interview?link=" .. ngx.escape_uri(url) .. "&api=" .. ngx.escape_uri(Activation.api_url())
+    return "snazzypro://interview?link=" .. ngx.escape_uri(url)
 end
 
 --- The row for a kit made in the Snazzy Pro app, matched by the app's kit id and

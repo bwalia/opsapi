@@ -16,6 +16,8 @@ export interface CandidateTurn { id: string; role: 'interviewer' | 'candidate'; 
 export interface CandidateView {
   state: 'invited' | 'in_progress' | 'paused' | 'completed' | 'human_requested' | 'abandoned' | 'expired' | 'withdrawn';
   role_title: string;
+  /** The invite has an interview pack: it can be taken in the Snazzy Pro app. */
+  has_pack?: boolean;
   organisation: string;
   interviewer_name: string;
   minutes: number;
