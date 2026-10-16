@@ -332,13 +332,20 @@ export const cmsService = {
     await apiClient.delete(`/api/v2/cms/webhooks/${uuid}`);
   },
 
-  // Manually deliver a webhook now (user-controlled). Returns the receiver status.
+  // Manually deliver a webhook now (user-controlled). Returns the receiver status. A delivery the website
+  // refused comes back as HTTP 502 with { error, status }: return it so the UI can say why, instead of throwing.
   async triggerWebhook(
     uuid: string,
     payload?: { event?: string; slug?: string; uuid?: string; status?: string },
   ): Promise<{ success?: boolean; status?: number; error?: string }> {
-    const response = await apiClient.post(`/api/v2/cms/webhooks/${uuid}/trigger`, toFormData(payload ?? {}));
-    return (response.data ?? {}) as { success?: boolean; status?: number; error?: string };
+    try {
+      const response = await apiClient.post(`/api/v2/cms/webhooks/${uuid}/trigger`, toFormData(payload ?? {}));
+      return (response.data ?? {}) as { success?: boolean; status?: number; error?: string };
+    } catch (e) {
+      const res = (e as { response?: { status?: number; data?: { error?: string; status?: number } } }).response;
+      if (res?.status === 502 && res.data) return { success: false, status: res.data.status, error: res.data.error };
+      throw e;
+    }
   },
 };
 
