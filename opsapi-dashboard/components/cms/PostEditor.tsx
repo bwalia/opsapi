@@ -15,6 +15,7 @@ import {
   type PostVisibility,
 } from '@/services/cms.service';
 import toast from 'react-hot-toast';
+import { explainDelivery } from '@/components/cms/WebsiteUpdateGuide';
 
 function slugify(text: string): string {
   return text
@@ -163,11 +164,15 @@ export default function PostEditor({ post }: PostEditorProps) {
           }),
         ),
       );
-      const ok = results.filter(
-        (r) => r.status === 'fulfilled' && (r.value as { success?: boolean }).success,
-      ).length;
-      if (ok > 0) toast.success(`Triggered ${ok} webhook${ok > 1 ? 's' : ''}`);
-      if (ok < selectedHooks.length) toast.error(`${selectedHooks.length - ok} webhook(s) failed`);
+      results.forEach((r, i) => {
+        const hook = webhooks.find((w) => w.uuid === selectedHooks[i]);
+        const label = hook?.name || hook?.url || 'Your website';
+        const res = r.status === 'fulfilled' ? (r.value as { success?: boolean; status?: number; error?: string }) : null;
+        const e = res?.success ? explainDelivery(res.status ?? 200) : res ? explainDelivery(res.status, res.error)
+          : { ok: false, text: 'The update could not be sent. Try again from Content → Website updates.' };
+        if (e.ok) toast.success(`${label}: updated`);
+        else toast.error(`${label}: ${e.text}`, { duration: 8000 });
+      });
     } finally {
       setTriggeringHooks(false);
       setShowWebhookModal(false);
@@ -236,15 +241,16 @@ export default function PostEditor({ post }: PostEditorProps) {
           setShowWebhookModal(false);
           leave();
         }}
-        title="Notify webhooks?"
+        title="Update your website now?"
+        description="Your post is published in OpsAPI. Your website shows it once it's updated."
       >
         <div className="space-y-4">
-          <p className="text-sm text-secondary-500">
-            The post is published. Trigger a webhook now to notify your site, or skip and
-            trigger later from Content → Webhooks (e.g. after a batch of edits).
+          <p className="text-sm text-secondary-600">
+            Pick the websites to update now, or choose Not now and update them later from
+            Content → Website updates, for example after a few more edits.
           </p>
           {webhooks.length === 0 ? (
-            <p className="text-sm text-secondary-400">No webhooks configured.</p>
+            <p className="text-sm text-secondary-400">No website connected yet.</p>
           ) : (
             <div className="flex flex-col gap-2">
               {webhooks.map((w) => (
@@ -257,7 +263,7 @@ export default function PostEditor({ post }: PostEditorProps) {
                     disabled={!w.active}
                   />
                   <span className="truncate">{w.name || w.url}</span>
-                  {!w.active && <span className="text-xs text-secondary-400">(paused)</span>}
+                  {!w.active && <span className="text-xs text-secondary-500">(paused: turn it on in Content → Website updates)</span>}
                 </label>
               ))}
             </div>
@@ -271,11 +277,11 @@ export default function PostEditor({ post }: PostEditorProps) {
               }}
               disabled={triggeringHooks}
             >
-              Skip
+              Not now
             </Button>
             <Button onClick={triggerSelected} disabled={triggeringHooks || selectedHooks.length === 0}>
               {triggeringHooks ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4" />}
-              Trigger
+              Update website
             </Button>
           </div>
         </div>

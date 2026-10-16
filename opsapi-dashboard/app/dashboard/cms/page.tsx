@@ -16,9 +16,9 @@ import {
   Newspaper,
   Files,
   Webhook,
-  Copy,
-  Check,
   Send,
+  Globe,
+  KeyRound,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
@@ -36,7 +36,6 @@ import {
 } from '@/components/ui';
 import {
   cmsService,
-  WEBHOOK_EVENTS,
   type CmsPost,
   type CmsPage,
   type CmsCategory,
@@ -45,6 +44,7 @@ import {
   type PostStatus,
 } from '@/services/cms.service';
 import { formatDate } from '@/lib/utils';
+import { DeliveryStatus, HowItWorks, WebhookSetupModal, explainDelivery } from '@/components/cms/WebsiteUpdateGuide';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -56,7 +56,7 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'pages', label: 'Pages', icon: <Files className="h-4 w-4" /> },
   { key: 'categories', label: 'Categories', icon: <FolderTree className="h-4 w-4" /> },
   { key: 'tags', label: 'Tags', icon: <TagIcon className="h-4 w-4" /> },
-  { key: 'webhooks', label: 'Webhooks', icon: <Webhook className="h-4 w-4" /> },
+  { key: 'webhooks', label: 'Website updates', icon: <Webhook className="h-4 w-4" /> },
 ];
 
 function statusVariant(status: string): 'success' | 'warning' | 'secondary' | 'info' | 'default' {
@@ -701,6 +701,13 @@ function TagsTab() {
 // ============================================================
 // Webhooks tab
 // ============================================================
+function serverError(e: unknown, fallback: string): string {
+  const msg = (e as { response?: { data?: { error?: string; message?: string } } }).response?.data;
+  const text = msg?.error || msg?.message;
+  if (text && /^url /.test(text)) return "That address can't be used: it must be a public website address (https://…).";
+  return text || fallback;
+}
+
 function WebhooksTab() {
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission('cms', 'update');
@@ -712,20 +719,20 @@ function WebhooksTab() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [events, setEvents] = useState<string[]>([...WEBHOOK_EVENTS]);
   const [active, setActive] = useState(true);
+  const [urlError, setUrlError] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<CmsWebhook | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [guide, setGuide] = useState<{ hook: CmsWebhook; justCreated: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setHooks(await cmsService.getWebhooks());
     } catch {
-      toast.error('Failed to load webhooks');
+      toast.error('Could not load your websites. Refresh the page to try again.');
     } finally {
       setLoading(false);
     }
@@ -739,44 +746,39 @@ function WebhooksTab() {
     setEditing(null);
     setName('');
     setUrl('');
-    setEvents([...WEBHOOK_EVENTS]);
     setActive(true);
+    setUrlError('');
     setShowForm(true);
   };
   const openEdit = (w: CmsWebhook) => {
     setEditing(w);
     setName(w.name ?? '');
     setUrl(w.url);
-    setEvents(String(w.events || '').split(',').map((s) => s.trim()).filter(Boolean));
     setActive(w.active);
+    setUrlError('');
     setShowForm(true);
   };
 
-  const toggleEvent = (e: string) =>
-    setEvents((prev) => (prev.includes(e) ? prev.filter((x) => x !== e) : [...prev, e]));
-
   const save = async () => {
-    if (!/^https?:\/\//.test(url.trim())) {
-      toast.error('A valid http(s) URL is required');
-      return;
-    }
-    if (events.length === 0) {
-      toast.error('Select at least one event');
+    if (!/^https?:\/\/\S+$/.test(url.trim())) {
+      setUrlError('Paste the full address, starting with https://');
       return;
     }
     setSaving(true);
     try {
+      const input = { name: name.trim() || undefined, url: url.trim(), active };
       if (editing) {
-        await cmsService.updateWebhook(editing.uuid, { name, url, events, active });
-        toast.success('Webhook updated');
+        await cmsService.updateWebhook(editing.uuid, input);
+        toast.success('Saved');
+        setShowForm(false);
       } else {
-        await cmsService.createWebhook({ name, url, events, active });
-        toast.success('Webhook created');
+        const created = await cmsService.createWebhook(input);
+        setShowForm(false);
+        setGuide({ hook: created, justCreated: true });
       }
-      setShowForm(false);
       load();
-    } catch {
-      toast.error('Failed to save webhook');
+    } catch (e) {
+      setUrlError(serverError(e, 'Could not save. Try again.'));
     } finally {
       setSaving(false);
     }
@@ -787,35 +789,26 @@ function WebhooksTab() {
     setDeleting(true);
     try {
       await cmsService.deleteWebhook(confirmDelete.uuid);
-      toast.success('Webhook deleted');
+      toast.success('Removed');
       setConfirmDelete(null);
       load();
     } catch {
-      toast.error('Failed to delete webhook');
+      toast.error('Could not remove it. Try again.');
     } finally {
       setDeleting(false);
     }
   };
 
-  const copySecret = async (w: CmsWebhook) => {
-    try {
-      await navigator.clipboard.writeText(w.secret);
-      setCopied(w.uuid);
-      setTimeout(() => setCopied(null), 1500);
-    } catch {
-      toast.error('Could not copy');
-    }
-  };
-
-  const trigger = async (w: CmsWebhook) => {
+  const updateNow = async (w: CmsWebhook) => {
     setTriggering(w.uuid);
     try {
       const res = await cmsService.triggerWebhook(w.uuid, { event: 'manual.trigger' });
-      if (res.success) toast.success(`Triggered (HTTP ${res.status ?? 200})`);
-      else toast.error(res.error || `Webhook failed${res.status ? ` (HTTP ${res.status})` : ''}`);
+      const r = res.success ? explainDelivery(res.status ?? 200) : explainDelivery(res.status, res.error);
+      if (r.ok) toast.success(r.text);
+      else toast.error(r.text, { duration: 8000 });
       load();
     } catch {
-      toast.error('Failed to trigger webhook');
+      toast.error('The update could not be sent. Try again in a moment.');
     } finally {
       setTriggering(null);
     }
@@ -823,17 +816,19 @@ function WebhooksTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-secondary-500">
-          Notify an external URL when content changes. OPSAPI POSTs a signed payload
-          (<code className="text-xs">X-Opsapi-Signature-256</code>) on the events you pick.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-secondary-900">Website updates</h2>
+          <p className="text-sm text-secondary-500">Tell your website to refresh after you publish or change content here. Developers call these webhooks.</p>
+        </div>
         {canWrite && (
-          <Button onClick={openNew}>
-            <Plus className="mr-1 h-4 w-4" /> New Webhook
+          <Button onClick={openNew} leftIcon={<Plus className="h-4 w-4" />}>
+            Add website
           </Button>
         )}
       </div>
+
+      {!loading && <HowItWorks defaultOpen={hooks.length === 0} />}
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -841,104 +836,101 @@ function WebhooksTab() {
         </div>
       ) : hooks.length === 0 ? (
         <Card>
-          <p className="py-8 text-center text-secondary-500">No webhooks yet.</p>
+          <div className="flex flex-col items-center gap-2 py-8 text-center">
+            <Globe className="h-8 w-8 text-secondary-300" aria-hidden />
+            <p className="font-medium text-secondary-900">No website connected yet</p>
+            <p className="max-w-md text-sm text-secondary-500">
+              Add your website’s update address, and you can refresh the website straight from OpsAPI whenever you publish.
+            </p>
+            {canWrite && (
+              <Button className="mt-2" onClick={openNew} leftIcon={<Plus className="h-4 w-4" />}>
+                Add website
+              </Button>
+            )}
+          </div>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {hooks.map((w) => (
-            <Card key={w.uuid} className="space-y-2">
+            <Card key={w.uuid} className="space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-secondary-900">{w.name || 'Webhook'}</span>
+                    <span className="truncate font-medium text-secondary-900">{w.name || 'Website'}</span>
                     <Badge variant={w.active ? 'success' : 'secondary'} size="sm">
-                      {w.active ? 'active' : 'paused'}
+                      {w.active ? 'On' : 'Paused'}
                     </Badge>
                   </div>
-                  <div className="truncate text-xs text-secondary-400">{w.url}</div>
+                  <div className="truncate text-xs text-secondary-500" title={w.url}>{w.url}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {canWrite && (
-                    <button onClick={() => trigger(w)} disabled={triggering === w.uuid} className="rounded p-1.5 text-secondary-500 hover:bg-primary-50 hover:text-primary-600 disabled:opacity-50" aria-label="Trigger now" title="Trigger now">
-                      {triggering === w.uuid ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </button>
-                  )}
-                  {canWrite && (
-                    <button onClick={() => openEdit(w)} className="rounded p-1.5 text-secondary-500 hover:bg-secondary-100 hover:text-primary-600" aria-label="Edit">
+                    <button onClick={() => openEdit(w)} className="rounded p-2 text-secondary-500 hover:bg-secondary-100 hover:text-primary-600" aria-label={`Edit ${w.name || 'website'}`} title="Edit">
                       <Edit className="h-4 w-4" />
                     </button>
                   )}
                   {canDelete && (
-                    <button onClick={() => setConfirmDelete(w)} className="rounded p-1.5 text-secondary-500 hover:bg-error-50 hover:text-error-600" aria-label="Delete">
+                    <button onClick={() => setConfirmDelete(w)} className="rounded p-2 text-secondary-500 hover:bg-error-50 hover:text-error-600" aria-label={`Remove ${w.name || 'website'}`} title="Remove">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {String(w.events || '').split(',').filter(Boolean).map((e) => (
-                  <Badge key={e} variant="secondary" size="sm">
-                    {e.trim()}
-                  </Badge>
-                ))}
+              <div className="text-xs">
+                <DeliveryStatus webhook={w} />
               </div>
-              <div className="flex items-center justify-between gap-2 text-xs text-secondary-400">
-                <button onClick={() => copySecret(w)} className="inline-flex items-center gap-1 hover:text-primary-600" aria-label="Copy signing secret">
-                  {copied === w.uuid ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  secret: {w.secret ? `${w.secret.slice(0, 8)}…` : '—'}
-                </button>
-                <span>
-                  {w.last_triggered_at ? `last: ${w.last_status ?? '?'} · ${formatDate(w.last_triggered_at)}` : 'never fired'}
-                </span>
+              <div className="flex flex-wrap gap-2">
+                {canWrite && (
+                  <Button size="sm" onClick={() => updateNow(w)} disabled={triggering === w.uuid || !w.active}
+                    title={w.active ? undefined : 'Turn it on (Edit) to send updates'}
+                    leftIcon={triggering === w.uuid ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}>
+                    Update website now
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => setGuide({ hook: w, justCreated: false })} leftIcon={<KeyRound className="h-4 w-4" />}>
+                  Setup guide &amp; secret key
+                </Button>
               </div>
             </Card>
           ))}
         </div>
       )}
 
-      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit webhook' : 'New webhook'}>
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit website' : 'Add a website'}
+        description={editing ? undefined : 'Next, you’ll get a secret key for it and can send a test.'}>
         <div className="space-y-4">
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Website revalidation" />
-          <Input label="URL" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.example.com/api/revalidate" />
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-secondary-700">Events</label>
-            <div className="flex flex-col gap-2">
-              {WEBHOOK_EVENTS.map((e) => (
-                <label key={e} className="flex items-center gap-2 text-sm text-secondary-800">
-                  <input type="checkbox" className="h-4 w-4" checked={events.includes(e)} onChange={() => toggleEvent(e)} />
-                  {e}
-                </label>
-              ))}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-secondary-800">
-            <input type="checkbox" className="h-4 w-4" checked={active} onChange={(e) => setActive(e.target.checked)} />
-            Active
+          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company website"
+            helperText="A name you’ll recognise, e.g. “Company website” or “Blog”." />
+          <Input label="Update address" value={url} onChange={(e) => { setUrl(e.target.value); setUrlError(''); }}
+            placeholder="https://www.example.com/api/opsapi-update" error={urlError || undefined}
+            helperText="The address your website gave you for updates. Ask your developer, or copy the “Deploy Hook” from your host (Vercel, Netlify, Cloudflare Pages)." />
+          <label className="flex items-start gap-2 text-sm text-secondary-800">
+            <input type="checkbox" className="mt-0.5 h-4 w-4" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            <span>
+              On
+              <span className="block text-xs text-secondary-500">When it’s off, it isn’t offered when you publish and can’t be sent.</span>
+            </span>
           </label>
-          {editing && (
-            <p className="text-xs text-secondary-400">
-              A signing secret was generated when this webhook was created — copy it from the card to configure the receiver.
-            </p>
-          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowForm(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              {editing ? 'Save' : 'Create'}
+            <Button onClick={save} disabled={saving} leftIcon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>
+              {editing ? 'Save' : 'Add website'}
             </Button>
           </div>
         </div>
       </Modal>
 
+      <WebhookSetupModal webhook={guide?.hook ?? null} justCreated={guide?.justCreated} onClose={() => setGuide(null)} onTested={load} />
+
       <ConfirmDialog
         isOpen={Boolean(confirmDelete)}
         onClose={() => setConfirmDelete(null)}
         onConfirm={doDelete}
-        title="Delete webhook"
-        message={`Delete the webhook to "${confirmDelete?.url}"?`}
-        confirmText="Delete"
+        title="Remove this website?"
+        message={`OpsAPI will stop sending updates to "${confirmDelete?.name || confirmDelete?.url}". Your website itself isn't changed.`}
+        confirmText="Remove"
         variant="danger"
         isLoading={deleting}
       />
