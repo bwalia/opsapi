@@ -228,4 +228,39 @@ check("the owner turns MFA back on", st == 200 and r.get("mfa_required") is True
 st, r = login("alice")
 check("...and a sign-in asks for a code again", st == 200 and r.get("requires_2fa") and not r.get("token"), (st, r))
 
+print("A9: the general workspace update changes only the profile")
+def ns_row(): return (req("GET", "/api/v2/namespace", tok=ALICE, headers=HA)[1] or {}).get("namespace") or {}
+KEEP = ("plan", "max_users", "max_stores", "status", "owner_user_id", "project_code", "allowed_redirect_origins", "settings")
+before = ns_row()
+# status last: on code without the fix, "suspended" would lock the workspace and hide what the others do.
+for field, value in (("plan", "enterprise"), ("max_users", 9999), ("max_stores", 9999), ("owner_user_id", 1),
+                     ("project_code", "all"), ("allowed_redirect_origins", "{https://evil.example}"),
+                     ("settings", {"default_landing_path": "https://evil.example"}), ("mfa_required", False),
+                     ("uuid", "x"), ("status", "suspended")):
+    st, r = req("PUT", "/api/v2/namespace", {"description": "try " + field, field: value}, ALICE, HA)
+    check(f"the owner setting {field} through the general update -> 403", st == 403, (st, r))
+st, r = req("PUT", "/api/v2/namespace?plan=enterprise&max_users=9999", {"description": "via the query string"}, ALICE, HA)
+check("...nor through the query string -> 403", st == 403, (st, r))
+after = ns_row()
+check("plan, limits, status, owner, project, password-reset origins and settings unchanged",
+      all(json.dumps(after.get(k), sort_keys=True) == json.dumps(before.get(k), sort_keys=True) for k in KEEP),
+      {k: (before.get(k), after.get(k)) for k in KEEP if before.get(k) != after.get(k)})
+st, r = req("PUT", "/api/v2/namespace", {"name": "Sec A Ltd", "description": "Profile change"}, ALICE, HA)
+check("the owner renames the workspace", st == 200 and ns_row().get("name") == "Sec A Ltd", (st, r))
+st, r = req("GET", "/api/v2/namespace/audit-logs", tok=ALICE, headers=HA)
+check("...and it is in the workspace audit log", st == 200 and "namespace.updated" in json.dumps(r), (st, str(r)[:300]))
+st, r = req("PUT", "/api/v2/namespace", {"name": "   "}, ALICE, HA)
+check("a blank name -> 400", st == 400 and ns_row().get("name") == "Sec A Ltd", (st, r))
+st, r = req("POST", "/api/v2/namespace/roles", {"role_name": "ws_editor", "display_name": "Workspace editor",
+            "permissions": {"namespace": ["read", "update"]}}, ALICE, HA)
+check("alice creates role ws_editor (namespace read+update)", st == 201, (st, r))
+ED = ((r.get("data") or {}).get("role") or r.get("role") or {}).get("id") if isinstance(r, dict) else None
+st, r = req("POST", "/api/v2/namespace/members", {"email": U["carol"]["email"], "role_ids": [ED]}, ALICE, HA)
+check("alice adds carol as workspace editor", st == 201, (st, r))
+CAROL = token("carol")
+st, r = req("PUT", "/api/v2/namespace", {"domain": "carol.example"}, CAROL, ns(CAROL, "sec-a"))
+check("an editor (not the owner) changing the domain -> 403", st == 403 and not ns_row().get("domain"), (st, r))
+st, r = req("PUT", "/api/v2/namespace", {"description": "Edited by an editor"}, CAROL, ns(CAROL, "sec-a"))
+check("...but can edit the profile", st == 200 and ns_row().get("description") == "Edited by an editor", (st, r))
+
 print("\nFAILURES:", len(fails), fails)

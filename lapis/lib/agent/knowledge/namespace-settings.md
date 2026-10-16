@@ -20,11 +20,11 @@ Edit the current workspace's profile: name, description, logo, banner and custom
 - Name is required ("Namespace name is required").
 - Only the owner can change slug or domain; for anyone else those fields are ignored. Errors: "Slug is already taken", "Domain is already in use".
 - Saving needs `namespace` update.
-- Send ONLY the fields listed below — never plan, status, max_users, max_stores, settings or ids. Unknown fields make the save fail.
+- Send ONLY the fields listed below. Anything else (plan, status, limits, settings, owner, ids, MFA) is refused with 403 and nothing is saved: plan, status and limits are the platform administrator's.
 - Only use GET /api/v2/namespace and PUT /api/v2/namespace on this page; do not call other /api/v2/namespace/* paths here.
 - Logo/Banner must be URLs (https://...); the assistant cannot upload images.
 - Never change the sign-in code (MFA) setting yourself: explain it and point to the switch on this page.
 
 ## API
 - `GET /api/v2/namespace` — current workspace (name, slug, description, logo_url, banner_url, domain, plan, status, max_users, max_stores) plus my membership and permissions
-- `PUT /api/v2/namespace {name, description, logo_url, banner_url, domain}` — save (send only changed fields)
+- `PUT /api/v2/namespace {name, description, logo_url, banner_url, business_type, domain}` — save (send only changed fields; domain and slug: owner only)

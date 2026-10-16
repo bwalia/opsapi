@@ -26,6 +26,15 @@ local RateLimit = require("middleware.rate-limit")
 local RbacGuard = require("helper.rbac-guard")
 
 -- Rate limit configs for sensitive namespace operations
+-- PUT /api/v2/namespace: what it may change. Any other column is refused there (see the route).
+local PROFILE_FIELDS = { name = true, description = true, logo_url = true, banner_url = true, business_type = true }
+local OWNER_FIELDS = { slug = true, domain = true }
+local PROTECTED_FIELDS = {
+    id = true, uuid = true, plan = true, max_users = true, max_stores = true, status = true, settings = true,
+    owner_user_id = true, project_code = true, allowed_redirect_origins = true, mfa_required = true,
+    created_at = true, updated_at = true,
+}
+
 local NS_SWITCH_LIMIT = { rate = 20, window = 60, prefix = "ns:switch" }   -- 20/min per IP
 local NS_CREATE_LIMIT = { rate = 5,  window = 60, prefix = "ns:create" }   -- 5/min per IP
 local NS_INVITE_LIMIT = { rate = 15, window = 60, prefix = "ns:invite" }   -- 15/min per IP
@@ -512,52 +521,71 @@ return function(app)
             end)
         ),
 
+        -- Only the workspace's profile changes here. Everything else has its own route and checks: plan, limits and
+        -- status (platform admin, /api/v2/namespaces/:id), the owner (transfer-ownership), password-reset origins
+        -- (/api/v2/admin/namespaces/:id/redirect-origins), MFA (/api/v2/namespace/security) and modules
+        -- (/api/v2/namespace/settings/modules). This route used to write every request field (query string
+        -- included) to the row, so a workspace owner, or any role with namespace.update, could raise their own plan
+        -- and limits, lift a suspension, or add their own site to password-reset links (an account takeover).
         PUT = AuthMiddleware.requireAuth(
             NamespaceMiddleware.requirePermission("namespace", "update", function(self)
                 local params = RequestParser.parse_request(self)
+                local owner = self.is_namespace_owner == true
 
-                -- Validate slug if changing
-                if params.slug and params.slug ~= self.namespace.slug then
-                    if not NamespaceQueries.isSlugAvailable(params.slug, self.namespace.id) then
+                local changes, refused = {}, {}
+                for field, value in pairs(params) do
+                    if PROFILE_FIELDS[field] or (OWNER_FIELDS[field] and owner) then
+                        changes[field] = value
+                    elseif OWNER_FIELDS[field] or PROTECTED_FIELDS[field] then
+                        refused[#refused + 1] = field
+                    end
+                end
+                if #refused > 0 then
+                    table.sort(refused)
+                    return error_response(403, "These can't be changed here: " .. table.concat(refused, ", ")
+                        .. (owner and "" or " (slug and domain: the workspace owner only)"))
+                end
+                if next(changes) == nil then
+                    return error_response(400, "Nothing to update: send name, description, logo_url, banner_url, "
+                        .. "business_type" .. (owner and ", slug or domain" or ""))
+                end
+
+                -- JSON null clears a field, like the empty string the dashboard sends.
+                for field, value in pairs(changes) do
+                    if value == cjson.null then changes[field] = "" end
+                end
+                if changes.name ~= nil and (type(changes.name) ~= "string" or changes.name:match("^%s*$")) then
+                    return error_response(400, "The workspace name can't be empty")
+                end
+                for field, value in pairs(changes) do
+                    if type(value) ~= "string" then return error_response(400, field .. " must be text") end
+                end
+                if changes.slug and changes.slug ~= self.namespace.slug then
+                    if not NamespaceQueries.isSlugAvailable(changes.slug, self.namespace.id) then
                         return error_response(400, "Slug is already taken")
                     end
                 end
-
-                -- Validate domain if changing
-                if params.domain and params.domain ~= self.namespace.domain then
-                    if not NamespaceQueries.isDomainAvailable(params.domain, self.namespace.id) then
+                if changes.domain and changes.domain ~= "" and changes.domain ~= self.namespace.domain then
+                    if not NamespaceQueries.isDomainAvailable(changes.domain, self.namespace.id) then
                         return error_response(400, "Domain is already in use")
                     end
                 end
-
-                -- Only owners can change certain fields
-                if not self.is_namespace_owner then
-                    params.slug = nil
-                    params.domain = nil
-                    params.plan = nil
-                    params.max_users = nil
-                    params.max_stores = nil
-                end
-
-                -- MFA is changed only through PUT /api/v2/namespace/security (owner only, audited).
-                params.mfa_required = nil
-
-                -- Encode settings if provided as table
-                if type(params.settings) == "table" then
-                    params.settings = cjson.encode(params.settings)
-                end
-
-                if params.business_type ~= nil then
-                    local bt, bt_err = NamespaceQueries.businessType(params.business_type)
+                if changes.business_type ~= nil then
+                    local bt, bt_err = NamespaceQueries.businessType(changes.business_type)
                     if bt == nil then return error_response(400, bt_err) end
-                    params.business_type = bt
+                    changes.business_type = bt
                 end
 
-                local ok, namespace = pcall(NamespaceQueries.update, self.namespace.id, params)
+                local old = {}
+                for field in pairs(changes) do old[field] = self.namespace[field] end
 
+                local ok, namespace = pcall(NamespaceQueries.update, self.namespace.id, changes)
                 if not ok then
                     return error_response(500, "Failed to update namespace", namespace)
                 end
+
+                changes.updated_at = nil
+                audit(self, "namespace.updated", "namespace", self.namespace.id, old, changes)
 
                 return success_response({
                     message = "Namespace updated successfully",
