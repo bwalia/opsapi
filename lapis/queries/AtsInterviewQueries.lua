@@ -89,7 +89,22 @@ end
 
 --- The link that opens an invite in the Snazzy Pro app (for interviews with a pack).
 function I.app_url(url)
-    return "snazzypro://interview?link=" .. ngx.escape_uri(url)
+    return "snazzypro://interview?link=" .. ngx.escape_uri(url) .. "&api=" .. ngx.escape_uri(Activation.api_url())
+end
+
+--- The row for a kit made in the Snazzy Pro app, matched by the app's kit id and
+-- version (kept as sent: it was approved in the app by a person), or created.
+-- @return row, external_kit_id
+function I.desktop_kit_row(namespace_id, kit, actor)
+    local kit_ext = kit.id or ("title:" .. kit.title)
+    local kit_row = db.select("* FROM ats_kits WHERE namespace_id = ? AND external_kit_id = ? AND version = ? LIMIT 1",
+        namespace_id, kit_ext, kit.version or 0)[1]
+    if not kit_row then
+        kit_row = db.insert("ats_kits", { namespace_id = namespace_id, title = kit.title, kit = J.encode(kit),
+            version = kit.version or 0, approved_at = kit.approved_at or db.NULL, approved_by = kit.approved_by,
+            external_kit_id = kit_ext, source = "snazzy_desktop", created_by_uuid = actor }, { returning = "*" })[1]
+    end
+    return kit_row, kit_ext
 end
 
 I.MAX_BULK = 500
@@ -97,7 +112,8 @@ I.MAX_BULK = 500
 --- Invites many candidates to one kit (and pack) at once: each gets their own
 -- link, so they can all interview in parallel. Without job_uuid, the kit's open
 -- job is used (or made). One candidate's problem doesn't stop the others.
--- data: {kit_uuid, pack_uuid?, job_uuid?, expires_in_days?, candidates = {{name, email, reference}}}
+-- data: {kit_uuid | kit (the app's approved RoleKit), pack_uuid?, job_uuid?, expires_in_days?,
+--        candidates = {{name, email, reference}}}
 -- @return {invited, failed, results = {{name, email, uuid, url, app_url | error}}} | nil, err, status
 function I.invite_many(namespace_id, data, actor)
     local blocked = Activation.require_active(namespace_id)
@@ -105,7 +121,17 @@ function I.invite_many(namespace_id, data, actor)
     local list = type(data.candidates) == "table" and data.candidates or {}
     if #list == 0 then return nil, "Add at least one candidate." end
     if #list > I.MAX_BULK then return nil, ("At most %d candidates at a time."):format(I.MAX_BULK) end
-    local kit_row = Q.kit_row(namespace_id, data.kit_uuid)
+    local kit_row
+    if type(data.kit) == "table" then
+        -- A kit from the Snazzy Pro app (approved there by a person): checked again here.
+        local kit = Kit.normalise(data.kit)
+        if not kit.approved_at or not Kit.can_approve(kit) then
+            return nil, "The kit must be approved, with no errors, before inviting candidates."
+        end
+        kit_row = I.desktop_kit_row(namespace_id, kit, actor)
+    else
+        kit_row = Q.kit_row(namespace_id, data.kit_uuid)
+    end
     if not kit_row then return nil, "Kit not found" end
     if not v(kit_row.approved_at) then return nil, "Approve the kit before inviting candidates." end
     local _, perr = require("queries.AtsPackQueries").id_for_invite(namespace_id, data.pack_uuid)
@@ -146,7 +172,7 @@ function I.invite_many(namespace_id, data, actor)
     end
     Q.audit(namespace_id, actor, "interviews_bulk_invited", "kit", kit_row.uuid, { invited = invited,
         failed = failed })
-    return { invited = invited, failed = failed, job_uuid = job_uuid, results = results,
+    return { invited = invited, failed = failed, job_uuid = job_uuid, kit_uuid = kit_row.uuid, results = results,
         note = "Copy these links now: they aren't shown again." }
 end
 
@@ -493,15 +519,7 @@ end
 -- rec: Interop.parse() output. actor: who sent it ("token:<uuid>" or a user uuid).
 function I.import(namespace_id, rec, actor, source)
     local kit = rec.kit
-    local kit_ext = kit.id or ("title:" .. kit.title)
-    -- The kit version (kept as sent: it was approved in the app by a person).
-    local kit_row = db.select("* FROM ats_kits WHERE namespace_id = ? AND external_kit_id = ? AND version = ? LIMIT 1",
-        namespace_id, kit_ext, kit.version or 0)[1]
-    if not kit_row then
-        kit_row = db.insert("ats_kits", { namespace_id = namespace_id, title = kit.title, kit = J.encode(kit),
-            version = kit.version or 0, approved_at = kit.approved_at or db.NULL, approved_by = kit.approved_by,
-            external_kit_id = kit_ext, source = "snazzy_desktop", created_by_uuid = actor }, { returning = "*" })[1]
-    end
+    local kit_row, kit_ext = I.desktop_kit_row(namespace_id, kit, actor)
     -- The job: matched by the kit's id, else by title, else created.
     local job = db.select(
         "* FROM ats_jobs WHERE namespace_id = ? AND external_kit_id = ? AND deleted_at IS NULL LIMIT 1",
