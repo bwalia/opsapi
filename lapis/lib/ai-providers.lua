@@ -271,17 +271,51 @@ function Providers.save(ns, actor, b, existing)
     end
     if next(errors) then return nil, errors end
     row.updated_by, row.updated_at = actor, db.raw("NOW()")
+    local saved
     if existing then
         db.update("namespace_ai_providers", row, { id = existing.id })
-        return Providers.get(ns, existing.uuid)
+        saved = Providers.get(ns, existing.uuid)
+    else
+        row.namespace_id, row.created_by = ns, actor
+        local ok, res = pcall(db.insert, "namespace_ai_providers", row, { returning = "*" })
+        if not ok then
+            if tostring(res):find("duplicate key", 1, true) then return nil, { name = "already used in this workspace" } end
+            error(res)
+        end
+        saved = res[1]
     end
-    row.namespace_id, row.created_by = ns, actor
-    local ok, res = pcall(db.insert, "namespace_ai_providers", row, { returning = "*" })
-    if not ok then
-        if tostring(res):find("duplicate key", 1, true) then return nil, { name = "already used in this workspace" } end
-        error(res)
+    -- The assistant's model, or what it runs on, changed: it has to take a tool call, or every Ask AI turn fails.
+    local now_opts = decode(saved.options)
+    if now_opts.assistant == true and (decode(existing and existing.options).assistant ~= true
+            or b.default_model ~= nil or b.base_url ~= nil or b.secret ~= nil or b.provider_type ~= nil) then
+        local ok, why = Providers.assistant_ok(ns, saved)
+        if not ok then
+            now_opts.assistant = false
+            db.update("namespace_ai_providers", { options = cjson.encode(now_opts) }, { id = saved.id })
+            return nil, { options = saved.name .. " can't run the AI assistant (" .. why .. "). It needs a chat "
+                .. "model that can call tools, not a speech, image or embedding model; the rest was saved." }
+        end
     end
-    return res[1]
+    return saved
+end
+
+-- A tool the assistant check offers; answering in text instead of calling it is fine too.
+local PROBE_TOOL = { type = "function", ["function"] = { name = "ping", description = "Call this to answer.",
+    parameters = { type = "object", properties = {} } } }
+
+--- Can this provider run the assistant? One small request with a tool: a provider that refuses it (a model
+-- without tool calling, a wrong model name, a bad key) can't. Timeouts, rate limits and server errors say
+-- nothing about the model, so they don't count against it.
+function Providers.assistant_ok(ns, row)
+    local msg, _, attempts = Providers.chat(ns, { { provider_uuid = row.uuid } },
+        { { role = "user", content = "Call the ping tool." } }, { PROBE_TOOL },
+        { feature = "provider_test", max_tokens = 64, timeout_ms = 30000 })
+    if msg then return true end
+    local last = attempts and attempts[#attempts] or {}
+    local status = tonumber(last.status)
+    if status and status >= 400 and status < 500 and status ~= 408 and status ~= 429 then return nil, last.error end
+    if last.error and not status and last.error:find(" has no model set", 1, true) then return nil, last.error end
+    return true
 end
 
 function Providers.secret(row)
