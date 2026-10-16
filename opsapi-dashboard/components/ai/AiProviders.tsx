@@ -58,16 +58,17 @@ export default function AiProviders({ canEdit, onLoaded }: { canEdit: boolean; o
     } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(null); void reload(); }
   };
 
-  // At most one assistant model: switch the others off first, then this one on.
+  // At most one assistant model. This one goes on first: the server refuses a model that can't call tools,
+  // and the current assistant must stay in place when it does.
   const setAssistant = async (p: AiProvider, on: boolean) => {
     setBusy(p.uuid);
     try {
+      await aiProvidersService.save({ options: { ...providerOptions(p), assistant: on } }, p.uuid);
       if (on) {
         for (const o of (list || []).filter((x) => x.uuid !== p.uuid && isAssistant(x))) {
           await aiProvidersService.save({ options: { ...providerOptions(o), assistant: false } }, o.uuid);
         }
       }
-      await aiProvidersService.save({ options: { ...providerOptions(p), assistant: on } }, p.uuid);
       toast.success(on ? `${p.name} now runs the AI assistant` : 'The AI assistant uses the server’s default model');
     } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(null); void reload(); }
   };

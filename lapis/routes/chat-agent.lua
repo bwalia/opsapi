@@ -386,6 +386,15 @@ return function(app)
             ngx.log(ngx.ERR, "[chat-agent] run ", job.run_uuid, ": ", tostring(err))
             status = "error"
             reply = err == Llm.LIMIT_MESSAGE and err or "Sorry — the assistant is unavailable right now. Please try again."
+            -- The workspace's own model refusing the request won't pass by trying again: say which and where to fix it.
+            local http = tonumber(tostring(err):match("HTTP (%d%d%d)"))
+            if job.cfg and job.cfg.workspace_provider and http and http >= 400 and http < 500 and http ~= 408
+                    and http ~= 429 then
+                reply = "Sorry — the AI model this workspace chose for the assistant"
+                    .. (job.cfg.label and (" (" .. job.cfg.label .. ")") or "") .. " refused the request: "
+                    .. require("lib.ai-providers").reason(err, http)
+                    .. ". An owner can pick another under Workspace → AI providers."
+            end
         end
 
         local pending = result and result.pending

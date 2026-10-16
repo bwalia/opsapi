@@ -430,6 +430,9 @@ class Http(BaseHTTPRequestHandler):
             if p == "/v1/chat/completions":
                 STATE["log"].append({"messages": b.get("messages"), "tools": [t["function"]["name"] for t in b.get("tools") or []],
                                      "model": b.get("model")})
+                if b.get("model") == "tts-only" and b.get("tools"):  # a speech model, as Gemini answers for one
+                    return self.send(400, {"error": {"code": 400, "message": "Function calling is not enabled for this model",
+                                                     "status": "INVALID_ARGUMENT"}})
                 return self.send(200, model_reply(b))
             if p == "/down/v1/chat/completions":
                 return self.send(503, {"error": {"message": "overloaded"}})

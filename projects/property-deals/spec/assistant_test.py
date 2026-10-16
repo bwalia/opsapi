@@ -88,4 +88,28 @@ acts2 = actions(run2)
 check("a builder asking is refused by the API (403)", acts2 and "403" in str(acts2[0].get("error")), acts2)
 check("...and nothing was made", sql(f"SELECT COUNT(*) FROM property_deals_properties WHERE namespace_id = {ns_id}") == before)
 
+# A model that can't call tools (here a speech model, refused the way Gemini refuses one) can't become the
+# assistant: the save says why and the model already running it stays.
+def assistant_flags():
+    return sql(f"""SELECT name || '=' || COALESCE(options->>'assistant', 'false') FROM namespace_ai_providers
+                   WHERE namespace_id = {ns_id} ORDER BY name""")
+
+
+speech = data(call("POST", API + "/api/v2/namespace/ai-providers", "owner_b", W, {"name": "Speech model", "provider_type":
+              "openai_compatible", "base_url": M + "/v1", "default_model": "tts-only", "secret": "sk-local",
+              "is_local": True}), 201, "a speech model is added")
+res = call("PUT", API + f"/api/v2/namespace/ai-providers/{speech.get('uuid')}", "owner_b", W, {"options": {"assistant": True}})
+check("...but can't be made the assistant (422, says it needs a model that can call tools)",
+      res[0] == 422 and "can't run the AI assistant" in str(res[1]) and "call tools" in str(res[1]), res)
+check("...and the office model still runs the assistant", assistant_flags() == ["Office model=true", "Speech model=false"],
+      assistant_flags())
+
+# A workspace already stuck with such a model (set before this check existed) is told which one refused and where to
+# change it, instead of "the assistant is unavailable, try again".
+sql(f"UPDATE namespace_ai_providers SET options = jsonb_build_object('assistant', name = 'Speech model') WHERE namespace_id = {ns_id}")
+_, conv3 = ask("operator_s", "How many deals do we have?")
+reply3 = (conv3.get("turns") or [{}])[-1].get("content", "")
+check("a stuck workspace hears which model refused and where to change it",
+      "(Speech model) refused the request" in reply3 and "Workspace → AI providers" in reply3, reply3)
+
 sys.exit(finish())
