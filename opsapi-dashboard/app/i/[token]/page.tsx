@@ -136,6 +136,17 @@ export default function CandidateInterviewPage() {
         {phase === 'notice' && view && (
           <section className={`space-y-4 rounded-xl p-5 ${panel}`} aria-labelledby="notice-title">
             <h2 id="notice-title" className="text-xl font-semibold">Before you start</h2>
+            {view.has_pack && (
+              <p className="rounded-lg border border-current p-3 text-sm">
+                You can take this interview here, or in the Snazzy Pro app on a Mac, which shows the interview deck and
+                lets you answer by voice.{' '}
+                <a className="font-semibold underline"
+                  href={`snazzypro://interview?link=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}>
+                  Open in Snazzy Pro
+                </a>{' '}
+                (<a className="underline" href="https://snazzy.pro/download.html">get it free</a>). The link works on one device.
+              </p>
+            )}
             {view.notice.split('\n\n').map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}
             <fieldset className="space-y-2">
               <legend className="font-semibold">Do you need any adjustments?</legend>

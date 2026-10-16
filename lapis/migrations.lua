@@ -2698,6 +2698,7 @@ local _migrations = {
     -- Hiring: tables, then the RBAC modules + menu (migrations/ats-system.lua)
     ['zzats1_tables'] = conditional_array(ProjectConfig.FEATURES.ATS, ats_migrations, 1),
     ['zzats2_modules_menu'] = conditional_array(ProjectConfig.FEATURES.ATS, ats_migrations, 2),
+    ['zzats3_packs'] = conditional_array(ProjectConfig.FEATURES.ATS, ats_migrations, 3),
     ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
     -- My Tasks sidebar item, right after Dashboard (migrations/my-tasks.lua)
     ['zzmt1_my_tasks_menu'] = conditional_array(ProjectConfig.FEATURES.KANBAN, my_tasks_migrations, 1),

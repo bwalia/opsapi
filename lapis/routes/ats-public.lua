@@ -9,11 +9,18 @@
       POST /api/v2/public/ats/interviews/:token/event      {type, text?}: repeat | rephrase | pause | resume |
                                                            person | withdraw | adjustment
       POST /api/v2/public/ats/interviews/:token/self-id    {answers}: voluntary, after the interview
+      POST /api/v2/public/ats/interviews/:token/pack       {device_id}: the Snazzy Pro app redeems its invite for
+                                                           the interview pack (signed S3 link + key); the
+                                                           first device keeps the invite
 
     Snazzy Pro desktop app (Authorization: Bearer snz_<token>, from Hiring › Settings):
       GET  /api/v2/public/ats/integration/ping             {namespace, active}
       GET  /api/v2/public/ats/integration/kits             approved kits, as the app's RoleKit JSON
       POST /api/v2/public/ats/integration/interviews       an InterviewSession or a .snazzy_interview file (≤ 1 MB)
+      POST /api/v2/public/ats/integration/packs            {title, kit_uuid?, size_bytes, sha256, key}:
+                                                           a signed S3 upload link for the encrypted pack
+      POST /api/v2/public/ats/integration/packs/:uuid/complete
+      POST /api/v2/public/ats/integration/invites          {kit_uuid, pack_uuid?, candidates[], expires_in_days?}
 
     Stripe:
       POST /api/v2/public/ats/billing/webhook              activation events (signature checked, idempotent)
@@ -23,6 +30,8 @@ local J = require("lib.ats.json")
 local RateLimit = require("middleware.rate-limit")
 local Q = require("queries.AtsQueries")
 local I = require("queries.AtsInterviewQueries")
+local Packs = require("queries.AtsPackQueries")
+local Engine = require("lib.ats.engine")
 local Activation = require("lib.ats.activation")
 local Interop = require("lib.ats.interop")
 
@@ -130,6 +139,11 @@ function M.routes(app)
     app:post("/api/v2/public/ats/interviews/:token/answer", action(I.answer, 30))
     app:post("/api/v2/public/ats/interviews/:token/event", action(I.event, 30))
     app:post("/api/v2/public/ats/interviews/:token/self-id", action(I.self_id, 5))
+    -- The invite link is the credential: no passcode. Rate-limited like the others.
+    app:post("/api/v2/public/ats/interviews/:token/pack", action(function(r, b)
+        local s = type(r.session) == "table" and r.session or J.decode(tostring(r.session or "")) or {}
+        return Packs.for_invite(r, b.device_id, Engine.is_finished(s))
+    end, 10))
 
     -- MARK: Snazzy Pro desktop integration
 
@@ -164,6 +178,29 @@ function M.routes(app)
         local res, ierr = I.import(t.namespace_id, rec, "token:" .. t.uuid, "snazzy_desktop")
         if not res then return fail(422, ierr) end
         return ok(res, res.created and 201 or 200)
+    end)
+
+    -- Interview packs from the recruiter's Mac: encrypted there, uploaded once to S3.
+    local function integration_body(self, fn, max)
+        local t, err = integration(self)
+        if not t then return err end
+        local b, _, berr = body(max)
+        if not b then return fail(berr == "too_large" and 413 or 400, "Bad request.") end
+        local res, ferr, status = fn(t, b)
+        if not res then return fail(status or (tostring(ferr):find("not found", 1, true) and 404 or 422), ferr) end
+        return ok(res, 201)
+    end
+    app:post("/api/v2/public/ats/integration/packs", function(self)
+        return integration_body(self, function(t, b) return Packs.create(t.namespace_id, b, "token:" .. t.uuid) end)
+    end)
+    app:post("/api/v2/public/ats/integration/packs/:uuid/complete", function(self)
+        return integration_body(self, function(t)
+            return Packs.complete(t.namespace_id, self.params.uuid, "token:" .. t.uuid)
+        end)
+    end)
+    app:post("/api/v2/public/ats/integration/invites", function(self)
+        return integration_body(self, function(t, b) return I.invite_many(t.namespace_id, b, "token:" .. t.uuid) end,
+            512 * 1024)
     end)
 
     -- MARK: Stripe activation webhook

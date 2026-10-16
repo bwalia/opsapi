@@ -27,6 +27,17 @@ function A.public_url()
     return ((env("ATS_PUBLIC_URL") or env("FRONTEND_URL") or "http://localhost:8039"):gsub("/+$", ""))
 end
 
+--- The API's own address, for the Snazzy Pro app (ATS_API_URL or OPSAPI_PUBLIC_URL,
+-- else the address this request came in on).
+function A.api_url()
+    local u = env("ATS_API_URL") or env("OPSAPI_PUBLIC_URL")
+    if not u and ngx and ngx.var and ngx.var.http_host then
+        local scheme = ngx.var.http_x_forwarded_proto or ngx.var.scheme or "https"
+        u = scheme .. "://" .. ngx.var.http_host
+    end
+    return ((u or ""):gsub("/+$", ""))
+end
+
 local function grace_days()
     return tonumber(env("ATS_PAST_DUE_GRACE_DAYS")) or 7
 end
