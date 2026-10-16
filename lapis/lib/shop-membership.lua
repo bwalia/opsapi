@@ -1,6 +1,6 @@
 -- luacheck: max line length 140
 --[[
-    VIP price-lock membership — pure rules (no nginx, no DB)
+    Trade membership (price lock + trade discount) — pure rules (no nginx, no DB)
     ========================================================
     Every number the shop shows or charges for membership comes from here, so
     the rules are unit tested in one place (spec/shop-membership-test.lua):
@@ -11,6 +11,8 @@
       spots_left   cap − taken (never negative, never padded)
       lock_until   quote validity for a member's quote (lock_days)
       refund_credit  membership fees → order credit on a qualifying order
+      discount_pct   trade discount % for a member's tier (founding / standard)
+      apply_discount trade discount against an order subtotal, VAT recomputed
       apply_credits  credits against an order subtotal, VAT recomputed
 
     Money is integer pence. Settings (per namespace, admin-editable) default to
@@ -32,7 +34,11 @@ M.DEFAULTS = {
     early_access_hours = 24,
     long_lead_days = 21,                -- advisor may mention membership at or above this lead time
     terms_version = "2026-10",
+    founding_discount_pct = 5,          -- first founding_cap Trade members: % off catalogue orders (ex VAT)
+    standard_discount_pct = 2.5,        -- every Trade member after them
 }
+
+M.MAX_DISCOUNT_PCT = 50
 
 M.LOCK_DAYS_ALLOWED = { [90] = true, [120] = true }
 M.INTERVALS = { month = true, year = true }
@@ -55,6 +61,11 @@ function M.settings(row)
     end
     s.vat_rate = tonumber(s.vat_rate) or M.DEFAULTS.vat_rate
     s.uplift_pct = tonumber(s.uplift_pct) or M.DEFAULTS.uplift_pct
+    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct" }) do
+        local n = tonumber(s[k]) or M.DEFAULTS[k]
+        if n < 0 or n > M.MAX_DISCOUNT_PCT then n = M.DEFAULTS[k] end
+        s[k] = n
+    end
     if not M.LOCK_DAYS_ALLOWED[s.lock_days] then s.lock_days = M.DEFAULTS.lock_days end
     return s
 end
@@ -90,6 +101,15 @@ function M.validate_update(body)
         local n = tonumber(body.uplift_pct)
         if not n or n < 0 or n > 500 then return nil, "uplift_pct must be between 0 and 500" end
         out.uplift_pct = n
+    end
+    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct" }) do
+        if body[k] ~= nil then
+            local n = tonumber(body[k])
+            if not n or n < 0 or n > M.MAX_DISCOUNT_PCT then
+                return nil, k .. " must be a number between 0 and " .. M.MAX_DISCOUNT_PCT
+            end
+            out[k] = n
+        end
     end
     if body.vat_rate ~= nil then
         local n = tonumber(body.vat_rate)
@@ -151,6 +171,30 @@ function M.refund_credit(s, order_subtotal_net, fees_paid_net, already_credited)
     if s.refund_threshold_minor <= 0 then return 0 end
     local due = math.floor(tonumber(fees_paid_net) or 0) - math.floor(tonumber(already_credited) or 0)
     return math.max(0, due)
+end
+
+--- Trade discount % for a tier ("founding" | "standard").
+function M.discount_pct(s, tier)
+    if tier == "founding" then return s.founding_discount_pct end
+    return s.standard_discount_pct
+end
+
+--- Trade discount on an order subtotal (ex VAT), in pence.
+-- Returns { discount_minor, subtotal_minor, vat_minor, shipping_minor, total_minor }.
+-- VAT is recomputed on the reduced subtotal; shipping is never discounted.
+function M.apply_discount(subtotal_net, vat_rate, shipping_minor, pct)
+    subtotal_net = math.floor(tonumber(subtotal_net) or 0)
+    shipping_minor = math.floor(tonumber(shipping_minor) or 0)
+    pct = tonumber(pct) or 0
+    if pct < 0 then pct = 0 end
+    if pct > M.MAX_DISCOUNT_PCT then pct = M.MAX_DISCOUNT_PCT end
+    local discount = math.max(0, math.min(subtotal_net, round(subtotal_net * pct / 100)))
+    local net = subtotal_net - discount
+    local vat = round(net * (tonumber(vat_rate) or 0))
+    return {
+        discount_minor = discount, subtotal_minor = net, vat_minor = vat,
+        shipping_minor = shipping_minor, total_minor = net + vat + shipping_minor,
+    }
 end
 
 --- Apply available credits (oldest first) to an order subtotal (ex VAT).
