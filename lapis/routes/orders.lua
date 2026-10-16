@@ -5,6 +5,10 @@ local db = require("lapis.db")
 local Global = require("helper.global")
 local cjson = require("cjson")
 
+-- PUT /api/v2/orders/:id may change only these (see the handler).
+local ORDER_UPDATABLE = { "customer_notes", "internal_notes", "shipping_address", "billing_address", "tags",
+    "tracking_number", "tracking_url", "carrier", "estimated_delivery", "estimated_delivery_date" }
+
 -- Configure cjson to encode empty tables as arrays
 cjson.encode_empty_table_as_object(false)
 
@@ -649,8 +653,12 @@ return function(app)
                 end
             end
 
-            self.params.updated_at = require("helper.global").getCurrentTimestamp()
-            return { json = OrderQueries.update(order_id, self.params), status = 200 }
+            -- Only the order's notes, addresses and delivery tracking change here. Status and payment go through
+            -- PUT /api/v2/orders/:id/status (validated, audited); totals, store, customer, tenant and ids never change.
+            local Global = require("helper.global")
+            local changes = Global.pick(self.params, ORDER_UPDATABLE)
+            changes.updated_at = Global.getCurrentTimestamp()
+            return { json = OrderQueries.update(order_id, changes), status = 200 }
         end),
 
         DELETE = AuthMiddleware.requireAuth(function(self)

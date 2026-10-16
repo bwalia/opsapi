@@ -52,6 +52,15 @@ return function(app)
                 if not variant then
                     return { json = { error = "Variant not found" }, status = 404 }
                 end
+                -- The variant must be an option of THIS product: its price becomes the cart price, which checkout,
+                -- payments and the Stripe webhook charge. A cheap variant of another product used to make an
+                -- expensive product cost that much.
+                if tostring(variant.product_id) ~= tostring(product.id) then
+                    return { json = { error = "That variant isn't an option of this product" }, status = 400 }
+                end
+                if variant.is_active == false then
+                    return { json = { error = "That variant isn't available" }, status = 400 }
+                end
                 if variant.price then
                     item_price = variant.price
                 end

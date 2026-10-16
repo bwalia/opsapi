@@ -3,8 +3,15 @@ local CategoryQueries = require "queries.CategoryQueries"
 local AuthMiddleware = require "middleware.auth"
 local NamespaceMiddleware = require "middleware.namespace"
 local StoreQueries = require "queries.StoreQueries"
+local StoreModel = require "models.StoreModel"
 
 return function(app)
+    -- The category's store (by integer id) must belong to the signed-in seller. nil/false means deny.
+    local function owns_category_store(self)
+        if not self.category or not self.category.store_id then return true end
+        local store = StoreModel:find({ id = self.category.store_id })
+        return store and store.user_id == self.user_data.internal_id
+    end
     app:match("categories", "/api/v2/categories", respond_to({
         -- optionalNamespace: scoped to the tenant when a namespace header is present
         -- (dashboard), all categories for anonymous marketplace browse.
@@ -76,22 +83,16 @@ return function(app)
             return { json = self.category, status = 200 }
         end,
         PUT = AuthMiddleware.requireRole("seller", function(self)
-            -- Verify store ownership through category
-            if self.category.store_id then
-                local store = StoreQueries.showByOwner(self.category.store_id, self.user_data.internal_id)
-                if not store then
-                    return { json = { error = "Access denied - not your store" }, status = 403 }
-                end
+            if not owns_category_store(self) then
+                return { json = { error = "Access denied - not your store" }, status = 403 }
             end
-            return { json = CategoryQueries.update(self.params.id, self.params), status = 200 }
+            local category, err = CategoryQueries.update(self.params.id, self.params)
+            if not category then return { json = { error = err or "Category not found" }, status = err and 400 or 404 } end
+            return { json = category, status = 200 }
         end),
         DELETE = AuthMiddleware.requireRole("seller", function(self)
-            -- Verify store ownership through category
-            if self.category.store_id then
-                local store = StoreQueries.showByOwner(self.category.store_id, self.user_data.internal_id)
-                if not store then
-                    return { json = { error = "Access denied - not your store" }, status = 403 }
-                end
+            if not owns_category_store(self) then
+                return { json = { error = "Access denied - not your store" }, status = 403 }
             end
             return { json = CategoryQueries.destroy(self.params.id), status = 200 }
         end)

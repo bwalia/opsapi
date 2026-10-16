@@ -6,15 +6,16 @@ local cJson = require "cjson"
 
 local SecretQueries = {}
 
-function SecretQueries.create(secretData)
+local FIELDS = { "name", "description", "secret" }
+
+function SecretQueries.create(params)
+    local secretData = Global.pick(params, FIELDS)
     Validation.createSecret(secretData)
     if secretData.secret then
         local encodedSecret = Global.encryptSecret(secretData.secret)
         secretData.secret = encodedSecret
     end
-    if secretData.uuid == nil then
-        secretData.uuid = Global.generateUUID()
-    end
+    secretData.uuid = Global.generateUUID()
     local secret = Secrets:create(secretData, {
         returning = "*"
     })
@@ -51,14 +52,15 @@ function SecretQueries.show(id)
         secret.id = secret.uuid
         return secret
     end
-    return {}
+    return nil
 end
 
-function SecretQueries.update(id, params)
+function SecretQueries.update(id, request)
     local secret = Secrets:find({
         uuid = id
     })
-    params.id = secret.id
+    if not secret then return nil end
+    local params = Global.pick(request, FIELDS)
     if params.secret == "********" then
         params.secret = nil
     end
@@ -77,6 +79,7 @@ function SecretQueries.destroy(id)
     local secret = Secrets:find({
         uuid = id
     })
+    if not secret then return nil end
     return secret:delete()
 end
 

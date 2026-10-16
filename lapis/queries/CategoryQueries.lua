@@ -81,11 +81,27 @@ function CategoryQueries.show(id)
     return CategoryModel:find({ uuid = id })
 end
 
-function CategoryQueries.update(id, params)
+-- What an update may change: never the store, the tenant or ids. A parent must be a category of the same store.
+local UPDATABLE = { "name", "description", "slug", "image_url", "sort_order", "is_active", "meta_title",
+    "meta_description", "parent_id" }
+
+function CategoryQueries.update(id, request)
     local record = CategoryModel:find({ uuid = id })
     if not record then return nil end
-    params.id = record.id
-    return record:update(params, { returning = "*" })
+    local params = Global.pick(request, UPDATABLE)
+    if params.parent_id ~= nil and params.parent_id ~= "" and params.parent_id ~= db.NULL then
+        local parent = CategoryModel:find({ id = tonumber(params.parent_id) or -1 })
+            or CategoryModel:find({ uuid = tostring(params.parent_id) })
+        if not parent or parent.store_id ~= record.store_id or parent.id == record.id then
+            return nil, "parent_id must be another category of the same store"
+        end
+        params.parent_id = parent.id
+    elseif params.parent_id == "" then
+        params.parent_id = db.NULL
+    end
+    if next(params) == nil then return record end
+    record:update(params, { returning = "*" })
+    return record
 end
 
 function CategoryQueries.destroy(id)
