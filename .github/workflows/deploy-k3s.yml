@@ -4,7 +4,11 @@ name: Build and Deploy OpsAPI to K3s
 # deploy-docker-self-hosted have been taken off push:main so nothing else
 # fires). Mirrors the monitoring-go (Beacon) deploy-k3s.yml pattern:
 #
-#   push to main    → build → smoke → dns → wslproxy → deploy to `int`
+#   push to main    → build → smoke → seed `int` in the workstation Ring Promoter
+#                     (workstation-opsapi + workstation-opsapi-ui), which deploys
+#                     it by dispatching this workflow (DEPLOYMENT_TYPE=deploy) and
+#                     records the version, so int can be promoted to test straight
+#                     away. Nothing on a push deploys by itself.
 #   manual dispatch → any env (int/test/acc/prod), any DEPLOYMENT_TYPE
 #
 # It deploys the `workstation-opsapi` Helm release to k3s1, serving the
@@ -226,6 +230,9 @@ jobs:
       # Promoter promotes as the diytaxreturn-opsapi "version", so the
       # seed-ring-promoter job below needs it on its own.
       image_tag: ${{ steps.version.outputs.IMAGE_TAG }}
+      # The release version (e.g. 1.0.228) when this commit is exactly a release tag (every merge, after autotag),
+      # else empty. It is what the workstation Ring Promoter seeds and what /ready reports.
+      release: ${{ steps.version.outputs.RELEASE }}
     steps:
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -276,6 +283,7 @@ jobs:
           # their git tag, so bwalia/opsapi:1.0.183 must name that build.
           if [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "RELEASE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${APP_VERSION}" >> $GITHUB_OUTPUT
+            echo "RELEASE=${APP_VERSION}" >> $GITHUB_OUTPUT
           fi
           echo "IMAGE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME (tag: $IMAGE_TAG)"
@@ -548,7 +556,8 @@ jobs:
   dns:
     name: Ensure Cloudflare DNS
     runs-on: ubuntu-latest
-    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
+    # Not on a push: the workstation Ring Promoter deploys int (seed-workstation-ring-promoter below).
+    if: ${{ github.event_name != 'push' && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -588,7 +597,8 @@ jobs:
   wslproxy:
     name: Register WSL Proxy vhost
     needs: [dns]
-    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
+    # Not on a push: the workstation Ring Promoter deploys int (seed-workstation-ring-promoter below).
+    if: ${{ github.event_name != 'push' && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
     uses: ./.github/workflows/wslproxy-register-domains.yml
     with:
       TARGET_ENV: prod
@@ -812,3 +822,70 @@ jobs:
               exit 1
               ;;
           esac
+
+  # =========================================================================
+  # 7. SEED THE WORKSTATION RING PROMOTER (int)
+  # =========================================================================
+  # A merge to main reaches the workstation int ring THROUGH Ring Promoter
+  # (https://rp.workstation.co.uk), so the version it shows for int is always
+  # the one int runs, and int can be promoted to test/acc/prod without being
+  # redeployed first:
+  #
+  #   merge -> autotag 1.0.N -> build + smoke (bwalia/opsapi:1.0.N)
+  #     -> THIS job seeds 1.0.N into int for workstation-opsapi AND
+  #        workstation-opsapi-ui (one release = API + UI)
+  #     -> Ring Promoter dispatches deploy-k3s.yml (TARGET_ENV=int,
+  #        IMAGE_TAG=1.0.N, DEPLOYMENT_TYPE=deploy) and
+  #        deploy-workstation-dashboard.yml (TARGET_ENV=int, VERSION=1.0.N),
+  #        waits for /ready to report 1.0.N, and records it.
+  #
+  # The seed is the release version, not the build tag: Ring Promoter requires
+  # the ring's /ready "version" to equal exactly what it deployed.
+  #
+  # Requires repo secret WORKSTATION_RING_PROMOTER_TOKEN: the workstation Ring
+  # Promoter's API token (RP_API_TOKEN in the workstation-ring-promoter Secret;
+  # NOT the diytaxreturn one in RING_PROMOTER_TOKEN).
+  seed-workstation-ring-promoter:
+    name: Seed workstation Ring Promoter (int)
+    needs: [build, smoke-test]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    if: >-
+      ${{ github.event_name == 'push'
+          && needs.build.result == 'success'
+          && needs.smoke-test.result == 'success' }}
+    steps:
+      - name: Seed int with this release (API + UI)
+        env:
+          RP_BASE: https://rp.workstation.co.uk
+          RP_TOKEN: ${{ secrets.WORKSTATION_RING_PROMOTER_TOKEN }}
+          RELEASE: ${{ needs.build.outputs.release }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RP_TOKEN:-}" ]; then
+            echo "::error::Secret WORKSTATION_RING_PROMOTER_TOKEN is missing: add the workstation Ring Promoter API token (RP_API_TOKEN in the workstation-ring-promoter Secret). Until then a merge does NOT deploy workstation int; seed it in ${RP_BASE}."
+            exit 1
+          fi
+          if [ -z "${RELEASE:-}" ]; then
+            echo "::error::this commit isn't exactly a release tag (git describe isn't x.y.z), so there is no release to seed."
+            exit 1
+          fi
+          failed=0
+          for APP in workstation-opsapi workstation-opsapi-ui; do
+            echo "Seeding ${APP} int with ${RELEASE}"
+            # async=true: 202 + a job id now; Ring Promoter still rejects a seed that
+            # could never work (unknown ring/version, closed gate) on this request.
+            BODY=$(mktemp)
+            CODE=$(curl -sS --max-time 60 -o "$BODY" -w "%{http_code}" \
+              -X POST "${RP_BASE}/api/apps/${APP}/seed?async=true" \
+              -H "Authorization: Bearer ${RP_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"ring\":\"int\",\"version\":\"${RELEASE}\"}" || echo 000)
+            echo "HTTP $CODE"; cat "$BODY"; echo
+            case "$CODE" in
+              200|202) echo "::notice::${APP}: Ring Promoter is deploying ${RELEASE} to int. Watch it at ${RP_BASE}/?app=${APP}" ;;
+              000) echo "::error::${APP}: could not reach ${RP_BASE}; ${RELEASE} is built but NOT deploying. Seed it by hand in Ring Promoter."; failed=1 ;;
+              *) echo "::error::${APP}: Ring Promoter rejected the seed (HTTP ${CODE}); ${RELEASE} is built and can be seeded by hand once fixed."; failed=1 ;;
+            esac
+          done
+          exit $failed

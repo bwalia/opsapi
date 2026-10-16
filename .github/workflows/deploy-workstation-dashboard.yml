@@ -5,13 +5,15 @@ name: Deploy Workstation Dashboard
 # workstation-opsapi API at https://int-opsapi.workstation.co.uk.
 #
 # Rings (values-workstation-<env>.yaml):
-#   int  → https://int-opsapi-ui.workstation.co.uk   (auto on push to main)
+#   int  → https://int-opsapi-ui.workstation.co.uk   (every merge to main: deploy-k3s.yml
+#          seeds the release into the workstation Ring Promoter, which dispatches this)
 #   test → https://test-opsapi-ui.workstation.co.uk  (dispatch / Ring Promoter)
 #   acc  → https://acc-opsapi-ui.workstation.co.uk   (dispatch / Ring Promoter)
 #   prod → https://opsapi-ui.workstation.co.uk       (dispatch / Ring Promoter;
 #          namespace prod, pinned to cloud003 next to the prod API + DB, edge
 #          vhost via the opsapi-prod-cloud003 rule).
-# Pushes to main only ever auto-deploy int.
+# Nothing here runs on a push: Ring Promoter deploys every ring, int included, so
+# the version it shows is always the one running and int can be promoted as is.
 #
 # Mirrors deploy-k3s.yml (which deploys the API): same k3s1 cluster
 # (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> lon1.pop0.uk +
@@ -26,14 +28,6 @@ name: Deploy Workstation Dashboard
 #        -> deploy (helm upgrade + rollout)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "opsapi-dashboard/**"
-      - "devops/helm-charts/opsapi-dashboard/**"
-      - ".github/workflows/deploy-workstation-dashboard.yml"
-      # matches int/test/acc-opsapi-ui... and the bare prod host opsapi-ui...
-      - ".github/wslproxy/data/servers/prod/host:*opsapi-ui.workstation.co.uk.json"
   workflow_dispatch:
     inputs:
       TARGET_ENV:
