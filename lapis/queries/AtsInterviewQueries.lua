@@ -270,7 +270,9 @@ local function candidate_view(r, s)
     local e = Engine.new(s, now)
     local turns = J.array({})
     for _, t in ipairs(s.turns or {}) do
-        if t.role ~= "system" then turns[#turns + 1] = { id = t.id, role = t.role, text = t.text, kind = t.kind } end
+        if t.role ~= "system" then
+            turns[#turns + 1] = { id = t.id, role = t.role, text = t.text, kind = t.kind, question_id = t.question_id }
+        end
     end
     local kit = s.kit
     local settings = Q.settings(r.namespace_id)
