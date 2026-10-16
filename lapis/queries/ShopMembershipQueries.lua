@@ -109,6 +109,9 @@ function Q.offer(ns_id)
             price = price_view(R.prices(s, "founding")),
         },
         standard_price = price_view(R.prices(s, "standard")),
+        -- Trade discount on catalogue (basket) orders: founding_pct for the first founding.cap members.
+        trade_discount = { founding_pct = s.founding_discount_pct, standard_pct = s.standard_discount_pct },
+        discount_pct = R.discount_pct(s, tier),
         uplift_pct = s.uplift_pct,
         lock_days = s.lock_days,
         refund_threshold_minor = s.refund_threshold_minor,
@@ -700,8 +703,9 @@ function Q.maybeIssueRefundCredit(order)
     ]], order.namespace_id, email)[1]
     if not m then return nil end
     local s = Q.settings(order.namespace_id)
-    -- What the order was worth before any credit (credit doesn't stop it qualifying).
+    -- What the order was worth before any credit or trade discount (neither stops it qualifying).
     local qualifying = (tonumber(order.subtotal_minor) or 0) + (tonumber(order.credit_minor) or 0)
+        + (tonumber(order.member_discount_minor) or 0)
     local amount = R.refund_credit(s, qualifying, m.fees_paid_net_minor, m.fees_credited_net_minor)
     if amount <= 0 then return nil end
     db.query([[
@@ -745,6 +749,8 @@ function Q.me(ns_id, member)
             joined_at = m.joined_at or U.null, current_period_end = m.current_period_end or U.null,
             cancel_at_period_end = m.cancel_at_period_end == true,
             fees_paid_net_minor = tonumber(m.fees_paid_net_minor), fees_credited_net_minor = tonumber(m.fees_credited_net_minor),
+            -- Trade discount for this member's tier; it applies at checkout only while status is active/past_due.
+            discount_pct = R.discount_pct(s, m.tier),
         } or U.null,
         credits = U.arr(credits),
         lock_days = s.lock_days,

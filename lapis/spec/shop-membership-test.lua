@@ -113,6 +113,29 @@ local over = M.apply_credits(500000, 0.2, 0, { { id = 9, amount_minor = 25000, m
 check("credit redeem: not applied below the minimum order", under.credit_minor == 0)
 check("credit redeem: applied at the minimum order", over.credit_minor == 25000 and over.subtotal_minor == 475000)
 
+-- trade discount ------------------------------------------------------------------------------
+check("trade: defaults 5% founding, 2.5% standard", s.founding_discount_pct == 5 and s.standard_discount_pct == 2.5)
+check("trade: pct by tier", M.discount_pct(s, "founding") == 5 and M.discount_pct(s, "standard") == 2.5)
+local tset = M.settings({ founding_discount_pct = "7.5", standard_discount_pct = 99 })
+check("trade: settings row read (numeric string), out-of-range falls back",
+    tset.founding_discount_pct == 7.5 and tset.standard_discount_pct == 2.5)
+local d5 = M.apply_discount(1000000, 0.2, 2500, 5)
+check("trade: 5% off £10,000 ex VAT = £500, VAT recomputed, shipping kept",
+    d5.discount_minor == 50000 and d5.subtotal_minor == 950000 and d5.vat_minor == 190000
+    and d5.shipping_minor == 2500 and d5.total_minor == 1142500)
+local d25 = M.apply_discount(12345, 0.2, 0, 2.5)
+check("trade: 2.5% rounds to the penny", d25.discount_minor == 309 and d25.subtotal_minor == 12036 and d25.vat_minor == 2407,
+    d25.discount_minor)
+check("trade: 0% → unchanged", M.apply_discount(1000, 0.2, 0, 0).total_minor == 1200)
+check("trade: pct clamped to max", M.apply_discount(1000, 0.2, 0, 90).discount_minor == 500)
+-- discount first, then credit on the discounted subtotal
+local after = M.apply_credits(d5.subtotal_minor, 0.2, d5.shipping_minor, { { id = 1, amount_minor = 10000, min_order_minor = 0 } })
+check("trade + credit: credit applies to the discounted subtotal", after.subtotal_minor == 940000 and after.total_minor == 1130500)
+local okv, errv = M.validate_update({ founding_discount_pct = 5, standard_discount_pct = 2.5 })
+check("trade: admin update accepts decimals", okv and okv.standard_discount_pct == 2.5, errv)
+check("trade: admin update rejects > 50", M.validate_update({ founding_discount_pct = 60 }) == nil)
+check("trade: admin update rejects negative", M.validate_update({ standard_discount_pct = -1 }) == nil)
+
 -- email ----------------------------------------------------------------------------------------
 check("email: normalised", M.email(" VIP@Lab.ac.uk ") == "vip@lab.ac.uk")
 check("email: junk rejected", M.email("x@y") == nil)

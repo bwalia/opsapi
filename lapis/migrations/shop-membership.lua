@@ -20,7 +20,10 @@
     Plus: shop_products.public_launch_at (members see it early_access_hours
     sooner), shop_quotes.price_locked, shop_orders.credit_minor.
 
-    Registered in migrations.lua as zzs19–zzs21 and zzs25. Idempotent.
+    Plus (zzs26): Trade discount — shop_membership_settings.founding_discount_pct /
+    standard_discount_pct, shop_orders.member_discount_minor / member_discount_pct.
+
+    Registered in migrations.lua as zzs19–zzs21, zzs25 and zzs26. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -176,5 +179,14 @@ return {
             CREATE INDEX IF NOT EXISTS shop_account_deactivations_close_idx
                 ON shop_account_deactivations (close_at) WHERE status = 'pending'
         ]])
+    end,
+    -- [5] Trade discount: % off catalogue (cart) orders for members, by tier -----------------
+    [5] = function()
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS founding_discount_pct numeric(5,2)
+                   NOT NULL DEFAULT 5 CHECK (founding_discount_pct BETWEEN 0 AND 50)]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS standard_discount_pct numeric(5,2)
+                   NOT NULL DEFAULT 2.5 CHECK (standard_discount_pct BETWEEN 0 AND 50)]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS member_discount_minor integer NOT NULL DEFAULT 0]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS member_discount_pct numeric(5,2)]])
     end,
 }

@@ -36,7 +36,7 @@ local ALLOWED_SHIP_COUNTRIES = { "GB", "IE", "FR", "DE", "NL", "BE", "ES", "IT" 
 local ORDER_COLS = [[
     o.id, o.uuid, o.namespace_id, o.order_number, o.access_token, o.status, o.email, o.customer::text AS customer,
     o.shipping_address::text AS shipping_address, o.billing_address::text AS billing_address,
-    o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.credit_minor, o.currency,
+    o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.credit_minor, o.member_discount_minor, o.member_discount_pct, o.currency,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at
 ]]
@@ -62,6 +62,8 @@ function ShopOrderQueries.shape(o, opts)
         shipping_minor = o.shipping_minor,
         total_minor = o.total_minor,
         credit_minor = tonumber(o.credit_minor) or 0,
+        member_discount_minor = tonumber(o.member_discount_minor) or 0,
+        member_discount_pct = tonumber(o.member_discount_pct) or U.null,
         currency = o.currency,
         paid_at = o.paid_at or U.null,
         created_at = o.created_at,
@@ -280,24 +282,43 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         return nil, U.err(409, "QUOTE_REQUIRED", "This order has no payable amount — please request a quote")
     end
 
-    -- Member credit: only for a signed-in member paying with their own email (ngx.ctx.shop_member is
-    -- set by the public route from X-Member-Token). Credit reduces the subtotal ex VAT; VAT is recomputed.
-    local credit
+    -- Trade discount + member credit: only for a signed-in member paying with their own email
+    -- (ngx.ctx.shop_member is set by the public route from X-Member-Token). Both reduce the subtotal
+    -- ex VAT and VAT is recomputed. The trade discount (by membership tier, active/past_due only)
+    -- applies to basket orders, never to quotes (those keep their quoted prices), and comes first;
+    -- credit then applies to the discounted subtotal.
+    local credit, trade
+    local gross_before = totals.total_minor
+    -- Stripe line items are the undiscounted lines + undiscounted VAT; the coupon below takes off
+    -- amount_off, so Stripe's total equals the order total exactly.
+    local stripe_totals = totals
     local member = ngx.ctx and ngx.ctx.shop_member
     if member and (not email or tostring(email):lower() == member.email) then
         local Membership = require("queries.ShopMembershipQueries")
+        local R = require("lib.shop-membership")
+        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local m = member.membership
+        if from == "cart" and member.active and type(m) == "table"
+            and (m.status == "active" or m.status == "past_due") then
+            local pct = R.discount_pct(Membership.settings(ns_id), m.tier)
+            local d = R.apply_discount(totals.subtotal_minor, vat_rate, totals.shipping_minor, pct)
+            if d.discount_minor > 0 then
+                trade = { pct = pct, discount_minor = d.discount_minor }
+                totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
+                           shipping_minor = d.shipping_minor, total_minor = d.total_minor }
+                email = email or member.email
+                customer.email = email
+            end
+        end
         local available = Membership.availableCredits(ns_id, member.email)
         if #available > 0 then
-            local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
-            local applied = require("lib.shop-membership").apply_credits(totals.subtotal_minor, vat_rate,
-                totals.shipping_minor, available)
+            local applied = R.apply_credits(totals.subtotal_minor, vat_rate, totals.shipping_minor, available)
             if applied.credit_minor > 0 then
                 if applied.total_minor < 50 then
                     return nil, U.err(409, "CREDIT_COVERS_ORDER",
                         "Your credit covers this whole order — please request a quote and we'll arrange it for you")
                 end
                 credit = applied
-                credit.discount_minor = totals.total_minor - applied.total_minor
                 totals = { subtotal_minor = applied.subtotal_minor, vat_minor = applied.vat_minor,
                            shipping_minor = applied.shipping_minor, total_minor = applied.total_minor }
                 email = email or member.email
@@ -305,6 +326,8 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             end
         end
     end
+    -- Everything off the order (trade discount, credit and the VAT they save) as one amount for Stripe.
+    local amount_off = gross_before - totals.total_minor
 
     local stripe, serr = PaymentProvider.get_stripe()
     if not stripe then
@@ -324,13 +347,15 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local token = U.token(24)
         local row = db.query([[
             INSERT INTO shop_orders (uuid, namespace_id, order_number, access_token, status, email, customer, lines,
-                                     subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor, currency,
+                                     subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor,
+                                     member_discount_minor, member_discount_pct, currency,
                                      cart_id, quote_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, 'GBP', ?, ?, NOW(), NOW())
+            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, 'GBP', ?, ?, NOW(), NOW())
             RETURNING id, uuid, order_number, access_token
         ]], Global.generateUUID(), ns_id, next_number(), token, email or db.NULL, U.enc(customer),
             U.enc(U.arr(lines)), totals.subtotal_minor, totals.vat_minor, totals.shipping_minor,
-            totals.total_minor, credit and credit.credit_minor or 0, cart and cart.id or db.NULL,
+            totals.total_minor, credit and credit.credit_minor or 0,
+            trade and trade.discount_minor or 0, trade and trade.pct or db.NULL, cart and cart.id or db.NULL,
             quote and quote.id or db.NULL)[1]
         Stock.hold(ns_id, row.id, demand, RESERVATION_MINUTES)
         if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
@@ -344,7 +369,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         mode = "payment",
         success_url = substitute(body.success_url, order.uuid, order.access_token),
         cancel_url = substitute(body.cancel_url, order.uuid, order.access_token),
-        line_items = stripe_line_items(lines, totals),
+        line_items = stripe_line_items(lines, stripe_totals),
         shipping_address_collection = { allowed_countries = ALLOWED_SHIP_COUNTRIES },
         billing_address_collection = "required",
         phone_number_collection = { enabled = true },
@@ -356,14 +381,17 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         idempotency_key = "shop-order-" .. order.uuid,
     }
     if email then opts.customer_email = email end
-    if credit then
-        -- Stripe line items can't be negative: the credit (plus the VAT it saves) goes on as a one-off coupon.
+    if amount_off > 0 then
+        -- Stripe line items can't be negative: the trade discount and/or credit (plus the VAT they save)
+        -- go on as one one-off coupon.
+        local coupon_name = (trade and credit) and "Trade discount + credit"
+            or trade and ("Trade discount " .. tostring(trade.pct) .. "%") or "Workstation credit"
         local coupon, cerr = stripe:_request("POST", "/coupons", {
-            amount_off = credit.discount_minor, currency = "gbp", duration = "once", max_redemptions = 1,
-            name = "Workstation credit", metadata = { order_uuid = order.uuid },
+            amount_off = amount_off, currency = "gbp", duration = "once", max_redemptions = 1,
+            name = coupon_name, metadata = { order_uuid = order.uuid },
         }, "shop-credit-" .. order.uuid)
         if not coupon or not coupon.id then
-            ngx.log(ngx.ERR, "[shop] credit coupon failed for ", order.order_number, ": ", tostring(cerr))
+            ngx.log(ngx.ERR, "[shop] discount coupon failed for ", order.order_number, ": ", tostring(cerr))
             U.tx(function()
                 db.query("UPDATE shop_orders SET status = 'cancelled', updated_at = NOW() WHERE id = ?", order.id)
                 Stock.release(order.id)
@@ -390,7 +418,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     end
     db.query("UPDATE shop_orders SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, order.id)
     return { order_uuid = order.uuid, order_token = order.access_token, checkout_url = session.url,
-             order_number = order.order_number, credit_minor = credit and credit.credit_minor or 0 }
+             order_number = order.order_number, credit_minor = credit and credit.credit_minor or 0,
+             member_discount_minor = trade and trade.discount_minor or 0,
+             member_discount_pct = trade and trade.pct or U.null }
 end
 
 -- ---------------------------------------------------------------------------

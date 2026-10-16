@@ -249,15 +249,21 @@ st, nm = call("POST", "/checkout", {"from": "cart", "email": X, "success_url": "
 hook("checkout.session.completed", {"id": "cs_nm", "object": "checkout.session", "mode": "payment", "payment_status": "paid",
                                     "metadata": {"order_uuid": nm["data"]["order_uuid"]}, "customer_details": {"email": X}})
 check("refund: non-members get no credit", sql(f"select count(*) from shop_credits where email='{X}'") == ["0"])
+check("trade: non-members get no trade discount",
+      sql(f"select member_discount_minor from shop_orders where uuid='{nm['data']['order_uuid']}'") == ["0"])
 
 # --- applying credit ------------------------------------------------------------------------------------------
 tok, _ = cart_with(1, member=session)  # £12,999 ex VAT
 st, co = call("POST", "/checkout", {"from": "cart", "email": B, "success_url": "https://shop.e2e.test/ok",
                                      "cancel_url": "https://shop.e2e.test/no"}, cart=tok, member=session)
-row = sql(f"select subtotal_minor, vat_minor, total_minor, credit_minor, stripe_coupon_id is not null from shop_orders "
-          f"where uuid='{co['data']['order_uuid']}'")[0].split("|")
-check("credit: £750 off the subtotal ex VAT", row[0] == str(1299900 - 75000) and row[3] == "75000", row)
-check("credit: VAT recomputed on the reduced subtotal", row[1] == str(round((1299900 - 75000) * 0.2)), row)
+row = sql(f"select subtotal_minor, vat_minor, total_minor, credit_minor, stripe_coupon_id is not null, member_discount_minor, "
+          f"member_discount_pct from shop_orders where uuid='{co['data']['order_uuid']}'")[0].split("|")
+# B is a founding Trade member: 5% trade discount first, then the £750 credit on the discounted subtotal.
+TRADE5 = round(1299900 * 5 / 100)
+check("trade: founding member gets 5% off a basket order", row[5] == str(TRADE5) and float(row[6]) == 5.0, row)
+check("trade: checkout response reports the discount", co["data"].get("member_discount_minor") == TRADE5, co["data"])
+check("credit: £750 off the discounted subtotal ex VAT", row[0] == str(1299900 - TRADE5 - 75000) and row[3] == "75000", row)
+check("credit: VAT recomputed on the reduced subtotal", row[1] == str(round((1299900 - TRADE5 - 75000) * 0.2)), row)
 check("credit: applied via a one-off Stripe coupon", row[4] == "t", row)
 check("credit: reserved while paying", sql(f"select status from shop_credits where email='{B}' and source='vip_refund'") == ["reserved"])
 st, other = call("POST", "/checkout", {"from": "cart", "email": X, "success_url": "https://shop.e2e.test/ok",
