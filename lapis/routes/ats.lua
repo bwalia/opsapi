@@ -12,6 +12,7 @@ local Http = require("helper.field-service-http")
 local J = require("lib.ats.json")
 local Q = require("queries.AtsQueries")
 local I = require("queries.AtsInterviewQueries")
+local Packs = require("queries.AtsPackQueries")
 local Activation = require("lib.ats.activation")
 local Kit = require("lib.ats.kit")
 local P = require("lib.ats.prompts")
@@ -223,6 +224,35 @@ return function(app)
         if not inv and status == 402 then return fail(402, err, { code = "ats_inactive" }) end
         return result(inv, err, inv and 201)
     end))
+    -- Invite many candidates to one kit (and pack) at once; each link is returned once.
+    app:post("/api/v2/ats/interviews/bulk", with_body("ats_interviews", "create", function(self, b)
+        local res, err, status = I.invite_many(self.namespace.id, b, actor(self))
+        if not res and status == 402 then return fail(402, err, { code = "ats_inactive" }) end
+        return result(res, err, res and 201)
+    end))
+    -- Let an invite be opened on a different device (the first one keeps it otherwise).
+    app:post("/api/v2/ats/interviews/:uuid/release-device", guard("ats_interviews", "update", function(self)
+        return result(Packs.release_device(self.namespace.id, self.params.uuid, actor(self)))
+    end))
+
+    -- MARK: Interview packs (encrypted files in S3)
+
+    app:get("/api/v2/ats/packs", guard("ats_kits", "read", function(self)
+        return ok(Packs.list(self.namespace.id))
+    end))
+    -- Returns a signed upload link: PUT the encrypted pack there, then call complete.
+    app:post("/api/v2/ats/packs", with_body("ats_kits", "create", function(self, b)
+        local res, err, status = Packs.create(self.namespace.id, b, actor(self))
+        return result(res, err, res and 201 or status)
+    end))
+    app:post("/api/v2/ats/packs/:uuid/complete", guard("ats_kits", "update", function(self)
+        local res, err, status = Packs.complete(self.namespace.id, self.params.uuid, actor(self))
+        return result(res, err, not res and status or nil)
+    end))
+    app:delete("/api/v2/ats/packs/:uuid", guard("ats_kits", "delete", function(self)
+        return result(Packs.delete(self.namespace.id, self.params.uuid, actor(self)))
+    end))
+
     -- Import .snazzy_interview files (the dashboard posts each file's text as {content}).
     app:post("/api/v2/ats/interviews/import", guard("ats_interviews", "create", function(self)
         -- The file text, or {content: "<file text>"} (≤ 1 MB of interview, so 2 MB of JSON-escaped text).

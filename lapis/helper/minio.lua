@@ -929,7 +929,9 @@ end
 -- @param browser boolean When true, sign for and return the browser-reachable
 --   public host (MINIO_ENDPOINT_WEB_EXTERNAL) so the URL works in an <img>/tab,
 --   not just from inside the network.
-function MinioClient:getPresignedUrl(object_key, expires_in, bucket, browser)
+-- @param method string "GET" (default) or "PUT": a PUT link lets the holder upload
+--   that one object until it expires (the object key and expiry are signed).
+function MinioClient:getPresignedUrl(object_key, expires_in, bucket, browser, method)
     bucket = bucket or self.bucket
     expires_in = expires_in or 3600
 
@@ -978,7 +980,7 @@ function MinioClient:getPresignedUrl(object_key, expires_in, bucket, browser)
     -- Create canonical request
     local headers = { ["host"] = host }
     local canonical_request = createCanonicalRequest(
-        "GET", uri, query_string, headers, "host", "UNSIGNED-PAYLOAD"
+        method or "GET", uri, query_string, headers, "host", "UNSIGNED-PAYLOAD"
     )
 
     -- Create string to sign

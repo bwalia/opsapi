@@ -7,6 +7,7 @@
     works with any preset.
 
     [1] tables   [2] RBAC modules, role grants and the "Hiring" menu item
+    [3] interview packs (encrypted files in S3) and invite device binding
 ]]
 
 local db = require("lapis.db")
@@ -264,5 +265,26 @@ return {
             ]], menu.id, menu.id)
         end
         print("[ATS] Registered the hiring modules and menu item")
+    end,
+
+    [3] = function()
+        -- An interview pack: the recruiter's kit, decks and media, encrypted on the
+        -- recruiter's Mac (AES-256-GCM) and uploaded once to S3. key_sealed is that
+        -- key sealed with helper/secret-box; it's released only to a valid invite.
+        base("ats_packs", [[
+            kit_id BIGINT,
+            title VARCHAR(200) NOT NULL,
+            object_key TEXT NOT NULL,
+            size_bytes BIGINT NOT NULL DEFAULT 0,
+            sha256 CHAR(64) NOT NULL,
+            key_sealed TEXT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'uploading',
+            created_by_uuid TEXT,
+            deleted_at TIMESTAMPTZ]])
+        -- One invite, one device: the first device to fetch the pack keeps it.
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS pack_id BIGINT")
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS device_hash CHAR(64)")
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS pack_fetched_at TIMESTAMPTZ")
+        print("[ATS] Interview packs")
     end,
 }

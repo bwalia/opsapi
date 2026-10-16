@@ -59,6 +59,8 @@ function I.invite(namespace_id, data, actor)
     end
     if not kit_row then return nil, "Choose an interview kit (the job has none)." end
     if not v(kit_row.approved_at) then return nil, "Approve the kit before inviting candidates." end
+    local pack_id, perr = require("queries.AtsPackQueries").id_for_invite(namespace_id, data.pack_uuid)
+    if perr then return nil, perr end
     local settings = Q.settings(namespace_id)
     local kit = Q.kit_contract(kit_row)
     kit.settings.retention_days = settings.retention_days
@@ -74,13 +76,78 @@ function I.invite(namespace_id, data, actor)
     local r = db.insert("ats_interviews", { namespace_id = namespace_id, application_id = app.id, kit_id = kit_row.id,
         kit_version = kit_row.version, source = "hosted", state = "invited", session = J.encode(session),
         link_token_hash = Hash.sha256_hex(token), link_expires_at = db.raw(("NOW() + interval '%d days'"):format(days)),
+        pack_id = pack_id,
         invited_by_uuid = actor, delete_after = ts_sql(session.delete_after_ts) }, { returning = "*" })[1]
     if EARLY_STAGES[app.stage] and app.stage ~= "interview" then Q.move_stage(namespace_id, app.uuid, "interview",
         actor) end
     Q.audit(namespace_id, actor, "interview_invited", "interview", r.uuid, { application = app.uuid,
         kit_version = kit_row.version })
-    return { uuid = r.uuid, url = Activation.public_url() .. "/i/" .. token, expires_at = r.link_expires_at,
+    local url = Activation.public_url() .. "/i/" .. token
+    return { uuid = r.uuid, url = url, app_url = pack_id and I.app_url(url) or nil, expires_at = r.link_expires_at,
         note = "Copy this link now: it isn't shown again." }
+end
+
+--- The link that opens an invite in the Snazzy Pro app (for interviews with a pack).
+function I.app_url(url)
+    return "snazzypro://interview?link=" .. ngx.escape_uri(url)
+end
+
+I.MAX_BULK = 500
+
+--- Invites many candidates to one kit (and pack) at once: each gets their own
+-- link, so they can all interview in parallel. Without job_uuid, the kit's open
+-- job is used (or made). One candidate's problem doesn't stop the others.
+-- data: {kit_uuid, pack_uuid?, job_uuid?, expires_in_days?, candidates = {{name, email, reference}}}
+-- @return {invited, failed, results = {{name, email, uuid, url, app_url | error}}} | nil, err, status
+function I.invite_many(namespace_id, data, actor)
+    local blocked = Activation.require_active(namespace_id)
+    if blocked then return nil, blocked.json.error, 402 end
+    local list = type(data.candidates) == "table" and data.candidates or {}
+    if #list == 0 then return nil, "Add at least one candidate." end
+    if #list > I.MAX_BULK then return nil, ("At most %d candidates at a time."):format(I.MAX_BULK) end
+    local kit_row = Q.kit_row(namespace_id, data.kit_uuid)
+    if not kit_row then return nil, "Kit not found" end
+    if not v(kit_row.approved_at) then return nil, "Approve the kit before inviting candidates." end
+    local _, perr = require("queries.AtsPackQueries").id_for_invite(namespace_id, data.pack_uuid)
+    if perr then return nil, perr end
+    local job_uuid = v(data.job_uuid)
+    if job_uuid then
+        if not Q.job_row(namespace_id, job_uuid) then return nil, "Job not found" end
+    else
+        local job = db.select("uuid FROM ats_jobs WHERE namespace_id = ? AND kit_id = ? AND status = 'open' "
+            .. "AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1", namespace_id, kit_row.id)[1]
+        if not job then
+            local created, jerr = Q.create_job(namespace_id, { title = kit_row.title, kit_uuid = kit_row.uuid }, actor)
+            if not created then return nil, jerr end
+            job = created
+        end
+        job_uuid = job.uuid
+    end
+    local results, invited, failed = J.array({}), 0, 0
+    for _, c in ipairs(list) do
+        c = type(c) == "table" and c or {}
+        local item = { name = v(c.name), email = v(c.email) }
+        local cand, cerr = Q.find_or_create_candidate(namespace_id, c, actor, "bulk_invite")
+        local app, aerr
+        if cand then app, aerr = Q.create_application(namespace_id, job_uuid, cand.uuid, actor) end
+        local inv, ierr
+        if app then
+            inv, ierr = I.invite(namespace_id, { application_uuid = app.uuid, kit_uuid = kit_row.uuid,
+                pack_uuid = data.pack_uuid, expires_in_days = data.expires_in_days }, actor)
+        end
+        if inv then
+            item.uuid, item.url, item.app_url, item.expires_at = inv.uuid, inv.url, inv.app_url, inv.expires_at
+            invited = invited + 1
+        else
+            item.error = tostring(cerr or aerr or ierr or "Couldn't invite")
+            failed = failed + 1
+        end
+        results[#results + 1] = item
+    end
+    Q.audit(namespace_id, actor, "interviews_bulk_invited", "kit", kit_row.uuid, { invited = invited,
+        failed = failed })
+    return { invited = invited, failed = failed, job_uuid = job_uuid, results = results,
+        note = "Copy these links now: they aren't shown again." }
 end
 
 function I.revoke(namespace_id, uuid, actor)
@@ -192,6 +259,7 @@ local function candidate_view(r, s)
         turns = turns, choices = e:current_choices(), progress = e:progress(),
         seconds_left = s.started_ts and math.floor(e:seconds_left()) or nil,
         question_count = #kit.questions,
+        has_pack = v(r.pack_id) ~= nil,
         self_id = (finished and not v(r.self_id_key)) and F.QUESTIONS or nil,
     }
 end
