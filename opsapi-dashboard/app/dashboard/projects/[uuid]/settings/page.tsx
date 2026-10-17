@@ -27,6 +27,7 @@ import {
   Clock,
   Target,
   BarChart3,
+  Bot,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
@@ -40,6 +41,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { kanbanService } from '@/services/kanban.service';
 import usersService from '@/services/users.service';
 import { customersService } from '@/services/customers.service';
+import ProjectAiSettings from '@/components/ai-runner/ProjectAiSettings';
 import type {
   User,
   Customer,
@@ -57,7 +59,7 @@ import { cn } from '@/lib/utils';
 // Types & Constants
 // ============================================
 
-type SettingsTab = 'general' | 'members' | 'visibility' | 'budget' | 'dates' | 'danger';
+type SettingsTab = 'general' | 'members' | 'visibility' | 'budget' | 'dates' | 'ai' | 'danger';
 
 interface TabConfig {
   id: SettingsTab;
@@ -72,6 +74,7 @@ const TABS: TabConfig[] = [
   { id: 'visibility', label: 'Visibility', icon: Eye, description: 'Privacy and access control' },
   { id: 'budget', label: 'Budget', icon: DollarSign, description: 'Budget and billing settings' },
   { id: 'dates', label: 'Timeline', icon: Calendar, description: 'Project dates and deadlines' },
+  { id: 'ai', label: 'AI', icon: Bot, description: 'Skills, vault PRs, executors' },
   { id: 'danger', label: 'Danger Zone', icon: AlertTriangle, description: 'Destructive actions' },
 ];
 
@@ -1253,6 +1256,14 @@ export default function ProjectSettingsPage() {
                 onSave={handleSave}
                 isSaving={isSaving}
               />
+            )}
+
+            {activeTab === 'ai' && (
+              <Card>
+                <CardContent className="p-6">
+                  <ProjectAiSettings projectUuid={projectUuid} />
+                </CardContent>
+              </Card>
             )}
 
             {activeTab === 'danger' && (

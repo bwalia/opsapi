@@ -154,6 +154,11 @@ export interface Run {
   pending_requests?: number | null;
   approved_by?: string | null;
   approved_at?: string | null;
+  executor_kind?: string | null;
+  provider_uuid?: string | null;
+  context_snapshot?: ContextSnapshot | null;
+  conversation_summary?: string | null;
+  jobshout_run_id?: string | null;
 }
 export type RequestStatus = 'pending' | 'allowed' | 'denied' | 'expired';
 /** A permission request from the agent (ar_run_requests). */
@@ -292,6 +297,24 @@ export interface Conflicts {
   /** Not a block: starting anyway needs confirm_similar. */
   similar?: SimilarRun[] | null;
 }
+export interface SkillGitUrl {
+  url: string;
+  ref?: string | null;
+  path?: string | null;
+  label?: string | null;
+}
+export interface MdRef {
+  path?: string | null;
+  url?: string | null;
+  label?: string | null;
+}
+export interface ContextSnapshot {
+  target_repo_url?: string | null;
+  base_branch?: string | null;
+  skills_git_urls?: SkillGitUrl[];
+  md_refs?: MdRef[];
+  vault_configured?: boolean;
+}
 export interface Preview {
   prompt: string;
   template_version?: number;
@@ -307,6 +330,12 @@ export interface Preview {
   /** The run would wait for a manager's approval before it starts. */
   needs_approval?: boolean;
   limits?: Limits | null;
+  context?: ContextSnapshot | null;
+  project?: ProjectSettings | null;
+  executor_kind?: string | null;
+  allowed_executors?: string[];
+  executor_locked?: boolean;
+  can_change_executor?: boolean;
 }
 export interface StartInput {
   runner_uuid: string;
@@ -317,6 +346,52 @@ export interface StartInput {
   output_mode?: OutputMode;
   /** The user saw the similar open runs and starts anyway. */
   confirm_similar?: boolean;
+  executor_kind?: string;
+  provider_uuid?: string;
+  selected_skill_urls?: string[];
+  selected_md?: string[];
+}
+export interface TaskWork {
+  uuid: string;
+  task_uuid: string;
+  project_uuid: string;
+  run_uuid?: string | null;
+  status: string;
+  executor_kind: string;
+  provider_uuid?: string | null;
+  prompt: string;
+  context_snapshot?: ContextSnapshot;
+  conversation_summary?: string | null;
+  summary?: string | null;
+  requested_by?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+export interface TaskPr {
+  uuid: string;
+  task_uuid: string;
+  project_uuid: string;
+  run_uuid?: string | null;
+  repo: string;
+  pr_url: string;
+  pr_number?: number | null;
+  state: string;
+  review_status: 'pending' | 'approved' | 'changes_requested' | string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  created_at: string;
+}
+export interface TaskWorkBundle {
+  work: TaskWork | null;
+  history: TaskWork[];
+  pull_requests: TaskPr[];
+  project?: ProjectSettings | null;
+  manager_links?: {
+    task_url?: string | null;
+    run_url?: string | null;
+    pr_urls?: string[];
+  } | null;
 }
 
 export interface ApprovalPolicy {
@@ -528,9 +603,23 @@ export interface Overview {
   avg_permission_wait_s_7d: number | null;
 }
 export interface ProjectSettings {
-  default_repo_paths: Record<string, string>;
+  project_uuid?: string;
+  default_repo_paths?: Record<string, string>;
   output_mode?: OutputMode | null;
   base_branch?: string | null;
+  target_repo_url?: string | null;
+  skills_git_urls?: SkillGitUrl[];
+  md_refs?: MdRef[];
+  vault_url?: string | null;
+  vault_secret_path?: string | null;
+  vault_mount_path?: string | null;
+  vault_token_set?: boolean;
+  vault_configured?: boolean;
+  /** Write-only: send to save; never returned. */
+  vault_token?: string | null;
+  allowed_executors?: string[];
+  executor_locked?: boolean;
+  default_executor?: string | null;
 }
 export interface Template {
   body: string;
@@ -640,7 +729,7 @@ export const aiRunner = {
   overview: async () => (await get<Overview>('/overview')).data,
 
   // Start a run on a task
-  preview: (taskUuid: string, input: Partial<Pick<StartInput, 'runner_uuid' | 'profile' | 'repo_path'>> = {}) =>
+  preview: (taskUuid: string, input: Partial<StartInput> = {}) =>
     send<Preview>('post', `/tasks/${id(taskUuid)}/runs/preview`, input),
   start: async (taskUuid: string, input: StartInput): Promise<Run> => {
     const body = JSON.stringify(input);
@@ -657,6 +746,19 @@ export const aiRunner = {
     }
   },
   taskRuns: async (taskUuid: string) => list<Run>((await get<Run[]>(`/tasks/${id(taskUuid)}/runs`)).data),
+  taskWork: async (taskUuid: string): Promise<TaskWorkBundle> => {
+    const d = (await get<Partial<TaskWorkBundle>>(`/tasks/${id(taskUuid)}/work`)).data || {};
+    return {
+      work: (d.work as TaskWork) || null,
+      history: list<TaskWork>(d.history),
+      pull_requests: list<TaskPr>(d.pull_requests),
+      project: d.project ?? null,
+      manager_links: d.manager_links ?? null,
+    };
+  },
+  taskPrs: async (taskUuid: string) => list<TaskPr>((await get<TaskPr[]>(`/tasks/${id(taskUuid)}/prs`)).data),
+  reviewPr: (taskUuid: string, prUuid: string, decision: 'approved' | 'changes_requested', note?: string) =>
+    send<TaskPr>('post', `/tasks/${id(taskUuid)}/prs/${id(prUuid)}/review`, { decision, note }),
 
   // Runs
   listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>

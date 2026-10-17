@@ -641,7 +641,7 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
 check("plugin migrations are tracked once each", one(
-    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "7")
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "8")
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -2780,6 +2780,83 @@ if MIGRATE:
           and expect("the old source", call("GET", P + f"/runners/{SRC}", "mgr", A), 200).get("kind") == "runner",
           (out.stdout + out.stderr)[-600:])
 expect("safety additions cleared", put_s({"safety": {"extra_denied_commands": [], "extra_redactions": []}}), 200)
+
+# --- AI task completion: context pack, task work, executor lock, PR attach -----------------------------------------
+print("--- AI task completion ---")
+ps_full = expect("project context pack saved", call("PUT", P + f"/projects/{PROJ}/settings", "mgr", A, {
+    "target_repo_url": "https://github.com/acme/app.git",
+    "skills_git_urls": [{"url": "https://github.com/acme/skills.git", "ref": "main", "label": "standards"}],
+    "md_refs": [{"path": "docs/WAYS.md", "label": "Ways of working"}],
+    "allowed_executors": ["machine", "builtin", "jobshout"],
+    "default_executor": "machine",
+    "executor_locked": True,
+    "base_branch": "main",
+}), 200)
+check("context fields returned without sealed token",
+      ps_full.get("target_repo_url") == "https://github.com/acme/app.git"
+      and len(ps_full.get("skills_git_urls") or []) == 1
+      and ps_full.get("executor_locked") is True
+      and "vault_token_sealed" not in ps_full
+      and ps_full.get("vault_token_set") is False, ps_full)
+
+TC = task("Task completion " + TAG, "medium", "dev")
+pv_ctx = expect("preview includes context pack", call(
+    "POST", P + f"/tasks/{TC['uuid']}/runs/preview", "dev", A, {}), 200)
+ctx = pv_ctx.get("context") or {}
+prompt = pv_ctx.get("prompt") or ""
+check("preview context lists skills and target repo",
+      ctx.get("target_repo_url") == "https://github.com/acme/app.git"
+      and len(ctx.get("skills_git_urls") or []) == 1
+      and pv_ctx.get("executor_locked") is True
+      and pv_ctx.get("can_change_executor") is False
+      and ("standards" in prompt or "skills" in prompt.lower() or "Ways of working" in prompt), pv_ctx)
+
+hb_c(name="cfg runner online for task completion")
+locked = call("POST", P + f"/tasks/{TC['uuid']}/runs", "dev", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/one",
+    "executor_kind": "jobshout",
+})
+check("executor lock blocks developer (403)", locked[0] == 403, locked[:2])
+
+expect("unlock executor for start test", call("PUT", P + f"/projects/{PROJ}/settings", "mgr", A, {
+    "executor_locked": False, "allowed_executors": ["machine", "builtin"],
+}), 200)
+# Start records ar_task_work even while queued (no silent prompt-only state).
+run_w = expect("start records task work", call("POST", P + f"/tasks/{TC['uuid']}/runs", "mgr", A, {
+    "runner_uuid": RC, "profile": "fake", "repo_path": "/cfg/one",
+    "executor_kind": "machine", "confirm_similar": True,
+    "selected_skill_urls": ["https://github.com/acme/skills.git"],
+}), 201)
+work = expect("GET task work", call("GET", P + f"/tasks/{TC['uuid']}/work", "mgr", A), 200)
+wrow = work.get("work") or {}
+check("task work has prompt and context",
+      wrow.get("run_uuid") == run_w.get("uuid")
+      and bool(wrow.get("prompt"))
+      and (wrow.get("context_snapshot") or {}).get("target_repo_url") == "https://github.com/acme/app.git", work)
+
+sql(f"""INSERT INTO ar_task_prs (namespace_id, task_uuid, project_uuid, run_uuid, repo, pr_url, pr_number, state)
+    SELECT r.namespace_id, r.task_uuid, r.project_uuid, r.uuid, 'acme/app',
+           'https://github.com/acme/app/pull/42', 42, 'open'
+    FROM ar_runs r WHERE r.uuid = '{run_w["uuid"]}'""")
+prs = expect("list task PRs", call("GET", P + f"/tasks/{TC['uuid']}/prs", "mgr", A), 200)
+check("PR listed on task", isinstance(prs, list) and len(prs) >= 1 and prs[0].get("pr_url"), prs)
+pr_uuid = prs[0]["uuid"]
+rev = expect("manager signs off PR", call("POST", P + f"/tasks/{TC['uuid']}/prs/{pr_uuid}/review", "mgr", A, {
+    "decision": "approved", "note": "LGTM",
+}), 200)
+check("review status approved (not merged)", rev.get("review_status") == "approved", rev)
+expect("developer can't sign off", call("POST", P + f"/tasks/{TC['uuid']}/prs/{pr_uuid}/review", "dev2", A, {
+    "decision": "changes_requested",
+}), 403)
+
+MIG_TC = "20261017180000_ai_runner_task_completion"
+if MIGRATE:
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG_TC}'")
+    out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
+    check("task completion migration re-runs idempotently",
+          out.returncode == 0 and f"{MIG_TC}: running" in (out.stdout + out.stderr)
+          and int(one("SELECT COUNT(*)::int FROM information_schema.columns WHERE table_name = 'ar_task_work'") or 0) > 5,
+          (out.stdout + out.stderr)[-400:])
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")

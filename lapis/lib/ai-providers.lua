@@ -58,6 +58,10 @@ Providers.TYPES = {
     gemini = { adapter = "openai", url = "https://generativelanguage.googleapis.com/v1beta/openai", key = true },
     mistral = { adapter = "openai", url = "https://api.mistral.ai/v1", key = true },
     azure_openai = { adapter = "openai", key = true, needs_url = true },
+    -- AWS Bedrock Runtime (OpenAI-compatible proxy URL, e.g. Bedrock Access Gateway / LiteLLM).
+    bedrock = { adapter = "openai", needs_url = true, key = true, stream = true },
+    -- xAI Grok
+    xai = { adapter = "openai", url = "https://api.x.ai/v1", key = true },
     -- stream: local servers answer slowly; streaming keeps bytes flowing past proxies that cut silent connections.
     openai_compatible = { adapter = "openai", needs_url = true, stream = true },
     ollama = { adapter = "openai", url = "http://localhost:11434/v1", is_local = true, stream = true },
@@ -202,7 +206,7 @@ function Providers.save(ns, actor, b, existing)
     local ptype = b.provider_type or (existing and existing.provider_type)
     local spec = Providers.TYPES[ptype or ""]
     if not spec then errors.provider_type = "one of anthropic, openai, gemini, azure_openai, mistral, "
-        .. "openai_compatible, ollama, jobshout, platform" end
+        .. "bedrock, xai, openai_compatible, ollama, jobshout, platform" end
     if spec and spec.platform then
         local ok, why = Providers.platform_cfg()
         if not ok then errors.provider_type = why end

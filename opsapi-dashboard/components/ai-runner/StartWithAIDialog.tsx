@@ -25,6 +25,13 @@ import {
 } from '@/services/ai-runner.service';
 import { BASE, ago, compact, outputModeLabel, runStatusLabel, useAiRunnerOn, when } from './ui';
 
+const EXECUTOR_LABELS: Record<string, string> = {
+  machine: 'Machine runner (PromptPilot / local IDE)',
+  builtin: 'Built-in (OpsAPI)',
+  jobshout: 'JobShout workflow',
+  provider: 'Workspace AI provider',
+};
+
 interface TaskRef {
   taskUuid: string;
   /** "#12 Fix the login" — names the task in the dialog and in the button's label. */
@@ -123,6 +130,9 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
   const [previewFor, setPreviewFor] = useState('');
   const [prompt, setPrompt] = useState('');
   const [confirmSimilar, setConfirmSimilar] = useState(false);
+  const [executorKind, setExecutorKind] = useState('machine');
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedMd, setSelectedMd] = useState<string[]>([]);
   const live = useRef(0);
 
   const runner = runners.find((r) => r.uuid === runnerUuid);
@@ -135,12 +145,18 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
   const githubRepos = repos.filter((r) => r.path !== 'none');
 
   /** Preview for these inputs; with no folder yet, take the suggested one and preview again. */
-  async function runPreview(r: string, p: string, folder: string) {
+  async function runPreview(r: string, p: string, folder: string, exec?: string) {
     const id = live.current;
-    let res = await aiRunner.preview(taskUuid, { runner_uuid: r || undefined, profile: p || undefined, repo_path: folder.trim() || undefined });
+    const base = {
+      runner_uuid: r || undefined, profile: p || undefined, repo_path: folder.trim() || undefined,
+      executor_kind: exec || executorKind || undefined,
+      selected_skill_urls: selectedSkills.length ? selectedSkills : undefined,
+      selected_md: selectedMd.length ? selectedMd : undefined,
+    };
+    let res = await aiRunner.preview(taskUuid, base);
     if (!folder.trim() && res.default_repo_path && r) {
       folder = res.default_repo_path;
-      res = await aiRunner.preview(taskUuid, { runner_uuid: r, profile: p || undefined, repo_path: folder });
+      res = await aiRunner.preview(taskUuid, { ...base, repo_path: folder });
     }
     if (id !== live.current) return;
     setRepo(folder);
@@ -148,6 +164,13 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
     setPrompt(res.prompt || '');
     setPreviewFor(inputsKey(r, p, folder));
     setConfirmSimilar(false);
+    if (res.executor_kind) setExecutorKind(res.executor_kind);
+    const skills = res.context?.skills_git_urls || [];
+    const mds = res.context?.md_refs || [];
+    if (!selectedSkills.length && skills.length) setSelectedSkills(skills.map((s) => s.url));
+    if (!selectedMd.length && mds.length) {
+      setSelectedMd(mds.map((m) => m.path || m.url || '').filter(Boolean));
+    }
   }
 
   useEffect(() => {
@@ -217,8 +240,11 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
         repo_path: repo.trim(),
         prompt: edited ? prompt : undefined,
         confirm_similar: similar.length > 0 && confirmSimilar ? true : undefined,
+        executor_kind: executorKind || undefined,
+        selected_skill_urls: selectedSkills.length ? selectedSkills : undefined,
+        selected_md: selectedMd.length ? selectedMd : undefined,
       });
-      toast.success(run.status === 'pending_approval' ? 'Sent to a manager for approval' : 'AI run started');
+      toast.success(run.status === 'pending_approval' ? 'Sent to a manager for approval' : 'AI work started (saved on the task)');
       onClose();
       router.push(`${BASE}/runs/${run.uuid}`);
     } catch (e) {
@@ -261,6 +287,63 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
         <p className="py-8 text-center text-sm text-secondary-500" role="status">Loading runners and the prompt…</p>
       ) : (
         <div className="space-y-4">
+          {preview?.context && (
+            <div className="rounded-lg border border-secondary-200 p-3 space-y-2" data-testid="air-context">
+              <p className="text-sm font-medium text-secondary-800">Context before launch</p>
+              <p className="text-xs text-secondary-500">
+                Skills, MD files and the target repo from the project. Toggle what to load into the agent.
+              </p>
+              {preview.context.target_repo_url && (
+                <p className="text-xs text-secondary-600">
+                  <span className="font-medium">Target PR repo:</span> {preview.context.target_repo_url}
+                  {preview.context.vault_configured ? ' · vault credentials configured' : ''}
+                </p>
+              )}
+              {(preview.context.skills_git_urls || []).map((s) => (
+                <label key={s.url} className="flex items-start gap-2 text-xs text-secondary-700">
+                  <input type="checkbox" className="mt-0.5" checked={selectedSkills.includes(s.url)}
+                    onChange={(e) => setSelectedSkills((prev) => e.target.checked
+                      ? [...prev, s.url] : prev.filter((u) => u !== s.url))} />
+                  <span><span className="font-medium">{s.label || 'Skill'}</span> — {s.url}{s.ref ? ` @${s.ref}` : ''}</span>
+                </label>
+              ))}
+              {(preview.context.md_refs || []).map((m) => {
+                const key = m.path || m.url || '';
+                return (
+                  <label key={key} className="flex items-start gap-2 text-xs text-secondary-700">
+                    <input type="checkbox" className="mt-0.5" checked={selectedMd.includes(key)}
+                      onChange={(e) => setSelectedMd((prev) => e.target.checked
+                        ? [...prev, key] : prev.filter((u) => u !== key))} />
+                    <span><span className="font-medium">{m.label || 'MD'}</span> — {key}</span>
+                  </label>
+                );
+              })}
+              {!preview.context.target_repo_url && !(preview.context.skills_git_urls?.length)
+                && !(preview.context.md_refs?.length) && (
+                <p className="text-xs text-secondary-400">
+                  No project skills/MD/target repo yet. Set them under Project settings → AI.
+                </p>
+              )}
+            </div>
+          )}
+
+          {preview && (
+            <Select id="air-executor" label="Executor" value={executorKind}
+              disabled={preview.executor_locked && !preview.can_change_executor}
+              onChange={(e) => setExecutorKind(e.target.value)}
+              helperText={preview.executor_locked && !preview.can_change_executor
+                ? 'An admin locked the executor for this project.'
+                : 'Machine / built-in / JobShout. Admins can restrict which options appear.'}>
+              {(preview.allowed_executors?.length
+                ? preview.allowed_executors
+                : ['machine', 'builtin', 'jobshout']).map((k) => (
+                <option key={k} value={k.startsWith('provider:') ? 'provider' : k}>
+                  {EXECUTOR_LABELS[k] || EXECUTOR_LABELS[k.split(':')[0]] || k}
+                </option>
+              ))}
+            </Select>
+          )}
+
           <Select id="air-runner" label="Runner" value={runnerUuid}
             onChange={(e) => {
               const r = runners.find((x) => x.uuid === e.target.value);

@@ -631,18 +631,23 @@ return function(app)
         return sdk.ok(with_limits(R.settings(ns)))
     end)))
 
-    -- Project settings -----------------------------------------------------------------------------------------
+    -- Project settings (target repo, skills/MD, vault, allowed executors) ------------------------------------
     app:get("/projects/:project_uuid/settings", sdk.handler({}, U.guard(function(self)
         local ns = sdk.namespace_id(self)
-        return sdk.ok(R.project_settings(ns, project_or_403(self, ns).uuid))
+        return sdk.ok(R.project_settings_view(R.project_settings(ns, project_or_403(self, ns).uuid)))
     end)))
 
     app:put("/projects/:project_uuid/settings", sdk.handler({}, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local p = project_or_403(self, ns)
         local b = body(self)
-        local d, errors = sdk.validate(b, { output_mode = { enum = R.OUTPUT_MODES }, base_branch = { max = 255 } },
-            true)
+        local Ctx = require("ai_runner.context")
+        local d, errors = sdk.validate(b, {
+            output_mode = { enum = R.OUTPUT_MODES }, base_branch = { max = 255 },
+            target_repo_url = { max = 2000 }, vault_url = { max = 2000 }, vault_secret_path = { max = 1024 },
+            vault_mount_path = { max = 120 }, vault_token = { type = "text", max = 8000 },
+            default_executor = { max = 80 }, executor_locked = { type = "boolean" },
+        }, true)
         if not d then U.invalid(errors) end
         if type(d.base_branch) == "string" and not U.is_branch(d.base_branch) then
             U.invalid({ base_branch = "must be a branch name" })
@@ -666,21 +671,49 @@ return function(app)
                 paths[k:lower()] = path
             end
         end
+        local skills = b.skills_git_urls ~= nil and Ctx.skills(b.skills_git_urls) or cur.skills_git_urls
+        local md_refs = b.md_refs ~= nil and Ctx.md_refs(b.md_refs) or cur.md_refs
+        local allowed = b.allowed_executors ~= nil and Ctx.allowed_executors(b.allowed_executors)
+            or cur.allowed_executors
         local function pick(k)
             if d[k] == db.NULL then return db.NULL end
             if d[k] ~= nil then return d[k] end
             return cur[k] ~= cjson.null and cur[k] or db.NULL
         end
+        local vault_sealed = cur.vault_token_sealed
+        if type(d.vault_token) == "string" and d.vault_token ~= "" then
+            vault_sealed = require("helper.secret-box").seal(d.vault_token, require("ai_runner.vault_pr").PURPOSE)
+        elseif d.vault_token == db.NULL then
+            vault_sealed = db.NULL
+        end
+        local locked = d.executor_locked
+        if locked == nil then locked = cur.executor_locked == true end
         db.query([[
             INSERT INTO ar_project_settings (namespace_id, project_uuid, default_repo_paths, output_mode, base_branch,
-                updated_by)
-            VALUES (?, ?, ?::jsonb, ?, ?, ?)
-            ON CONFLICT (namespace_id, project_uuid) DO UPDATE SET default_repo_paths = EXCLUDED.default_repo_paths,
-                output_mode = EXCLUDED.output_mode, base_branch = EXCLUDED.base_branch,
+                target_repo_url, skills_git_urls, md_refs, vault_url, vault_secret_path, vault_mount_path,
+                vault_token_sealed, allowed_executors, executor_locked, default_executor, updated_by)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+            ON CONFLICT (namespace_id, project_uuid) DO UPDATE SET
+                default_repo_paths = EXCLUDED.default_repo_paths, output_mode = EXCLUDED.output_mode,
+                base_branch = EXCLUDED.base_branch, target_repo_url = EXCLUDED.target_repo_url,
+                skills_git_urls = EXCLUDED.skills_git_urls, md_refs = EXCLUDED.md_refs,
+                vault_url = EXCLUDED.vault_url, vault_secret_path = EXCLUDED.vault_secret_path,
+                vault_mount_path = EXCLUDED.vault_mount_path,
+                vault_token_sealed = COALESCE(EXCLUDED.vault_token_sealed, ar_project_settings.vault_token_sealed),
+                allowed_executors = EXCLUDED.allowed_executors, executor_locked = EXCLUDED.executor_locked,
+                default_executor = EXCLUDED.default_executor,
                 updated_by = EXCLUDED.updated_by, updated_at = NOW()
         ]], ns, p.uuid, next(paths) and cjson.encode(paths) or "{}", pick("output_mode"), pick("base_branch"),
+            pick("target_repo_url"), cjson.encode(U.array(skills)), cjson.encode(U.array(md_refs)),
+            pick("vault_url"), pick("vault_secret_path"), pick("vault_mount_path"),
+            vault_sealed or db.NULL, cjson.encode(U.array(allowed)), locked == true, pick("default_executor"),
             sdk.user(self).uuid)
-        return sdk.ok(R.project_settings(ns, p.uuid))
+        -- Explicit clear of vault token when null was sent.
+        if d.vault_token == db.NULL then
+            db.query("UPDATE ar_project_settings SET vault_token_sealed = NULL WHERE namespace_id = ? AND project_uuid = ?",
+                ns, p.uuid)
+        end
+        return sdk.ok(R.project_settings_view(R.project_settings(ns, p.uuid)))
     end)))
 
     -- Prompt template ------------------------------------------------------------------------------------------
