@@ -1260,3 +1260,31 @@ A workspace without a machine running PromptPilot can still run AI tasks. Each w
   - pause, access, no token, no revoke, kind fixed; isolation; disconnect.
 - **Real model (local stack, qwen3.8 on Ollama):** a plan run (comment and five subtasks) and a code run against a mock GitHub (read README and `src/app.js`, committed a correct section on its branch).
 - **Cypress (`ai-runner-builtin.cy.ts`):** the runner card and row, a run started from the task page on the real model, the GitHub return page, the platform page (and that saving it never sends the App).
+
+## 29. AI task completion (context, vault PRs, executors)
+
+Per-project ways of working and a durable task work record so Start with AI is not prompt-only.
+
+### 29.1 Project settings (`ar_project_settings`)
+- `target_repo_url` — PRs open in this remote (never the OpsAPI repo); inherited by tasks.
+- `skills_git_urls` JSON — `{ url, ref?, path?, label? }` packs the agent must load before coding.
+- `md_refs` JSON — `{ path|url, label? }` reference markdown.
+- `vault_url`, `vault_secret_path`, `vault_mount_path`, `vault_token_sealed` — HashiCorp/WSL Vault; the access token is sealed in OpsAPI (`secret-box` purpose `ai_runner_vault`). At PR time OpsAPI fetches `github_token`/`token`/`pat` from the secret and opens the PR in `target_repo_url`.
+- `allowed_executors` — `machine` | `builtin` | `jobshout` | `provider` | `provider:<uuid>`; empty = all allowed.
+- `executor_locked` + `default_executor` — when locked, only managers may change the executor at start.
+
+API: `GET|PUT /projects/:project_uuid/settings` (no sealed token in responses; write `vault_token` to set/replace).
+
+### 29.2 Task work (`ar_task_work`)
+On every start (including `pending_approval` / queued with no machine), OpsAPI writes a work row: frozen prompt, context snapshot, executor, linked `run_uuid`. Turns update `conversation_summary`. Task page shows the AI work panel + manager links.
+
+`GET /tasks/:task_uuid/work` → `{ work, history, pull_requests, project, manager_links }`.
+
+### 29.3 Pull requests (`ar_task_prs`)
+Multiple PRs per task (one unique per run). On success (or when `pr_url` is reported), `vault_pr.open_or_attach` stores the URL, comments on the task, and notifies managers (`ai_run_pr_ready`) with the task URL. Managers `POST /tasks/:task_uuid/prs/:pr_uuid/review` with `approved` | `changes_requested` — **never merges**.
+
+### 29.4 Executors
+`ar_runs.executor_kind` + optional `provider_uuid`. JobShout launches via `lib/jobshout-client` (`jobshout_exec`). Workspace AI providers may include `bedrock` and `xai` (Grok). Claim payload includes `context`, `skills_git_urls`, `md_refs` for preload before the IDE/agent starts.
+
+### 29.5 Prompt variables
+Added: `project.context`, `target_repo` (plus existing task/repo/branch/output variables).

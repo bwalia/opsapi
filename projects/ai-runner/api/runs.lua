@@ -34,7 +34,8 @@ local FIELDS = { "uuid", "task_uuid", "project_uuid", "requested_by", "assignee_
     "timeout_s", "lease_until", "heartbeat_at", "claimed_at", "started_at", "finished_at", "cancel_requested_at",
     "cancel_requested_by", "pid", "agent_session_id", "exit_code", "error_category", "error", "summary",
     "commit_sha", "pr_url", "created_at", "updated_at", "approved_by", "approved_at", "question", "tokens_in",
-    "tokens_out", "cache_read", "cache_write", "cost_estimate", "turns" }
+    "tokens_out", "cache_read", "cache_write", "cost_estimate", "turns", "executor_kind", "provider_uuid",
+    "jobshout_run_id", "conversation_summary" }
 local COLS = {}
 for i, f in ipairs(FIELDS) do COLS[i] = "r." .. f end
 COLS = table.concat(COLS, ", ") .. ", r.task_snapshot"
@@ -47,6 +48,7 @@ local function view(r)
     local v = {}
     for _, f in ipairs(FIELDS) do v[f] = U.null(r[f]) end
     v.task_snapshot = U.json(r.task_snapshot) or cjson.null
+    v.context_snapshot = U.json(r.context_snapshot) or cjson.null
     -- Totals again as one object: on the detail `turns` is the conversation, not the count.
     v.usage = { tokens_in = r.tokens_in or 0, tokens_out = r.tokens_out or 0, cache_read = r.cache_read or 0,
         cache_write = r.cache_write or 0, cost_estimate = r.cost_estimate or 0, turns = r.turns or 0 }
@@ -70,13 +72,21 @@ local function map(rows, fn)
 end
 
 -- How the prompt names the run's folder and what happens to its work: a machine's folder, or for the built-in
--- runner (§28) its GitHub repository (or none) and its branch.
-local function render_opts(builtin, repo_path, defaults, output_mode)
+-- runner (§28) its GitHub repository (or none) and its branch. Includes project context pack.
+local function render_opts(builtin, repo_path, defaults, output_mode, context_snapshot)
+    local target = type(defaults.project_settings.target_repo_url) == "string"
+        and defaults.project_settings.target_repo_url or nil
+    local base = {
+        base_branch = defaults.base_branch, output_mode = output_mode,
+        context_snapshot = context_snapshot, target_repo = target,
+    }
     if builtin then
-        return { repo_path = repo_path and B.repo_label(repo_path) or nil, base_branch = defaults.base_branch,
-            output_mode = output_mode, output_text = B.OUTPUT_TEXT[repo_path == B.NO_REPO and "none" or output_mode] }
+        base.repo_path = repo_path and B.repo_label(repo_path) or nil
+        base.output_text = B.OUTPUT_TEXT[repo_path == B.NO_REPO and "none" or output_mode]
+        return base
     end
-    return { repo_path = repo_path, base_branch = defaults.base_branch, output_mode = output_mode }
+    base.repo_path = repo_path
+    return base
 end
 
 local function task_or_404(ns, task_uuid)
@@ -155,10 +165,13 @@ return function(app)
         local task = task_or_404(ns, self.params.task_uuid)
         local allowed, privileged = R.can_start(self, task)
         if not allowed then return sdk.error(403, NOT_ALLOWED) end
-        local d, errors = sdk.validate(body(self), {
+        local b = body(self)
+        local d, errors = sdk.validate(b, {
             runner_uuid = { type = "uuid" }, profile = { max = 80 }, repo_path = { max = 1024 },
+            executor_kind = { max = 40 }, provider_uuid = { type = "uuid" },
         })
         if not d then U.invalid(errors) end
+        local Ctx = require("ai_runner.context")
         local list_ = runners(self, ns, task.project_uuid)
         local runner_uuid = type(d.runner_uuid) == "string" and d.runner_uuid:lower() or nil
         if runner_uuid then
@@ -170,8 +183,12 @@ return function(app)
             end
         end
         local defaults = R.defaults(ns, task)
+        local ps = defaults.project_settings
+        local snap = Ctx.snapshot(ps, {
+            selected_skill_urls = b.selected_skill_urls, selected_md = b.selected_md,
+        })
         local builtin = runner_uuid and B.is_builtin(ns, runner_uuid)
-        local suggested = R.default_repo_path(ns, task, runner_uuid, defaults.project_settings)
+        local suggested = R.default_repo_path(ns, task, runner_uuid, ps)
         if builtin and not B.repo_ref(suggested) then suggested = B.NO_REPO end
         local given = type(d.repo_path) == "string" and (builtin and B.repo_ref(d.repo_path) or U.path(d.repo_path))
         local repo_path = given or suggested
@@ -187,8 +204,11 @@ return function(app)
                 end
             end
         end
+        local default_executor = (type(ps.default_executor) == "string" and ps.default_executor ~= ""
+            and ps.default_executor ~= cjson.null and ps.default_executor)
+            or (builtin and "builtin") or "machine"
         return sdk.ok({
-            prompt = R.render(tpl.body, task, render_opts(builtin, repo_path, defaults, defaults.output_mode)),
+            prompt = R.render(tpl.body, task, render_opts(builtin, repo_path, defaults, defaults.output_mode, snap)),
             template_version = tpl.version, template_uuid = U.null(tpl.uuid), can_edit_prompt = privileged,
             runners = U.array(list_), runner_uuid = U.null(runner_uuid), default_repo_path = U.null(suggested),
             repo_path = U.null(repo_path), work_branch = R.work_branch(task), output_mode = defaults.output_mode,
@@ -196,6 +216,12 @@ return function(app)
                 busy_session = busy or cjson.null, similar = R.similar(self, ns, task, guards.similar_threshold) },
             limits = R.limits(ns, sdk.user(self).uuid, guards),
             needs_approval = R.needs_approval(ns, profile, R.is_manager(self, task.project_uuid)),
+            context = snap,
+            project = R.project_settings_view(ps),
+            executor_kind = default_executor,
+            allowed_executors = U.array(ps.allowed_executors or {}),
+            executor_locked = ps.executor_locked == true,
+            can_change_executor = not ps.executor_locked or R.is_manager(self, task.project_uuid),
         })
     end)))
 
@@ -205,14 +231,27 @@ return function(app)
             local task = task_or_404(ns, self.params.task_uuid)
             local allowed, privileged, assignee = R.can_start(self, task)
             if not allowed then return sdk.error(403, NOT_ALLOWED) end
-            local d, errors = sdk.validate(body(self), {
-                runner_uuid = { type = "uuid", required = true }, profile = { required = true, max = 80 },
-                model = { max = 120 }, repo_path = { required = true, max = 1024 },
+            local b = body(self)
+            local d, errors = sdk.validate(b, {
+                runner_uuid = { type = "uuid" }, profile = { required = true, max = 80 },
+                model = { max = 120 }, repo_path = { max = 1024 },
                 prompt = { type = "text", max = 100000 }, output_mode = { enum = R.OUTPUT_MODES },
-                confirm_similar = { type = "boolean" },
+                confirm_similar = { type = "boolean" }, executor_kind = { max = 40 },
+                provider_uuid = { type = "uuid" },
             })
             if not d then U.invalid(errors) end
             for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
+            -- JobShout runs inside JobShout: prefer the built-in runner as the OpsAPI host row when the client
+            -- didn't pick a machine (or picked one by habit).
+            if d.executor_kind == "jobshout" then
+                B.refresh(ns)
+                local bi = U.one("SELECT uuid FROM ar_runners WHERE namespace_id = ? AND kind = 'builtin' LIMIT 1", ns)
+                if bi then d.runner_uuid = bi.uuid end
+                if not d.repo_path then d.repo_path = B.NO_REPO end
+                if not d.profile then d.profile = "jobshout" end
+            end
+            if not d.runner_uuid then U.invalid({ runner_uuid = "is required" }) end
+            if not d.repo_path then U.invalid({ repo_path = "is required" }) end
             local builtin = B.is_builtin(ns, d.runner_uuid:lower())
             local path = builtin and B.repo_ref(d.repo_path) or (not builtin and U.path(d.repo_path)) or nil
             if not path then
@@ -224,10 +263,14 @@ return function(app)
                 return sdk.error(403, "Only an AI runs manager can edit the prompt")
             end
             local defaults = R.defaults(ns, task)
+            local Ctx = require("ai_runner.context")
+            local snap = Ctx.snapshot(defaults.project_settings, {
+                selected_skill_urls = b.selected_skill_urls, selected_md = b.selected_md,
+            })
             local output_mode = d.output_mode or defaults.output_mode
             local tpl = R.template(ns)
             local prompt = d.prompt and U.clean(d.prompt) or R.render(tpl.body, task,
-                render_opts(builtin, path, defaults, output_mode))
+                render_opts(builtin, path, defaults, output_mode, snap))
             local key = ngx.req.get_headers()["Idempotency-Key"]
             local run = R.create(self, ns, task, {
                 runner_uuid = d.runner_uuid:lower(), profile = d.profile, model = d.model, repo_path = path,
@@ -235,6 +278,8 @@ return function(app)
                 pr_draft = defaults.pr_draft, pr_base = defaults.pr_base, base_branch = defaults.base_branch,
                 timeout_s = defaults.timeout_s, assignee_uuid = assignee, confirm_similar = d.confirm_similar,
                 idempotency_key = type(key) == "string" and key:sub(1, 255) or nil,
+                executor_kind = d.executor_kind, provider_uuid = d.provider_uuid, context_snapshot = snap,
+                selected_skill_urls = b.selected_skill_urls, selected_md = b.selected_md,
             })
             return sdk.created(view(run))
         end)
@@ -443,5 +488,68 @@ return function(app)
             if R.can_approve(self, r) then approvals[#approvals + 1] = view(r) end
         end
         return sdk.ok({ requests = U.array(requests), approvals = U.array(approvals) })
+    end)))
+
+    -- Task work record + PRs (AI task completion) --------------------------------------------------------------
+    app:get("/tasks/:task_uuid/work", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local task = task_or_404(ns, self.params.task_uuid)
+        local W = require("ai_runner.task_work")
+        local V = require("ai_runner.vault_pr")
+        local latest = W.latest(ns, task.uuid)
+        local history = {}
+        for i, w in ipairs(W.list(ns, task.uuid)) do history[i] = W.view(w) end
+        local prs = {}
+        for i, p in ipairs(V.list_for_task(ns, task.uuid)) do prs[i] = V.view(p) end
+        return sdk.ok({
+            work = latest and W.view(latest) or cjson.null,
+            history = U.array(history),
+            pull_requests = U.array(prs),
+            project = R.project_settings_view(R.project_settings(ns, task.project_uuid)),
+            manager_links = latest and {
+                task_url = R.task_url(task.project_uuid, task.uuid),
+                run_url = latest.run_uuid and ("/dashboard/ai-runner/runs/" .. latest.run_uuid) or cjson.null,
+                pr_urls = (function()
+                    local urls = {}
+                    for _, p in ipairs(prs) do urls[#urls + 1] = p.pr_url end
+                    return U.array(urls)
+                end)(),
+            } or cjson.null,
+        })
+    end)))
+
+    app:get("/tasks/:task_uuid/prs", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        task_or_404(ns, self.params.task_uuid)
+        local V = require("ai_runner.vault_pr")
+        local out = {}
+        for i, p in ipairs(V.list_for_task(ns, self.params.task_uuid)) do out[i] = V.view(p) end
+        return sdk.ok(U.array(out))
+    end)))
+
+    app:post("/tasks/:task_uuid/prs/:pr_uuid/review", sdk.handler({}, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local task = task_or_404(ns, self.params.task_uuid)
+        if not R.is_manager(self, task.project_uuid) then
+            return sdk.error(403, "Only an AI run manager can sign off on a pull request")
+        end
+        local d, errors = sdk.validate(body(self), {
+            decision = { required = true, enum = { "approved", "changes_requested" } },
+            note = { type = "text", max = 2000 },
+        })
+        if not d then U.invalid(errors) end
+        local V = require("ai_runner.vault_pr")
+        local row = V.review(ns, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
+            type(d.note) == "string" and d.note or nil)
+        if row.task_uuid ~= task.uuid then return sdk.not_found("Pull request") end
+        pcall(function()
+            require("queries.KanbanTaskQueries").addComment({
+                task_id = task.id, user_uuid = sdk.user(self).uuid,
+                content = "PR review: " .. d.decision
+                    .. (d.note and d.note ~= "" and (" — " .. U.clean(d.note, 500)) or "")
+                    .. "\n" .. tostring(row.pr_url),
+            })
+        end)
+        return sdk.ok(V.view(row))
     end)))
 end

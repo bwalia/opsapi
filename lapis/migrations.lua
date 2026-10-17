@@ -2681,7 +2681,20 @@ local _migrations = {
                     ALTER TABLE namespace_ai_providers DROP CONSTRAINT IF EXISTS namespace_ai_providers_provider_type_check;
                     ALTER TABLE namespace_ai_providers ADD CONSTRAINT namespace_ai_providers_provider_type_check
                         CHECK (provider_type IN ('anthropic', 'openai', 'gemini', 'azure_openai', 'mistral',
-                            'openai_compatible', 'ollama', 'jobshout', 'platform'));
+                            'bedrock', 'xai', 'openai_compatible', 'ollama', 'jobshout', 'platform'));
+                END IF;
+            END $$
+        ]])
+    end,
+    -- Bedrock (private) + xAI Grok as first-class workspace AI provider types.
+    ['zzai3_bedrock_xai_providers'] = function()
+        db.query([[
+            DO $$ BEGIN
+                IF to_regclass('namespace_ai_providers') IS NOT NULL THEN
+                    ALTER TABLE namespace_ai_providers DROP CONSTRAINT IF EXISTS namespace_ai_providers_provider_type_check;
+                    ALTER TABLE namespace_ai_providers ADD CONSTRAINT namespace_ai_providers_provider_type_check
+                        CHECK (provider_type IN ('anthropic', 'openai', 'gemini', 'azure_openai', 'mistral',
+                            'bedrock', 'xai', 'openai_compatible', 'ollama', 'jobshout', 'platform'));
                 END IF;
             END $$
         ]])

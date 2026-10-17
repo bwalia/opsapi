@@ -23,6 +23,7 @@ import { TimerButton } from '@/components/time-tracking';
 import RichTextEditor from '@/components/academy/RichTextEditor';
 import { StartWithAIButton } from '@/components/ai-runner/StartWithAIDialog';
 import TaskRuns from '@/components/ai-runner/TaskRuns';
+import TaskWork from '@/components/ai-runner/TaskWork';
 import type {
   KanbanTask, KanbanProjectMember, KanbanActivity, KanbanTaskStatus, KanbanTaskPriority,
 } from '@/types';
@@ -480,6 +481,7 @@ export default function TaskDetailPage() {
             </Field>
           </div>
 
+          <TaskWork taskUuid={task.uuid} />
           <TaskRuns taskUuid={task.uuid} />
 
           {/* Meta */}
