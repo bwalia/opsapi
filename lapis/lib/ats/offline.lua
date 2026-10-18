@@ -46,7 +46,8 @@ end
 -- fractional seconds dropped). nil when it isn't one.
 function Offline.parse_iso(text)
     if type(text) ~= "string" then return nil end
-    local y, mo, d, h, mi, s, rest = text:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)(.*)$")
+    -- "T" or a space between date and time (Postgres prints "2026-10-18 10:00:00+00").
+    local y, mo, d, h, mi, s, rest = text:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)[T ](%d%d):(%d%d):(%d%d)(.*)$")
     if not y then return nil end
     y, mo, d, h, mi, s = tonumber(y), tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(s)
     if mo < 1 or mo > 12 or d < 1 or d > 31 or h > 23 or mi > 59 or s > 60 then return nil end
@@ -56,10 +57,20 @@ function Offline.parse_iso(text)
         offset = 0
     else
         local sign, oh, om = rest:match("^([%+%-])(%d%d):?(%d%d)$")
+        if not sign then
+            sign, oh = rest:match("^([%+%-])(%d%d)$")
+            om = "00"
+        end
         if not sign then return nil end
         offset = (tonumber(oh) * 3600 + tonumber(om) * 60) * (sign == "+" and 1 or -1)
     end
     return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + s - offset
+end
+
+--- A time as the Snazzy app reads it (ISO 8601 UTC), from ISO text or a Postgres timestamp; nil if neither.
+function Offline.to_iso(text)
+    local t = Offline.parse_iso(text ~= nil and tostring(text) or nil)
+    return t and os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(t)) or nil
 end
 
 local function clamp(t, lo, hi)
