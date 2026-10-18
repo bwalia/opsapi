@@ -72,8 +72,11 @@ export interface Evaluation {
 export interface Review {
   reviewer: string; decision?: Decision; reason: string; note: string; levels: Record<string, number>; at: string; via?: string;
 }
+/** Where the interview runs: in the candidate's browser, or offline in Snazzy Pro on their Mac. */
+export type Delivery = 'online' | 'offline';
 export interface InterviewSummary {
-  uuid: string; state: string; source: string; evaluation_status: string; started_at?: string; ended_at?: string;
+  uuid: string; state: string; source: string; delivery?: Delivery; result_uploaded_at?: string;
+  evaluation_status: string; started_at?: string; ended_at?: string;
   created_at: string; decision?: Decision; reviewed: boolean; flag_count: number; candidate_uuid: string;
   candidate_name: string; job_uuid: string; job_title: string; application_uuid: string;
 }
@@ -82,6 +85,8 @@ export interface InterviewDetail extends InterviewSummary {
   eligibility: { id: string; text: string; answer?: string; meets?: boolean | null }[];
   adjustments: string[]; forwarded_questions: string[]; models: Record<string, string>; end_reason?: string;
   evaluation?: Evaluation; review?: Review; low_agreement: string[]; settings: AtsSettings; dashboard_url: string;
+  /** The transcript was reported by the candidate's device (offline interviews). */
+  device_reported?: boolean;
 }
 
 export interface Activation {
@@ -164,9 +169,9 @@ export const atsService = {
     paged<InterviewSummary>(await apiClient.get(`${BASE}/interviews${buildQueryString({ ...params,
       to_review: params.to_review ? 'true' : undefined })}`)),
   interview: async (uuid: string) => unwrap<InterviewDetail>(await apiClient.get(`${BASE}/interviews/${uuid}`)),
-  invite: async (application_uuid: string, kit_uuid?: string, expires_in_days = 7) =>
-    unwrap<{ uuid: string; url: string; expires_at: string }>(
-      await apiClient.post(`${BASE}/interviews`, { application_uuid, kit_uuid, expires_in_days }, JSON_BODY)),
+  invite: async (application_uuid: string, kit_uuid?: string, expires_in_days = 7, delivery: Delivery = 'online') =>
+    unwrap<{ uuid: string; url: string; app_url?: string; expires_at: string; delivery?: Delivery }>(
+      await apiClient.post(`${BASE}/interviews`, { application_uuid, kit_uuid, expires_in_days, delivery }, JSON_BODY)),
   importFile: async (content: string) =>
     unwrap<ImportResult>(await apiClient.post(`${BASE}/interviews/import`, { content }, JSON_BODY)),
   evaluate: async (uuid: string) => unwrap<unknown>(await apiClient.post(`${BASE}/interviews/${uuid}/evaluate`, {}, JSON_BODY)),

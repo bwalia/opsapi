@@ -133,7 +133,31 @@ export default function CandidateInterviewPage() {
         {phase === 'error' && <p role="alert" className={`rounded-xl p-4 ${panel}`}>{error}</p>}
         {error && phase !== 'error' && <p role="alert" className="rounded-lg border border-red-400 bg-red-50 p-3 text-red-900">{error}</p>}
 
-        {phase === 'notice' && view && (
+        {phase === 'notice' && view && view.delivery === 'offline' && (
+          <section className={`space-y-4 rounded-xl p-5 ${panel}`} aria-labelledby="offline-title">
+            <h2 id="offline-title" className="text-xl font-semibold">This interview runs in the Snazzy Pro app</h2>
+            <p className="leading-relaxed">
+              {view.organisation || 'The hiring team'} has set this interview up to run offline, on your own Mac, in the
+              Snazzy Pro app. Nothing is sent while you take it; when it ends, the app sends the transcript to the
+              hiring team. The link works on one device.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <a className="rounded-lg bg-primary-600 px-5 py-3 text-center font-semibold text-white focus:outline-none focus:ring-4 focus:ring-primary-300"
+                href={`snazzypro://interview?link=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}>
+                Open in Snazzy Pro
+              </a>
+              <a className="rounded-lg border border-current px-5 py-3 text-center font-semibold" href="https://snazzy.pro/download.html">
+                Get Snazzy Pro (free)
+              </a>
+            </div>
+            <p className="text-sm opacity-80">
+              You can ask for adjustments, or to speak to a person instead, in the app before you start. If you can&apos;t use
+              a Mac, contact the hiring team and they can send you a link that works in the browser.
+            </p>
+          </section>
+        )}
+
+        {phase === 'notice' && view && view.delivery !== 'offline' && (
           <section className={`space-y-4 rounded-xl p-5 ${panel}`} aria-labelledby="notice-title">
             <h2 id="notice-title" className="text-xl font-semibold">Before you start</h2>
             {view.has_pack && (

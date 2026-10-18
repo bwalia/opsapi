@@ -35,9 +35,10 @@ function L.label(role)
     return cfg.provider .. "/" .. tostring(cfg.model)
 end
 
---- Who processes candidates' answers, for the notice.
-function L.provider_name()
-    local cfg = L.config("interviewer")
+--- Who processes candidates' answers, for the notice (role: "interviewer" by
+-- default; offline interviews name the evaluator, the only model run here).
+function L.provider_name(role)
+    local cfg = L.config(role or "interviewer")
     if cfg.provider == "anthropic" then return "Anthropic (Claude)" end
     if cfg.provider == "openai" then return "an AI service chosen by the hiring team" end
     return "an AI model run by the hiring team's service provider"

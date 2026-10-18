@@ -106,9 +106,39 @@ function P.parse_generated_kit(text, job_description)
 end
 
 --- What a candidate reads before starting (InterviewPrompts.notice, word for word).
-function P.notice(kit, provider)
+-- opts.offline: the interview runs in the Snazzy Pro app on the candidate's own
+-- computer and only the finished transcript is sent; `provider` then names who
+-- summarises it (the server's evaluator). The online wording is unchanged.
+function P.notice(kit, provider, opts)
     local org = kit.organisation == "" and "the hiring team" or kit.organisation
     local s = kit.settings
+    if opts and opts.offline then
+        return table.concat({
+            "This is a first-round interview for " .. kit.title .. " with " .. org
+                .. ". The interviewer is an AI, not a person.",
+            "Where it runs: the interview runs in the Snazzy Pro app with an AI model on your own computer. "
+                .. "Nothing is sent while you take it. When it ends, the app sends the transcript of the "
+                .. "interview (the questions and your answers, as text) to " .. org .. ".",
+            "What happens: the AI asks every candidate for this role the same main questions in the same order, "
+                .. "and may ask short follow-up questions about your answers. It takes about " .. s.minutes
+                .. " minutes. You can ask for any question to be repeated or rephrased"
+                .. (s.allow_pause and ", and you can pause" or "") .. ". At the end you can ask your own questions.",
+            "Who decides: a person at " .. org .. " reads your answers and makes the decision. The AI does not "
+                .. "decide, rank or reject anyone. After the interview, the transcript is summarised by " .. provider
+                .. " against the skills the role needs, and a person on the hiring team reviews your answers "
+                .. "alongside that summary.",
+            "What is not used: the AI does not analyse your face, voice, tone, emotions or typing. Only the words of "
+                .. "your answers are assessed. Personal details you mention (for example about health, family or "
+                .. "religion) are hidden from the assessment.",
+            "Your data: the transcript is kept by " .. org .. " for up to " .. s.retention_days
+                .. " days after a decision, then deleted. You can ask " .. org
+                .. " for a copy, a correction or deletion at any time.",
+            "Adjustments: tell us below if you need extra time, a pause, text instead of voice or anything else. "
+                .. "Asking won't count against you.",
+            "If you'd rather speak to a person instead, choose \"I'd prefer to speak to a person\". That won't "
+                .. "count against you either.",
+        }, "\n\n")
+    end
     return table.concat({
         "This is a first-round interview for " .. kit.title .. " with " .. org
             .. ". The interviewer is an AI, not a person.",

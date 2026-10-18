@@ -8,6 +8,7 @@
 
     [1] tables   [2] RBAC modules, role grants and the "Hiring" menu item
     [3] interview packs (encrypted files in S3) and invite device binding
+    [4] offline interviews (run on the candidate's Mac, transcript uploaded once)
 ]]
 
 local db = require("lapis.db")
@@ -286,5 +287,22 @@ return {
         db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS device_hash CHAR(64)")
         db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS pack_fetched_at TIMESTAMPTZ")
         print("[ATS] Interview packs")
+    end,
+
+    [4] = function()
+        -- Offline delivery: the candidate's Snazzy Pro app downloads the kit once, runs
+        -- the interview on their Mac and uploads the transcript once.
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS delivery TEXT NOT NULL DEFAULT 'online'")
+        db.query([[DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ats_interviews_delivery_check') THEN
+                ALTER TABLE ats_interviews ADD CONSTRAINT ats_interviews_delivery_check
+                    CHECK (delivery IN ('online', 'offline'));
+            END IF;
+        END $$]])
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS offline_started_at TIMESTAMPTZ")
+        db.query("ALTER TABLE ats_interviews ADD COLUMN IF NOT EXISTS result_uploaded_at TIMESTAMPTZ")
+        db.query([[CREATE INDEX IF NOT EXISTS ats_interviews_updated_idx
+            ON ats_interviews (namespace_id, updated_at DESC)]])
+        print("[ATS] Offline interviews")
     end,
 }

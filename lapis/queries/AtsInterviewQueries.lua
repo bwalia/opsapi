@@ -20,6 +20,8 @@ local L = require("lib.ats.llm")
 local F = require("lib.ats.fairness")
 local Hash = require("lib.ats.hash")
 local Activation = require("lib.ats.activation")
+local Offline = require("lib.ats.offline")
+local Interop = require("lib.ats.interop")
 local Q = require("queries.AtsQueries")
 
 local I = {}
@@ -46,7 +48,21 @@ end
 
 -- MARK: Invitations
 
+I.DELIVERIES = { online = true, offline = true }
+I.ONLINE_ONLY = "This interview runs in the browser: open the link there."
+I.OFFLINE_ONLY = "This interview runs in the Snazzy Pro app on your Mac: open the link there."
+
+--- "online" (the default) or "offline"; nil, err for anything else.
+function I.delivery_of(data)
+    local d = v(data.delivery)
+    if d == nil or d == "" then return "online" end
+    if type(d) ~= "string" or not I.DELIVERIES[d] then return nil, 'delivery must be "online" or "offline".' end
+    return d
+end
+
 function I.invite(namespace_id, data, actor)
+    local delivery, derr = I.delivery_of(data)
+    if not delivery then return nil, derr, 422 end
     local blocked = Activation.require_active(namespace_id)
     if blocked then return nil, blocked.json.error, 402 end
     local app = Q.application_row(namespace_id, data.application_uuid)
@@ -70,22 +86,25 @@ function I.invite(namespace_id, data, actor)
     local token = Hash.random_token()
     local session = Engine.new_session(kit, { name = cand.name, email = v(cand.email) or "",
         reference = v(cand.reference) or "" }, now())
-    session.channel = "hosted"
+    session.channel = delivery == "offline" and "this_mac" or "hosted"
+    session.delivery = delivery
     session.rev = 0
     session.models = { interviewer = L.label("interviewer") }
     local r = db.insert("ats_interviews", { namespace_id = namespace_id, application_id = app.id, kit_id = kit_row.id,
         kit_version = kit_row.version, source = "hosted", state = "invited", session = J.encode(session),
         link_token_hash = Hash.sha256_hex(token), link_expires_at = db.raw(("NOW() + interval '%d days'"):format(days)),
-        pack_id = pack_id,
+        pack_id = pack_id, delivery = delivery,
         invited_by_uuid = actor, delete_after = ts_sql(session.delete_after_ts) }, { returning = "*" })[1]
     if EARLY_STAGES[app.stage] and app.stage ~= "interview" then Q.move_stage(namespace_id, app.uuid, "interview",
         actor) end
     Q.audit(namespace_id, actor, "interview_invited", "interview", r.uuid, { application = app.uuid,
-        kit_version = kit_row.version })
+        kit_version = kit_row.version, delivery = delivery })
     -- ?api= tells the Snazzy Pro app where the API is when the candidate pastes this link
     -- (the browser page ignores it).
     local url = Activation.public_url() .. "/i/" .. token .. "?api=" .. ngx.escape_uri(Activation.api_url())
-    return { uuid = r.uuid, url = url, app_url = pack_id and I.app_url(url) or nil, expires_at = r.link_expires_at,
+    -- Only the app can take an offline interview, so it always gets the app link.
+    local app_url = (pack_id or delivery == "offline") and I.app_url(url) or nil
+    return { uuid = r.uuid, url = url, app_url = app_url, expires_at = r.link_expires_at, delivery = delivery,
         note = "Copy this link now: it isn't shown again." }
 end
 
@@ -115,9 +134,11 @@ I.MAX_BULK = 500
 -- link, so they can all interview in parallel. Without job_uuid, the kit's open
 -- job is used (or made). One candidate's problem doesn't stop the others.
 -- data: {kit_uuid | kit (the app's approved RoleKit), pack_uuid?, job_uuid?, expires_in_days?,
---        candidates = {{name, email, reference}}}
+--        delivery? ("online" | "offline"), candidates = {{name, email, reference}}}
 -- @return {invited, failed, results = {{name, email, uuid, url, app_url | error}}} | nil, err, status
 function I.invite_many(namespace_id, data, actor)
+    local delivery, derr = I.delivery_of(data)
+    if not delivery then return nil, derr, 422 end
     local blocked = Activation.require_active(namespace_id)
     if blocked then return nil, blocked.json.error, 402 end
     local list = type(data.candidates) == "table" and data.candidates or {}
@@ -161,7 +182,7 @@ function I.invite_many(namespace_id, data, actor)
         local inv, ierr
         if app then
             inv, ierr = I.invite(namespace_id, { application_uuid = app.uuid, kit_uuid = kit_row.uuid,
-                pack_uuid = data.pack_uuid, expires_in_days = data.expires_in_days }, actor)
+                pack_uuid = data.pack_uuid, expires_in_days = data.expires_in_days, delivery = delivery }, actor)
         end
         if inv then
             item.uuid, item.url, item.app_url, item.expires_at = inv.uuid, inv.url, inv.app_url, inv.expires_at
@@ -173,15 +194,18 @@ function I.invite_many(namespace_id, data, actor)
         results[#results + 1] = item
     end
     Q.audit(namespace_id, actor, "interviews_bulk_invited", "kit", kit_row.uuid, { invited = invited,
-        failed = failed })
+        failed = failed, delivery = delivery })
     return { invited = invited, failed = failed, job_uuid = job_uuid, kit_uuid = kit_row.uuid, results = results,
+        delivery = delivery,
         note = "Copy these links now: they aren't shown again." }
 end
 
 function I.revoke(namespace_id, uuid, actor)
     local r = I.row(namespace_id, uuid)
     if not r then return nil, "Interview not found" end
-    db.update("ats_interviews", { link_expires_at = db.raw("NOW()"), updated_at = db.raw("NOW()") }, { id = r.id })
+    -- revoked_at also ends an offline interview's upload grace period (by_token).
+    db.update("ats_interviews", { link_expires_at = db.raw("NOW()"), updated_at = db.raw("NOW()"),
+        session = db.raw("jsonb_set(session, '{revoked}', 'true'::jsonb)") }, { id = r.id })
     Q.audit(namespace_id, actor, "link_revoked", "interview", uuid, {})
     return { uuid = uuid, revoked = true }
 end
@@ -189,7 +213,8 @@ end
 -- MARK: Recruiter views
 
 local LIST_SELECT = [[
-    SELECT i.uuid, i.state, i.source, i.evaluation_status, i.started_at, i.ended_at, i.created_at, i.link_expires_at,
+    SELECT i.uuid, i.state, i.source, i.delivery, i.evaluation_status, i.started_at, i.ended_at, i.created_at,
+      i.link_expires_at, i.result_uploaded_at, i.updated_at,
       i.review->>'decision' AS decision, (i.review IS NOT NULL) AS reviewed,
       jsonb_array_length(COALESCE(i.session->'flags', '[]'::jsonb)) AS flag_count,
       c.uuid AS candidate_uuid, c.name AS candidate_name, j.uuid AS job_uuid, j.title AS job_title,
@@ -211,6 +236,10 @@ function I.list(namespace_id, params)
     if params.job_uuid and params.job_uuid ~= "" then
         where = where .. " AND j.uuid = ?"
         args[#args + 1] = params.job_uuid
+    end
+    if I.DELIVERIES[params.delivery or ""] then
+        where = where .. " AND i.delivery = ?"
+        args[#args + 1] = params.delivery
     end
     local total = db.query([[SELECT count(*)::int AS n FROM ats_interviews i
         JOIN ats_applications a ON a.id = i.application_id
@@ -244,6 +273,7 @@ function I.detail(namespace_id, uuid)
     r.models = s.models or {}
     r.end_reason = s.end_reason
     r.notice_hash = s.notice_hash
+    r.device_reported = s.device_reported == true
     r.evaluation = decode(full.evaluation)
     r.review = decode(full.review)
     r.low_agreement = J.array(Ev.low_agreement(r.evaluation))
@@ -257,15 +287,33 @@ end
 --- The interview for a raw link token. @return row | nil, status (404 unknown, 410 expired)
 function I.by_token(token)
     if type(token) ~= "string" or #token < 20 or #token > 100 then return nil, 404 end
-    local r = db.query("SELECT *, (link_expires_at > NOW()) AS live FROM ats_interviews WHERE link_token_hash = ?",
-        Hash.sha256_hex(token))[1]
+    local r = db.query(([[SELECT *, (link_expires_at > NOW()) AS live,
+        (link_expires_at + interval '%d days' > NOW()) AS grace_live,
+        EXTRACT(EPOCH FROM link_expires_at)::bigint AS link_expires_ts,
+        EXTRACT(EPOCH FROM offline_started_at)::bigint AS offline_started_ts
+        FROM ats_interviews WHERE link_token_hash = ?]]):format(Offline.GRACE_DAYS), Hash.sha256_hex(token))[1]
     if not r then return nil, 404 end
     local s = decode(r.session) or {}
     -- An expired link still shows a finished interview's thank-you page.
     if not r.live and not Engine.is_finished(s) and s.state ~= "in_progress" and s.state ~= "paused" then
-        return nil, 410
+        -- An offline interview the app fetched before the link expired can still send its results.
+        local uploading = r.delivery == "offline" and v(r.offline_started_at) and r.grace_live and not s.revoked
+        if not uploading then return nil, 410 end
     end
     return r
+end
+
+--- What the candidate reads before starting, and its hash (with the workspace's own legal notice).
+function I.notice_for(r, kit)
+    local settings = Q.settings(r.namespace_id)
+    local notice
+    if r.delivery == "offline" then
+        notice = P.notice(kit, L.provider_name("evaluator"), { offline = true })
+    else
+        notice = P.notice(kit, L.provider_name())
+    end
+    if settings.legal_notice ~= "" then notice = notice .. "\n\n" .. settings.legal_notice end
+    return notice, Hash.notice(notice)
 end
 
 local function candidate_view(r, s)
@@ -277,15 +325,14 @@ local function candidate_view(r, s)
         end
     end
     local kit = s.kit
-    local settings = Q.settings(r.namespace_id)
-    local notice = P.notice(kit, L.provider_name())
-    if settings.legal_notice ~= "" then notice = notice .. "\n\n" .. settings.legal_notice end
+    local notice, notice_hash = I.notice_for(r, kit)
     local finished = Engine.is_finished(s)
     return {
         state = s.state, role_title = kit.title, organisation = kit.organisation,
         interviewer_name = kit.settings.interviewer_name, minutes = kit.settings.minutes,
         allow_pause = kit.settings.allow_pause, allowed_adjustments = kit.settings.allowed_adjustments,
-        notice = notice, notice_hash = Hash.notice(notice), next_steps = kit.settings.next_steps,
+        notice = notice, notice_hash = notice_hash, next_steps = kit.settings.next_steps,
+        delivery = r.delivery or "online",
         turns = turns, choices = e:current_choices(), progress = e:progress(),
         seconds_left = s.started_ts and math.floor(e:seconds_left()) or nil,
         question_count = #kit.questions,
@@ -365,6 +412,7 @@ local function load_session(r)
 end
 
 function I.start(r, data)
+    if r.delivery == "offline" then return nil, I.OFFLINE_ONLY, 409 end
     local s = load_session(r)
     if s.state ~= "invited" then return candidate_view(r, s) end
     local blocked = Activation.require_active(r.namespace_id)
@@ -384,6 +432,7 @@ function I.start(r, data)
 end
 
 function I.answer(r, data)
+    if r.delivery == "offline" then return nil, I.OFFLINE_ONLY, 409 end
     local s = load_session(r)
     if s.state ~= "in_progress" then return candidate_view(r, s) end
     local text = type(data.text) == "string" and data.text or ""
@@ -395,6 +444,7 @@ local EVENTS = { ["repeat"] = true, rephrase = true, pause = true, resume = true
     adjustment = true }
 
 function I.event(r, data)
+    if r.delivery == "offline" then return nil, I.OFFLINE_ONLY, 409 end
     if not EVENTS[data.type] then return nil, "Unknown action", 422 end
     local s = load_session(r)
     if Engine.is_finished(s) or s.state == "invited" then
@@ -426,6 +476,218 @@ function I.self_id(r, data)
     db.insert("ats_self_id", { namespace_id = r.namespace_id, key = key, answers = J.encode(answers) })
     db.update("ats_interviews", { self_id_key = key }, { id = r.id })
     return { saved = true }
+end
+
+-- MARK: Offline interviews (the candidate's Snazzy Pro app runs them on their Mac)
+
+local function contains(list, x)
+    for _, y in ipairs(list or {}) do if y == x then return true end end
+    return false
+end
+
+--- The app fetches an offline interview: the candidate-safe kit, the notice and
+-- (when the invite has one) the pack. The first device keeps the invite.
+-- @return data | nil, err, status, code
+function I.offline(r, data)
+    if r.delivery ~= "offline" then return nil, I.ONLINE_ONLY, 409, "online" end
+    local s = load_session(r)
+    if Engine.is_finished(s) or v(r.result_uploaded_at) then
+        return nil, "This interview has finished.", 410, "finished"
+    end
+    if not Activation.is_active(r.namespace_id) then
+        return nil, "This interview can't start right now. Please contact the hiring team.", 402, "ats_inactive"
+    end
+    local Packs = require("queries.AtsPackQueries")
+    local bound, berr, bstatus = Packs.bind_device(r, data.device_id)
+    if not bound then return nil, berr, bstatus, bstatus == 403 and "device_in_use" or "bad_request" end
+    local pack = J.null
+    if v(r.pack_id) then
+        local p, perr, pstatus = Packs.for_invite(r, data.device_id, false)
+        if not p then return nil, perr, pstatus end
+        pack = p
+    end
+    local first = not v(r.offline_started_at)
+    local notice, notice_hash = I.notice_for(r, s.kit)
+    -- Remember each notice issued, so the upload can be checked against what was shown.
+    local hashes = type(s.offline_notice_hashes) == "table" and s.offline_notice_hashes or {}
+    if not contains(hashes, notice_hash) then
+        hashes[#hashes + 1] = notice_hash
+        while #hashes > 5 do table.remove(hashes, 1) end
+    end
+    db.query([[UPDATE ats_interviews SET offline_started_at = COALESCE(offline_started_at, NOW()), updated_at = NOW(),
+        session = jsonb_set(session, '{offline_notice_hashes}', ?::jsonb) WHERE id = ?]],
+        J.encode(J.array(hashes)), r.id)
+    Q.audit(r.namespace_id, "candidate", "offline_started", "interview", r.uuid, { first = first,
+        pack = v(r.pack_id) ~= nil })
+    local name = type(s.candidate) == "table" and v(s.candidate.name) or ""
+    return {
+        kit = Kit.for_candidate(s.kit), notice = notice, notice_hash = notice_hash,
+        candidate = { name = name },
+        pack = pack,
+        upload_by = T.iso((tonumber(r.link_expires_ts) or now()) + Offline.GRACE_DAYS * 86400),
+        interview_uuid = r.uuid,
+    }
+end
+
+local function is_uuid(x)
+    return type(x) == "string" and x:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
+        ~= nil
+end
+
+--- The app uploads the finished interview once. Stored on the invite's own row
+-- with the server's kit; the upload's evaluation and review are never used.
+-- body: {device_id, interview = <.snazzy_interview wrapper or a bare InterviewSession>}
+-- @return candidate view | nil, err, status, code
+function I.offline_result(r, body)
+    if r.delivery ~= "offline" then return nil, I.ONLINE_ONLY, 409, "online" end
+    local doc = type(body.interview) == "table" and body.interview or nil
+    if not doc then return nil, "Send the interview.", 400, "bad_request" end
+    local rec, perr = Interop.parse(J.encode(doc))
+    if not rec then return nil, perr, 422, "invalid" end
+    local raw_session = (v(doc.format) ~= nil and type(doc.interview) == "table") and doc.interview or doc
+    if not v(r.offline_started_at) then
+        return nil, "Open this interview in the Snazzy Pro app first.", 409, "not_started"
+    end
+    local Packs = require("queries.AtsPackQueries")
+    local bound, berr, bstatus = Packs.bind_device(r, body.device_id, false)
+    if not bound then return nil, berr, bstatus, bstatus == 403 and "device_in_use" or "bad_request" end
+    local s = load_session(r)
+    if v(r.result_uploaded_at) or Engine.is_finished(s) then
+        if v(r.result_uploaded_at) and v(r.external_id) == rec.external_id then return candidate_view(r, s) end
+        return nil, "This interview's results were already sent.", 409, "already_sent"
+    end
+    local checked, verr = Offline.validate(rec, s.kit, s.offline_notice_hashes, tonumber(r.offline_started_ts),
+        now(), raw_session)
+    if not checked then return nil, verr, 422, "invalid" end
+    local clash = db.select("id FROM ats_interviews WHERE namespace_id = ? AND external_id = ? AND id <> ?",
+        r.namespace_id, rec.external_id, r.id)[1]
+    if clash then return nil, "This interview's results were already sent.", 409, "already_sent" end
+
+    -- The server's kit and candidate stay; the transcript is the device's.
+    s.state = rec.state
+    s.turns, s.flags = rec.turns, rec.flags
+    s.eligibility_answers, s.adjustments = rec.eligibility_answers, rec.adjustments
+    s.forwarded_questions, s.models = rec.forwarded_questions, rec.models
+    s.end_reason = rec.end_reason
+    s.notice_hash = (not checked.before_start) and rec.notice_hash or nil
+    s.started_ts, s.ended_ts, s.notice_accepted_ts = checked.started_ts, checked.ended_ts, checked.notice_accepted_ts
+    s.paused_ts = nil
+    s.step = #Engine.plan(s.kit) - 1
+    s.delete_after_ts = checked.ended_ts + math.max(s.kit.settings.retention_days, 1) * 86400
+    s.delivery, s.channel, s.device_reported = "offline", "this_mac", true
+    s.external = { app = rec.app, exported_at = rec.exported_at, id = rec.external_id }
+    local audit = J.array({})
+    for _, a in ipairs(rec.audit or {}) do audit[#audit + 1] = a end
+    audit[#audit + 1] = { at = T.iso(now()), who = "opsapi", action = "offline_result_uploaded",
+        detail = "Taken offline on the candidate's own Mac; reported by their device." }
+    s.audit = audit
+    s.evaluation, s.review = nil, nil
+    local rev = tonumber(s.rev) or 0
+    s.rev = rev + 1
+    local res = db.update("ats_interviews", {
+        session = J.encode(s), state = s.state, updated_at = db.raw("NOW()"), started_at = ts_sql(s.started_ts),
+        ended_at = ts_sql(s.ended_ts), delete_after = ts_sql(s.delete_after_ts), external_id = rec.external_id,
+        result_uploaded_at = db.raw("NOW()"),
+    }, "id = ? AND result_uploaded_at IS NULL AND COALESCE((session->>'rev')::int, 0) = ?", r.id, rev)
+    local n = type(res) == "table" and (res.affected_rows or 0) or 0
+    if n == 0 then return nil, "This interview's results were already sent.", 409, "already_sent" end
+    Q.audit(r.namespace_id, "candidate", "offline_result_uploaded", "interview", r.uuid, { state = s.state,
+        turns = #s.turns, app = rec.app, device_reported = true })
+    r.external_id, r.result_uploaded_at = rec.external_id, true
+    I.on_finished(r, s)
+    return candidate_view(r, s)
+end
+
+-- MARK: Results for the recruiter's Snazzy Pro app (integration token)
+
+local function iso_sql(col)
+    return ("to_char(%s AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')"):format(col)
+end
+
+local INTEGRATION_STATES = { invited = true, in_progress = true, paused = true, completed = true,
+    human_requested = true, abandoned = true, expired = true, withdrawn = true }
+
+--- Interviews, newest change first. params: state, delivery, since (ISO 8601), page, per_page.
+-- @return items, meta | nil, err
+function I.integration_list(namespace_id, params)
+    local page = math.max(1, math.floor(tonumber(params.page) or 1))
+    local per = math.min(100, math.max(1, math.floor(tonumber(params.per_page) or 25)))
+    local where, args = "i.namespace_id = ?", { namespace_id }
+    if v(params.state) and params.state ~= "" then
+        if not INTEGRATION_STATES[params.state] then return nil, "Unknown state" end
+        where = where .. " AND i.state = ?"
+        args[#args + 1] = params.state
+    end
+    if v(params.delivery) and params.delivery ~= "" then
+        if not I.DELIVERIES[params.delivery] then return nil, 'delivery must be "online" or "offline".' end
+        where = where .. " AND i.delivery = ?"
+        args[#args + 1] = params.delivery
+    end
+    if v(params.since) and params.since ~= "" then
+        local since = Offline.parse_iso(params.since)
+        if not since then return nil, "since must be an ISO 8601 time, e.g. 2026-10-18T09:00:00Z" end
+        where = where .. " AND i.updated_at > to_timestamp(?)"
+        args[#args + 1] = since
+    end
+    local from = [[ FROM ats_interviews i JOIN ats_applications a ON a.id = i.application_id
+        JOIN ats_candidates c ON c.id = a.candidate_id JOIN ats_jobs j ON j.id = a.job_id WHERE ]]
+    local total = db.query("SELECT count(*)::int AS n" .. from .. where, unpack(args))[1].n
+    args[#args + 1] = per
+    args[#args + 1] = (page - 1) * per
+    local rows = db.query("SELECT i.uuid, c.name AS candidate_name, c.email AS candidate_email, j.title AS job_title,"
+        .. " i.session->'kit'->>'title' AS kit_title, i.state, i.delivery, i.evaluation_status,"
+        .. " i.review->>'decision' AS decision, " .. iso_sql("i.started_at") .. " AS started_at, "
+        .. iso_sql("i.ended_at") .. " AS ended_at, " .. iso_sql("i.updated_at") .. " AS updated_at, "
+        .. iso_sql("i.result_uploaded_at") .. " AS result_uploaded_at"
+        .. from .. where .. " ORDER BY i.updated_at DESC, i.id DESC LIMIT ? OFFSET ?", unpack(args))
+    local items = J.array({})
+    for _, x in ipairs(rows) do
+        items[#items + 1] = {
+            uuid = x.uuid, candidate = { name = v(x.candidate_name) or "", email = v(x.candidate_email) or J.null },
+            job_title = v(x.job_title) or J.null, kit_title = v(x.kit_title) or J.null, state = x.state,
+            delivery = x.delivery, evaluation_status = x.evaluation_status, decision = v(x.decision) or J.null,
+            started_at = v(x.started_at) or J.null, ended_at = v(x.ended_at) or J.null,
+            updated_at = v(x.updated_at) or J.null, result_uploaded_at = v(x.result_uploaded_at) or J.null,
+            dashboard_url = I.dashboard_url(x.uuid),
+        }
+    end
+    return items, { total = total, page = page, per_page = per, total_pages = math.max(1, math.ceil(total / per)) }
+end
+
+--- One interview as a .snazzy_interview file the app can open, with the server's
+-- evaluation and a person's review (as stored).
+function I.integration_file(namespace_id, uuid)
+    local r = db.query([[SELECT *, EXTRACT(EPOCH FROM started_at)::bigint AS started_ts,
+        EXTRACT(EPOCH FROM ended_at)::bigint AS ended_ts, EXTRACT(EPOCH FROM created_at)::bigint AS created_ts
+        FROM ats_interviews WHERE namespace_id = ? AND uuid = ?]], namespace_id, tostring(uuid or ""))[1]
+    if not r then return nil, "Interview not found" end
+    local s = load_session(r)
+    -- Imported interviews keep their times on the row only.
+    s.started_ts = s.started_ts or tonumber(v(r.started_ts))
+    s.ended_ts = s.ended_ts or tonumber(v(r.ended_ts))
+    s.created_ts = s.created_ts or tonumber(v(r.created_ts))
+    s.evaluation = decode(r.evaluation)
+    s.review = decode(r.review)
+    -- jsonb comes back without array markers: lists the app decodes must stay lists.
+    for _, k in ipairs({ "turns", "flags", "adjustments", "forwarded_questions", "audit" }) do
+        s[k] = J.array(type(s[k]) == "table" and s[k] or {})
+    end
+    if type(s.eligibility_answers) ~= "table" then s.eligibility_answers = {} end
+    if type(s.evaluation) == "table" then
+        s.evaluation.competencies = J.array(type(s.evaluation.competencies) == "table" and s.evaluation.competencies
+            or {})
+        s.evaluation.injection = J.array(type(s.evaluation.injection) == "table" and s.evaluation.injection or {})
+        for _, c in ipairs(s.evaluation.competencies) do
+            if type(c) == "table" then c.evidence = J.array(type(c.evidence) == "table" and c.evidence or {}) end
+        end
+    end
+    local id = is_uuid(v(r.external_id)) and r.external_id or r.uuid
+    return {
+        uuid = r.uuid, delivery = r.delivery, evaluation_status = r.evaluation_status,
+        dashboard_url = I.dashboard_url(r.uuid),
+        file = { format = Interop.FORMAT, version = Interop.VERSION, exported_at = T.iso(now()), app = "OpsAPI",
+            interview = Interop.to_snazzy(s, id) },
+    }
 end
 
 -- MARK: Evaluation

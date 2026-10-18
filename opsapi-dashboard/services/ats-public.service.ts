@@ -18,6 +18,8 @@ export interface CandidateView {
   role_title: string;
   /** The invite has an interview pack: it can be taken in the Snazzy Pro app. */
   has_pack?: boolean;
+  /** "offline": the interview runs only in the Snazzy Pro app, on the candidate's Mac. */
+  delivery?: 'online' | 'offline';
   organisation: string;
   interviewer_name: string;
   minutes: number;
