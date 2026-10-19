@@ -44,7 +44,13 @@ print("accepted:")
 local app = "https://app.diytaxreturn.co.uk"
 check("a configured frontend", trusted(app, configured) == app)
 check("trailing slash dropped", trusted(app .. "/", configured) == app)
-check("localhost (CORS always trusts it)", trusted("http://localhost:8039", {}) == "http://localhost:8039")
+check("localhost refused unless CORS_ALLOW_LOCALHOST=true", trusted("http://localhost:8039", {}) == nil)
+local getenv = os.getenv
+os.getenv = function(k) if k == "CORS_ALLOW_LOCALHOST" then return "true" end return getenv(k) end
+package.loaded["middleware.cors"] = nil
+local trusted_dev = require("middleware.cors").trustedFrontend
+os.getenv = getenv
+check("localhost with CORS_ALLOW_LOCALHOST=true", trusted_dev("http://localhost:8039", {}) == "http://localhost:8039")
 
 print("wired into the callback:")
 local h = assert(io.open("lapis/routes/auth.lua") or io.open("routes/auth.lua"))
