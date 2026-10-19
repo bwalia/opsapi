@@ -382,10 +382,25 @@ export interface TaskPr {
   review_note?: string | null;
   created_at: string;
 }
+export interface TerminalSession {
+  uuid: string;
+  task_uuid: string;
+  project_uuid: string;
+  opened_by?: string | null;
+  terminal_url: string;
+  session_id?: string | null;
+  repo_url?: string | null;
+  status: 'launched' | 'active' | 'ended' | string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  created_at: string;
+}
 export interface TaskWorkBundle {
   work: TaskWork | null;
   history: TaskWork[];
   pull_requests: TaskPr[];
+  terminal_sessions?: TerminalSession[];
+  terminal_base_url?: string | null;
   project?: ProjectSettings | null;
   manager_links?: {
     task_url?: string | null;
@@ -752,6 +767,8 @@ export const aiRunner = {
       work: (d.work as TaskWork) || null,
       history: list<TaskWork>(d.history),
       pull_requests: list<TaskPr>(d.pull_requests),
+      terminal_sessions: list<TerminalSession>(d.terminal_sessions),
+      terminal_base_url: (d.terminal_base_url as string) || null,
       project: d.project ?? null,
       manager_links: d.manager_links ?? null,
     };
@@ -759,6 +776,10 @@ export const aiRunner = {
   taskPrs: async (taskUuid: string) => list<TaskPr>((await get<TaskPr[]>(`/tasks/${id(taskUuid)}/prs`)).data),
   reviewPr: (taskUuid: string, prUuid: string, decision: 'approved' | 'changes_requested', note?: string) =>
     send<TaskPr>('post', `/tasks/${id(taskUuid)}/prs/${id(prUuid)}/review`, { decision, note }),
+  openTerminalSession: (taskUuid: string) =>
+    send<TerminalSession>('post', `/tasks/${id(taskUuid)}/terminal-sessions`, {}),
+  listTerminalSessions: async (taskUuid: string) =>
+    list<TerminalSession>((await get<TerminalSession[]>(`/tasks/${id(taskUuid)}/terminal-sessions`)).data),
 
   // Runs
   listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>

@@ -2848,8 +2848,58 @@ check("review status approved (not merged)", rev.get("review_status") == "approv
 expect("developer can't sign off", call("POST", P + f"/tasks/{TC['uuid']}/prs/{pr_uuid}/review", "dev2", A, {
     "decision": "changes_requested",
 }), 403)
+n_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
+    JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{TC["uuid"]}'
+    AND c.content LIKE '%Manager approved PR%'""") or 0)
+check("manager approve posts task comment", n_comments >= 1, n_comments)
+
+# --- Web terminal + webhook + PR poll bookkeeping --------------------------------------------------------------
+print("--- Web terminal ---")
+term = expect("open web terminal session", call(
+    "POST", P + f"/tasks/{TC['uuid']}/terminal-sessions", "dev", A, {}), 201)
+turl = term.get("terminal_url") or ""
+check("terminal deep link has opsapi_task and repo",
+      "opsapi_task=" in turl and ("acme" in turl and "app" in turl)
+      and turl.startswith("https://dev.workstation.co.uk"),
+      term)
+work_t = expect("GET work lists terminal sessions", call("GET", P + f"/tasks/{TC['uuid']}/work", "mgr", A), 200)
+sessions = work_t.get("terminal_sessions") or []
+check("terminal_sessions on work bundle",
+      isinstance(sessions, list) and len(sessions) >= 1 and sessions[0].get("status") == "launched", work_t)
+n_term_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
+    JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{TC["uuid"]}'
+    AND c.content LIKE '%Web terminal opened%'""") or 0)
+check("terminal launch posts comment", n_term_comments >= 1, n_term_comments)
+
+# Simulate sshweb webhook (HMAC over the same JSON bytes call() sends).
+WH_SECRET = "ar-e2e-terminal-webhook"
+sid = "abcdef0123456789abcdef0123456789"
+payload = {"event": "session_start", "session_id": sid, "user": "dev",
+           "opsapi_task": TC["uuid"], "ts": int(time.time())}
+sig = "sha256=" + hmac.new(WH_SECRET.encode(), json.dumps(payload).encode(), hashlib.sha256).hexdigest()
+bad = call("POST", P + "/public/terminal/webhook", body=payload,
+           headers={"X-Opsapi-Signature": "sha256=" + ("0" * 64)})
+check("terminal webhook rejects bad signature", bad[0] == 401, bad[:2])
+wh = expect("terminal webhook session_start", call(
+    "POST", P + "/public/terminal/webhook", body=payload, headers={"X-Opsapi-Signature": sig}), 200)
+check("webhook marks session active", wh.get("status") == "active" and wh.get("session_id") == sid, wh)
+payload_end = dict(payload, event="session_end")
+raw_end = json.dumps(payload_end).encode()
+sig_end = "sha256=" + hmac.new(WH_SECRET.encode(), raw_end, hashlib.sha256).hexdigest()
+wh2 = expect("terminal webhook session_end", call(
+    "POST", P + "/public/terminal/webhook", body=payload_end, headers={"X-Opsapi-Signature": sig_end}), 200)
+check("webhook marks session ended", wh2.get("status") == "ended", wh2)
+
+# PR poll: without Vault token, state stays open; github_state_checked_at may still be null.
+sql(f"""UPDATE ar_task_prs SET state = 'open', github_state_checked_at = NULL
+    WHERE uuid = '{pr_uuid}'""")
+# Opening work triggers throttled refresh (no token → no change).
+expect("work triggers pr_poll throttle path", call("GET", P + f"/tasks/{TC['uuid']}/work", "mgr", A), 200)
+st = one(f"SELECT state FROM ar_task_prs WHERE uuid = '{pr_uuid}'")
+check("pr_poll without token leaves state open", st == "open", st)
 
 MIG_TC = "20261017180000_ai_runner_task_completion"
+MIG_TERM = "20261017190000_ai_runner_terminal_sessions"
 if MIGRATE:
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG_TC}'")
     out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
@@ -2857,6 +2907,13 @@ if MIGRATE:
           out.returncode == 0 and f"{MIG_TC}: running" in (out.stdout + out.stderr)
           and int(one("SELECT COUNT(*)::int FROM information_schema.columns WHERE table_name = 'ar_task_work'") or 0) > 5,
           (out.stdout + out.stderr)[-400:])
+    sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG_TERM}'")
+    out2 = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
+    check("terminal sessions migration re-runs idempotently",
+          out2.returncode == 0 and f"{MIG_TERM}: running" in (out2.stdout + out2.stderr)
+          and int(one("SELECT COUNT(*)::int FROM information_schema.columns "
+                      "WHERE table_name = 'ar_terminal_sessions'") or 0) > 5,
+          (out2.stdout + out2.stderr)[-400:])
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")
