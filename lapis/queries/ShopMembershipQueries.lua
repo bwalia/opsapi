@@ -119,6 +119,8 @@ function Q.offer(ns_id)
         early_access_hours = s.early_access_hours,
         long_lead_days = s.long_lead_days,
         terms_version = s.terms_version,
+        -- Basket checkout takes { membership } and charges the order and the first fee in one payment.
+        join_with_order = true,
     }
 end
 
@@ -235,9 +237,9 @@ local function recurring_item(name, amount, interval)
     }
 end
 
---- POST /membership/checkout
--- body: { email, interval: month|year, accept_terms: true, terms_version, success_url, cancel_url }
-function Q.startCheckout(ns_id, body)
+--- Check a join request. Returns settings, email, interval, or nil and an error.
+-- body: { email, interval: month|year, accept_terms: true, terms_version }
+function Q.validateJoin(ns_id, body)
     body = type(body) == "table" and body or {}
     local s = Q.settings(ns_id)
     if not s.enabled then return nil, U.err(409, "MEMBERSHIP_CLOSED", "VIP membership is not open yet") end
@@ -251,21 +253,16 @@ function Q.startCheckout(ns_id, body)
     if body.terms_version ~= s.terms_version then
         return nil, U.err(409, "TERMS_CHANGED", "The membership terms have been updated — please read them again")
     end
-    if not U.url_allowed(body.success_url) or not U.url_allowed(body.cancel_url) then
-        return nil, U.err(400, "INVALID_REDIRECT_URL", "success_url and cancel_url must start with an allowed origin")
-    end
     if active_membership(ns_id, email) then
         return nil, U.err(409, "ALREADY_MEMBER", "This email already has an active membership — sign in instead")
     end
-    local stripe, serr = require("lib.payment-provider").get_stripe()
-    if not stripe then
-        ngx.log(ngx.ERR, "[shop-vip] ", tostring(serr))
-        return nil, U.err(503, "PAYMENTS_DISABLED", "Online payment is not available right now")
-    end
+    return s, email, interval
+end
 
-    -- Reserve the spot: the count and the insert happen under one per-namespace lock, so the
-    -- (cap+1)th person can never be given the founding price, however many check out at once.
-    local m = U.tx(function()
+--- Reserve the spot: the count and the insert happen under one per-namespace lock, so the
+-- (cap+1)th person can never be given the founding price, however many check out at once.
+function Q.reserve(ns_id, s, email, interval)
+    return U.tx(function()
         db.query("SELECT pg_advisory_xact_lock(hashtext('shop_vip_cap_' || ?))", tostring(ns_id))
         db.query([[UPDATE shop_memberships SET status = 'abandoned', updated_at = NOW()
                     WHERE namespace_id = ? AND status = 'pending' AND reserve_expires_at <= NOW()]], ns_id)
@@ -279,13 +276,49 @@ function Q.startCheckout(ns_id, body)
         ]], Global.generateUUID(), ns_id, email, tier, interval, price.net_minor, price.vat_minor,
             tostring(RESERVE_MINUTES), s.terms_version)[1]
     end)
+end
 
+--- Stripe recurring line items for a reserved membership (fee, then VAT).
+function Q.joinItems(s, m)
     local label = "Workstation VIP membership" .. (m.tier == "founding" and " (founding member)" or "")
-    local meta = { membership_uuid = m.uuid, namespace_id = tostring(ns_id), source = VIP_SOURCE }
-    local items = { recurring_item(label, tonumber(m.net_minor), interval) }
+    local items = { recurring_item(label, tonumber(m.net_minor), m.billing_interval) }
     if tonumber(m.vat_minor) > 0 then
-        items[2] = recurring_item("VAT (" .. math.floor(s.vat_rate * 100 + 0.5) .. "%)", tonumber(m.vat_minor), interval)
+        items[2] = recurring_item("VAT (" .. math.floor(s.vat_rate * 100 + 0.5) .. "%)", tonumber(m.vat_minor),
+            m.billing_interval)
     end
+    return items
+end
+
+--- Metadata that routes this membership's Stripe events (and renewals) to the handlers below.
+function Q.joinMeta(ns_id, m)
+    return { membership_uuid = m.uuid, namespace_id = tostring(ns_id), source = VIP_SOURCE }
+end
+
+--- Give up a reserved spot when checkout could not start. No-op once it is no longer pending.
+function Q.abandon(m)
+    if not m then return end
+    db.query("UPDATE shop_memberships SET status = 'abandoned', updated_at = NOW() WHERE id = ? AND status = 'pending'",
+        m.id)
+end
+
+--- POST /membership/checkout
+-- body: { email, interval: month|year, accept_terms: true, terms_version, success_url, cancel_url }
+function Q.startCheckout(ns_id, body)
+    body = type(body) == "table" and body or {}
+    local s, email, interval = Q.validateJoin(ns_id, body)
+    if not s then return nil, email end
+    if not U.url_allowed(body.success_url) or not U.url_allowed(body.cancel_url) then
+        return nil, U.err(400, "INVALID_REDIRECT_URL", "success_url and cancel_url must start with an allowed origin")
+    end
+    local stripe, serr = require("lib.payment-provider").get_stripe()
+    if not stripe then
+        ngx.log(ngx.ERR, "[shop-vip] ", tostring(serr))
+        return nil, U.err(503, "PAYMENTS_DISABLED", "Online payment is not available right now")
+    end
+
+    local m = Q.reserve(ns_id, s, email, interval)
+    local meta = Q.joinMeta(ns_id, m)
+    local items = Q.joinItems(s, m)
     local session, stripe_err = stripe:create_checkout_session({
         mode = "subscription",
         success_url = body.success_url,
@@ -393,6 +426,13 @@ function Q.onInvoicePaid(invoice)
     local m = membership_by(nz(meta.membership_uuid), id_of(invoice.subscription))
     if not m then return nil end
     if nz(invoice.id) and m.last_invoice_id == invoice.id then return m end
+    -- Joined with a basket order: the first invoice also paid for the order, so link its payment
+    -- (charge.refunded finds orders by payment intent).
+    local pi = id_of(invoice.payment_intent)
+    if nz(meta.order_uuid) and pi then
+        db.query([[UPDATE shop_orders SET stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+                   updated_at = NOW() WHERE uuid = ?]], pi, meta.order_uuid)
+    end
     if not m.joined_at then m = activate(m, id_of(invoice.subscription), id_of(invoice.customer)) end
     local paid = tonumber(invoice.amount_paid) or 0
     local period_end

@@ -24,7 +24,7 @@
       GET    /market?product_slug=|q=&limit=3   (market-price reference, MARKET.prompt.md §A)
       POST   /quotes
       GET    /quotes/:uuid?t=
-      POST   /checkout
+      POST   /checkout                           { …, membership?: { interval, accept_terms, terms_version } } joins Trade in the same payment
       GET    /orders/:uuid?t=
       POST   /chat-sessions
       POST   /chat-sessions/:uuid/messages
