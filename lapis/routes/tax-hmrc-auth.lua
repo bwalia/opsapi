@@ -271,7 +271,7 @@ return function(app)
                 redirect_uri  = redirect_uri,
             }),
             headers    = { ["Content-Type"] = "application/x-www-form-urlencoded" },
-            ssl_verify = (environment == "production"),
+            ssl_verify = true,  -- sandbox and live HMRC both have public certificates
         })
 
         if not token_res then

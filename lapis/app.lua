@@ -207,16 +207,26 @@ app:get("/api/v2/system/info", function(self)
     }
 end)
 
+-- The API docs and OpenAPI spec list every route there is to probe. Served
+-- only where EXPOSE_API_DOCS=true (local development, internal tooling).
+local function api_docs_hidden()
+    if (os.getenv("EXPOSE_API_DOCS") or ""):lower() == "true" then return nil end
+    return { status = 404, json = { error = "Not found" } }
+end
+
 app:get("/swagger", function(self)
+    local hidden = api_docs_hidden(); if hidden then return hidden end
     return { render = "swagger" }
 end)
 
 app:get("/api-docs", function(self)
+    local hidden = api_docs_hidden(); if hidden then return hidden end
     return { render = "swagger" }
 end)
 
 -- OpenAPI spec
 app:get("/openapi.json", function(self)
+    local hidden = api_docs_hidden(); if hidden then return hidden end
     ngx.log(ngx.NOTICE, "=== Serving /openapi.json - NO AUTH REQUIRED ===")
     ngx.header["Access-Control-Allow-Origin"] = "*"
 
@@ -232,6 +242,7 @@ end)
 
 -- Alternative OpenAPI spec path
 app:get("/swagger/swagger.json", function(self)
+    local hidden = api_docs_hidden(); if hidden then return hidden end
     ngx.log(ngx.NOTICE, "=== Serving /swagger/swagger.json - NO AUTH REQUIRED ===")
     ngx.header["Access-Control-Allow-Origin"] = "*"
 

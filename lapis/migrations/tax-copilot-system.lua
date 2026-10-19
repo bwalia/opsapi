@@ -3219,4 +3219,64 @@ return {
         ]])
         print("[Tax Copilot] Added mtd_enabled column to tax_user_profiles")
     end,
+
+    -- 92. Re-encrypt stored HMRC tokens and NINOs in the v2 format (AES-GCM,
+    -- random nonce per value — see Global.encryptSecret). A plaintext token
+    -- left from before tokens were encrypted (its base64 doesn't decode to a
+    -- whole number of AES blocks) is encrypted too, so FastAPI's plaintext
+    -- fallback can go. A value that looks like ciphertext but won't decrypt
+    -- (wrong key) is never overwritten — only counted and reported.
+    [92] = function()
+        local Global = require("helper.global")
+
+        local function upgrade(value)
+            if not value or value == "" or value:sub(1, 3) == "v2:" then return nil end
+            local ok, plain = pcall(Global.decryptSecret, value)
+            if ok and plain and plain ~= "" then return Global.encryptSecret(plain) end
+            local raw = ngx.decode_base64(value)
+            if raw and #raw > 0 and #raw % 16 == 0 then return nil, "undecryptable" end
+            return Global.encryptSecret(value)
+        end
+
+        local done, skipped, failed = 0, 0, 0
+        local function try(fn)
+            local ok, err = pcall(fn)
+            if not ok then
+                failed = failed + 1
+                print("[Tax Copilot] secret re-encryption failed for a row: " .. tostring(err))
+            end
+        end
+
+        for _, row in ipairs(db.query("SELECT id, access_token, refresh_token FROM hmrc_tokens") or {}) do
+            try(function()
+                local access, why = upgrade(row.access_token)
+                local refresh, why_r = upgrade(row.refresh_token)
+                if why or why_r then skipped = skipped + 1 end
+                if access or refresh then
+                    db.update("hmrc_tokens", {
+                        access_token = access or row.access_token,
+                        refresh_token = refresh or row.refresh_token,
+                    }, { id = row.id })
+                    done = done + 1
+                end
+            end)
+        end
+
+        for _, row in ipairs(db.query([[
+            SELECT id, nino_encrypted FROM tax_user_profiles
+            WHERE nino_encrypted IS NOT NULL AND nino_encrypted <> '' AND nino_encrypted NOT LIKE 'v2:%'
+        ]]) or {}) do
+            try(function()
+                local nino, why = upgrade(row.nino_encrypted)
+                if why then skipped = skipped + 1 end
+                if nino then
+                    db.update("tax_user_profiles", { nino_encrypted = nino }, { id = row.id })
+                    done = done + 1
+                end
+            end)
+        end
+
+        print(string.format("[Tax Copilot] Secrets re-encrypted as v2: %d rows, %d undecryptable left as-is, %d failed",
+            done, skipped, failed))
+    end,
 }

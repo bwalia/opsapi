@@ -21,6 +21,12 @@ local DEFAULT_EXPIRATION = 60 * 60
 --- The user still needs to re-login after this period.
 local REFRESH_GRACE_PERIOD = 7 * 24 * 60 * 60
 
+-- Longest a sign-in can be kept alive by legacy JWT refresh (re-minting an
+-- access token from the previous one). Each token carries auth_time, when its
+-- chain started; refresh stops once that is older than this, so a stolen
+-- token can't be renewed forever. JWT_MAX_SESSION_SECONDS overrides.
+local MAX_SESSION_SECONDS = tonumber(os.getenv("JWT_MAX_SESSION_SECONDS") or "") or 30 * 24 * 60 * 60
+
 --- Get JWT secret key from environment
 -- @return string The JWT secret key
 local function getSecretKey()
@@ -105,6 +111,7 @@ function JWTHelper.generateToken(user, options)
         userinfo = userinfo,
         iat = now,
         exp = now + expiration,
+        auth_time = options.auth_time or now,
         iss = "opsapi"
     }
 
@@ -277,6 +284,12 @@ function JWTHelper.refreshToken(token, expiration)
         return nil
     end
 
+    -- Tokens minted before auth_time existed start their chain now.
+    local auth_time = tonumber(result.payload.auth_time) or tonumber(result.payload.iat) or ngx.time()
+    if ngx.time() - auth_time > MAX_SESSION_SECONDS then
+        return nil
+    end
+
     -- Re-validate user from DB (catches deactivated users, deleted accounts)
     local db_user = db.select("* FROM users WHERE uuid = ? AND active = true", userinfo.uuid)
     if not db_user or #db_user == 0 then
@@ -300,7 +313,8 @@ function JWTHelper.refreshToken(token, expiration)
 
     local options = {
         roles = platform_roles,
-        expiration = expiration or DEFAULT_EXPIRATION
+        expiration = expiration or DEFAULT_EXPIRATION,
+        auth_time = auth_time,
     }
 
     -- Re-fetch namespace context if present

@@ -193,7 +193,7 @@ local function fetch_jwks()
     httpc:set_timeout(10000)
     local res, err = httpc:request_uri(APPLE_JWKS_URL, {
         method = "GET",
-        ssl_verify = false,
+        ssl_verify = true,
     })
     if not res then
         return nil, "Failed to fetch Apple JWKS: " .. (err or "unknown")
@@ -436,7 +436,7 @@ function AppleSignIn.exchange_code(code)
         headers = {
             ["Content-Type"] = "application/x-www-form-urlencoded",
         },
-        ssl_verify = false,
+        ssl_verify = true,
     })
 
     if not res then

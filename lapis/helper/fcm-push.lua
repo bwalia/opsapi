@@ -136,7 +136,7 @@ local function get_access_token(service_account)
             ["Content-Type"] = "application/x-www-form-urlencoded"
         },
         body = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" .. jwt,
-        ssl_verify = false  -- TODO: Enable SSL verification in production with proper CA bundle
+        ssl_verify = true
     })
 
     if not res then
@@ -212,7 +212,7 @@ function FCMPush.sendToDevice(fcm_token, notification, data)
             ["Authorization"] = "Bearer " .. access_token
         },
         body = cjson.encode(payload),
-        ssl_verify = false  -- TODO: Enable SSL verification in production with proper CA bundle
+        ssl_verify = true
     })
 
     if not res then
