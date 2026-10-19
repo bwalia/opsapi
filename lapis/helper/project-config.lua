@@ -296,6 +296,22 @@ function ProjectConfig.parseProjectCodes()
     return codes
 end
 
+--- May a signed-in user create a workspace (namespace) of their own?
+-- Off for single-workspace products. The tax app (tax_copilot) seeds one
+-- namespace and every user belongs to it; a self-made namespace would make
+-- its creator owner with every permission there. Other products (billing,
+-- forms, tasks...) keep self-service workspaces.
+-- ALLOW_SELF_SERVICE_WORKSPACES=true|false overrides either way.
+function ProjectConfig.allowsSelfServiceWorkspaces()
+    local override = (os.getenv("ALLOW_SELF_SERVICE_WORKSPACES") or ""):lower()
+    if override == "true" then return true end
+    if override == "false" then return false end
+    for _, code in ipairs(ProjectConfig.parseProjectCodes()) do
+        if code == "tax_copilot" then return false end
+    end
+    return true
+end
+
 -- Get all enabled features for current project(s)
 function ProjectConfig.getEnabledFeatures()
     if _enabled_features then
