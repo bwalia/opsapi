@@ -490,21 +490,28 @@ return function(app)
         return sdk.ok({ requests = U.array(requests), approvals = U.array(approvals) })
     end)))
 
-    -- Task work record + PRs (AI task completion) --------------------------------------------------------------
+    -- Task work record + PRs + web terminal (AI task completion) ----------------------------------------------
     app:get("/tasks/:task_uuid/work", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local task = task_or_404(ns, self.params.task_uuid)
         local W = require("ai_runner.task_work")
         local V = require("ai_runner.vault_pr")
+        local Term = require("ai_runner.terminal")
+        pcall(function() require("ai_runner.pr_poll").refresh_task(ns, task.uuid) end)
+        Term.ensure_poll_timer()
         local latest = W.latest(ns, task.uuid)
         local history = {}
         for i, w in ipairs(W.list(ns, task.uuid)) do history[i] = W.view(w) end
         local prs = {}
         for i, p in ipairs(V.list_for_task(ns, task.uuid)) do prs[i] = V.view(p) end
+        local sessions = {}
+        for i, s in ipairs(Term.list_for_task(ns, task.uuid)) do sessions[i] = Term.view(s) end
         return sdk.ok({
             work = latest and W.view(latest) or cjson.null,
             history = U.array(history),
             pull_requests = U.array(prs),
+            terminal_sessions = U.array(sessions),
+            terminal_base_url = Term.base_url(),
             project = R.project_settings_view(R.project_settings(ns, task.project_uuid)),
             manager_links = latest and {
                 task_url = R.task_url(task.project_uuid, task.uuid),
@@ -516,6 +523,24 @@ return function(app)
                 end)(),
             } or cjson.null,
         })
+    end)))
+
+    app:get("/tasks/:task_uuid/terminal-sessions", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        task_or_404(ns, self.params.task_uuid)
+        local Term = require("ai_runner.terminal")
+        local out = {}
+        for i, s in ipairs(Term.list_for_task(ns, self.params.task_uuid)) do out[i] = Term.view(s) end
+        return sdk.ok(U.array(out))
+    end)))
+
+    app:post("/tasks/:task_uuid/terminal-sessions", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local task = task_or_404(ns, self.params.task_uuid)
+        local Term = require("ai_runner.terminal")
+        local ns_slug = self.namespace and (self.namespace.slug or self.namespace.name) or ""
+        local row = Term.launch(ns, task, sdk.user(self).uuid, ns_slug)
+        return sdk.created(Term.view(row))
     end)))
 
     app:get("/tasks/:task_uuid/prs", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
@@ -542,10 +567,12 @@ return function(app)
         local row = V.review(ns, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
             type(d.note) == "string" and d.note or nil)
         if row.task_uuid ~= task.uuid then return sdk.not_found("Pull request") end
+        local label = d.decision == "approved" and "Manager approved PR (OpsAPI sign-off; not merged)"
+            or "Manager requested changes on PR"
         pcall(function()
             require("queries.KanbanTaskQueries").addComment({
                 task_id = task.id, user_uuid = sdk.user(self).uuid,
-                content = "PR review: " .. d.decision
+                content = label
                     .. (d.note and d.note ~= "" and (" — " .. U.clean(d.note, 500)) or "")
                     .. "\n" .. tostring(row.pr_url),
             })

@@ -59,6 +59,8 @@ docker run -d --name "ar-api-$ID" --network "$NET" -p 127.0.0.1::80 -v "$W/src/l
   -e JWT_SECRET_KEY="$JWT_SECRET" -e PROJECT_CODE=all -e LAPIS_ENVIRONMENT=production \
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e FRONTEND_URL=https://dash.example.invalid -e REDIS_ENABLED=false \
+  -e WORKSTATION_TERMINAL_URL=https://dev.workstation.co.uk \
+  -e WORKSTATION_TERMINAL_WEBHOOK_SECRET=ar-e2e-terminal-webhook \
   -e OLLAMA_URL=http://ar-mock:8080 -e OLLAMA_MODEL=mock-qwen -e AI_FALLBACK_PROVIDER=none lapis-lapis >/dev/null
 sleep 6
 [ "$(docker inspect -f '{{.State.Running}}' "ar-api-$ID")" = true ] || { docker logs "ar-api-$ID" 2>&1 | tail -40; exit 1; }

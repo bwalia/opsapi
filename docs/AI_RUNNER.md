@@ -1288,3 +1288,15 @@ Multiple PRs per task (one unique per run). On success (or when `pr_url` is repo
 
 ### 29.5 Prompt variables
 Added: `project.context`, `target_repo` (plus existing task/repo/branch/output variables).
+
+### 29.6 Web terminal (workstation-terminal)
+
+One-click **Open web terminal** on the task AI work panel opens `WORKSTATION_TERMINAL_URL` (default `https://dev.workstation.co.uk`) in a new tab with `opsapi_task`, `opsapi_ns`, `repo`, and `return` query params. OpsAPI records `ar_terminal_sessions` and posts a kanban comment with the terminal URL, target repo, and any linked PR URLs.
+
+- `POST /tasks/:task_uuid/terminal-sessions` → create + comment + deep link  
+- `GET /tasks/:task_uuid/terminal-sessions` and `GET .../work` → `terminal_sessions`  
+- `POST /public/terminal/webhook` — HMAC (`X-Opsapi-Signature: sha256=<hex>`, secret `WORKSTATION_TERMINAL_WEBHOOK_SECRET`) from sshweb when a session starts/ends with `opsapi_task`; updates status and comments a resume link. sshweb config: `opsapi.webhook_url` / `opsapi.webhook_secret` (or `SSHWEB_OPSAPI_WEBHOOK_*`).
+
+### 29.7 PR status polling
+
+`ar_task_prs.state` tracks GitHub lifecycle (`open` | `merged` | `closed`). Manager `review_status` is separate (approve / changes_requested — never merges). `pr_poll` refreshes open PRs via the project's Vault GitHub token (throttled on `GET .../work`, and a ~3 minute timer). On change it posts a task comment (“PR #N is now merged”).
