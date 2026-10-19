@@ -6,14 +6,17 @@
  * Loaded client-side only. Requires NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (Maps
  * JavaScript API) at build time.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GoogleMap, useJsApiLoader, Circle, Marker, InfoWindow } from '@react-google-maps/api';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { GoogleMap, useJsApiLoader, Circle, Marker } from '@react-google-maps/api';
 import type { MapFeature } from '@/services/property-deals.service';
 import { LAYER_COLOURS } from './mapColours';
 
 const HEALTH: Record<string, string> = { red: '#dc2626', amber: '#f59e0b', green: '#16a34a' };
 const MAP_ID = 'property-deals-deal-finder';
 const LIBRARIES: ('places')[] = ['places'];
+// Sparse, meaningful layers get a proper teardrop pin; the dense market layers
+// (sold prices can be ~1,000 points) stay as small dots so the map stays readable.
+const PIN_LAYERS = new Set(['properties', 'deals', 'leads', 'holdings', 'suppliers', 'company']);
 
 function pinColour(f: MapFeature): string {
   return f.layer === 'deals' && f.deal_health ? HEALTH[f.deal_health] : LAYER_COLOURS[f.layer] || '#334155';
@@ -31,32 +34,69 @@ function markerIcon(colour: string, size: number): google.maps.Icon {
   };
 }
 
+/** A proper teardrop map pin (anchored at its tip), for sparse clickable layers like companies. */
+function pinIcon(colour: string, selected: boolean): google.maps.Icon {
+  const w = selected ? 34 : 28;
+  const h = Math.round(w * 1.4);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 26 36">
+    <path d="M13 0.5C6 0.5 0.5 6 0.5 13c0 9 12.5 22.5 12.5 22.5S25.5 22 25.5 13C25.5 6 20 0.5 13 0.5z"
+      fill="${colour}" stroke="#fff" stroke-width="1.6"/>
+    <circle cx="13" cy="13" r="4.6" fill="#fff"/>
+  </svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(w, h),
+    anchor: new google.maps.Point(w / 2, h),
+  };
+}
+
 type Props = {
   center: { lat: number; lng: number };
   radiusMiles: number;
   features: MapFeature[];
   onPick: (lat: number, lng: number) => void;
   onSelect: (f: MapFeature) => void;
+  /** Keyword mode (Companies House): fit the view to the result pins instead of a fixed radius. */
+  fitToFeatures?: boolean;
+  /** Show the dropped search pin + radius circle, and let a map click move the pin (default true). */
+  showSearchPin?: boolean;
+  /** The currently-selected feature's uuid, to emphasise its pin. */
+  selectedUuid?: string;
 };
 
-function GoogleMapView({ apiKey, center, radiusMiles, features, onPick, onSelect }: Props & { apiKey: string }) {
+function GoogleMapView({
+  apiKey, center, radiusMiles, features, onPick, onSelect, fitToFeatures = false, showSearchPin = true, selectedUuid,
+}: Props & { apiKey: string }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: MAP_ID,
     googleMapsApiKey: apiKey,
     libraries: LIBRARIES,
   });
   const mapRef = useRef<google.maps.Map | null>(null);
-  const [hover, setHover] = useState<MapFeature | null>(null);
 
   const onLoad = useCallback((map: google.maps.Map) => { mapRef.current = map; }, []);
   const onUnmount = useCallback(() => { mapRef.current = null; }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isLoaded) return;
+    if (!map || !isLoaded || fitToFeatures) return;
     const bounds = map.getBounds();
     if (!bounds || !bounds.contains(center)) map.panTo(center);
-  }, [center.lat, center.lng, isLoaded, center]);
+  }, [center.lat, center.lng, isLoaded, center, fitToFeatures]);
+
+  // Keyword mode: frame all result pins (they can be anywhere in the UK).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded || !fitToFeatures || features.length === 0) return;
+    if (features.length === 1) {
+      map.setCenter({ lat: features[0].lat, lng: features[0].lng });
+      map.setZoom(13);
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    for (const f of features) bounds.extend({ lat: f.lat, lng: f.lng });
+    map.fitBounds(bounds, 56);
+  }, [isLoaded, fitToFeatures, features]);
 
   const mapOptions = useMemo<google.maps.MapOptions>(() => ({
     disableDefaultUI: false,
@@ -86,38 +126,35 @@ function GoogleMapView({ apiKey, center, radiusMiles, features, onPick, onSelect
       onLoad={onLoad}
       onUnmount={onUnmount}
       onClick={(e) => {
-        if (e.latLng) onPick(e.latLng.lat(), e.latLng.lng());
+        if (showSearchPin && e.latLng) onPick(e.latLng.lat(), e.latLng.lng());
       }}
     >
-      <Circle
-        center={center}
-        radius={radiusMiles * 1609.344}
-        options={{ strokeColor: '#6366f1', strokeOpacity: 0.8, strokeWeight: 1, fillColor: '#6366f1', fillOpacity: 0.05, clickable: false }}
-      />
-      <Marker position={center} title="Search pin" zIndex={1000} />
+      {showSearchPin && (
+        <>
+          <Circle
+            center={center}
+            radius={radiusMiles * 1609.344}
+            options={{ strokeColor: '#6366f1', strokeOpacity: 0.8, strokeWeight: 1, fillColor: '#6366f1', fillOpacity: 0.05, clickable: false }}
+          />
+          <Marker position={center} title="Search pin" zIndex={1000} />
+        </>
+      )}
       {features.map((f) => {
         const colour = pinColour(f);
+        const isPin = PIN_LAYERS.has(f.layer);
+        const isSelected = f.uuid === selectedUuid;
         const size = f.layer === 'deals' || f.layer === 'properties' ? 18 : 14;
         return (
           <Marker
             key={`${f.layer}:${f.uuid}`}
             position={{ lat: f.lat, lng: f.lng }}
-            icon={markerIcon(colour, size)}
+            icon={isPin ? pinIcon(colour, isSelected) : markerIcon(colour, size)}
             title={f.title}
+            zIndex={isPin ? (isSelected ? 600 : 500) : undefined}
             onClick={() => onSelect(f)}
-            onMouseOver={() => setHover(f)}
-            onMouseOut={() => setHover((h) => (h?.uuid === f.uuid ? null : h))}
           />
         );
       })}
-      {hover && (
-        <InfoWindow position={{ lat: hover.lat, lng: hover.lng }} onCloseClick={() => setHover(null)}>
-          <div className="text-sm">
-            <strong>{hover.title}</strong>
-            {hover.price != null ? ` · £${Number(hover.price).toLocaleString('en-GB')}` : ''}
-          </div>
-        </InfoWindow>
-      )}
     </GoogleMap>
   );
 }
