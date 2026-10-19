@@ -60,6 +60,8 @@ local function buildAllowedOrigins()
     return origins
 end
 
+local ALLOW_LOCALHOST = (os.getenv("CORS_ALLOW_LOCALHOST") or ""):lower() == "true"
+
 -- Build configuration once at module load time
 local CORS_CONFIG = {
     domain_patterns = buildDomainPatterns(),
@@ -80,8 +82,11 @@ local function isOriginAllowed(origin)
         return true, nil
     end
 
-    -- Tier 1: Always allow localhost/loopback on any port
-    if isLocalhostOrigin(origin) then
+    -- Tier 1: localhost/loopback on any port — local development only.
+    -- With credentials allowed, trusting localhost everywhere let any page
+    -- served from a developer's (or attacker's) localhost call the live API
+    -- as the signed-in user. Set CORS_ALLOW_LOCALHOST=true in local .env.
+    if ALLOW_LOCALHOST and isLocalhostOrigin(origin) then
         return true, origin
     end
 

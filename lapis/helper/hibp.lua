@@ -60,14 +60,9 @@ local function fetch_range(prefix)
             ["Add-Padding"] = "true",
             ["User-Agent"] = "OpsAPI-Registration/1.0",
         },
-        -- Match project-wide pattern for outbound TLS from Lua
-        -- cosockets (see helper/hmrc.lua, lib/llm-client.lua):
-        -- ssl_verify=true requires lua_ssl_trusted_certificate, which
-        -- this image doesn't ship. The k-anonymity guarantee is
-        -- preserved either way — only a 5-hex-char prefix ever leaves
-        -- this process — so MITM on the lookup learns nothing about
-        -- the underlying password.
-        ssl_verify = false,
+        -- nginx.conf trusts the system CA bundle (lua_ssl_trusted_certificate),
+        -- so verify: an unverified lookup could be told a breached password is fine.
+        ssl_verify = true,
     })
 
     if not res then

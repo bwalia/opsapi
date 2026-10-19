@@ -26,6 +26,31 @@ local ShopCustomerAuth = require("queries.ShopCustomerAuthQueries")
 local ShopCustomerAuthRules = require("lib.shop-customer-auth")
 
 -- 429 with Retry-After, for per-account limits (helper/auth-throttle.lua).
+-- OAuth login CSRF: a random nonce rides in `state` AND in a short-lived
+-- cookie set when sign-in starts; the callback accepts only a match, so an
+-- attacker can't finish their own Google/Apple sign-in in a victim's
+-- browser. SameSite=None: Apple posts its callback cross-site (form_post).
+-- Path=/ because the API is served under a path prefix (/opsapi).
+local OAUTH_NONCE_COOKIE = "opsapi_oauth_nonce"
+
+local function issue_oauth_nonce()
+    local nonce = ngx.encode_base64(assert(require("resty.openssl.rand").bytes(18)))
+        :gsub("[+/=]", { ["+"] = "-", ["/"] = "_", ["="] = "" })
+    local cookies = ngx.header["Set-Cookie"]
+    local cookie = OAUTH_NONCE_COOKIE .. "=" .. nonce .. "; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=None"
+    if type(cookies) == "table" then table.insert(cookies, cookie)
+    elseif cookies then cookies = { cookies, cookie }
+    else cookies = cookie end
+    ngx.header["Set-Cookie"] = cookies
+    return nonce
+end
+
+local function oauth_nonce_matches(state_data)
+    local cookie = ngx.var["cookie_" .. OAUTH_NONCE_COOKIE]
+    return type(state_data) == "table" and type(state_data.nonce) == "string"
+        and cookie ~= nil and cookie ~= "" and cookie == state_data.nonce
+end
+
 -- A deactivated account gets no new session on any sign-in path.
 local function is_deactivated(user)
     return user ~= nil and (user.active == false or user.active == "f" or user.active == "false")
@@ -1048,16 +1073,12 @@ return function(app)
         -- Encode state as JSON if any structured field is set; keep the
         -- plain-string legacy shape only when NOTHING extra needs to
         -- survive the round-trip.
-        local state
-        if frontend_url or project_code then
-            state = cJson.encode({
-                from = redirect_from,
-                frontend_url = frontend_url,
-                project_code = project_code,
-            })
-        else
-            state = redirect_from
-        end
+        local state = cJson.encode({
+            from = redirect_from,
+            frontend_url = frontend_url,
+            project_code = project_code,
+            nonce = issue_oauth_nonce(),
+        })
 
         local auth_url = string.format(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s" ..
@@ -1104,6 +1125,9 @@ return function(app)
                 }
             }
         end
+        if not shop_state and not oauth_nonce_matches(state_data) then
+            return { status = 400, json = { error = "Sign-in link expired or not started here - please try again" } }
+        end
 
         local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
         local google_client_secret = Global.getEnvVar("GOOGLE_CLIENT_SECRET")
@@ -1125,7 +1149,7 @@ return function(app)
             headers = {
                 ["Content-Type"] = "application/x-www-form-urlencoded",
             },
-            ssl_verify = false,
+            ssl_verify = true,
         })
 
         if not token_res then
@@ -1156,7 +1180,7 @@ return function(app)
             headers = {
                 ["Authorization"] = "Bearer " .. token_data.access_token,
             },
-            ssl_verify = false,
+            ssl_verify = true,
         })
 
         if not user_res then
@@ -1178,6 +1202,11 @@ return function(app)
                     error = "No email received from Google"
                 }
             }
+        end
+        -- Accounts are found and linked by email, so only an address Google
+        -- itself has verified may sign in to one.
+        if not shop_state and google_user.verified_email ~= true then
+            return { status = 403, json = { error = "Your Google email address isn't verified" } }
         end
 
         -- A shop customer gets a one-time shop sign-in link, never a users row or namespace membership.
@@ -1390,16 +1419,12 @@ return function(app)
         local frontend_url = self.params.frontend_url
         local project_code = self.params.project_code
 
-        local state
-        if frontend_url or project_code then
-            state = cJson.encode({
-                from = redirect_from,
-                frontend_url = frontend_url,
-                project_code = project_code,
-            })
-        else
-            state = redirect_from
-        end
+        local state = cJson.encode({
+            from = redirect_from,
+            frontend_url = frontend_url,
+            project_code = project_code,
+            nonce = issue_oauth_nonce(),
+        })
 
         local auth_url, url_err = AppleSignIn.build_authorize_url(state)
         if not auth_url then
@@ -1448,6 +1473,9 @@ return function(app)
                     err_frontend, ngx.escape_uri(code_name)
                 )
             }
+        end
+        if not shop_state and not oauth_nonce_matches(state_data) then
+            return apple_error_redirect("session_expired")
         end
 
         if self.params.error then
@@ -1576,9 +1604,9 @@ return function(app)
         httpc:set_timeout(30000)
 
         -- Validate token with Google's tokeninfo endpoint
-        local res, err = httpc:request_uri("https://oauth2.googleapis.com/tokeninfo?id_token=" .. token, {
+        local res, err = httpc:request_uri("https://oauth2.googleapis.com/tokeninfo?id_token=" .. ngx.escape_uri(token), {
             method = "GET",
-            ssl_verify = false
+            ssl_verify = true
         })
 
         if not res then
@@ -1600,6 +1628,9 @@ return function(app)
 
         if not valid_audience then
             return nil, "Token not issued for this app"
+        end
+        if token_info.email_verified ~= "true" and token_info.email_verified ~= true then
+            return nil, "Google email address isn't verified"
         end
 
         return token_info, nil

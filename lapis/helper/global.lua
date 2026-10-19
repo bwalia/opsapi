@@ -124,12 +124,52 @@ local function validateEncryptionConfig()
     return secretKey, secretIV
 end
 
+-- Secrets are written as "v2:" .. base64(nonce[12] .. tag[16] .. ciphertext):
+-- AES-GCM with a fresh random nonce per value. The legacy format (bare
+-- base64, AES-CBC with the one fixed OPENSSL_SECRET_IV) made equal
+-- plaintexts — the same NINO — encrypt identically and let a changed
+-- ciphertext decrypt to garbage unnoticed. Legacy values still decrypt.
+-- FastAPI (services/crypto.py) reads both formats.
+-- SECRETS_ENCRYPTION_FORMAT=cbc writes the legacy format again (rollback only).
+local SECRET_V2 = "v2:"
+
+local function gcmCipher(key)
+    local cipher = require("resty.openssl.cipher")
+    return assert(cipher.new(#key >= 32 and "aes-256-gcm" or "aes-128-gcm"))
+end
+
+local function encryptGcm(secret, key)
+    local nonce = assert(require("resty.openssl.rand").bytes(12))
+    local c = gcmCipher(key)
+    local ciphertext, err = c:encrypt(key, nonce, secret, false)
+    if not ciphertext then
+        error("Encryption failed - " .. tostring(err))
+    end
+    local tag = assert(c:get_aead_tag())
+    return SECRET_V2 .. ngx.encode_base64(nonce .. tag .. ciphertext)
+end
+
+local function decryptGcm(encoded, key)
+    local blob = ngx.decode_base64(encoded:sub(#SECRET_V2 + 1))
+    if not blob or #blob < 28 then
+        error("Decryption failed - malformed secret")
+    end
+    local plain = gcmCipher(key):decrypt(key, blob:sub(1, 12), blob:sub(29), false, nil, blob:sub(13, 28))
+    if not plain then
+        error("Decryption failed - secret was altered or encrypted with a different key")
+    end
+    return plain
+end
+
 function Global.encryptSecret(secret)
     if not secret or secret == "" then
         error("Cannot encrypt empty secret")
     end
 
     local secretKey, secretIV = validateEncryptionConfig()
+    if (os.getenv("SECRETS_ENCRYPTION_FORMAT") or ""):lower() ~= "cbc" then
+        return encryptGcm(secret, secretKey)
+    end
     local AES = require("resty.aes")
 
     -- Auto-detect cipher size from key length: 16 bytes → AES-128, 32 bytes → AES-256
@@ -154,6 +194,9 @@ function Global.decryptSecret(encodedSecret)
     end
 
     local secretKey, secretIV = validateEncryptionConfig()
+    if encodedSecret:sub(1, #SECRET_V2) == SECRET_V2 then
+        return decryptGcm(encodedSecret, secretKey)
+    end
     local AES = require("resty.aes")
 
     -- Auto-detect cipher size from key length: 16 bytes → AES-128, 32 bytes → AES-256

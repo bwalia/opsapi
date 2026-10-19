@@ -34,8 +34,11 @@ end
 -- container historically lacked a configured CA trust store; production REQUIRES
 -- verification (we send NINOs + financial data) and the nginx http block now sets
 -- lua_ssl_trusted_certificate to the system CA bundle so resty.http can verify.
+-- HMRC's sandbox and live APIs both have publicly trusted certificates, and
+-- nginx.conf trusts the system CA bundle: always verify (tokens and NINOs
+-- travel on these calls).
 local function tls_verify()
-    return HMRC_ENVIRONMENT == "production"
+    return true
 end
 
 local function create_http_client()
