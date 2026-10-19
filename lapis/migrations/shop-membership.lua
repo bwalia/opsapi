@@ -23,7 +23,10 @@
     Plus (zzs26): Trade discount — shop_membership_settings.founding_discount_pct /
     standard_discount_pct, shop_orders.member_discount_minor / member_discount_pct.
 
-    Registered in migrations.lua as zzs19–zzs21, zzs25 and zzs26. Idempotent.
+    Plus (zzs27): fixed Trade discount — shop_membership_settings.discount_fixed_minor /
+    discount_min_order_minor (£500 off orders of £5,000+ ex VAT by default).
+
+    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26 and zzs27. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -188,5 +191,12 @@ return {
                    NOT NULL DEFAULT 2.5 CHECK (standard_discount_pct BETWEEN 0 AND 50)]])
         db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS member_discount_minor integer NOT NULL DEFAULT 0]])
         db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS member_discount_pct numeric(5,2)]])
+    end,
+    -- [6] Fixed Trade discount: £ off basket orders at or above a minimum (replaces the % when > 0) ---
+    [6] = function()
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_fixed_minor integer
+                   NOT NULL DEFAULT 50000 CHECK (discount_fixed_minor >= 0)]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_min_order_minor integer
+                   NOT NULL DEFAULT 500000 CHECK (discount_min_order_minor >= 0)]])
     end,
 }

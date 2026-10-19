@@ -136,6 +136,22 @@ check("trade: admin update accepts decimals", okv and okv.standard_discount_pct 
 check("trade: admin update rejects > 50", M.validate_update({ founding_discount_pct = 60 }) == nil)
 check("trade: admin update rejects negative", M.validate_update({ standard_discount_pct = -1 }) == nil)
 
+-- fixed Trade discount -------------------------------------------------------------------------
+check("fixed: default is £500 off orders of £5,000+", s.discount_fixed_minor == 50000 and s.discount_min_order_minor == 500000
+    and M.fixed_discount(s))
+local fx = M.apply_trade(s, "founding", 500000, 0.2, 2500)
+check("fixed: £5,000 order → £500 off, VAT on £4,500, shipping kept",
+    fx.discount_minor == 50000 and fx.subtotal_minor == 450000 and fx.vat_minor == 90000 and fx.total_minor == 542500
+    and fx.pct == nil, fx.total_minor)
+check("fixed: same for standard tier", M.apply_trade(s, "standard", 800000, 0.2, 0).discount_minor == 50000)
+check("fixed: £4,999.99 order → nothing off", M.apply_trade(s, "founding", 499999, 0.2, 0).discount_minor == 0)
+local pctmode = M.settings({ discount_fixed_minor = 0 })
+local pd = M.apply_trade(pctmode, "founding", 1000000, 0.2, 0)
+check("fixed: 0 falls back to the tier %", not M.fixed_discount(pctmode) and pd.discount_minor == 50000 and pd.pct == 5)
+check("fixed: admin update accepts amounts",
+    M.validate_update({ discount_fixed_minor = 60000, discount_min_order_minor = 600000 }).discount_fixed_minor == 60000)
+check("fixed: admin update rejects negative", M.validate_update({ discount_fixed_minor = -1 }) == nil)
+
 -- email ----------------------------------------------------------------------------------------
 check("email: normalised", M.email(" VIP@Lab.ac.uk ") == "vip@lab.ac.uk")
 check("email: junk rejected", M.email("x@y") == nil)

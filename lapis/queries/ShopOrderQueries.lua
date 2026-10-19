@@ -292,18 +292,46 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     -- Stripe line items are the undiscounted lines + undiscounted VAT; the coupon below takes off
     -- amount_off, so Stripe's total equals the order total exactly.
     local stripe_totals = totals
+
+    -- Joining Trade with this order (body.membership): reserve the spot now, give this order the
+    -- Trade discount for the tier they join at, and charge the first fee in the same Stripe payment.
+    local join
+    if type(body.membership) == "table" then
+        if from ~= "cart" then
+            return nil, U.err(400, "VALIDATION_ERROR", "Trade membership can only be added to a basket order")
+        end
+        local Membership = require("queries.ShopMembershipQueries")
+        local R = require("lib.shop-membership")
+        local bm = body.membership
+        local s, jemail, interval = Membership.validateJoin(ns_id, {
+            email = email, interval = bm.interval, accept_terms = bm.accept_terms, terms_version = bm.terms_version,
+        })
+        if not s then return nil, jemail end
+        join = { settings = s, m = Membership.reserve(ns_id, s, jemail, interval) }
+        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor)
+        if d.discount_minor > 0 then
+            trade = { pct = d.pct, discount_minor = d.discount_minor }
+            totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
+                       shipping_minor = d.shipping_minor, total_minor = d.total_minor }
+        end
+    end
+    local function abandon_join()
+        if join then require("queries.ShopMembershipQueries").abandon(join.m) end
+    end
+
     local member = ngx.ctx and ngx.ctx.shop_member
     if member and (not email or tostring(email):lower() == member.email) then
         local Membership = require("queries.ShopMembershipQueries")
         local R = require("lib.shop-membership")
         local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
         local m = member.membership
-        if from == "cart" and member.active and type(m) == "table"
+        if from == "cart" and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
-            local pct = R.discount_pct(Membership.settings(ns_id), m.tier)
-            local d = R.apply_discount(totals.subtotal_minor, vat_rate, totals.shipping_minor, pct)
+            local d = R.apply_trade(Membership.settings(ns_id), m.tier, totals.subtotal_minor, vat_rate,
+                totals.shipping_minor)
             if d.discount_minor > 0 then
-                trade = { pct = pct, discount_minor = d.discount_minor }
+                trade = { pct = d.pct, discount_minor = d.discount_minor }
                 totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
                            shipping_minor = d.shipping_minor, total_minor = d.total_minor }
                 email = email or member.email
@@ -315,6 +343,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             local applied = R.apply_credits(totals.subtotal_minor, vat_rate, totals.shipping_minor, available)
             if applied.credit_minor > 0 then
                 if applied.total_minor < 50 then
+                    abandon_join()
                     return nil, U.err(409, "CREDIT_COVERS_ORDER",
                         "Your credit covers this whole order — please request a quote and we'll arrange it for you")
                 end
@@ -332,6 +361,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     local stripe, serr = PaymentProvider.get_stripe()
     if not stripe then
         ngx.log(ngx.ERR, "[shop] checkout: ", tostring(serr))
+        abandon_join()
         return nil, U.err(503, "PAYMENTS_DISABLED", "Online payment is not available — please request a quote")
     end
 
@@ -361,7 +391,10 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
         return row
     end)
-    if not order then return nil, terr end
+    if not order then
+        abandon_join()
+        return nil, terr
+    end
 
     -- 3. Stripe Checkout Session
     local meta = { order_uuid = order.uuid, namespace_id = tostring(ns_id), source = "workstation-shop" }
@@ -380,12 +413,29 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         payment_intent_data = { metadata = meta },
         idempotency_key = "shop-order-" .. order.uuid,
     }
+    if join then
+        -- One payment for both: subscription mode with the hardware as one-off items on the first
+        -- invoice. The session stays an order session (its webhook also activates the membership via
+        -- metadata.membership_uuid); the subscription carries the membership's own metadata.
+        local Membership = require("queries.ShopMembershipQueries")
+        local sub_meta = Membership.joinMeta(ns_id, join.m)
+        sub_meta.order_uuid = order.uuid
+        meta.membership_uuid = join.m.uuid
+        local items = Membership.joinItems(join.settings, join.m)
+        for _, it in ipairs(opts.line_items) do items[#items + 1] = it end
+        opts.mode = "subscription"
+        opts.line_items = items
+        opts.payment_intent_data = nil
+        opts.subscription_data = { metadata = sub_meta }
+        opts.idempotency_key = "shop-order-trade-" .. order.uuid
+    end
     if email then opts.customer_email = email end
     if amount_off > 0 then
         -- Stripe line items can't be negative: the trade discount and/or credit (plus the VAT they save)
         -- go on as one one-off coupon.
         local coupon_name = (trade and credit) and "Trade discount + credit"
-            or trade and ("Trade discount " .. tostring(trade.pct) .. "%") or "Workstation credit"
+            or trade and (trade.pct and ("Trade discount " .. tostring(trade.pct) .. "%") or "Trade discount")
+            or "Workstation credit"
         local coupon, cerr = stripe:_request("POST", "/coupons", {
             amount_off = amount_off, currency = "gbp", duration = "once", max_redemptions = 1,
             name = coupon_name, metadata = { order_uuid = order.uuid },
@@ -398,6 +448,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
                 require("queries.ShopMembershipQueries").releaseCredits(order.id)
                 return true
             end)
+            abandon_join()
             return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Could not start checkout — please try again or request a quote")
         end
         opts.discounts = { { coupon = coupon.id } }
@@ -414,13 +465,21 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             require("queries.ShopMembershipQueries").releaseCredits(order.id)
             return true
         end)
+        abandon_join()
         return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Could not start checkout — please try again or request a quote")
     end
     db.query("UPDATE shop_orders SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, order.id)
+    if join then
+        db.query("UPDATE shop_memberships SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, join.m.id)
+        db.query([[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],
+            "Joining Trade with this order: membership " .. join.m.uuid .. " (" .. join.m.tier .. ", "
+                .. join.m.billing_interval .. "ly)", order.id)
+    end
     return { order_uuid = order.uuid, order_token = order.access_token, checkout_url = session.url,
              order_number = order.order_number, credit_minor = credit and credit.credit_minor or 0,
              member_discount_minor = trade and trade.discount_minor or 0,
-             member_discount_pct = trade and trade.pct or U.null }
+             member_discount_pct = trade and trade.pct or U.null,
+             membership_uuid = join and join.m.uuid or U.null }
 end
 
 -- ---------------------------------------------------------------------------

@@ -109,13 +109,18 @@ end
 
 -- VIP membership checkouts (mode=subscription) share the shop webhook; their sessions carry
 -- metadata.source = "workstation-shop-vip". Membership handlers return nil (no order to link).
+-- A basket order that joins Trade is one session for both: an order session whose metadata also
+-- carries membership_uuid, so the membership handler runs after the order's.
 local function vip_or(order_handler, vip_handler)
     return function(obj, event)
         if Membership.isVipObject(obj) then
             vip_handler(obj, event)
             return nil
         end
-        return order_handler(obj, event)
+        local order = order_handler(obj, event)
+        local meta = type(obj) == "table" and type(obj.metadata) == "table" and obj.metadata or {}
+        if nz(meta.membership_uuid) then vip_handler(obj, event) end
+        return order
     end
 end
 
