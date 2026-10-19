@@ -13,6 +13,7 @@
       refund_credit  membership fees → order credit on a qualifying order
       discount_pct   trade discount % for a member's tier (founding / standard)
       apply_discount trade discount against an order subtotal, VAT recomputed
+      apply_trade    the Trade discount in force: fixed £ off qualifying orders, or the tier's %
       apply_credits  credits against an order subtotal, VAT recomputed
 
     Money is integer pence. Settings (per namespace, admin-editable) default to
@@ -36,6 +37,10 @@ M.DEFAULTS = {
     terms_version = "2026-10",
     founding_discount_pct = 5,          -- first founding_cap Trade members: % off catalogue orders (ex VAT)
     standard_discount_pct = 2.5,        -- every Trade member after them
+    -- Fixed Trade discount: when discount_fixed_minor > 0 it replaces the % discount for every tier:
+    -- that much off (ex VAT) any basket order whose subtotal ex VAT is at least discount_min_order_minor.
+    discount_fixed_minor = 50000,       -- £500 ex VAT
+    discount_min_order_minor = 500000,  -- on orders of £5,000 ex VAT or more
 }
 
 M.MAX_DISCOUNT_PCT = 50
@@ -56,7 +61,8 @@ function M.settings(row)
     end
     s.enabled = s.enabled == true or s.enabled == "t"
     for _, k in ipairs({ "monthly_price_minor", "yearly_months_charged", "founding_cap", "refund_threshold_minor",
-                         "credit_expiry_days", "early_access_hours", "long_lead_days", "lock_days" }) do
+                         "credit_expiry_days", "early_access_hours", "long_lead_days", "lock_days",
+                         "discount_fixed_minor", "discount_min_order_minor" }) do
         s[k] = math.floor(tonumber(s[k]) or M.DEFAULTS[k])
     end
     s.vat_rate = tonumber(s.vat_rate) or M.DEFAULTS.vat_rate
@@ -87,6 +93,7 @@ function M.validate_update(body)
         { "monthly_price_minor", 100, 10000000 }, { "yearly_months_charged", 1, 12 }, { "founding_cap", 0, 100000 },
         { "refund_threshold_minor", 0, 10000000000 }, { "credit_expiry_days", 1, 3650 },
         { "early_access_hours", 0, 720 }, { "long_lead_days", 1, 365 },
+        { "discount_fixed_minor", 0, 10000000 }, { "discount_min_order_minor", 0, 1000000000 },
     }
     for _, c in ipairs(checks) do
         local ok, err = pos_int(c[1], c[2], c[3])
@@ -182,19 +189,43 @@ end
 --- Trade discount on an order subtotal (ex VAT), in pence.
 -- Returns { discount_minor, subtotal_minor, vat_minor, shipping_minor, total_minor }.
 -- VAT is recomputed on the reduced subtotal; shipping is never discounted.
-function M.apply_discount(subtotal_net, vat_rate, shipping_minor, pct)
-    subtotal_net = math.floor(tonumber(subtotal_net) or 0)
-    shipping_minor = math.floor(tonumber(shipping_minor) or 0)
-    pct = tonumber(pct) or 0
-    if pct < 0 then pct = 0 end
-    if pct > M.MAX_DISCOUNT_PCT then pct = M.MAX_DISCOUNT_PCT end
-    local discount = math.max(0, math.min(subtotal_net, round(subtotal_net * pct / 100)))
+local function apply_amount(subtotal_net, vat_rate, shipping_minor, amount)
+    local discount = math.max(0, math.min(subtotal_net, math.floor(tonumber(amount) or 0)))
     local net = subtotal_net - discount
     local vat = round(net * (tonumber(vat_rate) or 0))
     return {
         discount_minor = discount, subtotal_minor = net, vat_minor = vat,
         shipping_minor = shipping_minor, total_minor = net + vat + shipping_minor,
     }
+end
+
+function M.apply_discount(subtotal_net, vat_rate, shipping_minor, pct)
+    subtotal_net = math.floor(tonumber(subtotal_net) or 0)
+    shipping_minor = math.floor(tonumber(shipping_minor) or 0)
+    pct = tonumber(pct) or 0
+    if pct < 0 then pct = 0 end
+    if pct > M.MAX_DISCOUNT_PCT then pct = M.MAX_DISCOUNT_PCT end
+    return apply_amount(subtotal_net, vat_rate, shipping_minor, round(subtotal_net * pct / 100))
+end
+
+--- True when the fixed Trade discount (discount_fixed_minor) is in force instead of the %.
+function M.fixed_discount(s)
+    return (tonumber(s.discount_fixed_minor) or 0) > 0
+end
+
+--- The Trade discount for a member of `tier` on a basket order: the fixed amount when the order
+-- qualifies (else nothing), or the tier's %. Same shape as apply_discount, plus pct (nil when fixed).
+function M.apply_trade(s, tier, subtotal_net, vat_rate, shipping_minor)
+    if not M.fixed_discount(s) then
+        local pct = M.discount_pct(s, tier)
+        local d = M.apply_discount(subtotal_net, vat_rate, shipping_minor, pct)
+        d.pct = pct
+        return d
+    end
+    subtotal_net = math.floor(tonumber(subtotal_net) or 0)
+    shipping_minor = math.floor(tonumber(shipping_minor) or 0)
+    local amount = subtotal_net >= s.discount_min_order_minor and s.discount_fixed_minor or 0
+    return apply_amount(subtotal_net, vat_rate, shipping_minor, amount)
 end
 
 --- Apply available credits (oldest first) to an order subtotal (ex VAT).

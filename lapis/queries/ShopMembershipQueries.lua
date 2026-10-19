@@ -110,7 +110,10 @@ function Q.offer(ns_id)
         },
         standard_price = price_view(R.prices(s, "standard")),
         -- Trade discount on catalogue (basket) orders: founding_pct for the first founding.cap members.
-        trade_discount = { founding_pct = s.founding_discount_pct, standard_pct = s.standard_discount_pct },
+        -- fixed_minor > 0: Trade members get that much off (ex VAT) basket orders of min_order_minor or more,
+        -- for every tier, instead of the percentages.
+        trade_discount = { founding_pct = s.founding_discount_pct, standard_pct = s.standard_discount_pct,
+                           fixed_minor = s.discount_fixed_minor, min_order_minor = s.discount_min_order_minor },
         discount_pct = R.discount_pct(s, tier),
         uplift_pct = s.uplift_pct,
         lock_days = s.lock_days,
@@ -791,6 +794,9 @@ function Q.me(ns_id, member)
             fees_paid_net_minor = tonumber(m.fees_paid_net_minor), fees_credited_net_minor = tonumber(m.fees_credited_net_minor),
             -- Trade discount for this member's tier; it applies at checkout only while status is active/past_due.
             discount_pct = R.discount_pct(s, m.tier),
+            -- When > 0 this replaces discount_pct: that much off (ex VAT) orders of discount_min_order_minor or more.
+            discount_fixed_minor = s.discount_fixed_minor,
+            discount_min_order_minor = s.discount_min_order_minor,
         } or U.null,
         credits = U.arr(credits),
         lock_days = s.lock_days,

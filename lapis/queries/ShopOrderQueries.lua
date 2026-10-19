@@ -309,10 +309,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if not s then return nil, jemail end
         join = { settings = s, m = Membership.reserve(ns_id, s, jemail, interval) }
         local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
-        local pct = R.discount_pct(s, join.m.tier)
-        local d = R.apply_discount(totals.subtotal_minor, vat_rate, totals.shipping_minor, pct)
+        local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor)
         if d.discount_minor > 0 then
-            trade = { pct = pct, discount_minor = d.discount_minor }
+            trade = { pct = d.pct, discount_minor = d.discount_minor }
             totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
                        shipping_minor = d.shipping_minor, total_minor = d.total_minor }
         end
@@ -329,10 +328,10 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local m = member.membership
         if from == "cart" and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
-            local pct = R.discount_pct(Membership.settings(ns_id), m.tier)
-            local d = R.apply_discount(totals.subtotal_minor, vat_rate, totals.shipping_minor, pct)
+            local d = R.apply_trade(Membership.settings(ns_id), m.tier, totals.subtotal_minor, vat_rate,
+                totals.shipping_minor)
             if d.discount_minor > 0 then
-                trade = { pct = pct, discount_minor = d.discount_minor }
+                trade = { pct = d.pct, discount_minor = d.discount_minor }
                 totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
                            shipping_minor = d.shipping_minor, total_minor = d.total_minor }
                 email = email or member.email
@@ -435,7 +434,8 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         -- Stripe line items can't be negative: the trade discount and/or credit (plus the VAT they save)
         -- go on as one one-off coupon.
         local coupon_name = (trade and credit) and "Trade discount + credit"
-            or trade and ("Trade discount " .. tostring(trade.pct) .. "%") or "Workstation credit"
+            or trade and (trade.pct and ("Trade discount " .. tostring(trade.pct) .. "%") or "Trade discount")
+            or "Workstation credit"
         local coupon, cerr = stripe:_request("POST", "/coupons", {
             amount_off = amount_off, currency = "gbp", duration = "once", max_redemptions = 1,
             name = coupon_name, metadata = { order_uuid = order.uuid },
