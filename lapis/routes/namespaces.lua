@@ -322,6 +322,11 @@ return function(app)
     app:post("/api/v2/user/namespaces", RateLimit.wrap(NS_CREATE_LIMIT, AuthMiddleware.requireAuth(function(self)
         local params = RequestParser.parse_request(self)
 
+        if not require("helper.project-config").allowsSelfServiceWorkspaces()
+            and not require("helper.admin-check").isPlatformAdmin(self.current_user) then
+            return error_response(403, "Creating workspaces isn't available on this service")
+        end
+
         if not params.name or params.name == "" then
             return error_response(400, "Namespace name is required")
         end

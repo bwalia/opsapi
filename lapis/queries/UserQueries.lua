@@ -350,8 +350,9 @@ function UserQueries.verify(identifier, plain_password)
         user = Users:find({ username = identifier })
     end
 
-    -- Verify password
-    if user and bcrypt.verify(plain_password, user.password) then
+    -- Verify password. A deactivated account answers exactly like a wrong
+    -- password, so sign-in can't be used to tell the two apart.
+    if user and user.active ~= false and bcrypt.verify(plain_password, user.password) then
         return user
     end
     return nil

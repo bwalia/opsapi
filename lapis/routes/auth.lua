@@ -26,6 +26,11 @@ local ShopCustomerAuth = require("queries.ShopCustomerAuthQueries")
 local ShopCustomerAuthRules = require("lib.shop-customer-auth")
 
 -- 429 with Retry-After, for per-account limits (helper/auth-throttle.lua).
+-- A deactivated account gets no new session on any sign-in path.
+local function is_deactivated(user)
+    return user ~= nil and (user.active == false or user.active == "f" or user.active == "false")
+end
+
 local function locked_response(message, retry_after)
     ngx.header["Retry-After"] = tostring(math.max(retry_after or 60, 1))
     return { status = 429, json = { error = message, code = "AUTH_LOCKED", retry_after = retry_after } }
@@ -336,6 +341,9 @@ local function mint_oauth_session(self, user, opts)
     if not userWithRoles then
         return nil, "Failed to load user data"
     end
+    if is_deactivated(userWithRoles) then
+        return nil, "This account has been deactivated"
+    end
 
     local rolesArray = {}
     if userWithRoles.roles then
@@ -529,6 +537,9 @@ return function(app)
         local userWithRoles = UserQueries.show(user_uuid)
         if not userWithRoles then
             return { status = 401, json = { error = "Invalid session" } }
+        end
+        if is_deactivated(userWithRoles) then
+            return { status = 403, json = { error = "This account has been deactivated" } }
         end
 
         -- Verify OTP
@@ -1251,6 +1262,9 @@ return function(app)
                 }
             }
         end
+        if is_deactivated(userWithRoles) then
+            return { status = 403, json = { error = "This account has been deactivated" } }
+        end
 
         -- Build roles array
         local rolesArray = {}
@@ -1768,6 +1782,9 @@ return function(app)
                     status = 500,
                     json = { error = "Failed to load user data" }
                 }
+            end
+            if is_deactivated(userWithRoles) then
+                return { status = 403, json = { error = "This account has been deactivated" } }
             end
 
             -- Build roles array

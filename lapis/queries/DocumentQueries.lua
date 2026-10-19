@@ -18,17 +18,14 @@ function DocumentQueries.create(data)
     -- Get user UUID from route (from JWT token) for MinIO folder structure
     local user_uuid = data.user_uuid
 
-    -- Resolve user_id to internal ID (use user_uuid from JWT if user_id not provided)
-    local userUuid = data.user_id or user_uuid
-    local user = nil
-    if userUuid and userUuid ~= "" then
-        user = UserQueries.show(userUuid)
+    -- The owner is always the signed-in user (route sets user_uuid from the
+    -- JWT). A body user_id used to win, and an unknown one fell back to
+    -- user 1, so anyone could file documents under another account.
+    local user = (user_uuid and user_uuid ~= "") and UserQueries.show(user_uuid) or nil
+    if user == nil then
+        return { status = 401, json = { error = "Unknown user" } }
     end
-    if user ~= nil then
-        data.user_id = user.internal_id
-    else
-        data.user_id = 1
-    end
+    data.user_id = user.internal_id
 
     local file = data.cover_image
     if not file then
@@ -78,7 +75,14 @@ function DocumentQueries.create(data)
     if data.status == "true" then
         data.published_date = os.date("%Y-%m-%d %H:%M:%S")
     end
-    local savedDocument = DocumentModel:create(data, {
+    -- Only these columns come from the request; the rest are ours.
+    local row = { uuid = doc_uuid, user_id = data.user_id, content = data.content,
+                  published_date = data.published_date }
+    for _, col in ipairs({ "title", "sub_title", "excerpt", "slug", "status",
+                           "meta_title", "meta_description", "meta_keywords" }) do
+        row[col] = data[col]
+    end
+    local savedDocument = DocumentModel:create(row, {
         returning = "*"
     })
 

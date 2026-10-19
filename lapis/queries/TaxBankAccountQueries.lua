@@ -122,19 +122,20 @@ function TaxBankAccountQueries.create(data, user)
         data.uuid = Global.generateUUID()
     end
 
-    -- Get internal user ID from users table (if not already resolved)
-    if not data.user_id then
-        local user_record
-        if user.uuid then
-            user_record = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
-        else
-            user_record = db.query("SELECT id FROM users WHERE id = ? LIMIT 1", user_uuid)
-        end
-        if not user_record or #user_record == 0 then
-            return nil, "User not found"
-        end
-        data.user_id = user_record[1].id
+    -- The owner is always the signed-in user. Routes pass the request body
+    -- straight in, so a body user_id / namespace_id would otherwise plant an
+    -- account in someone else's data (and clear their primary flag).
+    local user_record
+    if user.uuid then
+        user_record = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    else
+        user_record = db.query("SELECT id FROM users WHERE id = ? LIMIT 1", user_uuid)
     end
+    if not user_record or #user_record == 0 then
+        return nil, "User not found"
+    end
+    data.user_id = user_record[1].id
+    data.namespace_id = nil
 
     -- If this is the first account, make it primary
     local existing = db.query("SELECT COUNT(*) as count FROM tax_bank_accounts WHERE user_id = ?", data.user_id)
@@ -147,8 +148,8 @@ function TaxBankAccountQueries.create(data, user)
         db.query("UPDATE tax_bank_accounts SET is_primary = false WHERE user_id = ? AND is_primary = true", data.user_id)
     end
 
-    -- Resolve namespace_id from user's default namespace if not provided
-    if not data.namespace_id or data.namespace_id == 0 then
+    -- namespace_id comes from the user's default namespace, never the body.
+    do
         local ns = db.query("SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1", data.user_id)
         if ns and #ns > 0 and ns[1].default_namespace_id then
             data.namespace_id = ns[1].default_namespace_id
