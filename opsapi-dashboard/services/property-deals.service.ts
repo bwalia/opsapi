@@ -271,14 +271,29 @@ export type WorkflowTemplateVersion = S['PropertyDealsWorkflowTemplateVersion'];
 export type MapResult = S['PropertyDealsMapResult'];
 // The suppliers layer: hand-written until the next generate run.
 export type MapFeature = Omit<S['PropertyDealsMapFeature'], 'layer'> & {
-  layer: S['PropertyDealsMapFeature']['layer'] | 'suppliers';
+  layer: S['PropertyDealsMapFeature']['layer'] | 'suppliers' | 'company';
   kinds?: string[];
   register_ref?: string | null;
   email?: string | null;
   phone?: string | null;
   website?: string | null;
   rating?: number | null;
+  // Companies House (NebulaDB) finder results — the 'company' layer.
+  company_number?: string | null;
+  company_status?: string | null;
+  address_snippet?: string | null;
 };
+
+/** A Companies House result from the NebulaDB index (GET /finder/companies). */
+export interface FinderCompany {
+  company_number: string | null;
+  title: string;
+  company_status: string | null;
+  address_snippet: string | null;
+  postcode: string | null;
+  lat: number | null;
+  lng: number | null;
+}
 export type PropertyCard = S['PropertyDealsPropertyCard'];
 export type Digest = S['PropertyDealsDigest'];
 export type TimelineItem = S['PropertyDealsTimelineItem'];
@@ -484,6 +499,10 @@ export const pdService = {
   updateProperty: (id: string, body: Record<string, unknown>) => send<Property>('put', `/properties/${id}`, body),
   enrich: (id: string) => send<unknown>('post', `/properties/${id}/enrich`),
   map: (params: Record<string, unknown>) => get<MapResult>('/map', params),
+  // Companies House base for the finder (NebulaDB index): keyword search + create a lead.
+  companies: (q: string) => get<{ companies: FinderCompany[]; total: number; mapped: number }>('/finder/companies', { q }),
+  createCompanyLead: (body: { company_number?: string | null; title: string; address_snippet?: string | null }) =>
+    send<{ uuid: string }>('post', '/finder/companies/lead', body),
   card: (id: string) => get<PropertyCard>(`/properties/${id}/card`),
   propertyMatches: (id: string) => get<MatchWithBreakdown[]>(`/properties/${id}/matches`),
   buyerMatches: (id: string) => get<MatchWithBreakdown[]>(`/buyer-profiles/${id}/matches`),
