@@ -276,7 +276,7 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local source = SOURCES[body.source] and body.source or (chat_session_id and "chat" or "cart")
     if source == "admin" then source = "cart" end
 
-    -- VIP price lock: a signed-in, active member's own quote holds its prices for lock_days (90/120)
+    -- Trade price lock: a signed-in, active member's own quote holds its prices for lock_days (60/120)
     -- instead of 30. Checkout from a quote already charges the quote's snapshot prices.
     local member = ngx.ctx and ngx.ctx.shop_member
     local locked = member ~= nil and member.active == true and U.nz(customer.email)

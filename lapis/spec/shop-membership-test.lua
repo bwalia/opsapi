@@ -51,12 +51,14 @@ local cap0 = M.settings({ founding_cap = 0 })
 check("cap: cap 0 means everyone pays standard", M.tier_for(cap0, 0) == "standard")
 
 -- price lock --------------------------------------------------------------------------
-check("lock: members' quotes hold for 90 days", M.quote_valid_days(s, true) == 90)
+check("lock: members' quotes hold for 60 days", M.quote_valid_days(s, true) == 60)
 check("lock: everyone else 30 days", M.quote_valid_days(s, false) == 30)
 check("lock: 120 allowed", M.quote_valid_days(M.settings({ lock_days = 120 }), true) == 120)
-check("lock: other values fall back to 90", M.quote_valid_days(M.settings({ lock_days = 45 }), true) == 90)
+check("lock: other values fall back to 60", M.quote_valid_days(M.settings({ lock_days = 45 }), true) == 60)
+check("lock: legacy 90 falls back to 60", M.quote_valid_days(M.settings({ lock_days = 90 }), true) == 60)
 
 -- settings validation ------------------------------------------------------------------------
+check("settings: lock_days 60 accepted", M.validate_update({ lock_days = 60 }).lock_days == 60)
 check("settings: lock_days 120 accepted", M.validate_update({ lock_days = 120 }).lock_days == 120)
 local _, e1 = M.validate_update({ lock_days = 100 })
 check("settings: lock_days 100 rejected", e1 ~= nil)
