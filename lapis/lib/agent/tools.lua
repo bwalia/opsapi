@@ -1311,6 +1311,237 @@ register({
     end,
 })
 
+-- ========================= marketing cloud =========================
+-- Plugin modules live under /app/projects/opsapi-marketing. Path is bootstrapped
+-- lazily so core boots even when the plugin is not mounted.
+
+local function mkt_mod(name)
+    local root = (os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects") .. "/opsapi-marketing"
+    if not package.path:find(root .. "/?.lua", 1, true) then
+        package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
+    end
+    local ok, mod = pcall(require, name)
+    if not ok then return nil, "Marketing Cloud is not available in this deployment." end
+    return mod
+end
+
+local function mkt_plugin_on(ns)
+    local ok, pw = pcall(require, "helper.plugin-workspaces")
+    if not ok or not pw.isEnabled("opsapi_marketing", ns) then
+        return nil, "Enable the Marketing Cloud plugin for this workspace first."
+    end
+    return true
+end
+
+register({
+    name = "mkt_campaign_overview",
+    description = "Summarise Marketing Cloud campaign + delivery stats for this workspace. "
+        .. "Opens are always estimated (scanners inflate counts).",
+    perms = { { "opsapi_marketing_analytics", "read" }, { "opsapi_marketing_campaigns", "read" } },
+    parameters = {
+        type = "object",
+        properties = {
+            campaign_uuid = { type = "string", description = "Optional campaign UUID for a single campaign breakdown." },
+        },
+    },
+    handler = function(ctx, a)
+        local on, err = mkt_plugin_on(ctx.namespace_id)
+        if not on then return nil, err end
+        local Analytics, aerr = mkt_mod("opsapi_marketing.analytics")
+        if not Analytics then return nil, aerr end
+        if a.campaign_uuid and a.campaign_uuid ~= "" then
+            local Camp = mkt_mod("opsapi_marketing.campaigns")
+            if not Camp then return nil, "campaigns module unavailable" end
+            local c = Camp.find(ctx.namespace_id, a.campaign_uuid)
+            if not c then return nil, "Campaign not found." end
+            local stats = Analytics.campaign(ctx.namespace_id, c.id)
+            stats.campaign = { uuid = c.uuid, name = c.name, status = c.status, channel = c.channel }
+            stats.notes = stats.notes or {}
+            stats.notes.opens_are_estimated = true
+            return stats
+        end
+        return Analytics.overview(ctx.namespace_id)
+    end,
+})
+
+register({
+    name = "mkt_audience_preview",
+    description = "Preview how many contacts on a list are eligible to receive a marketing message "
+        .. "(after consent, suppression, quiet hours and frequency caps). Does not send.",
+    perms = { { "opsapi_marketing_campaigns", "read" }, { "opsapi_marketing_lists", "read" } },
+    parameters = {
+        type = "object",
+        properties = {
+            campaign_uuid = { type = "string", description = "Campaign UUID (uses its channel/list)." },
+            list_uuid = { type = "string", description = "Optional list UUID override." },
+        },
+        required = { "campaign_uuid" },
+    },
+    handler = function(ctx, a)
+        local on, err = mkt_plugin_on(ctx.namespace_id)
+        if not on then return nil, err end
+        local Camp, cerr = mkt_mod("opsapi_marketing.campaigns")
+        if not Camp then return nil, cerr end
+        local c = Camp.find(ctx.namespace_id, a.campaign_uuid)
+        if not c then return nil, "Campaign not found." end
+        if a.list_uuid and a.list_uuid ~= "" then
+            local list = require("lapis.db").query([[
+                SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?
+            ]], ctx.namespace_id, a.list_uuid)[1]
+            if list then c.list_id = list.id end
+        end
+        return Camp.audience_preview(ctx.namespace_id, c, { skip_quiet_hours = true })
+    end,
+})
+
+register({
+    name = "mkt_draft_campaign",
+    description = "Create a DRAFT marketing campaign (never schedules or sends). "
+        .. "Human must validate → approve → schedule. Always include an unsubscribe merge field for email.",
+    perms = { { "opsapi_marketing_campaigns", "create" } },
+    parameters = {
+        type = "object",
+        properties = {
+            name = { type = "string" },
+            channel = { type = "string", enum = { "email", "sms" } },
+            subject = { type = "string", description = "Email subject (email only)." },
+            body_html = { type = "string", description = "Email HTML body." },
+            body_text = { type = "string", description = "Plain text / SMS body." },
+            objective = { type = "string" },
+        },
+        required = { "name", "channel" },
+    },
+    handler = function(ctx, a)
+        local on, err = mkt_plugin_on(ctx.namespace_id)
+        if not on then return nil, err end
+        local Ai = mkt_mod("opsapi_marketing.ai_actions")
+        local db = require("lapis.db")
+        local channel = a.channel == "sms" and "sms" or "email"
+        local body_html = a.body_html
+        local body_text = a.body_text
+        if channel == "email" and type(body_html) == "string"
+            and not body_html:find("unsubscribe_url", 1, true)
+            and not body_html:find("Unsubscribe", 1, true) then
+            body_html = (body_html or "") .. '<p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>'
+        end
+        if channel == "sms" and type(body_text) == "string"
+            and not body_text:lower():find("stop", 1, true) then
+            body_text = body_text .. " Reply STOP to opt out."
+        end
+        local row = db.query([[
+            INSERT INTO mkt_campaigns
+                (namespace_id, name, channel, message_type, status, subject, body_html, body_text,
+                 objective, created_by)
+            VALUES (?, ?, ?, 'marketing', 'draft', ?, ?, ?, ?, ?)
+            RETURNING uuid, name, channel, status
+        ]], ctx.namespace_id, a.name, channel, a.subject, body_html, body_text,
+            a.objective, ctx.user_uuid)[1]
+        if Ai and row then
+            Ai.record(ctx.namespace_id, {
+                user_uuid = ctx.user_uuid,
+                agent = "campaign-planner",
+                action = "draft_campaign",
+                status = "executed",
+                requires_approval = false,
+                campaign_uuid = row.uuid,
+                input_summary = a.name,
+                output_summary = "draft " .. row.uuid,
+            })
+        end
+        return {
+            uuid = row.uuid,
+            name = row.name,
+            channel = row.channel,
+            status = row.status,
+            edit_link = "/dashboard/opsapi-marketing/campaigns/" .. row.uuid,
+            note = "Draft only. Validate, approve and schedule from the campaign page — nothing was sent.",
+        }
+    end,
+})
+
+register({
+    name = "mkt_classify_reply",
+    description = "Classify an inbound marketing reply with the rule-based classifier. "
+        .. "Stores the classification when store=true. NEVER sends a message.",
+    perms = { { "opsapi_marketing_conversations", "read" }, { "opsapi_marketing_conversations", "create" } },
+    parameters = {
+        type = "object",
+        properties = {
+            subject = { type = "string" },
+            body_text = { type = "string" },
+            channel = { type = "string", enum = { "email", "sms" } },
+            address = { type = "string" },
+            contact_uuid = { type = "string" },
+            store = { type = "boolean", description = "Persist the reply (default false = preview)." },
+        },
+        required = { "body_text" },
+    },
+    handler = function(ctx, a)
+        local on, err = mkt_plugin_on(ctx.namespace_id)
+        if not on then return nil, err end
+        local Replies, rerr = mkt_mod("opsapi_marketing.replies")
+        if not Replies then return nil, rerr end
+        if a.store then
+            if not ctx.has_permission("opsapi_marketing_conversations", "create")
+                and not ctx.has_permission("opsapi_marketing_conversations", "manage") then
+                return nil, "You need conversations.create to store a reply."
+            end
+            local out = Replies.ingest(ctx.namespace_id, {
+                subject = a.subject,
+                body_text = a.body_text,
+                channel = a.channel or "email",
+                address = a.address,
+                contact_uuid = a.contact_uuid,
+                classified_by = "agent",
+            })
+            out.auto_send = false
+            out.note = "Classification recorded only; no automatic outbound message."
+            return out
+        end
+        local class, conf = Replies.classify_text(a.subject, a.body_text)
+        return {
+            classification = class,
+            confidence = conf,
+            auto_send = false,
+            note = "Preview only — nothing stored or sent.",
+        }
+    end,
+})
+
+register({
+    name = "mkt_check_eligibility",
+    description = "Check whether a CRM contact may receive a marketing message on a channel. "
+        .. "Uses the same can_send gate as real sends (consent, suppression, quiet hours, caps).",
+    perms = { { "opsapi_marketing_consent", "read" }, { "opsapi_marketing_campaigns", "read" } },
+    parameters = {
+        type = "object",
+        properties = {
+            contact_uuid = { type = "string" },
+            channel = { type = "string", enum = { "email", "sms" } },
+            message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
+        },
+        required = { "contact_uuid", "channel" },
+    },
+    handler = function(ctx, a)
+        local on, err = mkt_plugin_on(ctx.namespace_id)
+        if not on then return nil, err end
+        local E, eerr = mkt_mod("opsapi_marketing.eligibility")
+        if not E then return nil, eerr end
+        local contact = require("lapis.db").query([[
+            SELECT * FROM crm_contacts WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL
+        ]], ctx.namespace_id, a.contact_uuid)[1]
+        if not contact then return nil, "Contact not found." end
+        contact.namespace_id = ctx.namespace_id
+        local gate = E.can_send(contact, {
+            namespace_id = ctx.namespace_id,
+            message_type = a.message_type or "marketing",
+            channel = a.channel,
+            skip_quiet_hours = true,
+        }, a.channel, a.message_type or "marketing")
+        return { allowed = gate.allowed and true or false, reason = gate.reason }
+    end,
+})
+
 -- ========================= public API =========================
 
 --- Ollama tool definitions (function schemas). With a scope: ask_user, the

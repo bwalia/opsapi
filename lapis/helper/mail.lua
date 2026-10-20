@@ -521,6 +521,11 @@ local function smtp_send(opts)
         send_opts.reply_to = opts.reply_to
     end
 
+    -- Extra MIME headers (e.g. List-Unsubscribe / List-Unsubscribe-Post for marketing).
+    if type(opts.headers) == "table" then
+        send_opts.headers = opts.headers
+    end
+
     if opts.html then
         send_opts.html = opts.html
     end
@@ -578,6 +583,7 @@ end
 --   cc             : string or table
 --   bcc            : string or table
 --   reply_to       : string
+--   headers        : table of extra MIME headers (e.g. List-Unsubscribe)
 --   sync           : boolean if true, send synchronously (blocks; use in timers/scripts only)
 --
 -- @return boolean true if queued (async) or sent (sync)
