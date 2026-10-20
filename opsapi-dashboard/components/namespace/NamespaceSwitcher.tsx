@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react';
 import {
   Building2,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   Crown,
   Star,
   StarOff,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNamespace } from '@/contexts/NamespaceContext';
@@ -129,6 +130,8 @@ export const NamespaceSwitcher: React.FC<NamespaceSwitcherProps> = memo(
     const [isOpen, setIsOpen] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [settingDefault, setSettingDefault] = useState<string | null>(null);
+    const [query, setQuery] = useState('');
+    const searchRef = useRef<HTMLInputElement | null>(null);
     const {
       currentNamespace,
       namespaces,
@@ -140,13 +143,32 @@ export const NamespaceSwitcher: React.FC<NamespaceSwitcherProps> = memo(
       defaultNamespaceInfo,
     } = useNamespace();
 
+    // Filter by name or slug — the main reason to search when there are many workspaces.
+    const filtered = useMemo(() => {
+      const q = query.trim().toLowerCase();
+      if (!q) return namespaces;
+      return namespaces.filter(
+        (n) => (n.name || '').toLowerCase().includes(q) || (n.slug || '').toLowerCase().includes(q)
+      );
+    }, [namespaces, query]);
+    const showSearch = namespaces.length > 6;
+
     const handleToggle = useCallback(() => {
       setIsOpen((prev) => !prev);
     }, []);
 
     const handleClose = useCallback(() => {
       setIsOpen(false);
+      setQuery('');
     }, []);
+
+    // Focus the search as soon as the dropdown opens, so you can just start typing.
+    useEffect(() => {
+      if (isOpen && showSearch) {
+        const t = setTimeout(() => searchRef.current?.focus(), 40);
+        return () => clearTimeout(t);
+      }
+    }, [isOpen, showSearch]);
 
     const handleSwitch = useCallback(
       async (namespaceId: string) => {
@@ -274,6 +296,24 @@ export const NamespaceSwitcher: React.FC<NamespaceSwitcherProps> = memo(
                   )}
                 </div>
 
+                {/* Search — only when there are enough workspaces to bother */}
+                {showSearch && (
+                  <div className="px-2 pb-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" />
+                      <input
+                        ref={searchRef}
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search workspaces…"
+                        aria-label="Search workspaces"
+                        className="w-full rounded-lg border border-secondary-200 bg-secondary-50 pl-8 pr-2.5 py-2 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-primary-500 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Namespace List */}
                 <div className="max-h-64 overflow-y-auto px-2">
                   {namespacesLoading ? (
@@ -284,8 +324,12 @@ export const NamespaceSwitcher: React.FC<NamespaceSwitcherProps> = memo(
                     <p className="text-sm text-secondary-500 text-center py-4">
                       No namespaces available
                     </p>
+                  ) : filtered.length === 0 ? (
+                    <p className="text-sm text-secondary-500 text-center py-4">
+                      No workspaces match &ldquo;{query}&rdquo;.
+                    </p>
                   ) : (
-                    namespaces.map((namespace) => (
+                    filtered.map((namespace) => (
                       <div key={namespace.uuid} className="relative">
                         {settingDefault === namespace.uuid && (
                           <div className="absolute inset-0 bg-white/50 flex items-center justify-center rounded-lg z-10">
