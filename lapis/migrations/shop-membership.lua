@@ -31,7 +31,9 @@
     refund_clawback_minor), 48-hour join credits (shop_credits.source 'join_credit', one per order) and
     refund-the-gap claims (shop_membership_gap_claims, one per membership year).
 
-    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26, zzs27 and zzs28. Idempotent.
+    Plus (zzs29): Trade price lock default shortened from 90 → 60 days (allowed values 60 or 120).
+
+    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26, zzs27, zzs28 and zzs29. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -48,7 +50,7 @@ return {
                 vat_rate numeric(5,4) NOT NULL DEFAULT 0.20,
                 founding_cap integer NOT NULL DEFAULT 100 CHECK (founding_cap >= 0),
                 uplift_pct numeric(6,2) NOT NULL DEFAULT 33,
-                lock_days integer NOT NULL DEFAULT 90 CHECK (lock_days IN (90, 120)),
+                lock_days integer NOT NULL DEFAULT 60 CHECK (lock_days IN (60, 120)),
                 refund_threshold_minor bigint NOT NULL DEFAULT 10000000,
                 credit_expiry_days integer NOT NULL DEFAULT 365,
                 early_access_hours integer NOT NULL DEFAULT 24,
@@ -242,5 +244,14 @@ return {
                 UNIQUE (membership_id, year_start)
             )
         ]])
+    end,
+    -- [8] Trade price lock: 90 → 60 days (default + allowed values) -----------------------------
+    [8] = function()
+        -- Drop the old CHECK (name is auto-generated from the column).
+        db.query([[ALTER TABLE shop_membership_settings DROP CONSTRAINT IF EXISTS shop_membership_settings_lock_days_check]])
+        db.query([[UPDATE shop_membership_settings SET lock_days = 60 WHERE lock_days = 90]])
+        db.query([[ALTER TABLE shop_membership_settings ALTER COLUMN lock_days SET DEFAULT 60]])
+        db.query([[ALTER TABLE shop_membership_settings ADD CONSTRAINT shop_membership_settings_lock_days_check
+                   CHECK (lock_days IN (60, 120))]])
     end,
 }

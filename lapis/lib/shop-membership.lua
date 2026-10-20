@@ -34,7 +34,7 @@ M.DEFAULTS = {
     vat_rate = 0.20,
     founding_cap = 100,                 -- first N members keep the launch price
     uplift_pct = 33,                    -- standard price = launch × (1 + 33%)
-    lock_days = 90,                     -- member quotes hold their price this long (90 or 120)
+    lock_days = 60,                     -- member quotes hold their price this long (60 or 120)
     refund_threshold_minor = 10000000,  -- order subtotal ex VAT ≥ £100,000 refunds fees as credit
     credit_expiry_days = 365,
     early_access_hours = 24,
@@ -55,7 +55,7 @@ M.DEFAULTS = {
 
 M.MAX_DISCOUNT_PCT = 50
 
-M.LOCK_DAYS_ALLOWED = { [90] = true, [120] = true }
+M.LOCK_DAYS_ALLOWED = { [60] = true, [120] = true }
 M.INTERVALS = { month = true, year = true }
 
 local function round(x) return math.floor(x + 0.5) end
@@ -128,7 +128,7 @@ function M.validate_update(body)
     end
     if body.lock_days ~= nil then
         local n = tonumber(body.lock_days)
-        if not n or not M.LOCK_DAYS_ALLOWED[n] then return nil, "lock_days must be 90 or 120" end
+        if not n or not M.LOCK_DAYS_ALLOWED[n] then return nil, "lock_days must be 60 or 120" end
         out.lock_days = n
     end
     if body.uplift_pct ~= nil then
