@@ -248,6 +248,37 @@ function ShopStripeQueries.reconcile(ns_id, opts)
         end
     end
 
+    -- Memberships whose Checkout finished but whose webhook never arrived (joined on /trade, or with a
+    -- basket order). A spot can be marked abandoned by a later reservation while its session was still
+    -- payable, so recent abandoned ones are checked too; only a paid session activates anything.
+    summary.memberships_activated = 0
+    if stripe then
+        -- Sessions live 31 minutes, so anything older than 2 hours can no longer turn paid.
+        local mwhere = [[m.status IN ('pending', 'abandoned') AND m.stripe_session_id IS NOT NULL
+                         AND m.created_at > NOW() - interval '2 hours']]
+        local mvals = {}
+        if ns_id then
+            mwhere = mwhere .. " AND m.namespace_id = ?"
+            mvals[#mvals + 1] = ns_id
+        end
+        local rows = db.query("SELECT m.uuid, m.stripe_session_id FROM shop_memberships m WHERE " .. mwhere
+            .. " ORDER BY m.created_at LIMIT 100", unpack(mvals))
+        for _, r in ipairs(rows) do
+            local s = stripe:retrieve_checkout_session(r.stripe_session_id)
+            if s and (s.payment_status == "paid" or s.payment_status == "no_payment_required") then
+                local ok, err = pcall(U.tx, function()
+                    local m = Membership.onSessionCompleted(s)
+                    if m and m.status == "active" then summary.memberships_activated = summary.memberships_activated + 1 end
+                    return true
+                end)
+                if not ok then
+                    summary.errors = summary.errors + 1
+                    ngx.log(ngx.ERR, "[shop-reconcile] membership ", r.uuid, ": ", tostring(err))
+                end
+            end
+        end
+    end
+
     local rel = Stock.releaseStale(ns_id)
     summary.released = rel and rel.affected_rows or 0
     return summary
