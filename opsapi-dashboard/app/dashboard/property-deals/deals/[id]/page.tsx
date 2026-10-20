@@ -146,7 +146,7 @@ function Deal() {
         )}
       </Card>
 
-      <DealResearch dealId={id} dealType={d.deal_type} />
+      <DealResearch dealId={id} dealType={d.deal_type} onPropertyAdded={ov.refresh} />
 
       <Tabs<TabKey>
         value={tab}

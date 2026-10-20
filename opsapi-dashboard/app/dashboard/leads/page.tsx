@@ -121,6 +121,12 @@ function LeadsPageContent() {
   const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
   const [detailLead, setDetailLead] = useState<CrmLead | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  // Deep-link: /dashboard/leads?open=<uuid> opens that lead's drawer (e.g. after creating a lead
+  // from the deal finder). Read from the URL directly to avoid needing a Suspense boundary.
+  const [openUuid] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('open');
+  });
 
   const [deleteTarget, setDeleteTarget] = useState<CrmLead | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -202,6 +208,19 @@ function LeadsPageContent() {
   const openDetail = useCallback((lead: CrmLead) => {
     setDetailLead(lead);
     setIsDetailOpen(true);
+  }, []);
+
+  // Open the deep-linked lead once on mount, fetched by uuid so it works regardless of the
+  // current page, filters or sort (and quietly falls back to the list if it's gone or unreadable).
+  useEffect(() => {
+    if (!openUuid) return;
+    let alive = true;
+    crmService
+      .getLead(openUuid)
+      .then((lead) => { if (alive && lead) openDetail(lead); })
+      .catch(() => { /* deleted or no access — just show the list */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Quick triage: flip new ⇄ contacted from the row. Updates the header stats.
