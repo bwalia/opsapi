@@ -43,7 +43,7 @@ import type { KanbanNotification, NotificationType } from "@/types";
 // Icon Map
 // ============================================
 
-const NOTIFICATION_ICONS: Record<
+export const NOTIFICATION_ICONS: Record<
   NotificationType,
   React.ComponentType<{ className?: string }>
 > = {
