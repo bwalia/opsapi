@@ -62,10 +62,13 @@ type Props = {
   showSearchPin?: boolean;
   /** The currently-selected feature's uuid, to emphasise its pin. */
   selectedUuid?: string;
+  /** Initial zoom (default 10). Higher when arriving focused on one deal via "Show on map". */
+  zoom?: number;
 };
 
 function GoogleMapView({
-  apiKey, center, radiusMiles, features, onPick, onSelect, fitToFeatures = false, showSearchPin = true, selectedUuid,
+  apiKey, center, radiusMiles, features, onPick, onSelect,
+  fitToFeatures = false, showSearchPin = true, selectedUuid, zoom = 10,
 }: Props & { apiKey: string }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: MAP_ID,
@@ -121,7 +124,7 @@ function GoogleMapView({
     <GoogleMap
       mapContainerClassName="h-[60vh] min-h-[420px] w-full rounded-xl"
       center={center}
-      zoom={10}
+      zoom={zoom}
       options={mapOptions}
       onLoad={onLoad}
       onUnmount={onUnmount}

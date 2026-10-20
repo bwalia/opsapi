@@ -22,6 +22,7 @@ import {
 import { BASE, ContactLinks, ErrorNote, ExtLink, Spinner, dateText, kindText, label } from './ui';
 import { usePdData, usePdMe } from './usePd';
 import AreaFacts from './AreaFacts';
+import AddProperty from './AddProperty';
 
 const STEP_NAME: Record<string, string> = {
   pin: 'Pin the home on the map',
@@ -49,7 +50,9 @@ const QUOTE_STATUS: Record<string, { text: string; variant: 'default' | 'success
   failed: { text: "Couldn't send", variant: 'error' },
 };
 
-export default function DealResearch({ dealId, dealType }: { dealId: string; dealType?: string }) {
+export default function DealResearch({ dealId, dealType, onPropertyAdded }: {
+  dealId: string; dealType?: string; onPropertyAdded?: () => void;
+}) {
   const { can } = usePdMe();
   const [open, setOpen] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -92,8 +95,11 @@ export default function DealResearch({ dealId, dealType }: { dealId: string; dea
           <p className="mt-0.5 text-sm text-secondary-500" aria-live="polite">{r.data && <RunStatus run={run} />}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {!onMap && can('properties', 'create') && (
+            <AddProperty dealId={dealId} onAdded={() => { refresh(); onPropertyAdded?.(); }} />
+          )}
           {onMap && (
-            <Link className={buttonClass('outline', 'sm')} href={`${BASE}/map?lat=${lat}&lng=${lng}&layers=deals,suppliers`}>
+            <Link className={buttonClass('outline', 'sm')} href={`${BASE}/map?lat=${lat}&lng=${lng}&layers=deals,suppliers&focus=1`}>
               <MapPin className="h-4 w-4" aria-hidden /> Show on map
             </Link>
           )}

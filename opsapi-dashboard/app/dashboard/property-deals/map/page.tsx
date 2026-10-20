@@ -6,9 +6,10 @@
  * breakdown), saved searches for the deal scout and its alerts. Deep link: ?lat=&lng=&layers=deals,suppliers
  * (the deal page's "Show on map").
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { MapPin, Save, Bell, Play, Trash2, Search, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -31,26 +32,38 @@ const LAYERS = [
 export default function MapPage() {
   return (
     <PdPage module="properties">
-      <Finder />
+      <Suspense fallback={<Spinner label="Loading the map…" />}>
+        <KeyedFinder />
+      </Suspense>
     </PdPage>
   );
 }
 
-/** The pin and layers from ?lat=&lng=&layers= (this page only renders in the browser, after /me). */
-function fromUrl(): { center?: { lat: number; lng: number }; layers?: string[] } {
-  const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+// Remount Finder whenever the query string changes, so "Show on map" (a client-side navigation with
+// new ?lat/&lng/&focus) re-reads the URL — otherwise the soft nav keeps the old centre/zoom and only
+// a full reload picks up the new deal. useSearchParams is reactive; window.location (read once in a
+// useState initializer) is not.
+function KeyedFinder() {
+  const sp = useSearchParams();
+  return <Finder key={sp.toString()} linked={parseUrl(sp)} />;
+}
+
+type Linked = { center?: { lat: number; lng: number }; layers?: string[]; focus?: string };
+
+/** The pin, layers and focus flag from ?lat=&lng=&layers=&focus=. */
+function parseUrl(q: { get(name: string): string | null }): Linked {
   const lat = Number(q.get('lat') || NaN);
   const lng = Number(q.get('lng') || NaN);
   const layers = (q.get('layers') || '').split(',').filter((k) => LAYERS.some(([l]) => l === k));
   return {
     center: Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : undefined,
     layers: layers.length ? layers : undefined,
+    focus: q.get('focus') || undefined,
   };
 }
 
-function Finder() {
+function Finder({ linked }: { linked: Linked }) {
   const { can } = usePdMe();
-  const [linked] = useState(fromUrl);
   const [center, setCenter] = useState(linked.center || { lat: 53.96, lng: -1.08 });
   // No pin in the link: start at the most recent deal that is on the map (the default is for a workspace with none).
   useEffect(() => {
@@ -64,7 +77,10 @@ function Finder() {
   }, [linked.center]);
   const [radius, setRadius] = useState(25);
   const [layers, setLayers] = useState<string[]>(linked.layers || ['properties', 'deals', 'sold_prices', 'listings']);
-  const [selected, setSelected] = useState<MapFeature | null>(null);
+  // `picked` is the user's own choice: undefined until they click a pin or close the panel. Until
+  // then, the "focus" deal from ?focus= (set by "Show on map") is selected by default — derived
+  // below so we never setState in an effect.
+  const [picked, setPicked] = useState<MapFeature | null | undefined>(undefined);
   // The map's "base": your own deals (Google Maps), or the NebulaDB Companies House index.
   const [base, setBase] = useState<'deals' | 'companies'>('deals');
   const [companyQuery, setCompanyQuery] = useState('');
@@ -87,6 +103,22 @@ function Finder() {
     [companies.data],
   );
 
+  // Arriving via "Show on map" (?focus=1): the deal we came from sits at the link's centre, and the
+  // pins carry the same lat/lng, so the nearest-to-centre pin IS that deal. Select it by default so
+  // it stands out (enlarged) and its card opens on the right — otherwise it's lost among the others.
+  const focusCenter = linked.focus ? linked.center : undefined;
+  const focusedFeature = useMemo<MapFeature | null>(() => {
+    if (!focusCenter || base !== 'deals') return null;
+    let best: MapFeature | null = null;
+    let bestD = Infinity;
+    for (const f of map.data?.features || []) {
+      const d = Math.abs(f.lat - focusCenter.lat) + Math.abs(f.lng - focusCenter.lng);
+      if (d < bestD) { bestD = d; best = f as MapFeature; }
+    }
+    return bestD < 1e-4 ? best : null; // ~10 m: the exact pin, not a different nearby one
+  }, [focusCenter, base, map.data]);
+  const selected = picked === undefined ? focusedFeature : picked;
+
   return (
     <div className="space-y-6">
       <PageHeader title="Deal finder" description="Google Map — click to drop a search pin. Deals with an address appear as pins within the radius." icon={<MapPin className="h-6 w-6" />} />
@@ -98,7 +130,7 @@ function Finder() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => { setBase(key); setSelected(null); }}
+                  onClick={() => { setBase(key); setPicked(null); }}
                   aria-pressed={base === key}
                   className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${base === key ? 'bg-primary-500 text-white' : 'text-secondary-600 hover:bg-secondary-100'}`}
                 >
@@ -123,7 +155,7 @@ function Finder() {
                 </div>
               </div>
             ) : (
-              <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); setSubmittedQ(companyQuery.trim()); setSelected(null); }}>
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); setSubmittedQ(companyQuery.trim()); setPicked(null); }}>
                 <Input placeholder="Company name or number…" value={companyQuery} onChange={(e) => setCompanyQuery(e.target.value)} aria-label="Company search" className="min-w-[14rem] flex-1" />
                 <Button type="submit" leftIcon={<Search className="h-4 w-4" />} disabled={!companyQuery.trim() || companies.loading}>Search</Button>
                 {companies.data && submittedQ ? (
@@ -137,11 +169,12 @@ function Finder() {
             center={center}
             radiusMiles={radius}
             features={base === 'deals' ? (map.data?.features || []) : companyFeatures}
-            onPick={(lat, lng) => { setCenter({ lat, lng }); setSelected(null); }}
-            onSelect={setSelected}
+            onPick={(lat, lng) => { setCenter({ lat, lng }); setPicked(null); }}
+            onSelect={setPicked}
             showSearchPin={base === 'deals'}
             fitToFeatures={base === 'companies'}
             selectedUuid={selected?.uuid}
+            zoom={base === 'deals' && linked.focus ? 15 : 10}
           />
           {base === 'deals' && map.data?.truncated && <p className="text-xs text-secondary-500">Showing the nearest 2,000. Zoom in with a smaller radius for the rest.</p>}
           {base === 'companies' && submittedQ && !companies.loading && companyFeatures.length === 0 && (
@@ -149,7 +182,7 @@ function Finder() {
           )}
         </div>
         <div className="space-y-6">
-          {selected ? <Selected f={selected} canSend={can('buyers', 'update')} onClose={() => setSelected(null)} /> : (
+          {selected ? <Selected f={selected} canSend={can('buyers', 'update')} onClose={() => setPicked(null)} /> : (
             <Card><p className="text-sm text-secondary-500">{base === 'companies' ? 'Search Companies House, then click a company pin to see it and create a lead.' : 'Click a dot for its details. Your properties show a card with comparables and the best matching buyers.'}</p></Card>
           )}
           {base === 'deals' && <Searches center={center} radius={radius} layers={layers} onOpen={(lat, lng, r) => { setCenter({ lat, lng }); setRadius(r); }} />}
@@ -243,7 +276,8 @@ function CompanyPanel({ f }: { f: MapFeature }) {
         try {
           const r = (await pdService.createCompanyLead({ company_number: f.company_number, title: f.title ?? 'Company', address_snippet: f.address_snippet })).data;
           toast.success('Lead created');
-          window.location.assign(`${BASE}/leads/${r.uuid}`);
+          // Leads live on the CRM leads page (no property-deals leads route); ?open deep-links the drawer.
+          window.location.assign(`/dashboard/leads?open=${r.uuid}`);
         } catch (e) { toast.error(pdErrorText(e)); setBusy(false); }
       }}>Create a lead from this company</Button>
     </div>
