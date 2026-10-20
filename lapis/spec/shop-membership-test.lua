@@ -144,13 +144,100 @@ check("fixed: £5,000 order → £500 off, VAT on £4,500, shipping kept",
     fx.discount_minor == 50000 and fx.subtotal_minor == 450000 and fx.vat_minor == 90000 and fx.total_minor == 542500
     and fx.pct == nil, fx.total_minor)
 check("fixed: same for standard tier", M.apply_trade(s, "standard", 800000, 0.2, 0).discount_minor == 50000)
-check("fixed: £4,999.99 order → nothing off", M.apply_trade(s, "founding", 499999, 0.2, 0).discount_minor == 0)
+check("fixed: £4,999.99 order → the lower tier (£250) off", M.apply_trade(s, "founding", 499999, 0.2, 0).discount_minor == 25000)
+check("fixed: £2,999.99 order → nothing off", M.apply_trade(s, "founding", 299999, 0.2, 0).discount_minor == 0)
+local onetier = M.settings({ discount_tier2_minor = 0 })
+check("fixed: tier 2 = 0 → £4,999.99 order gets nothing", M.apply_trade(onetier, "founding", 499999, 0.2, 0).discount_minor == 0)
 local pctmode = M.settings({ discount_fixed_minor = 0 })
 local pd = M.apply_trade(pctmode, "founding", 1000000, 0.2, 0)
 check("fixed: 0 falls back to the tier %", not M.fixed_discount(pctmode) and pd.discount_minor == 50000 and pd.pct == 5)
 check("fixed: admin update accepts amounts",
     M.validate_update({ discount_fixed_minor = 60000, discount_min_order_minor = 600000 }).discount_fixed_minor == 60000)
 check("fixed: admin update rejects negative", M.validate_update({ discount_fixed_minor = -1 }) == nil)
+
+-- tiers + yearly cap -----------------------------------------------------------------------------
+check("tiers: defaults £500 at £5,000 then £250 at £3,000, cap £1,500", s.discount_tier2_minor == 25000
+    and s.discount_tier2_min_order_minor == 300000 and s.discount_cap_minor == 150000)
+local tl = M.tiers(s)
+check("tiers: highest first", #tl == 2 and tl[1].min_order_minor == 500000 and tl[1].amount_minor == 50000
+    and tl[2].min_order_minor == 300000 and tl[2].amount_minor == 25000)
+check("tiers: none in % mode", #M.tiers(pctmode) == 0)
+check("tiers: tier 2 ignored when not below the top tier", #M.tiers(M.settings({ discount_tier2_min_order_minor = 600000 })) == 1)
+check("tier_amount: boundaries", M.tier_amount(s, 500000) == 50000 and M.tier_amount(s, 300000) == 25000
+    and M.tier_amount(s, 299999) == 0 and M.tier_amount(s, 2000000) == 50000)
+check("cap: remaining = cap − used", M.cap_remaining(s, 50000) == 100000 and M.cap_remaining(s, 200000) == 0)
+check("cap: 0 means no cap (nil)", M.cap_remaining(M.settings({ discount_cap_minor = 0 }), 999999) == nil)
+check("discount_for: full tier when cap allows", M.discount_for(s, "founding", 600000, 150000) == 50000)
+check("discount_for: limited by what is left of the cap", M.discount_for(s, "founding", 600000, 20000) == 20000)
+check("discount_for: cap used up → nothing", M.discount_for(s, "founding", 600000, 0) == 0)
+check("discount_for: no cap → full tier", M.discount_for(s, "founding", 350000, nil) == 25000)
+check("discount_for: % mode capped too", M.discount_for(pctmode, "founding", 1000000, 30000) == 30000)
+local capped = M.apply_trade(s, "standard", 600000, 0.2, 0, 10000)
+check("apply_trade: remaining cap applied, VAT on the rest", capped.discount_minor == 10000 and capped.subtotal_minor == 590000
+    and capped.vat_minor == 118000)
+check("validate: tier and cap fields accepted", M.validate_update({ discount_tier2_minor = 20000,
+    discount_tier2_min_order_minor = 250000, discount_cap_minor = 0 }).discount_cap_minor == 0)
+check("validate: negative cap rejected", M.validate_update({ discount_cap_minor = -1 }) == nil)
+check("validate_tiers: tier 2 min must be below the top min",
+    M.validate_tiers(M.settings({ discount_tier2_min_order_minor = 500000 })) == nil)
+check("validate_tiers: tier 2 amount must not beat the top tier", M.validate_tiers(M.settings({ discount_tier2_minor = 60000 })) == nil)
+check("validate_tiers: defaults fine", M.validate_tiers(s) == true)
+
+-- clawback on returns ----------------------------------------------------------------------------
+check("clawback: £6,000 order (£500 off), £500 returned → still ≥ £5,000, nothing back",
+    M.clawback(s, 600000, 50000, 50000, 0) == 0)
+check("clawback: £6,000 order, £2,000 returned → £4,000 earns £250, £250 back", M.clawback(s, 600000, 50000, 200000, 0) == 25000)
+check("clawback: £6,000 order, £3,500 returned → below £3,000, all £500 back", M.clawback(s, 600000, 50000, 350000, 0) == 50000)
+check("clawback: second return counts only what wasn't taken before", M.clawback(s, 600000, 50000, 350000, 25000) == 25000)
+check("clawback: full return → whole discount", M.clawback(s, 600000, 50000, 600000, 0) == 50000)
+check("clawback: never more than the order got (capped discount)", M.clawback(s, 600000, 10000, 200000, 0) == 0
+    and M.clawback(s, 600000, 10000, 600000, 0) == 10000)
+check("clawback: no discount → nothing", M.clawback(s, 600000, 0, 600000, 0) == 0)
+check("clawback: % mode keeps the share of what is left", M.clawback(pctmode, 1000000, 50000, 400000, 0) == 20000)
+
+-- refund split -------------------------------------------------------------------------------------
+-- £6,000 basket order with £500 off: subtotal £5,500, VAT £1,100, shipping £25 → £6,625 paid.
+local ord = { subtotal_minor = 550000, member_discount_minor = 50000, credit_minor = 0, total_minor = 662500,
+              refunded_minor = 0, returned_net_minor = 0, refund_clawback_minor = 0 }
+local r1 = M.refund_split(s, ord, 200000, false, 0.2)
+check("refund: £2,000 returned → £2,400 less £250 + VAT clawback = £2,100",
+    r1 and r1.clawback_minor == 25000 and r1.clawback_gross_minor == 30000 and r1.refund_minor == 210000, r1 and r1.refund_minor)
+local r0 = M.refund_split(s, ord, 50000, false, 0.2)
+check("refund: small return keeps the tier → full £600 back, no clawback", r0.clawback_minor == 0 and r0.refund_minor == 60000)
+local rf = M.refund_split(s, ord, nil, true, 0.2)
+check("refund: full → everything paid back, whole discount reported as clawback",
+    rf.refund_minor == 662500 and rf.clawback_minor == 50000 and rf.returned_net_minor == 600000)
+local ord2 = { subtotal_minor = 550000, member_discount_minor = 50000, credit_minor = 0, total_minor = 662500,
+               refunded_minor = 210000, returned_net_minor = 200000, refund_clawback_minor = 25000 }
+local r2 = M.refund_split(s, ord2, 150000, false, 0.2)
+check("refund: second return below £3,000 claws back the other £250",
+    r2.clawback_minor == 25000 and r2.refund_minor == 180000 - 30000, r2.refund_minor)
+local rf2 = M.refund_split(s, ord2, nil, true, 0.2)
+check("refund: full after a partial refunds only what is left", rf2.refund_minor == 452500 and rf2.clawback_minor == 25000)
+check("refund: more than the goods left rejected", M.refund_split(s, ord2, 500000, false, 0.2) == nil)
+check("refund: amount required unless full", M.refund_split(s, ord, nil, false, 0.2) == nil
+    and M.refund_split(s, ord, 10.5, false, 0.2) == nil)
+
+-- membership year ----------------------------------------------------------------------------------
+local J = 1792454400 -- 2026-10-20T00:00:00Z
+local ys, ye, yi = M.year_bounds(J, J + 86400 * 10)
+check("year: first year runs joined → first anniversary", ys == J and ye == 1823990400 and yi == 0, ye)
+ys, ye, yi = M.year_bounds(J, 1823990400)
+check("year: anniversary starts year 2", ys == 1823990400 and yi == 1 and ye == 1855612800, ye)
+ys = M.year_bounds(J, 1823990399)
+check("year: one second before the anniversary is still year 1", ys == J)
+local leap = 1709164800 -- 2024-02-29T00:00:00Z
+check("year: 29 Feb joiner renews on 28 Feb", M.add_years(leap, 1) == 1740700800)
+check("year: back to 29 Feb in a leap year", M.add_years(leap, 4) == 1835395200)
+check("year: keeps the time of day", M.add_years(J + 3661, 1) == 1823990400 + 3661)
+
+-- year fees + refund-the-gap ------------------------------------------------------------------------
+check("fees: annual year 0", M.year_fees_net("year", 75000, 75000, 0) == 75000)
+check("fees: annual year 1 after renewal", M.year_fees_net("year", 75000, 150000, 1) == 75000)
+check("fees: annual year 1 before renewal paid", M.year_fees_net("year", 75000, 75000, 1) == 0)
+check("fees: monthly, 3 months into year 0", M.year_fees_net("month", 7500, 22500, 0) == 22500)
+check("gap: fee − discounts − credits", M.gap(75000, 25000, 10000) == 40000)
+check("gap: never negative", M.gap(75000, 50000, 50000) == 0)
 
 -- email ----------------------------------------------------------------------------------------
 check("email: normalised", M.email(" VIP@Lab.ac.uk ") == "vip@lab.ac.uk")

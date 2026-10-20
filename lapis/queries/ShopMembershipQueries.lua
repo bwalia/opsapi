@@ -10,7 +10,9 @@
       Stripe events           session completed/expired, invoice.paid, subscription updated/deleted
                               (called from ShopStripeQueries inside its one-transaction ledger)
       sign-in                 emailed one-time link → 30-day session (sha256 hashes only)
-      credits                 reserve at checkout, use when paid, release when not; VIP fee refund
+      credits                 reserve at checkout, use when paid, release when not; VIP fee refund;
+                              48-hour join credit on first activation
+      membership year         discount used against the yearly cap, year stats, refund-the-gap claims
       early access, waitlist
 
     Memberships are mirrored into billing_subscriptions (customer_id → customers)
@@ -67,6 +69,10 @@ end
 function Q.updateSettings(ns_id, body)
     local fields, err = R.validate_update(body)
     if not fields then return nil, U.err(400, "VALIDATION_ERROR", err) end
+    local merged = Q.settings(ns_id)
+    for k, v in pairs(fields) do merged[k] = v end
+    local tiers_ok, terr = R.validate_tiers(merged)
+    if not tiers_ok then return nil, U.err(400, "VALIDATION_ERROR", terr) end
     db.query("INSERT INTO shop_membership_settings (namespace_id) VALUES (?) ON CONFLICT (namespace_id) DO NOTHING", ns_id)
     if next(fields) then
         fields.updated_at = db.raw("NOW()")
@@ -112,8 +118,11 @@ function Q.offer(ns_id)
         -- Trade discount on catalogue (basket) orders: founding_pct for the first founding.cap members.
         -- fixed_minor > 0: Trade members get that much off (ex VAT) basket orders of min_order_minor or more,
         -- for every tier, instead of the percentages.
+        -- tiers: the fixed £ tiers, highest first ([] in % mode); cap_minor_per_year: most Trade discount
+        -- (order discounts + join credits) one membership year can take, 0 = no cap.
         trade_discount = { founding_pct = s.founding_discount_pct, standard_pct = s.standard_discount_pct,
-                           fixed_minor = s.discount_fixed_minor, min_order_minor = s.discount_min_order_minor },
+                           fixed_minor = s.discount_fixed_minor, min_order_minor = s.discount_min_order_minor,
+                           tiers = U.arr(R.tiers(s)), cap_minor_per_year = s.discount_cap_minor },
         discount_pct = R.discount_pct(s, tier),
         uplift_pct = s.uplift_pct,
         lock_days = s.lock_days,
@@ -377,6 +386,43 @@ local function record_lead(m, note)
     end)
 end
 
+--- 48-hour join credit (first activation only): each basket order this email paid in the last 48 hours
+-- without a Trade discount earns its tier amount as credit, within the yearly cap. One per order (unique index).
+local function issue_join_credits(m)
+    local s = Q.settings(m.namespace_id)
+    local orders = db.query([[
+        SELECT o.id, o.order_number, o.subtotal_minor, o.credit_minor FROM shop_orders o
+         WHERE o.namespace_id = ? AND lower(o.email) = lower(?) AND o.cart_id IS NOT NULL AND o.quote_id IS NULL
+           AND o.status IN ('paid', 'processing', 'shipped', 'delivered') AND o.member_discount_minor = 0
+           AND o.paid_at >= NOW() - make_interval(hours => ?)
+           AND NOT EXISTS (SELECT 1 FROM shop_credits c WHERE c.earned_order_id = o.id AND c.source = 'join_credit')
+         ORDER BY o.paid_at
+    ]], m.namespace_id, m.email, R.JOIN_CREDIT_HOURS)
+    if #orders == 0 then return end
+    local remaining = Q.capRemaining(m.namespace_id, m, s)
+    for _, o in ipairs(orders) do
+        -- Credit already used on the order doesn't stop it reaching a tier.
+        local value = (tonumber(o.subtotal_minor) or 0) + (tonumber(o.credit_minor) or 0)
+        local amount = R.discount_for(s, m.tier, value, remaining)
+        if amount > 0 then
+            local row = db.query([[
+                INSERT INTO shop_credits (uuid, namespace_id, email, amount_minor, min_order_minor, source, reason, status,
+                                          earned_order_id, membership_id, expires_at, created_by)
+                VALUES (?, ?, ?, ?, 0, 'join_credit', ?, 'available', ?, ?, NOW() + (? || ' days')::interval, 'system')
+                ON CONFLICT (earned_order_id) WHERE source = 'join_credit' DO NOTHING
+                RETURNING id
+            ]], Global.generateUUID(), m.namespace_id, m.email, amount,
+                "Joined within " .. R.JOIN_CREDIT_HOURS .. " hours of order " .. tostring(o.order_number),
+                o.id, m.id, tostring(s.credit_expiry_days))[1]
+            if row then
+                if remaining then remaining = remaining - amount end
+                record_lead(m, "Join credit " .. U.money(amount) .. " (ex VAT): joined Trade within "
+                    .. R.JOIN_CREDIT_HOURS .. " hours of order " .. tostring(o.order_number))
+            end
+        end
+    end
+end
+
 --- Make a membership active (first payment). Idempotent.
 local function activate(m, sub_id, customer_id)
     if m.joined_at then
@@ -393,6 +439,7 @@ local function activate(m, sub_id, customer_id)
     ]], sub_id or db.NULL, customer_id or db.NULL, m.id)
     m = reload(m.id)
     record_lead(m, "Joined VIP membership (" .. m.tier .. ", " .. m.billing_interval .. "ly)")
+    issue_join_credits(m)
     return m
 end
 
@@ -765,6 +812,112 @@ function Q.maybeIssueRefundCredit(order)
 end
 
 -- ---------------------------------------------------------------------------
+-- membership year: yearly cap, year stats, refund-the-gap
+-- ---------------------------------------------------------------------------
+
+local COUNTED_ORDER_STATUSES = "('paid', 'processing', 'shipped', 'delivered')"
+
+local function iso(unix) return unix and os.date("!%Y-%m-%dT%H:%M:%SZ", unix) or U.null end
+
+--- Trade discount given to an email between two moments (unix, end exclusive): order discounts net of any
+-- clawback on returns, all credits issued (not void), and the join credits among them.
+local function window_usage(ns_id, email, from_unix, to_unix)
+    local d = db.query([[
+        SELECT COALESCE(SUM(GREATEST(member_discount_minor - refund_clawback_minor, 0)), 0)::bigint AS n
+          FROM shop_orders WHERE namespace_id = ? AND lower(email) = lower(?) AND status IN ]]
+        .. COUNTED_ORDER_STATUSES .. [[ AND paid_at >= to_timestamp(?) AND paid_at < to_timestamp(?)
+    ]], ns_id, email, from_unix, to_unix)[1]
+    local c = db.query([[
+        SELECT COALESCE(SUM(amount_minor), 0)::bigint AS credits,
+               COALESCE(SUM(amount_minor) FILTER (WHERE source = 'join_credit'), 0)::bigint AS join_credits
+          FROM shop_credits WHERE namespace_id = ? AND lower(email) = lower(?) AND status <> 'void'
+           AND created_at >= to_timestamp(?) AND created_at < to_timestamp(?)
+    ]], ns_id, email, from_unix, to_unix)[1]
+    return tonumber(d.n) or 0, tonumber(c.credits) or 0, tonumber(c.join_credits) or 0
+end
+
+--- The membership year now, with what it has used. nil when the membership hasn't started.
+-- Year 0 counts from the reservation (created_at), so the order a member joins with is in it.
+function Q.yearView(ns_id, m, s)
+    if not m or not nz(m.joined_at) then return nil end
+    s = s or Q.settings(ns_id)
+    local t = db.query([[
+        SELECT floor(extract(epoch FROM joined_at))::bigint AS j, floor(extract(epoch FROM created_at))::bigint AS c,
+               floor(extract(epoch FROM NOW()))::bigint AS now
+          FROM shop_memberships WHERE id = ?
+    ]], m.id)[1]
+    if not t then return nil end
+    local j, now = tonumber(t.j), tonumber(t.now)
+    local ys, ye, k = R.year_bounds(j, now)
+    local from = k == 0 and math.min(tonumber(t.c) or j, j) or ys
+    local discounts, credits, join_credits = window_usage(ns_id, m.email, from, ye)
+    local used = discounts + join_credits
+    local v = {
+        joined = j, created = tonumber(t.c) or j, now = now, year_start = ys, year_end = ye, index = k,
+        discounts = discounts, credits = credits, used = used, remaining = R.cap_remaining(s, used),
+        fees = R.year_fees_net(m.billing_interval, m.net_minor, m.fees_paid_net_minor, k),
+    }
+    -- Refund-the-gap (annual plan): the year that ended at the last renewal, claimable for GAP_CLAIM_DAYS after it.
+    v.gap = { eligible = false, gap_minor = 0, window_ends_at = nil, claimed_at = nil }
+    if m.billing_interval == "year" and k >= 1 then
+        local ps = R.add_years(j, k - 1)
+        local pfrom = k == 1 and math.min(v.created, j) or ps
+        local pd, pc = window_usage(ns_id, m.email, pfrom, ys)
+        local pfees = R.year_fees_net(m.billing_interval, m.net_minor, m.fees_paid_net_minor, k - 1)
+        local window_end = ys + R.GAP_CLAIM_DAYS * 86400
+        local claim = db.query([[SELECT created_at FROM shop_membership_gap_claims WHERE membership_id = ?
+                                  AND year_start = to_timestamp(?)]], m.id, ps)[1]
+        local gap = R.gap(pfees, pd, pc)
+        v.gap = {
+            gap_minor = gap, window_ends_at = window_end, claimed_at = claim and claim.created_at or nil,
+            -- the renewal must be paid (this year's fee) and the membership live
+            eligible = gap > 0 and not claim and now < window_end and v.fees > 0 and MEMBER_STATUSES[m.status] == true,
+            prev_start = ps, fees = pfees, discounts = pd, credits = pc,
+        }
+    end
+    return v
+end
+
+--- What is left of a member's yearly cap (nil = no cap). Not yet joined → the whole cap.
+function Q.capRemaining(ns_id, m, s)
+    s = s or Q.settings(ns_id)
+    if R.cap_remaining(s, 0) == nil then return nil end
+    local v = Q.yearView(ns_id, m, s)
+    if not v then return R.cap_remaining(s, 0) end
+    return v.remaining
+end
+
+--- POST /member/gap-claim — record a refund-the-gap claim for the year that just ended; staff refund it.
+function Q.gapClaim(ns_id, member)
+    local m = member and member.membership
+    local v = m and Q.yearView(ns_id, m) or nil
+    if not v or not v.gap.eligible then
+        return nil, U.err(409, "NOT_ELIGIBLE", "There is no refund-the-gap amount to claim right now")
+    end
+    local g = v.gap
+    local row = db.query([[
+        INSERT INTO shop_membership_gap_claims (uuid, namespace_id, membership_id, email, year_start, year_end,
+                                                fees_paid_net_minor, discounts_minor, credits_minor, gap_minor)
+        VALUES (?, ?, ?, ?, to_timestamp(?), to_timestamp(?), ?, ?, ?, ?)
+        ON CONFLICT (membership_id, year_start) DO NOTHING
+        RETURNING id, created_at
+    ]], Global.generateUUID(), ns_id, m.id, m.email, g.prev_start, v.year_start, g.fees, g.discounts, g.credits,
+        g.gap_minor)[1]
+    if not row then return nil, U.err(409, "NOT_ELIGIBLE", "The gap for this year has already been claimed") end
+    local lead = require("queries.ShopLeadQueries").safeUpsert(ns_id, {
+        email = m.email, source = "shop_vip",
+        note = "Refund-the-gap claim: " .. U.money(g.gap_minor) .. " (ex VAT) to refund by hand for the membership year "
+            .. os.date("!%Y-%m-%d", g.prev_start) .. " to " .. os.date("!%Y-%m-%d", v.year_start) .. " — fee "
+            .. U.money(g.fees) .. ", discounts " .. U.money(g.discounts) .. ", credits " .. U.money(g.credits)
+            .. " (membership " .. m.uuid .. ")",
+    })
+    if lead and lead.id then
+        db.query("UPDATE shop_membership_gap_claims SET crm_lead_id = ? WHERE id = ?", lead.id, row.id)
+    end
+    return { claimed_at = row.created_at, gap_minor = g.gap_minor }
+end
+
+-- ---------------------------------------------------------------------------
 -- member area
 -- ---------------------------------------------------------------------------
 
@@ -782,6 +935,7 @@ function Q.me(ns_id, member)
     end
     local s = Q.settings(ns_id)
     local pending = deactivation_row(ns_id, member.email, "pending")
+    local y = m and Q.yearView(ns_id, m, s) or nil
     return {
         email = member.email,
         active = member.active == true,
@@ -797,6 +951,21 @@ function Q.me(ns_id, member)
             -- When > 0 this replaces discount_pct: that much off (ex VAT) orders of discount_min_order_minor or more.
             discount_fixed_minor = s.discount_fixed_minor,
             discount_min_order_minor = s.discount_min_order_minor,
+            -- Fixed tiers (highest first, [] in % mode) and the yearly cap (0 = none) on order discounts + join credits.
+            discount_tiers = U.arr(R.tiers(s)),
+            discount_cap_minor = s.discount_cap_minor,
+            year_start = iso(y and y.year_start), year_end = iso(y and y.year_end),
+            discount_used_this_year_minor = y and y.used or 0,
+            discount_remaining_minor = (function()
+                local r = y and y.remaining or R.cap_remaining(s, 0)
+                return r == nil and U.null or r
+            end)(),
+            year_stats = { discounts_minor = y and y.discounts or 0, credits_minor = y and y.credits or 0,
+                           fees_paid_net_minor = y and y.fees or 0 },
+            gap_claim = {
+                eligible = y ~= nil and y.gap.eligible == true, gap_minor = y and y.gap.gap_minor or 0,
+                window_ends_at = iso(y and y.gap.window_ends_at), claimed_at = y and y.gap.claimed_at or U.null,
+            },
         } or U.null,
         credits = U.arr(credits),
         lock_days = s.lock_days,

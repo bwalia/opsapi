@@ -12,6 +12,8 @@
       GET               /stock                 GET /stock/movements
       POST              /import
       GET               /orders                GET/PUT /orders/:uuid
+      POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
+                                               goods via Stripe less the Trade discount clawback
       GET/POST          /quotes                GET/PUT /quotes/:uuid
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
@@ -241,6 +243,13 @@ return function(app)
             end,
         }))(self)
     end)
+
+    app:post(BASE .. "/orders/:uuid/refund", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        return result(Orders.adminRefund(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
 
     -- quotes ----------------------------------------------------------------------
     app:get(BASE .. "/quotes", guard("read", function(self, ns_id)

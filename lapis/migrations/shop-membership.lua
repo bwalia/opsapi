@@ -26,7 +26,12 @@
     Plus (zzs27): fixed Trade discount — shop_membership_settings.discount_fixed_minor /
     discount_min_order_minor (£500 off orders of £5,000+ ex VAT by default).
 
-    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26 and zzs27. Idempotent.
+    Plus (zzs28): membership v2 — a lower fixed tier (discount_tier2_minor / discount_tier2_min_order_minor),
+    a yearly cap (discount_cap_minor), refunds with clawback (shop_orders.refunded_minor / returned_net_minor /
+    refund_clawback_minor), 48-hour join credits (shop_credits.source 'join_credit', one per order) and
+    refund-the-gap claims (shop_membership_gap_claims, one per membership year).
+
+    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26, zzs27 and zzs28. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -198,5 +203,44 @@ return {
                    NOT NULL DEFAULT 50000 CHECK (discount_fixed_minor >= 0)]])
         db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_min_order_minor integer
                    NOT NULL DEFAULT 500000 CHECK (discount_min_order_minor >= 0)]])
+    end,
+    -- [7] Membership v2: tiers, yearly cap, refunds with clawback, join credits, gap claims ------------
+    [7] = function()
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_tier2_minor integer
+                   NOT NULL DEFAULT 25000 CHECK (discount_tier2_minor >= 0)]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_tier2_min_order_minor integer
+                   NOT NULL DEFAULT 300000 CHECK (discount_tier2_min_order_minor >= 0)]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS discount_cap_minor integer
+                   NOT NULL DEFAULT 150000 CHECK (discount_cap_minor >= 0)]])
+        -- Refunds through the admin API: running totals so a second partial return claws back only the difference.
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS refunded_minor integer NOT NULL DEFAULT 0]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS returned_net_minor integer NOT NULL DEFAULT 0]])
+        db.query([[ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS refund_clawback_minor integer NOT NULL DEFAULT 0]])
+        -- 48-hour join credit: its own source, at most one per earning order.
+        db.query([[ALTER TABLE shop_credits DROP CONSTRAINT IF EXISTS shop_credits_source_check]])
+        db.query([[ALTER TABLE shop_credits ADD CONSTRAINT shop_credits_source_check
+                   CHECK (source IN ('vip_refund', 'loyalty', 'admin', 'join_credit'))]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS shop_credits_join_credit_uidx ON shop_credits (earned_order_id)
+                   WHERE source = 'join_credit']])
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_membership_gap_claims (
+                id serial PRIMARY KEY,
+                uuid varchar(64) NOT NULL UNIQUE,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                membership_id integer NOT NULL REFERENCES shop_memberships(id) ON DELETE CASCADE,
+                email varchar(254) NOT NULL,
+                year_start timestamptz NOT NULL,
+                year_end timestamptz NOT NULL,
+                fees_paid_net_minor integer NOT NULL,
+                discounts_minor integer NOT NULL,
+                credits_minor integer NOT NULL,
+                gap_minor integer NOT NULL CHECK (gap_minor > 0),
+                status varchar(16) NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed', 'refunded', 'rejected')),
+                crm_lead_id bigint,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                updated_at timestamptz NOT NULL DEFAULT NOW(),
+                UNIQUE (membership_id, year_start)
+            )
+        ]])
     end,
 }
