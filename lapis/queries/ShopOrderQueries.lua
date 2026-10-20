@@ -37,6 +37,7 @@ local ORDER_COLS = [[
     o.id, o.uuid, o.namespace_id, o.order_number, o.access_token, o.status, o.email, o.customer::text AS customer,
     o.shipping_address::text AS shipping_address, o.billing_address::text AS billing_address,
     o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.credit_minor, o.member_discount_minor, o.member_discount_pct, o.currency,
+    o.refunded_minor, o.returned_net_minor, o.refund_clawback_minor,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at
 ]]
@@ -71,6 +72,9 @@ function ShopOrderQueries.shape(o, opts)
         url_path = url_path(o),
     }
     if opts.admin then
+        out.refunded_minor = tonumber(o.refunded_minor) or 0
+        out.returned_net_minor = tonumber(o.returned_net_minor) or 0
+        out.refund_clawback_minor = tonumber(o.refund_clawback_minor) or 0
         out.internal_notes = o.internal_notes or U.null
         out.stripe_session_id = o.stripe_session_id or U.null
         out.stripe_payment_intent_id = o.stripe_payment_intent_id or U.null
@@ -309,7 +313,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if not s then return nil, jemail end
         join = { settings = s, m = Membership.reserve(ns_id, s, jemail, interval) }
         local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
-        local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor)
+        -- A new membership year: the whole yearly cap is available to the order they join with.
+        local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
+            R.cap_remaining(s, 0))
         if d.discount_minor > 0 then
             trade = { pct = d.pct, discount_minor = d.discount_minor }
             totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
@@ -328,8 +334,10 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local m = member.membership
         if from == "cart" and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
-            local d = R.apply_trade(Membership.settings(ns_id), m.tier, totals.subtotal_minor, vat_rate,
-                totals.shipping_minor)
+            -- Limited to what is left of this membership year's cap (order discounts + join credits so far).
+            local ms = Membership.settings(ns_id)
+            local d = R.apply_trade(ms, m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
+                Membership.capRemaining(ns_id, m, ms))
             if d.discount_minor > 0 then
                 trade = { pct = d.pct, discount_minor = d.discount_minor }
                 totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
@@ -608,6 +616,105 @@ function ShopOrderQueries.adminGet(ns_id, uuid)
          WHERE r.order_id = ? ORDER BY r.id
     ]], o.id))
     return s
+end
+
+local REFUNDABLE = { paid = true, processing = true, shipped = true, delivered = true }
+
+--- The payment intent to refund: the order's own, or (an order paid together with a Trade membership,
+-- mode=subscription) the first invoice's, looked up from the Checkout session when the webhook never linked it.
+local function payment_intent_for(stripe, o)
+    if nz(o.stripe_payment_intent_id) then return o.stripe_payment_intent_id end
+    if not nz(o.stripe_session_id) then return nil end
+    local session = stripe:retrieve_checkout_session(o.stripe_session_id)
+    if type(session) ~= "table" then return nil end
+    local pi = session.payment_intent
+    if type(pi) == "table" then pi = pi.id end
+    if nz(pi) then return pi end
+    local inv = session.invoice
+    if type(inv) == "table" then inv = inv.id end
+    if not nz(inv) then return nil end
+    local invoice = stripe:_request("GET", "/invoices/" .. inv)
+    pi = type(invoice) == "table" and invoice.payment_intent or nil
+    if type(pi) == "table" then pi = pi.id end
+    return nz(pi)
+end
+
+--- POST /orders/:uuid/refund — refund returned goods through Stripe, less the Trade discount the return
+-- takes back (lib/shop-membership.lua refund_split / clawback).
+-- body: { amount_net_minor? (goods ex VAT returned), full?, reason, dry_run? }
+-- Returns { refund_minor, clawback_minor (ex VAT), clawback_gross_minor, returned_net_minor, stripe_refund_id, … }.
+function ShopOrderQueries.adminRefund(ns_id, uuid, body, actor)
+    body = type(body) == "table" and body or {}
+    local R = require("lib.shop-membership")
+    local full, dry = body.full == true, body.dry_run == true
+    local reason = type(body.reason) == "string" and body.reason:gsub("%c", " "):match("^%s*(.-)%s*$") or ""
+    if not dry and (#reason < 3 or #reason > 500) then
+        return nil, U.err(400, "VALIDATION_ERROR", "reason is required (3–500 characters)")
+    end
+    local stripe
+    if not dry then
+        local serr
+        stripe, serr = require("lib.payment-provider").get_stripe()
+        if not stripe then
+            ngx.log(ngx.ERR, "[shop] refund: ", tostring(serr))
+            return nil, U.err(503, "PAYMENTS_DISABLED", "The payment provider is not available")
+        end
+    end
+    -- One transaction with the order row locked, so two refunds of the same order can't both use the same balance.
+    return U.tx(function()
+        local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
+            ns_id, uuid)[1]
+        if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+        if not REFUNDABLE[o.status] then
+            return nil, U.err(409, "NOT_REFUNDABLE", "This order can't be refunded (status " .. o.status .. ")")
+        end
+        local lines = U.dec(o.lines, {})
+        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local split, verr = R.refund_split(require("queries.ShopMembershipQueries").settings(ns_id), o,
+            body.amount_net_minor, full, vat_rate)
+        if not split then return nil, U.err(400, "VALIDATION_ERROR", verr) end
+        local out = {
+            order_uuid = o.uuid, order_number = o.order_number, dry_run = dry, full = full,
+            refund_minor = split.refund_minor, clawback_minor = split.clawback_minor,
+            clawback_gross_minor = split.clawback_gross_minor, returned_net_minor = split.returned_net_minor,
+            member_discount_minor = tonumber(o.member_discount_minor) or 0,
+            refunded_before_minor = tonumber(o.refunded_minor) or 0, stripe_refund_id = U.null,
+        }
+        if dry then return out end
+        if split.refund_minor <= 0 and not full then
+            return nil, U.err(409, "NOTHING_TO_REFUND", "After the discount clawback there is nothing to refund")
+        end
+        local refund_id
+        if split.refund_minor > 0 then
+            local pi = payment_intent_for(stripe, o)
+            if not pi then
+                return nil, U.err(409, "NO_PAYMENT", "No Stripe payment is linked to this order — refund it in Stripe")
+            end
+            local res, rerr = stripe:_request("POST", "/refunds", {
+                payment_intent = pi, amount = split.refund_minor, reason = "requested_by_customer",
+                metadata = { order_uuid = o.uuid, clawback_minor = tostring(split.clawback_minor),
+                             returned_net_minor = tostring(split.returned_net_minor) },
+            }, "shop-refund-" .. o.uuid .. "-" .. tostring(o.refunded_minor) .. "-" .. split.refund_minor)
+            if type(res) ~= "table" or not res.id then
+                ngx.log(ngx.ERR, "[shop] refund failed for ", o.order_number, ": ", tostring(rerr))
+                return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Stripe did not accept the refund — nothing was changed")
+            end
+            refund_id = res.id
+        end
+        local note = string.format("[%s] Refund %s: goods returned %s ex VAT, Trade discount clawback %s ex VAT%s — %s%s",
+            os.date("!%Y-%m-%d %H:%M UTC"), U.money(split.refund_minor), U.money(split.returned_net_minor),
+            U.money(split.clawback_minor), refund_id and (" (Stripe " .. refund_id .. ")") or "", reason,
+            actor and (" (by " .. actor .. ")") or "")
+        db.query([[
+            UPDATE shop_orders SET refunded_minor = refunded_minor + ?, returned_net_minor = returned_net_minor + ?,
+                   refund_clawback_minor = refund_clawback_minor + ?,
+                   status = CASE WHEN ? THEN 'refunded' ELSE status END,
+                   internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
+             WHERE id = ?
+        ]], split.refund_minor, split.returned_net_minor, split.clawback_minor, full, note, o.id)
+        out.stripe_refund_id = refund_id or U.null
+        return out
+    end)
 end
 
 function ShopOrderQueries.adminUpdate(ns_id, uuid, body)

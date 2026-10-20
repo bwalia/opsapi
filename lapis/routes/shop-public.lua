@@ -41,6 +41,8 @@
       POST   /member/cancel                      cancel at period end (X-Member-Token)
       POST   /member/deactivate                  schedule auto-close in 90 days (X-Member-Token)
       POST   /member/reactivate                  cancel a pending auto-close (X-Member-Token)
+      POST   /member/gap-claim                   claim the refund-the-gap amount after renewal (X-Member-Token;
+                                                 409 NOT_ELIGIBLE when there is nothing to claim)
       POST   /member/logout
       GET    /member/early-access                products in the members-only window (X-Member-Token)
       POST   /products/:slug/waitlist            { email } (members first)
@@ -357,6 +359,14 @@ return function(app)
         local m, bad = member_or_401()
         if not m then return bad end
         local res, err = Membership.reactivate(ns_id, m)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/member/gap-claim", public(function(_, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local res, err = Membership.gapClaim(ns_id, m)
         if not res then return U.from_err(err) end
         return U.ok(res)
     end))

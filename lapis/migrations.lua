@@ -2601,6 +2601,8 @@ local _migrations = {
     ['zzs26_shop_trade_discount'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 5),
     -- Trade discount: fixed £ off qualifying basket orders
     ['zzs27_shop_trade_fixed_discount'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 6),
+    -- Membership v2: lower tier, yearly cap, refunds with clawback, 48-hour join credits, gap claims
+    ['zzs28_shop_membership_v2'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 7),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

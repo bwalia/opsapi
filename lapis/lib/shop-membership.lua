@@ -15,6 +15,11 @@
       apply_discount trade discount against an order subtotal, VAT recomputed
       apply_trade    the Trade discount in force: fixed £ off qualifying orders, or the tier's %
       apply_credits  credits against an order subtotal, VAT recomputed
+      tiers / tier_amount / discount_for   fixed £ tiers (highest first) and the discount for a subtotal,
+                   limited to what is left of the yearly cap (cap_remaining)
+      clawback     discount taken back from a refund when a return drops the order below its tier
+      year_bounds  membership year (anniversary of joined_at) containing a moment
+      year_fees_net / gap   fees paid for a year (ex VAT) and the refund-the-gap amount
 
     Money is integer pence. Settings (per namespace, admin-editable) default to
     DEFAULTS below.
@@ -41,6 +46,11 @@ M.DEFAULTS = {
     -- that much off (ex VAT) any basket order whose subtotal ex VAT is at least discount_min_order_minor.
     discount_fixed_minor = 50000,       -- £500 ex VAT
     discount_min_order_minor = 500000,  -- on orders of £5,000 ex VAT or more
+    -- Second, lower fixed tier (0 = none): £250 off orders of £3,000–£4,999.99 ex VAT by default.
+    discount_tier2_minor = 25000,
+    discount_tier2_min_order_minor = 300000,
+    -- Most Trade discount (order discounts + join credits) one membership year can take; 0 = no cap.
+    discount_cap_minor = 150000,
 }
 
 M.MAX_DISCOUNT_PCT = 50
@@ -62,7 +72,8 @@ function M.settings(row)
     s.enabled = s.enabled == true or s.enabled == "t"
     for _, k in ipairs({ "monthly_price_minor", "yearly_months_charged", "founding_cap", "refund_threshold_minor",
                          "credit_expiry_days", "early_access_hours", "long_lead_days", "lock_days",
-                         "discount_fixed_minor", "discount_min_order_minor" }) do
+                         "discount_fixed_minor", "discount_min_order_minor", "discount_tier2_minor",
+                         "discount_tier2_min_order_minor", "discount_cap_minor" }) do
         s[k] = math.floor(tonumber(s[k]) or M.DEFAULTS[k])
     end
     s.vat_rate = tonumber(s.vat_rate) or M.DEFAULTS.vat_rate
@@ -74,6 +85,20 @@ function M.settings(row)
     end
     if not M.LOCK_DAYS_ALLOWED[s.lock_days] then s.lock_days = M.DEFAULTS.lock_days end
     return s
+end
+
+--- Cross-field check on the merged (current + update) settings: the lower tier must sit below the top one.
+-- Returns true or (nil, message).
+function M.validate_tiers(s)
+    local t2 = math.floor(tonumber(s.discount_tier2_minor) or 0)
+    if t2 <= 0 or (tonumber(s.discount_fixed_minor) or 0) <= 0 then return true end
+    if (tonumber(s.discount_tier2_min_order_minor) or 0) >= (tonumber(s.discount_min_order_minor) or 0) then
+        return nil, "discount_tier2_min_order_minor must be below discount_min_order_minor"
+    end
+    if t2 > (tonumber(s.discount_fixed_minor) or 0) then
+        return nil, "discount_tier2_minor must not be more than discount_fixed_minor"
+    end
+    return true
 end
 
 --- Validate an admin settings update. Returns (clean_fields) or (nil, message).
@@ -94,6 +119,8 @@ function M.validate_update(body)
         { "refund_threshold_minor", 0, 10000000000 }, { "credit_expiry_days", 1, 3650 },
         { "early_access_hours", 0, 720 }, { "long_lead_days", 1, 365 },
         { "discount_fixed_minor", 0, 10000000 }, { "discount_min_order_minor", 0, 1000000000 },
+        { "discount_tier2_minor", 0, 10000000 }, { "discount_tier2_min_order_minor", 0, 1000000000 },
+        { "discount_cap_minor", 0, 100000000 },
     }
     for _, c in ipairs(checks) do
         local ok, err = pos_int(c[1], c[2], c[3])
@@ -215,18 +242,181 @@ end
 
 --- The Trade discount for a member of `tier` on a basket order: the fixed amount when the order
 -- qualifies (else nothing), or the tier's %. Same shape as apply_discount, plus pct (nil when fixed).
-function M.apply_trade(s, tier, subtotal_net, vat_rate, shipping_minor)
-    if not M.fixed_discount(s) then
-        local pct = M.discount_pct(s, tier)
-        local d = M.apply_discount(subtotal_net, vat_rate, shipping_minor, pct)
-        d.pct = pct
-        return d
-    end
+-- remaining_cap: what is left of the member's yearly cap (nil = no cap); the discount never exceeds it.
+function M.apply_trade(s, tier, subtotal_net, vat_rate, shipping_minor, remaining_cap)
     subtotal_net = math.floor(tonumber(subtotal_net) or 0)
     shipping_minor = math.floor(tonumber(shipping_minor) or 0)
-    local amount = subtotal_net >= s.discount_min_order_minor and s.discount_fixed_minor or 0
-    return apply_amount(subtotal_net, vat_rate, shipping_minor, amount)
+    local d = apply_amount(subtotal_net, vat_rate, shipping_minor, M.discount_for(s, tier, subtotal_net, remaining_cap))
+    if not M.fixed_discount(s) then d.pct = M.discount_pct(s, tier) end
+    return d
 end
+
+--- Fixed tiers, highest first: { {min_order_minor, amount_minor}, … }. Empty in % mode.
+function M.tiers(s)
+    if not M.fixed_discount(s) then return {} end
+    local out = { { min_order_minor = s.discount_min_order_minor, amount_minor = s.discount_fixed_minor } }
+    local t2, t2min = tonumber(s.discount_tier2_minor) or 0, tonumber(s.discount_tier2_min_order_minor) or 0
+    if t2 > 0 and t2min < s.discount_min_order_minor then
+        out[2] = { min_order_minor = t2min, amount_minor = t2 }
+    end
+    return out
+end
+
+--- Tier amount for an order subtotal ex VAT (fixed mode): the highest tier it reaches, else 0.
+function M.tier_amount(s, subtotal_net)
+    subtotal_net = math.floor(tonumber(subtotal_net) or 0)
+    for _, t in ipairs(M.tiers(s)) do
+        if subtotal_net >= t.min_order_minor then return t.amount_minor end
+    end
+    return 0
+end
+
+--- What is left of the yearly cap after `used` (nil when there is no cap).
+function M.cap_remaining(s, used)
+    local cap = tonumber(s.discount_cap_minor) or 0
+    if cap <= 0 then return nil end
+    return math.max(0, cap - math.max(0, math.floor(tonumber(used) or 0)))
+end
+
+--- Trade discount (pence, ex VAT) for a subtotal: the tier amount (or the tier's %), limited to
+-- remaining_cap (nil = no cap) and to the subtotal itself.
+function M.discount_for(s, tier, subtotal_net, remaining_cap)
+    subtotal_net = math.max(0, math.floor(tonumber(subtotal_net) or 0))
+    local amount
+    if M.fixed_discount(s) then
+        amount = M.tier_amount(s, subtotal_net)
+    else
+        local pct = math.max(0, math.min(M.MAX_DISCOUNT_PCT, tonumber(M.discount_pct(s, tier)) or 0))
+        amount = round(subtotal_net * pct / 100)
+    end
+    if remaining_cap ~= nil then amount = math.min(amount, math.max(0, math.floor(tonumber(remaining_cap) or 0))) end
+    return math.min(amount, subtotal_net)
+end
+
+--- Returns clawback (pence, ex VAT) for a refund.
+-- original_net: the order's goods value ex VAT before any discount or credit; got: the Trade discount it was given;
+-- returned_net: goods ex VAT returned so far INCLUDING this refund; already: clawback already taken on earlier refunds.
+-- The order keeps the discount its remaining value still earns (never more than it got); the rest comes back.
+-- In % mode the % of the remaining value is kept.
+function M.clawback(s, original_net, got, returned_net, already)
+    got = math.max(0, math.floor(tonumber(got) or 0))
+    if got == 0 then return 0 end
+    original_net = math.max(0, math.floor(tonumber(original_net) or 0))
+    local remaining = math.max(0, original_net - math.max(0, math.floor(tonumber(returned_net) or 0)))
+    local keep
+    if remaining == 0 then
+        keep = 0
+    elseif M.fixed_discount(s) then
+        keep = math.min(got, M.tier_amount(s, remaining))
+    else
+        keep = math.min(got, original_net > 0 and round(got * remaining / original_net) or 0)
+    end
+    return math.max(0, got - keep - math.max(0, math.floor(tonumber(already) or 0)))
+end
+
+--- A refund on an order. o: { subtotal_minor (after discount + credit), member_discount_minor, credit_minor,
+-- total_minor, refunded_minor, returned_net_minor, refund_clawback_minor }; amount_net: goods ex VAT returned now
+-- (ignored when full). Returns { returned_net_minor, clawback_minor (ex VAT), clawback_gross_minor, refund_minor }
+-- or (nil, message). refund = returned goods + VAT − clawback incl. VAT, never more than is left to refund;
+-- a full refund returns everything still unrefunded (what the customer actually paid, shipping included).
+function M.refund_split(s, o, amount_net, full, vat_rate)
+    local function n(v) return math.max(0, math.floor(tonumber(v) or 0)) end
+    vat_rate = tonumber(vat_rate) or 0
+    local got = n(o.member_discount_minor)
+    local original = n(o.subtotal_minor) + got + n(o.credit_minor)
+    local returned_before = n(o.returned_net_minor)
+    local left_goods = math.max(0, original - returned_before)
+    local left_money = math.max(0, n(o.total_minor) - n(o.refunded_minor))
+    local now
+    if full then
+        now = left_goods
+    else
+        now = tonumber(amount_net)
+        if not now or now ~= math.floor(now) or now < 1 then
+            return nil, "amount_net_minor must be a whole number of pence, 1 or more (or send full: true)"
+        end
+        if now > left_goods then
+            return nil, "amount_net_minor is more than the goods left on this order (" .. left_goods .. ")"
+        end
+    end
+    local claw = M.clawback(s, original, got, returned_before + now, o.refund_clawback_minor)
+    local claw_gross = claw + round(claw * vat_rate)
+    local refund
+    if full then
+        refund = left_money
+    else
+        refund = math.max(0, math.min(left_money, now + round(now * vat_rate) - claw_gross))
+    end
+    return { returned_net_minor = now, clawback_minor = claw, clawback_gross_minor = claw_gross, refund_minor = refund }
+end
+
+-- Civil-date helpers (UTC, no os.time/local time zone involved).
+local function days_from_civil(y, m, d)
+    y = m <= 2 and y - 1 or y
+    local era = math.floor(y / 400)
+    local yoe = y - era * 400
+    local mp = (m + 9) % 12
+    local doy = math.floor((153 * mp + 2) / 5) + d - 1
+    local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+    return era * 146097 + doe - 719468
+end
+
+local function civil_from_days(z)
+    z = z + 719468
+    local era = math.floor(z / 146097)
+    local doe = z - era * 146097
+    local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+    local y = yoe + era * 400
+    local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+    local mp = math.floor((5 * doy + 2) / 153)
+    local d = doy - math.floor((153 * mp + 2) / 5) + 1
+    local m = mp < 10 and mp + 3 or mp - 9
+    return m <= 2 and y + 1 or y, m, d
+end
+
+local function is_leap(y) return (y % 4 == 0 and y % 100 ~= 0) or y % 400 == 0 end
+
+--- unix + n calendar years (29 Feb → 28 Feb in a non-leap year).
+function M.add_years(unix, n)
+    unix = math.floor(tonumber(unix) or 0)
+    local days = math.floor(unix / 86400)
+    local secs = unix - days * 86400
+    local y, m, d = civil_from_days(days)
+    y = y + n
+    if m == 2 and d == 29 and not is_leap(y) then d = 28 end
+    return days_from_civil(y, m, d) * 86400 + secs
+end
+
+--- Membership year containing `now`: returns start, end (unix, end exclusive) and its index (0 = first year).
+function M.year_bounds(joined_unix, now_unix)
+    joined_unix = math.floor(tonumber(joined_unix) or 0)
+    now_unix = math.floor(tonumber(now_unix) or 0)
+    if now_unix < joined_unix then return joined_unix, M.add_years(joined_unix, 1), 0 end
+    local y0 = civil_from_days(math.floor(joined_unix / 86400))
+    local y1 = civil_from_days(math.floor(now_unix / 86400))
+    local k = math.max(0, y1 - y0)
+    while k > 0 and M.add_years(joined_unix, k) > now_unix do k = k - 1 end
+    while M.add_years(joined_unix, k + 1) <= now_unix do k = k + 1 end
+    return M.add_years(joined_unix, k), M.add_years(joined_unix, k + 1), k
+end
+
+--- Fees paid (ex VAT) for membership year `index`, from the running total fees_paid_net (no per-invoice history):
+-- the fee is net_minor a year (annual) or a month (monthly); earlier years are assumed paid in full first.
+function M.year_fees_net(interval, net_minor, fees_paid_net, index)
+    net_minor = math.max(0, math.floor(tonumber(net_minor) or 0))
+    local per_year = interval == "month" and net_minor * 12 or net_minor
+    local before = per_year * math.max(0, math.floor(tonumber(index) or 0))
+    return math.max(0, math.min(per_year, math.floor(tonumber(fees_paid_net) or 0) - before))
+end
+
+--- Refund-the-gap: fee paid for the year minus the discounts and credits it gave (never negative).
+function M.gap(fees_net, discounts_minor, credits_minor)
+    return math.max(0, math.floor(tonumber(fees_net) or 0) - math.floor(tonumber(discounts_minor) or 0)
+        - math.floor(tonumber(credits_minor) or 0))
+end
+
+M.GAP_CLAIM_DAYS = 30
+M.JOIN_CREDIT_HOURS = 48
 
 --- Apply available credits (oldest first) to an order subtotal (ex VAT).
 -- credits: { {id, amount_minor, min_order_minor}, … }
