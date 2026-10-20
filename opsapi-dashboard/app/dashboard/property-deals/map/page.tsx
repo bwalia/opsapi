@@ -243,7 +243,8 @@ function CompanyPanel({ f }: { f: MapFeature }) {
         try {
           const r = (await pdService.createCompanyLead({ company_number: f.company_number, title: f.title ?? 'Company', address_snippet: f.address_snippet })).data;
           toast.success('Lead created');
-          window.location.assign(`${BASE}/leads/${r.uuid}`);
+          // Leads live on the CRM leads page (no property-deals leads route); ?open deep-links the drawer.
+          window.location.assign(`/dashboard/leads?open=${r.uuid}`);
         } catch (e) { toast.error(pdErrorText(e)); setBusy(false); }
       }}>Create a lead from this company</Button>
     </div>
