@@ -134,9 +134,11 @@ export const taxAgentService = {
   },
 
   // Kick off SERVER-SIDE background processing (extract + classify) for statements.
-  async processStatements(ids: Array<string | number>): Promise<void> {
+  // taxYear stamps the filing year onto the statements so the tax tools can see them.
+  async processStatements(ids: Array<string | number>, taxYear?: string): Promise<void> {
     const params = new URLSearchParams();
     params.append('statement_ids', ids.join(','));
+    if (taxYear) params.append('tax_year', taxYear);
     await apiClient.post('/api/v2/tax/statements/process', params.toString());
   },
 

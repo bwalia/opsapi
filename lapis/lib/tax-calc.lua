@@ -30,6 +30,19 @@ function TaxCalc.current_tax_year(now)
     return year .. "-" .. string.format("%02d", (year + 1) % 100)
 end
 
+-- The tax year a Self Assessment user would FILE now: the most recently COMPLETED
+-- year (you cannot file a year before it ends), i.e. one year before the in-progress
+-- year. On 2026-10-21 this is "2025-26"; the current (in-progress) year is "2026-27".
+function TaxCalc.filing_tax_year(now)
+    now = now or os.date("*t")
+    local year = now.year
+    if now.month < 4 or (now.month == 4 and now.day < 6) then
+        year = year - 1
+    end
+    year = year - 1
+    return year .. "-" .. string.format("%02d", (year + 1) % 100)
+end
+
 -- The hardcoded fallback is 2025-26; any supported year SHOULD have a `tax_rates`
 -- row (ponytail: fallback keeps estimates working if a year is unseeded, but it
 -- will silently use 2025-26 figures — seed every year you support).

@@ -44,6 +44,29 @@ function Classifier.get_hmrc_box_map()
     return {}
 end
 
+--- Per-category metadata: whether it is INCOME (vs expense), its catalogue HMRC key,
+-- and deductibility. Used to (a) offer the model only same-direction categories and
+-- (b) trust the catalogue — not the model — for the HMRC box + deductibility. Keyed by
+-- category key. income = maps to an income box (turnover/other_income) or type='income'.
+function Classifier.category_meta()
+    local ok, rows = pcall(db.query, [[SELECT c.key, c.type, c.is_tax_deductible, h.key AS hmrc_key
+        FROM tax_categories c LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
+        WHERE c.is_active = true]])
+    local by_key = {}
+    if ok then
+        for _, r in ipairs(rows or {}) do
+            local ded = r.is_tax_deductible
+            if ded == "f" or ded == 0 then ded = false elseif ded == "t" or ded == 1 then ded = true end
+            by_key[r.key] = {
+                hmrc_key = r.hmrc_key,
+                deductible = ded and true or false,
+                income = (r.hmrc_key == "turnover" or r.hmrc_key == "other_income" or r.type == "income"),
+            }
+        end
+    end
+    return by_key
+end
+
 -- ---------------------------------------------------------------------------
 -- Layer 1: Merchant Cleaner (shared with admin CSV upload / Python classify)
 -- ---------------------------------------------------------------------------
@@ -240,6 +263,62 @@ end
 -- Main Pipeline
 -- ---------------------------------------------------------------------------
 
+-- Rule engine: unambiguous UK merchants, matched as a lowercase substring of the
+-- cleaned description. Direction-aware — income rules apply to credits, expense rules
+-- to debits. Keep these HIGH-confidence only; ambiguous names fall through to the LLM.
+local INCOME_RULES = {
+    { "stripe", "sales_income" }, { "paypal", "sales_income" }, { "gocardless", "sales_income" },
+    { "sumup", "sales_income" }, { "square", "sales_income" }, { "worldpay", "sales_income" },
+    { "takepayments", "sales_income" }, { "zettle", "sales_income" }, { "teya", "sales_income" },
+}
+local EXPENSE_RULES = {
+    -- fuel
+    { "shell", "vehicle_fuel" }, { "esso", "vehicle_fuel" }, { "texaco", "vehicle_fuel" },
+    { "petrol", "vehicle_fuel" }, { "fuel", "vehicle_fuel" },
+    -- transport
+    { "uber", "travel_transport" }, { "trainline", "travel_transport" }, { "tfl ", "travel_transport" },
+    { "tfl.gov", "travel_transport" }, { "national rail", "travel_transport" }, { "addison lee", "travel_transport" },
+    { "railway", "travel_transport" }, { "ryanair", "travel_transport" }, { "easyjet", "travel_transport" },
+    -- software / subscriptions
+    { "amazon web services", "software_subscriptions" }, { "aws ", "software_subscriptions" },
+    { "microsoft", "software_subscriptions" }, { "adobe", "software_subscriptions" },
+    { "google cloud", "software_subscriptions" }, { "dropbox", "software_subscriptions" },
+    { "zoom", "software_subscriptions" }, { "slack", "software_subscriptions" },
+    { "github", "software_subscriptions" }, { "godaddy", "software_subscriptions" },
+    { "notion", "software_subscriptions" }, { "atlassian", "software_subscriptions" },
+    { "openai", "software_subscriptions" }, { "mailchimp", "software_subscriptions" },
+    { "canva", "software_subscriptions" }, { "xero", "software_subscriptions" }, { "quickbooks", "software_subscriptions" },
+    -- telephone / internet
+    { "vodafone", "telephone" }, { "o2.co", "telephone" }, { "three.co", "telephone" },
+    { "plusnet", "telephone" }, { "virgin media", "internet" }, { "ee.co", "telephone" },
+    -- utilities
+    { "british gas", "utilities" }, { "edf energy", "utilities" }, { "octopus energy", "utilities" },
+    { "scottish power", "utilities" }, { "thames water", "utilities" }, { "npower", "utilities" },
+    { "eon next", "utilities" }, { "ovo energy", "utilities" },
+    -- clearly personal
+    { "tesco", "personal_expense" }, { "sainsbury", "personal_expense" }, { "asda", "personal_expense" },
+    { "aldi", "personal_expense" }, { "lidl", "personal_expense" }, { "waitrose", "personal_expense" },
+    { "costa", "personal_expense" }, { "starbucks", "personal_expense" }, { "greggs", "personal_expense" },
+    { "mcdonald", "personal_expense" }, { "kfc", "personal_expense" }, { "pret a manger", "personal_expense" },
+    { "nando", "personal_expense" }, { "deliveroo", "personal_expense" }, { "just eat", "personal_expense" },
+    { "netflix", "personal_expense" }, { "spotify", "personal_expense" }, { "puregym", "personal_expense" },
+    { "disney+", "personal_expense" },
+    -- office / materials
+    { "screwfix", "materials_supplies" }, { "staples", "office_supplies" }, { "rymans", "office_supplies" },
+}
+
+--- Deterministic classification for known merchants. Returns a category key or nil.
+-- @param cleaned string  the cleaned merchant description
+-- @param is_credit boolean
+function Classifier.classify_by_rules(cleaned, is_credit)
+    local text = tostring(cleaned or ""):lower()
+    if text == "" then return nil end
+    for _, rule in ipairs(is_credit and INCOME_RULES or EXPENSE_RULES) do
+        if text:find(rule[1], 1, true) then return rule[2] end
+    end
+    return nil
+end
+
 --- Classify a single transaction through the five-layer pipeline
 -- @param transaction table { description, amount, transaction_type, ... }
 -- @param opts table { profile_type, llm_provider, categories, trace_id }
@@ -290,6 +369,12 @@ function Classifier.classify_transaction(transaction, opts)
         box_map = Classifier.get_hmrc_box_map()
     end
 
+    -- Direction (CREDIT = money in = income; DEBIT = money out = expense). The model
+    -- otherwise reads only the description and files income as an expense (and vice
+    -- versa), so we both tell it the direction AND offer only same-direction categories.
+    local cat_meta = opts.cat_meta or Classifier.category_meta()
+    local is_credit = tostring(transaction.transaction_type):upper() == "CREDIT"
+
     -- Affinity/exclusions come from guidance, falling back to the legacy hardcoded
     -- PROFILE_CATEGORIES when no guidance row exists.
     local affinity, excluded = {}, {}
@@ -308,57 +393,93 @@ function Classifier.classify_transaction(transaction, opts)
 
     categories = Classifier.narrow_categories(categories, affinity, excluded)
 
-    -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
-    local rag_results = {}
-    local embedding_result = LLMClient.generate_embedding({
-        text = cleaned,
-        provider = opts.llm_provider,
-        trace_id = opts.trace_id,
-    })
-    if embedding_result and embedding_result.embedding then
-        rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6)
+    -- Offer only same-direction categories: income for a credit, expense/non-business
+    -- for a debit. `transfer` is allowed either way. Falls back to the full list if the
+    -- filter would leave nothing (e.g. metadata missing).
+    do
+        local directed = {}
+        for _, c in ipairs(categories) do
+            local k = c.name or c
+            local inc = cat_meta[k] and cat_meta[k].income
+            if (is_credit and (inc or k == "transfer")) or (not is_credit and not inc) then
+                directed[#directed + 1] = c
+            end
+        end
+        if #directed > 0 then categories = directed end
     end
 
-    -- Build few-shot examples from RAG
-    local few_shot = {}
-    for _, r in ipairs(rag_results) do
-        table.insert(few_shot, {
-            description = r.description,
-            amount = 0,
-            category = r.category,
-            confidence = tonumber(r.similarity) or 0,
+    -- Layer 2.5: rule engine — obvious merchants are classified deterministically (no
+    -- LLM): faster, and the same merchant always gets the same category. Only
+    -- high-confidence, direction-aware matches; everything else falls through to the LLM.
+    local classification, err
+    local rag_results = {}
+    local rule_cat = Classifier.classify_by_rules(cleaned, is_credit)
+    if rule_cat then
+        classification = { category = rule_cat, confidence = 0.95,
+            reasoning = "Matched a known-merchant rule.", classified_by = "rule_engine" }
+    else
+        -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
+        local embedding_result = LLMClient.generate_embedding({
+            text = cleaned,
+            provider = opts.llm_provider,
+            trace_id = opts.trace_id,
+        })
+        if embedding_result and embedding_result.embedding then
+            rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6)
+        end
+
+        -- Build few-shot examples from RAG
+        local few_shot = {}
+        for _, r in ipairs(rag_results) do
+            table.insert(few_shot, {
+                description = r.description,
+                amount = 0,
+                category = r.category,
+                confidence = tonumber(r.similarity) or 0,
+            })
+        end
+
+        -- Layer 3: LLM classification
+        classification, err = LLMClient.classify({
+            description = cleaned,
+            amount = transaction.amount,
+            transaction_type = transaction.transaction_type,
+            categories = categories,
+            profile_type = opts.profile_type,
+            provider = opts.llm_provider,
+            trace_id = opts.trace_id,
+            few_shot_examples = few_shot,
+            is_credit = is_credit,
+            -- Phase 2 guidance: persona + per-profile rules + dynamic snake_case box map
+            persona = guidance and guidance.persona or nil,
+            rules_markdown = guidance and guidance.rules_markdown or nil,
+            hmrc_box_map = box_map,
         })
     end
 
-    -- Layer 3: LLM classification
-    local classification, err = LLMClient.classify({
-        description = cleaned,
-        amount = transaction.amount,
-        transaction_type = transaction.transaction_type,
-        categories = categories,
-        profile_type = opts.profile_type,
-        provider = opts.llm_provider,
-        trace_id = opts.trace_id,
-        few_shot_examples = few_shot,
-        -- Phase 2 guidance: persona + per-profile rules + dynamic snake_case box map
-        persona = guidance and guidance.persona or nil,
-        rules_markdown = guidance and guidance.rules_markdown or nil,
-        hmrc_box_map = box_map,
-    })
-
     if not classification then
         -- Model down / refused: flag for review explicitly so it is never
-        -- auto-filed, regardless of the downstream confidence threshold.
+        -- auto-filed, regardless of the downstream confidence threshold. Direction-aware:
+        -- a credit defaults to income (other income), a debit to uncategorised expense.
         ngx.log(ngx.WARN, "[tax-classifier] classify failed, flagging for review: ", tostring(err))
         return {
-            category = "uncategorised_expense",
-            hmrc_category = "other_expenses",
+            category = is_credit and "income_other" or "uncategorised_expense",
+            hmrc_category = is_credit and "other_income" or "other_expenses",
             confidence = 0,
             needs_review = true,
             reasoning = "Couldn't auto-classify (the AI model did not respond) — flagged for your review.",
             is_tax_deductible = false,
             classified_by = "fallback",
         }
+    end
+
+    -- The catalogue — not the model — is authoritative for the HMRC box + deductibility.
+    -- Mapping the chosen category key to its catalogue hmrc_category stops a model that
+    -- picked a valid category but a wrong/invalid box key from being needlessly flagged.
+    local meta = classification.category and cat_meta[classification.category]
+    if meta then
+        if meta.hmrc_key then classification.hmrc_category = meta.hmrc_key end
+        classification.is_tax_deductible = meta.deductible
     end
 
     -- Build the catalogue key-set once: used to guard RAG overrides and to validate
@@ -470,7 +591,8 @@ function Classifier.classify_transaction(transaction, opts)
             .. " [REVIEW: " .. table.concat(review_reasons, "; ") .. "]"
     end
 
-    classification.classified_by = "ai"
+    -- Keep "rule_engine" if the rule engine answered; otherwise it was the LLM.
+    classification.classified_by = classification.classified_by or "ai"
     classification.cleaned_description = cleaned
 
     return classification
@@ -489,6 +611,8 @@ function Classifier.classify_batch(transactions, opts)
     -- the machine identity is `key`, aliased to name for the pipeline).
     local categories = db.select("key as name, hmrc_category_id FROM tax_categories WHERE is_active = true ORDER BY key")
     opts.categories = categories
+    -- Direction + catalogue-hmrc metadata, once for the batch (per-txn fallback exists).
+    opts.cat_meta = Classifier.category_meta()
 
     -- Phase 2: preload the HMRC box map + per-profile guidance once for the whole batch
     -- (avoids a DB round-trip per transaction). `false` means "looked up, none found".

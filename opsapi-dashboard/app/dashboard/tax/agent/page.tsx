@@ -121,6 +121,7 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
 
 function TaxAgentChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [taxYear, setTaxYear] = useState<string>('');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [estimate, setEstimate] = useState<TaxEstimate | null>(null);
   const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
@@ -180,6 +181,7 @@ function TaxAgentChat() {
         const s = await taxAgentService.createSession();
         if (cancelled) return;
         setSessionId(s.id);
+        setTaxYear(s.tax_year || '');
         const existing: ChatMsg[] = (s.messages || []).map((m) => ({
           id: newId(), role: m.role, text: m.text, uploadPrompt: m.upload_prompt, quickReplies: m.quick_replies,
         }));
@@ -216,6 +218,7 @@ function TaxAgentChat() {
   const applyTurn = useCallback((turn: Awaited<ReturnType<typeof taxAgentService.sendMessage>>) => {
     setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: turn.message, uploadPrompt: turn.upload_prompt, quickReplies: turn.quick_replies }]);
     if (turn.estimate) setEstimate(turn.estimate);
+    if (turn.progress?.tax_year) setTaxYear(turn.progress.tax_year);
     setAwaitingConfirm(turn.awaiting_confirm ? (turn.confirm_card?.summary ?? 'Confirm this change?') : null);
     setQuickReplies(suggestionsFor(turn.message, turn.quick_replies));
   }, []);
@@ -293,7 +296,7 @@ function TaxAgentChat() {
       if (ids.length === 0) throw new Error('no statements uploaded');
       // Hand off to the SERVER-SIDE worker — extract + classify keep running even
       // if the user reloads or leaves. The UI follows progress by polling.
-      await taxAgentService.processStatements(ids);
+      await taxAgentService.processStatements(ids, taxYear || undefined);
       const bankLine = detectedBank ? `I read your bank as ${detectedBank}. ` : '';
       setMessages((prev) => [...prev, {
         id: newId(), role: 'assistant',
@@ -306,7 +309,7 @@ function TaxAgentChat() {
     } finally {
       setBusy(false);
     }
-  }, [sessionId, busy, startPolling]);
+  }, [sessionId, busy, startPolling, taxYear]);
 
   const confirmNewChat = useCallback(async () => {
     if (busy || loading || !sessionId) return;
@@ -318,6 +321,7 @@ function TaxAgentChat() {
       await taxAgentService.archive(sessionId, true); // purge old statements/transactions
       const s = await taxAgentService.createSession({ force_new: true });
       setSessionId(s.id);
+      setTaxYear(s.tax_year || '');
       setEstimate(null);
       setAwaitingConfirm(null);
       setQuickReplies([]);

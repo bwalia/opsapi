@@ -211,7 +211,10 @@ register({
     handler = function(ctx, args)
         local rows = db.query([[
             SELECT uuid, bank_name, period_start, period_end, workflow_step, processing_status, tax_year
-            FROM tax_statements WHERE user_id = ? AND tax_year = ?
+            -- ponytail: statement tax_year is often NULL (the upload flow doesn't stamp
+            -- it), so treat NULL as "belongs to the filing in progress". user_id keeps it
+            -- tenant-safe. Proper fix: stamp tax_year at upload/processing.
+            FROM tax_statements WHERE user_id = ? AND (tax_year = ? OR tax_year IS NULL)
             ORDER BY period_start ASC NULLS LAST, id ASC]],
             ctx.user_id, year_of(ctx, args))
         return { statements = take(rows or {}, 50), count = #(rows or {}) }
@@ -234,7 +237,7 @@ register({
             SELECT t.uuid, t.description, t.amount, t.transaction_type, t.category,
                    t.hmrc_category, t.confidence_score, t.classification_status, t.transaction_date
             FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-            WHERE t.user_id = ? AND s.tax_year = ?
+            WHERE t.user_id = ? AND (s.tax_year = ? OR s.tax_year IS NULL)
               AND (t.classification_status = 'NEEDS_REVIEW'
                    OR (t.confidence_score IS NOT NULL AND t.confidence_score < 0.7))
             ORDER BY t.confidence_score ASC NULLS FIRST
@@ -328,7 +331,7 @@ register({
                    THEN t.amount ELSE 0 END), 0) AS total_expenses,
               COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
             FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-            WHERE t.user_id = ? AND s.tax_year = ?]],
+            WHERE t.user_id = ? AND (s.tax_year = ? OR s.tax_year IS NULL)]],
             ctx.user_id, tax_year)
         local row = (agg and agg[1]) or { gross_income = 0, total_expenses = 0, unreviewed = 0 }
         local rates = TaxCalc.load_rates(tax_year)

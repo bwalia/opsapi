@@ -89,6 +89,11 @@ return function(app)
         end
         if #ids == 0 then return { status = 400, json = { error = "statement_ids is required" } } end
 
+        -- Stamp the filing year onto these statements so the tax tools (which scope by
+        -- tax_year) see them. Only a well-formed YYYY-YY, only when not already set.
+        local tax_year = tostring(data.tax_year or self.params.tax_year or "")
+        if not tax_year:match("^%d%d%d%d%-%d%d$") then tax_year = nil end
+
         local statements = {}
         for _, ident in ipairs(ids) do
             local rows = db.query(
@@ -97,6 +102,10 @@ return function(app)
             if rows and rows[1] then
                 statements[#statements + 1] = rows[1]
                 set_status(rows[1].id, "QUEUED")
+                if tax_year then
+                    db.query([[UPDATE tax_statements SET tax_year = ?
+                        WHERE id = ? AND (tax_year IS NULL OR tax_year = '')]], tax_year, rows[1].id)
+                end
             end
         end
         if #statements == 0 then return { status = 404, json = { error = "No matching statements for this user" } } end
