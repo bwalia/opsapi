@@ -119,6 +119,20 @@ export const taxAgentService = {
   async archive(id: string): Promise<void> {
     await apiClient.post(`${BASE}/sessions/${id}/archive`, {});
   },
+
+  // Best-effort: read the bank name (and account details) from an uploaded statement.
+  async detectBankDetails(
+    statementId: string | number,
+  ): Promise<{ bank_name?: string; account_number?: string; sort_code?: string } | null> {
+    try {
+      const params = new URLSearchParams();
+      params.append('statement_id', String(statementId));
+      const r = await apiClient.post('/api/v2/tax/extract/bank-details', params.toString());
+      return (r.data?.data ?? r.data) || null;
+    } catch {
+      return null;
+    }
+  },
 };
 
 export default taxAgentService;

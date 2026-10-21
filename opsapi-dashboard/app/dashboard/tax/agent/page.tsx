@@ -160,27 +160,54 @@ function TaxAgentChat() {
     }
   }, [sessionId, busy, applyTurn]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    if (!sessionId || busy) return;
+  // Upload one or more statements: each is uploaded, extracted and classified. The
+  // bank is auto-detected from the first statement (with a fallback note if it can't
+  // be read). One failed file doesn't stop the rest.
+  const handleUpload = useCallback(async (files: File[]) => {
+    if (!sessionId || busy || files.length === 0) return;
     setBusy(true);
-    setMessages((prev) => [...prev, { id: newId(), role: 'user', text: `📎 Uploading ${file.name}…` }]);
+    const names = files.map((f) => f.name).join(', ');
+    setMessages((prev) => [...prev, {
+      id: newId(), role: 'user',
+      text: `📎 Uploading ${files.length} statement${files.length > 1 ? 's' : ''}: ${names}`,
+    }]);
     try {
       const accounts = await taxService.getBankAccounts();
-      let acctId = accounts[0]?.id as string | undefined;
+      let acct = accounts[0] as { id?: string; uuid?: string; bank_name?: string } | undefined;
+      let acctId = acct?.id;
       if (!acctId) {
-        const created = await taxService.createBankAccount({ bank_name: 'My business account' } as never);
+        const created = await taxService.createBankAccount({ bank_name: 'My bank account' } as never);
         acctId = (created.id || created.uuid) as string;
+        acct = created as never;
       }
-      const stmt = await taxService.uploadStatement(file, acctId as string);
-      // POST /tax/upload returns the new statement's numeric id as `statement_id`.
-      const s = stmt as { statement_id?: number | string; id?: number | string; uuid?: string };
-      const stmtId = s.statement_id ?? s.id ?? s.uuid;
-      if (stmtId === undefined || stmtId === null || stmtId === '') {
-        throw new Error('Upload did not return a statement id');
+      let ok = 0;
+      let detectedBank: string | undefined;
+      for (const file of files) {
+        try {
+          const stmt = await taxService.uploadStatement(file, acctId as string);
+          const s = stmt as { statement_id?: number | string; id?: number | string; uuid?: string };
+          const stmtId = s.statement_id ?? s.id ?? s.uuid;
+          if (stmtId === undefined || stmtId === null || stmtId === '') continue;
+          if (!detectedBank) {
+            const bd = await taxAgentService.detectBankDetails(stmtId);
+            if (bd?.bank_name) detectedBank = bd.bank_name;
+          }
+          await taxService.extractTransactions(stmtId as number);
+          await taxService.classifyTransactions(stmtId as number);
+          ok += 1;
+        } catch {
+          // skip this file, keep going with the others
+        }
       }
-      await taxService.extractTransactions(stmtId as number);
-      await taxService.classifyTransactions(stmtId as number);
-      await send("I've uploaded my bank statement — please review the transactions and show my estimate.");
+      // Name the account from the detected bank if it's still the generic default.
+      if (detectedBank && acctId && (!acct?.bank_name || /my (bank|business) account/i.test(acct.bank_name))) {
+        try { await taxService.updateBankAccount(acctId as string, { bank_name: detectedBank }); } catch { /* non-fatal */ }
+      }
+      if (ok === 0) throw new Error('no statements processed');
+      const bankLine = detectedBank
+        ? `I read your bank as ${detectedBank}. `
+        : "I couldn't read your bank's name from the statement — you can set it under Tax → Bank Accounts if you'd like. ";
+      await send(`I've uploaded ${ok} statement${ok > 1 ? 's' : ''}. ${bankLine}Please review the transactions and show my estimate.`);
     } catch {
       toast.error('Upload failed. You can also upload from Tax → Statements.');
       setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: "That upload didn't work. You can also upload on the Tax → Statements page, then come back and tell me it's ready." }]);
@@ -189,12 +216,46 @@ function TaxAgentChat() {
     }
   }, [sessionId, busy, send]);
 
+  const startNewChat = useCallback(async () => {
+    if (busy || loading || !sessionId) return;
+    if (!window.confirm('Start a new tax filing chat? This clears the conversation so you can begin from scratch. (Your uploaded statements and transactions are not deleted.)')) return;
+    setBusy(true);
+    try {
+      await taxAgentService.archive(sessionId);
+      const s = await taxAgentService.createSession({ force_new: true });
+      setSessionId(s.id);
+      setEstimate(null);
+      setAwaitingConfirm(null);
+      setInput('');
+      setMessages([{
+        id: newId(), role: 'assistant',
+        text: "Fresh start! Tell me a bit about you to begin (tap a suggestion below, or type your own).",
+      }]);
+    } catch {
+      toast.error('Could not start a new chat.');
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, busy, loading]);
+
   const latestUpload = [...messages].reverse().find((m) => m.role === 'assistant' && m.uploadPrompt)?.uploadPrompt;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
       {/* Conversation */}
       <div className="flex min-h-[70vh] flex-col overflow-hidden rounded-xl border border-secondary-200 bg-white">
+        <div className="flex items-center justify-between border-b border-secondary-200 px-4 py-2.5">
+          <span className="text-sm font-medium text-secondary-700">Tax assistant</span>
+          <button
+            type="button"
+            onClick={startNewChat}
+            disabled={busy || loading}
+            title="Clear this conversation and start a fresh one"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-secondary-300 px-2.5 py-1 text-xs font-medium text-secondary-600 transition hover:bg-secondary-50 disabled:opacity-50"
+          >
+            ↻ New chat
+          </button>
+        </div>
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
           {loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-secondary-500">Starting your tax assistant…</div>
@@ -296,8 +357,9 @@ function TaxAgentChat() {
             ref={fileRef}
             type="file"
             accept=".pdf,.csv,image/*"
+            multiple
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+            onChange={(e) => { const fs = e.target.files ? Array.from(e.target.files) : []; if (fs.length) handleUpload(fs); e.target.value = ''; }}
           />
         </div>
       </div>
