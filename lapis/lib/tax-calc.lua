@@ -72,7 +72,12 @@ end
 --- Full UK tax breakdown from gross income + allowable expenses for one year.
 -- Pure: identical inputs always give identical output. The ONLY place tax is
 -- computed — do not duplicate this maths anywhere.
-function TaxCalc.compute(gross_income, total_expenses, rates)
+-- @param opts table? { apply_nic = boolean } — Class 2/4 NIC apply to trading
+--   (self-employment) profit but NOT to property income; a pure landlord passes
+--   apply_nic = false. Defaults to true (self-employment) for backward compat.
+function TaxCalc.compute(gross_income, total_expenses, rates, opts)
+    opts = opts or {}
+    local apply_nic = opts.apply_nic ~= false
     gross_income = tonumber(gross_income) or 0
     total_expenses = tonumber(total_expenses) or 0
     local trading_profit = math.max(0, gross_income - total_expenses)
@@ -110,20 +115,20 @@ function TaxCalc.compute(gross_income, total_expenses, rates)
 
     local income_tax = basic_tax + higher_tax + additional_tax
 
-    -- National Insurance Class 4.
-    local nic4 = 0
-    if trading_profit > rates.nic_lower then
-        local main_band = math.min(trading_profit, rates.nic_upper) - rates.nic_lower
-        nic4 = main_band * rates.nic_main_rate
-        if trading_profit > rates.nic_upper then
-            nic4 = nic4 + (trading_profit - rates.nic_upper) * rates.nic_additional_rate
+    -- National Insurance (Class 2 + 4) — self-employment only. Property income is
+    -- not subject to these, so a pure landlord (apply_nic = false) pays neither.
+    local nic4, nic2 = 0, 0
+    if apply_nic then
+        if trading_profit > rates.nic_lower then
+            local main_band = math.min(trading_profit, rates.nic_upper) - rates.nic_lower
+            nic4 = main_band * rates.nic_main_rate
+            if trading_profit > rates.nic_upper then
+                nic4 = nic4 + (trading_profit - rates.nic_upper) * rates.nic_additional_rate
+            end
         end
-    end
-
-    -- Class 2 NIC.
-    local nic2 = 0
-    if trading_profit >= rates.class2_threshold then
-        nic2 = rates.class2_annual
+        if trading_profit >= rates.class2_threshold then
+            nic2 = rates.class2_annual
+        end
     end
 
     local total_tax = income_tax + nic4 + nic2

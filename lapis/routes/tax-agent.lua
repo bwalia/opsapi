@@ -171,6 +171,8 @@ return function(app)
                 "- When the user tells you the correct category for a transaction, call apply_classification_fix — "
                     .. "the user confirms before it saves. Only use category keys that exist (from get_review_queue).",
                 "- After classification, call compute_estimate and tell the user their estimated tax in one sentence.",
+                "- For a landlord (property income only), remember property income is NOT subject to Class 2/4 "
+                    .. "National Insurance — the estimate already reflects this; mention it if it helps.",
                 "- Filing to HMRC from chat is NOT available yet. If asked to file, call hmrc_status and tell them they "
                     .. "can file from the Tax → File screen.",
                 "- Call ONE tool at a time. Never claim something was saved or changed unless a tool returned success "

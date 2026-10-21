@@ -52,7 +52,10 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
         {row('Taxable profit', formatCurrency(estimate.trading_profit), true)}
         {row('Personal allowance', formatCurrency(estimate.personal_allowance))}
         {row('Income tax', formatCurrency(estimate.income_tax.total))}
-        {row('National Insurance', formatCurrency(estimate.national_insurance.total))}
+        {row(
+          'National Insurance',
+          estimate.nic_applied === false ? 'N/A — property income' : formatCurrency(estimate.national_insurance.total),
+        )}
         {row('Effective rate', `${estimate.effective_rate}%`)}
       </div>
       {!!estimate.unreviewed_count && estimate.unreviewed_count > 0 && (

@@ -16,6 +16,7 @@ export interface TaxEstimate {
   effective_rate: number;
   tax_year: string;
   unreviewed_count?: number;
+  nic_applied?: boolean;
   is_estimate?: boolean;
 }
 

@@ -302,9 +302,22 @@ register({
             ctx.user_id, tax_year)
         local row = (agg and agg[1]) or { gross_income = 0, total_expenses = 0, unreviewed = 0 }
         local rates = TaxCalc.load_rates(tax_year)
-        local calc = TaxCalc.compute(tonumber(row.gross_income) or 0, tonumber(row.total_expenses) or 0, rates)
+        -- NIC (Class 2/4) applies to self-employment, not property income. Apply it
+        -- unless the profile is purely property (landlord). Unknown/empty profile
+        -- defaults to applying NIC (the self-employment case) — the safe default.
+        local profile = ctx._profile or {}
+        local types = type(profile.income_types) == "table" and profile.income_types or {}
+        local has_se, only_property = false, #types > 0
+        for _, t in ipairs(types) do
+            if t == "self_employment" then has_se = true end
+            if t ~= "uk_property" then only_property = false end
+        end
+        local apply_nic = has_se or not only_property
+        local calc = TaxCalc.compute(tonumber(row.gross_income) or 0, tonumber(row.total_expenses) or 0,
+            rates, { apply_nic = apply_nic })
         calc.tax_year = tax_year
         calc.unreviewed_count = tonumber(row.unreviewed) or 0
+        calc.nic_applied = apply_nic
         calc.is_estimate = true
         return calc
     end,

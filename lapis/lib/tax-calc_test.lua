@@ -67,5 +67,13 @@ local c4 = TaxCalc.compute(5000, 8000, RATES)
 check("c4 trading_profit", c4.trading_profit, 0)
 check("c4 total_tax_due", c4.total_tax_due, 0)
 
+-- Case 5: pure landlord (apply_nic = false) — same profit as case 1 but income
+-- tax only; property income is NOT subject to Class 2/4 NIC.
+local c5 = TaxCalc.compute(60000, 10000, RATES, { apply_nic = false })
+check("c5 income_tax", c5.income_tax.total, 7486)
+check("c5 class4", c5.national_insurance.class4, 0)
+check("c5 class2", c5.national_insurance.class2, 0)
+check("c5 total_tax_due", c5.total_tax_due, 7486)
+
 io.write(string.format("\ntax-calc: %d passed, %d failed\n", passed, failed))
 os.exit(failed == 0 and 0 or 1)
