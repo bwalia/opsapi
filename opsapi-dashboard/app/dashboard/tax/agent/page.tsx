@@ -15,7 +15,7 @@ import toast from 'react-hot-toast';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { formatCurrency } from '@/lib/utils';
-import taxAgentService, { type TaxEstimate, type UploadPrompt } from '@/services/tax-agent.service';
+import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
 
 interface ChatMsg {
@@ -54,6 +54,20 @@ function suggestionsFor(message: string | undefined, quickReplies: string[] | nu
   if (quickReplies && quickReplies.length > 0) return quickReplies;
   if (message && /tax year/i.test(message)) return ukTaxYears();
   return [];
+}
+
+function stageLabel(p: StatementStatus): string {
+  switch (p.processing_status) {
+    case 'QUEUED': return 'Queued…';
+    case 'EXTRACTING':
+    case 'PROCESSING': return 'Reading transactions…';
+    case 'CLASSIFYING':
+      return p.transaction_count
+        ? `Categorising (${p.classified_count ?? 0}/${p.transaction_count})…`
+        : 'Categorising…';
+    case 'ERROR': return "Couldn't process";
+    default: return 'Working…';
+  }
 }
 
 function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
@@ -110,11 +124,48 @@ function TaxAgentChat() {
   const [estimate, setEstimate] = useState<TaxEstimate | null>(null);
   const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
+  const [processing, setProcessing] = useState<StatementStatus[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wasProcessing = useRef(false);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }, []);
+
+  // Poll the server-side processing status. Runs independently of the upload, so
+  // it resumes after a reload/navigation (the work continues in the background).
+  const pollOnce = useCallback(async () => {
+    try {
+      const st = await taxAgentService.processStatus();
+      setProcessing(st);
+      if (st.length > 0) {
+        wasProcessing.current = true;
+      } else if (wasProcessing.current) {
+        wasProcessing.current = false;
+        stopPolling();
+        setMessages((prev) => [...prev, {
+          id: newId(), role: 'assistant',
+          text: '✅ Your statement(s) are processed and categorised. Want to see your tax estimate?',
+          quickReplies: ['Show my estimate'],
+        }]);
+        setQuickReplies(['Show my estimate']);
+      }
+    } catch {
+      /* transient poll error — keep trying */
+    }
+  }, [stopPolling]);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    wasProcessing.current = true;
+    void pollOnce();
+    pollRef.current = setInterval(() => { void pollOnce(); }, 2500);
+  }, [pollOnce, stopPolling]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -148,6 +199,17 @@ function TaxAgentChat() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // On mount / reload: if the server is still processing statements, resume the
+  // progress display and polling (the work keeps running server-side regardless).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const st = await taxAgentService.processStatus().catch(() => [] as StatementStatus[]);
+      if (!cancelled && st.length > 0) { setProcessing(st); startPolling(); }
+    })();
+    return () => { cancelled = true; stopPolling(); };
+  }, [startPolling, stopPolling]);
 
   const applyTurn = useCallback((turn: Awaited<ReturnType<typeof taxAgentService.sendMessage>>) => {
     setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: turn.message, uploadPrompt: turn.upload_prompt, quickReplies: turn.quick_replies }]);
@@ -205,7 +267,7 @@ function TaxAgentChat() {
         acctId = (created.id || created.uuid) as string;
         acct = created as never;
       }
-      let ok = 0;
+      const ids: string[] = [];
       let detectedBank: string | undefined;
       for (const file of files) {
         try {
@@ -213,13 +275,11 @@ function TaxAgentChat() {
           const s = stmt as { statement_id?: number | string; id?: number | string; uuid?: string };
           const stmtId = s.statement_id ?? s.id ?? s.uuid;
           if (stmtId === undefined || stmtId === null || stmtId === '') continue;
+          ids.push(String(stmtId));
           if (!detectedBank) {
             const bd = await taxAgentService.detectBankDetails(stmtId);
             if (bd?.bank_name) detectedBank = bd.bank_name;
           }
-          await taxService.extractTransactions(stmtId as number);
-          await taxService.classifyTransactions(stmtId as number);
-          ok += 1;
         } catch {
           // skip this file, keep going with the others
         }
@@ -228,18 +288,23 @@ function TaxAgentChat() {
       if (detectedBank && acctId && (!acct?.bank_name || /my (bank|business) account/i.test(acct.bank_name))) {
         try { await taxService.updateBankAccount(acctId as string, { bank_name: detectedBank }); } catch { /* non-fatal */ }
       }
-      if (ok === 0) throw new Error('no statements processed');
-      const bankLine = detectedBank
-        ? `I read your bank as ${detectedBank}. `
-        : "I couldn't read your bank's name from the statement — you can set it under Tax → Bank Accounts if you'd like. ";
-      await send(`I've uploaded ${ok} statement${ok > 1 ? 's' : ''}. ${bankLine}Please review the transactions and show my estimate.`);
+      if (ids.length === 0) throw new Error('no statements uploaded');
+      // Hand off to the SERVER-SIDE worker — extract + classify keep running even
+      // if the user reloads or leaves. The UI follows progress by polling.
+      await taxAgentService.processStatements(ids);
+      const bankLine = detectedBank ? `I read your bank as ${detectedBank}. ` : '';
+      setMessages((prev) => [...prev, {
+        id: newId(), role: 'assistant',
+        text: `${bankLine}Got ${ids.length} statement${ids.length > 1 ? 's' : ''}. I'm reading and categorising the transactions now — this keeps running in the background, so you can reload or leave this page and come back.`,
+      }]);
+      startPolling();
     } catch {
       toast.error('Upload failed. You can also upload from Tax → Statements.');
       setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: "That upload didn't work. You can also upload on the Tax → Statements page, then come back and tell me it's ready." }]);
     } finally {
       setBusy(false);
     }
-  }, [sessionId, busy, send]);
+  }, [sessionId, busy, startPolling]);
 
   const startNewChat = useCallback(async () => {
     if (busy || loading || !sessionId) return;
@@ -326,6 +391,23 @@ function TaxAgentChat() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+          {processing.length > 0 && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3.5">
+              <div className="flex items-center gap-2 text-sm font-medium text-indigo-800">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                Processing {processing.length} statement{processing.length > 1 ? 's' : ''}…
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {processing.map((p, i) => (
+                  <div key={p.uuid} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate text-indigo-900">{p.file_name || `Statement ${i + 1}`}</span>
+                    <span className={p.processing_status === 'ERROR' ? 'shrink-0 text-red-600' : 'shrink-0 text-indigo-600'}>{stageLabel(p)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs text-indigo-500">This keeps running in the background — you can reload or leave this page.</div>
             </div>
           )}
           {busy && (

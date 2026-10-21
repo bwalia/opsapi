@@ -38,6 +38,14 @@ export interface UploadPrompt {
   caption?: string;
 }
 
+export interface StatementStatus {
+  uuid: string;
+  file_name?: string | null;
+  processing_status: string; // QUEUED | EXTRACTING | CLASSIFYING | PROCESSING | COMPLETED | ERROR
+  transaction_count?: number;
+  classified_count?: number;
+}
+
 export interface AgentMessage {
   role: 'user' | 'assistant';
   text: string;
@@ -119,6 +127,19 @@ export const taxAgentService = {
 
   async archive(id: string): Promise<void> {
     await apiClient.post(`${BASE}/sessions/${id}/archive`, {});
+  },
+
+  // Kick off SERVER-SIDE background processing (extract + classify) for statements.
+  async processStatements(ids: Array<string | number>): Promise<void> {
+    const params = new URLSearchParams();
+    params.append('statement_ids', ids.join(','));
+    await apiClient.post('/api/v2/tax/statements/process', params.toString());
+  },
+
+  // Live status of the user's in-progress statements (empty = nothing processing).
+  async processStatus(): Promise<StatementStatus[]> {
+    const r = await apiClient.get('/api/v2/tax/statements/process-status');
+    return (r.data?.data ?? r.data) || [];
   },
 
   // Best-effort: read the bank name (and account details) from an uploaded statement.
