@@ -14,6 +14,7 @@ import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { Modal } from '@/components/ui';
 import { formatCurrency } from '@/lib/utils';
 import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
@@ -128,6 +129,7 @@ function TaxAgentChat() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showNewChat, setShowNewChat] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -306,9 +308,9 @@ function TaxAgentChat() {
     }
   }, [sessionId, busy, startPolling]);
 
-  const startNewChat = useCallback(async () => {
+  const confirmNewChat = useCallback(async () => {
     if (busy || loading || !sessionId) return;
-    if (!window.confirm('Start a new tax filing chat? This clears the conversation so you can begin from scratch. (Your uploaded statements and transactions are not deleted.)')) return;
+    setShowNewChat(false);
     setBusy(true);
     try {
       await taxAgentService.archive(sessionId);
@@ -339,7 +341,7 @@ function TaxAgentChat() {
           <span className="text-sm font-medium text-secondary-700">Tax assistant</span>
           <button
             type="button"
-            onClick={startNewChat}
+            onClick={() => setShowNewChat(true)}
             disabled={busy || loading}
             title="Clear this conversation and start a fresh one"
             className="inline-flex items-center gap-1.5 rounded-lg border border-secondary-300 px-2.5 py-1 text-xs font-medium text-secondary-600 transition hover:bg-secondary-50 disabled:opacity-50"
@@ -494,6 +496,38 @@ function TaxAgentChat() {
           The assistant never calculates tax itself — every figure is computed by OpsAPI and confirmed by HMRC at filing.
         </p>
       </div>
+
+      <Modal
+        isOpen={showNewChat}
+        onClose={() => setShowNewChat(false)}
+        title="Start a new chat?"
+        size="sm"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNewChat(false)}
+              className="rounded-lg border border-secondary-300 px-4 py-2 text-sm font-medium text-secondary-700 transition hover:bg-secondary-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmNewChat}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+            >
+              Start new chat
+            </button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-secondary-600">
+          This clears the current conversation so you can begin from scratch — useful if the chat has the wrong details.
+        </p>
+        <p className="mt-2 text-sm text-secondary-500">
+          Your uploaded statements and transactions are <span className="font-medium">not</span> deleted.
+        </p>
+      </Modal>
     </div>
   );
 }
