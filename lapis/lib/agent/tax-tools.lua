@@ -332,9 +332,13 @@ register({
             ctx.user_id, tax_year)
         local row = (agg and agg[1]) or { gross_income = 0, total_expenses = 0, unreviewed = 0 }
         local rates = TaxCalc.load_rates(tax_year)
-        -- NIC (Class 2/4) applies to self-employment, not property income. Apply it
-        -- unless the profile is purely property (landlord). Unknown/empty profile
-        -- defaults to applying NIC (the self-employment case) — the safe default.
+        local income = tonumber(row.gross_income) or 0
+        local expenses = tonumber(row.total_expenses) or 0
+
+        -- Route the bank-statement totals to the right schedule from the session
+        -- profile, then add any other income the agent has gathered into the profile
+        -- (employment, savings, dividends, Gift Aid). The full engine then applies
+        -- the correct bands, allowances and NIC (Class 4 on trading profit only).
         local profile = ctx._profile or {}
         local types = type(profile.income_types) == "table" and profile.income_types or {}
         local has_se, only_property = false, #types > 0
@@ -342,14 +346,40 @@ register({
             if t == "self_employment" then has_se = true end
             if t ~= "uk_property" then only_property = false end
         end
-        local apply_nic = has_se or not only_property
-        local calc = TaxCalc.compute(tonumber(row.gross_income) or 0, tonumber(row.total_expenses) or 0,
-            rates, { apply_nic = apply_nic })
-        calc.tax_year = tax_year
-        calc.unreviewed_count = tonumber(row.unreviewed) or 0
-        calc.nic_applied = apply_nic
-        calc.is_estimate = true
-        return calc
+        local inp = {
+            employment_income = tonumber(profile.employment_income) or 0,
+            paye_deducted = tonumber(profile.paye_deducted) or 0,
+            savings_interest = tonumber(profile.savings_interest) or 0,
+            dividends = tonumber(profile.dividends) or 0,
+            gift_aid_net = tonumber(profile.gift_aid_net) or 0,
+        }
+        if only_property and not has_se then
+            inp.property_rents = income
+            inp.property_expenses = expenses
+            inp.property_finance_costs = tonumber(profile.property_finance_costs) or 0
+        else
+            inp.se_turnover = income
+            inp.se_expenses = expenses
+        end
+
+        local full = TaxCalc.compute_full(inp, rates)
+        -- Context + legacy-compatible fields the estimate panel reads.
+        full.tax_year = tax_year
+        full.gross_income = income
+        full.total_expenses = expenses
+        full.unreviewed_count = tonumber(row.unreviewed) or 0
+        full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
+        full.trading_profit = full.profit
+        full.taxable_income = full.total_taxable
+        full.nic_applied = (full.class4_nic or 0) > 0
+        full.income_tax = { total = full.income_tax_due }
+        full.national_insurance = { class4 = full.class4_nic, class2 = full.class2_nic,
+            total = (full.class4_nic or 0) + (full.class2_nic or 0) }
+        full.total_tax_due = full.total_liability
+        full.effective_rate = (full.total_income or 0) > 0
+            and (math.floor(full.total_liability / full.total_income * 10000) / 100) or 0
+        full.is_estimate = true
+        return full
     end,
 })
 
