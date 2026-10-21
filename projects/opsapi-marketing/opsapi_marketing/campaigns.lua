@@ -36,9 +36,32 @@ function C.find(ns, id)
     return U.one("SELECT * FROM mkt_campaigns WHERE namespace_id = ? AND id = ?", ns, tonumber(id))
 end
 
+--- Refresh dynamic list membership (segment → mkt_list_members) before counting/sending.
+-- Static lists are left as-is. Empty/invalid segment rules return a clear error
+-- instead of a silent empty_audience.
+local function ensure_list_ready(ns, list_id)
+    local list = U.one("SELECT * FROM mkt_lists WHERE id = ? AND namespace_id = ?", list_id, ns)
+    if not list then return nil, "list_not_found" end
+    if list.list_type ~= "dynamic" then return list end
+
+    local rule = U.json(list.segment_rule) or {}
+    local has_rule = type(rule) == "table"
+        and (rule["and"] ~= nil or rule["or"] ~= nil or rule.field ~= nil)
+    if not has_rule then
+        return nil, "dynamic_list_needs_segment_rule"
+    end
+
+    local Seg = require("opsapi_marketing.segments")
+    local sync, err = Seg.sync_list(ns, list_id)
+    if not sync then return nil, err or "list_sync_failed" end
+    return list, nil, sync
+end
+
 local function audience_contact_uuids(ns, campaign)
     local uuids = {}
     if campaign.list_id then
+        local ok, err = ensure_list_ready(ns, campaign.list_id)
+        if not ok then return nil, err end
         local rows = db.query([[
             SELECT contact_uuid FROM mkt_list_members
             WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL
@@ -55,10 +78,12 @@ local function audience_contact_uuids(ns, campaign)
 end
 
 --- Count eligible / excluded / suppressed for the campaign audience (capped sample for speed).
+-- Returns nil, err when the audience list cannot be resolved (e.g. dynamic list with no rule).
 function C.audience_preview(ns, campaign, opts)
     opts = opts or {}
     local limit = math.min(tonumber(opts.limit) or 500, 2000)
-    local uuids = audience_contact_uuids(ns, campaign)
+    local uuids, aerr = audience_contact_uuids(ns, campaign)
+    if not uuids then return nil, aerr end
     local total = #uuids
     local eligible, suppressed, no_consent, other, missing_address = 0, 0, 0, 0, 0
     local sample = {}
@@ -106,6 +131,28 @@ function C.audience_preview(ns, campaign, opts)
     }
 end
 
+local FRIENDLY = {
+    empty_audience = "Audience list has no contacts. Add members, or set a segment rule on a dynamic list and sync.",
+    no_eligible_recipients = "No eligible recipients (suppressed, missing consent, or invalid address).",
+    audience_required = "Select a list (or add campaign recipients) before validating.",
+    dynamic_list_needs_segment_rule = "This dynamic list has no segment rule yet — edit the list segment, then Validate again.",
+    list_not_found = "Selected list was not found.",
+    list_sync_failed = "Could not sync the dynamic list.",
+    subject_required = "Email subject is required.",
+    body_required = "Email body is required.",
+    unknown_merge_fields = "Template has merge fields that are not in the registry.",
+    approval_required = "Campaign is awaiting approval.",
+}
+
+function C.friendly_error(err)
+    if type(err) ~= "string" then return "Campaign action failed" end
+    if FRIENDLY[err] then return FRIENDLY[err] end
+    if err:match("^bad_status:") then
+        return "Campaign status does not allow this action (" .. err:sub(12) .. ")"
+    end
+    return err
+end
+
 local function content_ok(campaign)
     local channel = campaign.channel or "email"
     if channel == "email" then
@@ -142,7 +189,8 @@ function C.validate(ns, campaign_id, opts)
     })
     if #(analysis.unknown_merge or {}) > 0 then return nil, "unknown_merge_fields" end
 
-    local preview = C.audience_preview(ns, campaign, { skip_quiet_hours = true })
+    local preview, perr = C.audience_preview(ns, campaign, { skip_quiet_hours = true })
+    if not preview then return nil, perr end
     if preview.audience_total == 0 then return nil, "empty_audience" end
     if preview.eligible == 0 then return nil, "no_eligible_recipients" end
 

@@ -306,6 +306,13 @@ function S.start_campaign(ns, campaign_id)
 
         local members
         if campaign.list_id then
+            local list = U.one("SELECT list_type FROM mkt_lists WHERE id = ? AND namespace_id = ?",
+                campaign.list_id, ns)
+            if list and list.list_type == "dynamic" then
+                pcall(function()
+                    require("opsapi_marketing.segments").sync_list(ns, campaign.list_id)
+                end)
+            end
             members = db.query([[
                 SELECT contact_uuid FROM mkt_list_members
                 WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL

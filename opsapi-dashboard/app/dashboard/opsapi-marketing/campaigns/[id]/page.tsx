@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { isAxiosError } from 'axios';
 import { Send, CheckCircle, Pause, Play, XCircle, Copy, Shield } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui';
@@ -18,6 +19,7 @@ type Campaign = {
   approval_required?: boolean;
   max_deliveries?: number;
   scheduled_at?: string;
+  list_id?: number | null;
   ab_config?: { enabled?: boolean; variants?: { key: string }[] };
 };
 
@@ -45,6 +47,19 @@ type Stats = {
   queued?: number;
 };
 
+type ListRow = { uuid: string; name: string; list_type?: string };
+
+function apiErrorMessage(e: unknown, fallback: string): string {
+  if (isAxiosError(e)) {
+    const data = e.response?.data as { error?: string; message?: string; details?: { code?: string } } | undefined;
+    if (data?.error) return String(data.error);
+    if (data?.message) return String(data.message);
+    if (e.message) return e.message;
+  }
+  if (e instanceof Error) return e.message;
+  return fallback;
+}
+
 export default function CampaignDetailPage() {
   const params = useParams();
   const id = String(params?.id || '');
@@ -53,7 +68,7 @@ export default function CampaignDetailPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lists, setLists] = useState<{ uuid: string; name: string }[]>([]);
+  const [lists, setLists] = useState<ListRow[]>([]);
   const [listUuid, setListUuid] = useState('');
 
   const load = useCallback(async () => {
@@ -70,9 +85,10 @@ export default function CampaignDetailPage() {
       setCampaign(c);
       if (sRes) setStats((sRes.data?.data ?? sRes.data) as Stats);
       if (aRes) {
-        const a = (aRes.data?.data ?? aRes.data) as { deliveries?: Stats & { opened_estimated?: number; clicked?: number } };
+        const a = (aRes.data?.data ?? aRes.data) as {
+          deliveries?: Stats & { opened_estimated?: number; clicked?: number };
+        };
         if (a?.deliveries) {
-          // Capture so the narrowing survives into the setStats callback (closure).
           const d = a.deliveries;
           setStats((prev) => ({
             ...(prev || {}),
@@ -83,9 +99,9 @@ export default function CampaignDetailPage() {
         }
       }
       const ld = lRes.data?.data ?? lRes.data ?? [];
-      setLists(Array.isArray(ld) ? ld : ld.items || []);
+      setLists(Array.isArray(ld) ? ld : (ld as { items?: ListRow[] }).items || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(apiErrorMessage(e, 'Failed to load'));
     }
   }, [id]);
 
@@ -100,7 +116,7 @@ export default function CampaignDetailPage() {
       await fn();
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Action failed');
+      setError(apiErrorMessage(e, 'Action failed'));
     } finally {
       setBusy(false);
     }
@@ -113,6 +129,8 @@ export default function CampaignDetailPage() {
       </div>
     );
   }
+
+  const selectedList = lists.find((l) => l.uuid === listUuid);
 
   return (
     <div className="space-y-6 p-6">
@@ -127,6 +145,10 @@ export default function CampaignDetailPage() {
         }
       />
       {error && <p className="text-sm text-destructive">{error}</p>}
+      <p className="text-xs text-muted-foreground">
+        This page has no draft Save — use Validate, then Send now. The audience list must have contacts (static
+        members, or a dynamic list with a segment rule).
+      </p>
 
       <div className="flex flex-wrap gap-2">
         {(campaign.status === 'draft' || campaign.status === 'validated') && (
@@ -238,10 +260,16 @@ export default function CampaignDetailPage() {
               {lists.map((l) => (
                 <option key={l.uuid} value={l.uuid}>
                   {l.name}
+                  {l.list_type ? ` (${l.list_type})` : ''}
                 </option>
               ))}
             </select>
           </label>
+          {selectedList?.list_type === 'dynamic' && (
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              Dynamic lists need a segment rule, then Validate will sync members automatically.
+            </p>
+          )}
           <Button
             size="sm"
             variant="outline"
