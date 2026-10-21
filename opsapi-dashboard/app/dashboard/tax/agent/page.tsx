@@ -86,9 +86,9 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
     </div>
   );
   return (
-    <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50 to-white p-5">
-      <div className="text-xs font-medium uppercase tracking-wide text-indigo-500">Estimated tax {estimate.tax_year}</div>
-      <div className="mt-1 text-3xl font-bold text-indigo-700">{formatCurrency(estimate.total_tax_due)}</div>
+    <div className="rounded-xl border border-primary-200 bg-linear-to-b from-primary-50 to-white p-5">
+      <div className="text-xs font-medium uppercase tracking-wide text-primary-500">Estimated tax {estimate.tax_year}</div>
+      <div className="mt-1 text-3xl font-bold text-primary-700">{formatCurrency(estimate.total_tax_due)}</div>
       <div className="mt-0.5 text-xs text-secondary-500">Estimate only — the figure HMRC confirms at filing is the one that counts.</div>
       <div className="mt-4 divide-y divide-secondary-100 text-sm">
         {row('Income', formatCurrency(estimate.gross_income))}
@@ -111,7 +111,7 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
           step for a legally-binding declaration, not a chat action. */}
       <Link
         href="/dashboard/tax/file"
-        className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+        className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
       >
         Ready to file? Open the File screen →
       </Link>
@@ -358,7 +358,7 @@ function TaxAgentChat() {
                 <div
                   className={
                     m.role === 'user'
-                      ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-indigo-600 px-4 py-2.5 text-sm text-white'
+                      ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-primary-600 px-4 py-2.5 text-sm text-white'
                       : 'max-w-[85%] rounded-2xl rounded-bl-sm bg-secondary-100 px-4 py-2.5 text-sm text-secondary-900'
                   }
                 >
@@ -368,7 +368,7 @@ function TaxAgentChat() {
                       type="button"
                       onClick={() => fileRef.current?.click()}
                       disabled={busy}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-primary-700 shadow-sm ring-1 ring-primary-200 hover:bg-primary-50 disabled:opacity-50"
                     >
                       ⬆ {m.uploadPrompt.button_label}
                     </button>
@@ -387,7 +387,7 @@ function TaxAgentChat() {
                     type="button"
                     onClick={() => send(s)}
                     disabled={busy}
-                    className="rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1.5 text-left text-sm text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                    className="rounded-full border border-primary-200 bg-primary-50 px-3.5 py-1.5 text-left text-sm text-primary-700 transition hover:bg-primary-100 disabled:opacity-50"
                   >
                     {s}
                   </button>
@@ -396,20 +396,20 @@ function TaxAgentChat() {
             </div>
           )}
           {processing.length > 0 && (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3.5">
-              <div className="flex items-center gap-2 text-sm font-medium text-indigo-800">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+            <div className="rounded-xl border border-primary-200 bg-primary-50 p-3.5">
+              <div className="flex items-center gap-2 text-sm font-medium text-primary-800">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary-500" />
                 Processing {processing.length} statement{processing.length > 1 ? 's' : ''}…
               </div>
               <div className="mt-2 space-y-1.5">
                 {processing.map((p, i) => (
                   <div key={p.uuid} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="truncate text-indigo-900">{p.file_name || `Statement ${i + 1}`}</span>
-                    <span className={p.processing_status === 'ERROR' ? 'shrink-0 text-red-600' : 'shrink-0 text-indigo-600'}>{stageLabel(p)}</span>
+                    <span className="truncate text-primary-900">{p.file_name || `Statement ${i + 1}`}</span>
+                    <span className={p.processing_status === 'ERROR' ? 'shrink-0 text-red-600' : 'shrink-0 text-primary-600'}>{stageLabel(p)}</span>
                   </div>
                 ))}
               </div>
-              <div className="mt-2 text-xs text-indigo-500">This keeps running in the background — you can reload or leave this page.</div>
+              <div className="mt-2 text-xs text-primary-500">This keeps running in the background — you can reload or leave this page.</div>
             </div>
           )}
           {busy && (
@@ -425,7 +425,7 @@ function TaxAgentChat() {
             <p className="text-sm text-amber-900">{awaitingConfirm}</p>
             <div className="mt-2 flex gap-2">
               <button type="button" onClick={() => confirm(true)} disabled={busy}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">
                 Confirm
               </button>
               <button type="button" onClick={() => confirm(false)} disabled={busy}
@@ -446,7 +446,7 @@ function TaxAgentChat() {
                   type="button"
                   onClick={() => send(q)}
                   disabled={busy}
-                  className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                  className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 transition hover:bg-primary-100 disabled:opacity-50"
                 >
                   {q}
                 </button>
@@ -471,10 +471,10 @@ function TaxAgentChat() {
               rows={1}
               placeholder="Type your answer…"
               disabled={busy || loading}
-              className="min-h-[42px] flex-1 resize-none rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-secondary-50"
+              className="min-h-[42px] flex-1 resize-none rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:bg-secondary-50"
             />
             <button type="submit" disabled={busy || loading || !input.trim()}
-              className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              className="shrink-0 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">
               Send
             </button>
           </form>
@@ -514,7 +514,7 @@ function TaxAgentChat() {
             <button
               type="button"
               onClick={confirmNewChat}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-700"
             >
               Start new chat
             </button>
