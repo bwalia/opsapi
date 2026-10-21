@@ -172,7 +172,12 @@ function TaxAgentChat() {
         acctId = (created.id || created.uuid) as string;
       }
       const stmt = await taxService.uploadStatement(file, acctId as string);
-      const stmtId = (stmt as { id?: number | string; uuid?: string }).id ?? (stmt as { uuid?: string }).uuid;
+      // POST /tax/upload returns the new statement's numeric id as `statement_id`.
+      const s = stmt as { statement_id?: number | string; id?: number | string; uuid?: string };
+      const stmtId = s.statement_id ?? s.id ?? s.uuid;
+      if (stmtId === undefined || stmtId === null || stmtId === '') {
+        throw new Error('Upload did not return a statement id');
+      }
       await taxService.extractTransactions(stmtId as number);
       await taxService.classifyTransactions(stmtId as number);
       await send("I've uploaded my bank statement — please review the transactions and show my estimate.");
