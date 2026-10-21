@@ -16,15 +16,20 @@ metadata:
     reloader.stakater.com/auto: "true"
 spec:
   replicas: {{ .Values.replicaCount }}
-  {{- with .Values.strategy }}
-  # Default kube RollingUpdate with replicaCount=1 uses maxUnavailable=0 and
-  # maxSurge=1, so a node-pinned release needs a free pod slot on that node
-  # before the old pod can terminate. On a full node (Too many pods) that
-  # deadlocks the rollout — use Recreate (or maxUnavailable:1) for pinned
-  # single-replica releases. See values-workstation-int.yaml.
+  # Zero-downtime by default: bring a new pod up (and Ready) before an old one
+  # leaves. Needs one free pod slot on an eligible node; a release pinned to a
+  # full node can override with Recreate (brief outage) via values `strategy`.
   strategy:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- if .Values.strategy }}
+    {{- toYaml .Values.strategy | nindent 4 }}
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    {{- end }}
+  # Don't count a pod as available until it has stayed Ready for a few seconds.
+  minReadySeconds: {{ .Values.minReadySeconds | default 5 }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}
@@ -65,11 +70,40 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if gt (int .Values.replicaCount) 1 }}
+      # Prefer different nodes for replicas (soft: a node-pinned release still
+      # schedules every replica on its one node).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: {{ .Release.Name }}
+      {{- end }}
+      # Room for preStop: endpoint-removal wait + nginx graceful quit.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 45 }}
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           lifecycle:
+            # PID 1 is the `lapis server` Lua wrapper, which ignores SIGTERM, so
+            # without this every stop waited out the grace period and was then
+            # SIGKILLed mid-request. Instead: wait for the Service/ingress to
+            # drop this pod's endpoint, then SIGQUIT nginx (graceful: finish
+            # in-flight requests, then exit), and wait for the master to go.
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - >-
+                    sleep {{ .Values.preStopDelaySeconds | default 8 }};
+                    PID=$(cat /app/logs/nginx.pid 2>/dev/null);
+                    [ -n "$PID" ] && kill -QUIT "$PID" 2>/dev/null;
+                    while [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; do sleep 1; done;
+                    exit 0
             postStart:
               exec:
                 command: ["/bin/sh", "-c", "stat -c %a /tmp && ls -la /tmp && cp /tmp/configmap/bootstrap-nginx.sh /usr/local/bin/bootstrap-nginx.sh && chmod +x /usr/local/bin/bootstrap-nginx.sh && /bin/sh /usr/local/bin/bootstrap-nginx.sh"]
