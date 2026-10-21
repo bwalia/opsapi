@@ -145,7 +145,11 @@ function PluginCard({
     });
 
   return (
-    <Card padding="none" className="overflow-hidden">
+    <Card
+      id={`plugin-${plugin.code}`}
+      padding="none"
+      className="overflow-hidden scroll-mt-24 target:ring-2 target:ring-primary-500"
+    >
       <div className="flex items-start justify-between gap-4 p-5">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
@@ -262,6 +266,15 @@ function PluginsPageContent() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Deep link (e.g. #plugin-opsapi_marketing from a plugin's own settings page):
+  // the cards render after the async load, so the browser's own jump to the
+  // fragment found nothing — scroll once they exist.
+  useEffect(() => {
+    if (loading || typeof window === 'undefined' || !window.location.hash) return;
+    const el = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [loading]);
 
   const onSaved = (updated: WorkspacePlugin, toggled: boolean) => {
     setPlugins((prev) => prev.map((p) => (p.code === updated.code ? updated : p)));
