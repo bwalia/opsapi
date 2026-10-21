@@ -32,6 +32,24 @@ local function findStatement(statement_id, user_id)
     return db.select("* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1", statement_id, user_id)
 end
 
+-- tax_transactions.namespace_id is NOT NULL, but these routes run under requireAuth
+-- only (no namespace middleware). Resolve the caller's workspace from the statement,
+-- then the X-Namespace-* header the dashboard sends, then the user's membership.
+local function resolveNamespaceId(self, stmt, user_id)
+    if stmt and stmt.namespace_id and stmt.namespace_id ~= db.NULL then
+        return stmt.namespace_id
+    end
+    local h = self.req.headers or {}
+    local ident = h["x-namespace-id"] or h["X-Namespace-Id"] or h["x-namespace-slug"] or h["X-Namespace-Slug"]
+    if ident and ident ~= "" then
+        local rows = db.query(
+            "SELECT id FROM namespaces WHERE uuid::text = ? OR slug = ? OR id::text = ? LIMIT 1", ident, ident, ident)
+        if rows and rows[1] then return rows[1].id end
+    end
+    local m = db.query("SELECT namespace_id FROM namespace_members WHERE user_id = ? ORDER BY id LIMIT 1", user_id)
+    return m and m[1] and m[1].namespace_id or nil
+end
+
 -- Fingerprint a transaction so re-extraction can't create duplicates. Date,
 -- normalized description, amount, direction and running balance together
 -- uniquely identify a row within a statement (the balance differs even when two
@@ -286,6 +304,7 @@ return function(app)
                         row.transaction_type, row.balance)] = true
                 end
 
+                local ns_id = resolveNamespaceId(self, stmt, user_id)
                 local inserted, skipped, failed = 0, 0, 0
                 for _, txn in ipairs(result.transactions or {}) do
                     local key = txnKey(txn.date, txn.description, txn.amount,
@@ -300,6 +319,7 @@ return function(app)
                                 -- each run and collides with rows from a prior extraction.
                                 uuid = db.raw("gen_random_uuid()::text"),
                                 statement_id = tonumber(statement_id),
+                                namespace_id = ns_id,
                                 bank_account_id = stmt.bank_account_id,
                                 user_id = user_id,
                                 transaction_date = txn.date,
