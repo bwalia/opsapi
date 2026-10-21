@@ -1,347 +1,803 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { isAxiosError } from 'axios';
-import { Send, CheckCircle, Pause, Play, XCircle, Copy, Shield } from 'lucide-react';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { Button } from '@/components/ui';
+import {
+  ArrowLeft,
+  BarChart3,
+  Calendar,
+  Check,
+  CheckCircle,
+  Copy,
+  FileText,
+  FlaskConical,
+  Pause,
+  Pencil,
+  Play,
+  Radar,
+  Send,
+  Shield,
+  ShieldCheck,
+  ThumbsDown,
+  Users,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { Button, ConfirmDialog, Modal } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
+import {
+  type AudiencePreview,
+  type Campaign,
+  type CampaignStatus,
+  type MktList,
+  AB_EDITABLE_STATUSES,
+  EDITABLE_STATUSES,
+  INPUT_CLASS,
+  LIVE_STATUSES,
+  Notice,
+  StatusBadge,
+  apiErrorCode,
+  apiErrorMessage,
+  fmtDateTime,
+  fmtInt,
+  normaliseCampaign,
+  toLocalInput,
+  unwrap,
+  unwrapArray,
+} from '../_components/shared';
+import PerformanceTab from '../_components/PerformanceTab';
+import ContentTab from '../_components/ContentTab';
+import AudienceTab from '../_components/AudienceTab';
+import TrackingTab from '../_components/TrackingTab';
+import AbTestTab from '../_components/AbTestTab';
 
-type Campaign = {
-  uuid: string;
-  name: string;
-  channel: string;
-  status: string;
-  subject?: string;
-  message_type?: string;
-  approval_required?: boolean;
-  max_deliveries?: number;
-  scheduled_at?: string;
-  list_id?: number | null;
-  ab_config?: { enabled?: boolean; variants?: { key: string }[] };
-};
+type TabKey = 'performance' | 'content' | 'audience' | 'tracking' | 'ab';
 
-type Preview = {
-  audience_total: number;
-  eligible: number;
-  suppressed: number;
-  no_consent: number;
-  missing_address: number;
-  other_excluded: number;
-  exact?: boolean;
-};
+const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
+  { key: 'performance', label: 'Performance', icon: <BarChart3 className="h-4 w-4" aria-hidden="true" /> },
+  { key: 'content', label: 'Content', icon: <FileText className="h-4 w-4" aria-hidden="true" /> },
+  { key: 'audience', label: 'Audience', icon: <Users className="h-4 w-4" aria-hidden="true" /> },
+  { key: 'tracking', label: 'Tracking', icon: <Radar className="h-4 w-4" aria-hidden="true" /> },
+  { key: 'ab', label: 'A/B test', icon: <FlaskConical className="h-4 w-4" aria-hidden="true" /> },
+];
 
-type Stats = {
-  total?: number;
-  by_state?: Record<string, number>;
-  by_variant?: Record<string, Record<string, number>>;
-  opened_estimated?: number;
-  clicked?: number;
-  accepted?: number;
-  delivered?: number;
-  bounced?: number;
-  failed?: number;
-  skipped?: number;
-  queued?: number;
-};
+const POLL_MS = 15_000;
 
-type ListRow = { uuid: string; name: string; list_type?: string };
+type Dialog = null | 'schedule' | 'reject' | 'approval' | 'duplicate' | 'cancel' | 'send';
 
-function apiErrorMessage(e: unknown, fallback: string): string {
-  if (isAxiosError(e)) {
-    const data = e.response?.data as { error?: string; message?: string; details?: { code?: string } } | undefined;
-    if (data?.error) return String(data.error);
-    if (data?.message) return String(data.message);
-    if (e.message) return e.message;
-  }
-  if (e instanceof Error) return e.message;
-  return fallback;
+type Flash = { tone: 'success' | 'error' | 'warn'; text: string };
+
+function isTabKey(v: string | null): v is TabKey {
+  return !!v && TABS.some((t) => t.key === v);
 }
 
-export default function CampaignDetailPage() {
+export default function CampaignWorkspacePage() {
   const params = useParams();
   const id = String(params?.id || '');
+  return (
+    <Suspense fallback={<p className="p-6 text-sm text-secondary-500">Loading…</p>}>
+      <CampaignWorkspace key={id} id={id} />
+    </Suspense>
+  );
+}
+
+function CampaignWorkspace({ id }: { id: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryTab = searchParams.get('tab');
+
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [lists, setLists] = useState<ListRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lists, setLists] = useState<MktList[]>([]);
   const [listUuid, setListUuid] = useState('');
+  const [tab, setTab] = useState<TabKey | null>(isTabKey(queryTab) ? queryTab : null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [validation, setValidation] = useState<{ preview: AudiencePreview | null; warnings: string[] } | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [dupName, setDupName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  const loadCampaign = useCallback(async () => {
+    const res = await marketingService.getCampaign(id);
+    const c = normaliseCampaign(unwrap<Campaign>(res));
+    setCampaign(c);
+    return c;
+  }, [id]);
 
   const load = useCallback(async () => {
-    if (!id) return;
-    setError(null);
     try {
-      const [cRes, sRes, aRes, lRes] = await Promise.all([
-        marketingService.getCampaign(id),
-        marketingService.campaignStats(id).catch(() => null),
-        marketingService.campaignAnalytics(id).catch(() => null),
-        marketingService.listLists({ per_page: 50 }),
+      const [c, lRes] = await Promise.all([
+        loadCampaign(),
+        marketingService.listLists({ per_page: 100 }).catch(() => null),
       ]);
-      const c = (cRes.data?.data ?? cRes.data) as Campaign;
-      setCampaign(c);
-      if (sRes) setStats((sRes.data?.data ?? sRes.data) as Stats);
-      if (aRes) {
-        const a = (aRes.data?.data ?? aRes.data) as {
-          deliveries?: Stats & { opened_estimated?: number; clicked?: number };
-        };
-        if (a?.deliveries) {
-          const d = a.deliveries;
-          setStats((prev) => ({
-            ...(prev || {}),
-            ...d,
-            opened_estimated: d.opened_estimated,
-            clicked: d.clicked,
-          }));
-        }
-      }
-      const ld = lRes.data?.data ?? lRes.data ?? [];
-      setLists(Array.isArray(ld) ? ld : (ld as { items?: ListRow[] }).items || []);
+      const ls = lRes ? unwrapArray<MktList>(lRes) : [];
+      setLists(ls);
+      const current = ls.find((l) => l.id === c.list_id);
+      if (current) setListUuid((prev) => prev || current.uuid);
+      setLoadError(null);
     } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Failed to load'));
+      setLoadError(apiErrorMessage(e, 'Failed to load campaign'));
     }
-  }, [id]);
+  }, [loadCampaign]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const act = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
+  const status = campaign?.status;
+
+  // Live campaigns: refresh status + analytics every 15s.
+  useEffect(() => {
+    if (status !== 'sending') return;
+    const t = window.setInterval(() => {
+      loadCampaign()
+        .then(() => setRefreshKey((k) => k + 1))
+        .catch(() => {
+          /* transient — next tick retries */
+        });
+    }, POLL_MS);
+    return () => window.clearInterval(t);
+  }, [status, loadCampaign]);
+
+  const onSaved = useCallback((c: Campaign, message: string) => {
+    setCampaign(normaliseCampaign(c));
+    setFlash({ tone: message.includes('back to draft') ? 'warn' : 'success', text: message });
+  }, []);
+
+  const run = async (label: string, fn: () => Promise<unknown>, success: string) => {
+    setBusy(label);
+    setFlash(null);
     try {
       await fn();
-      await load();
+      await loadCampaign();
+      setRefreshKey((k) => k + 1);
+      setFlash({ tone: 'success', text: success });
+      return true;
     } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Action failed'));
+      const code = apiErrorCode(e);
+      const msg = apiErrorMessage(e, `${label} failed`);
+      setFlash({
+        tone: 'error',
+        text: code === 'not_editable' ? `${msg} (Refresh to see the latest status.)` : msg,
+      });
+      // The campaign may have moved on (e.g. finished sending) — resync.
+      await loadCampaign().catch(() => undefined);
+      return false;
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+
+  const listBody = listUuid ? { list_uuid: listUuid } : {};
+
+  const doValidate = () =>
+    run(
+      'Validate',
+      async () => {
+        const res = await marketingService.validateCampaign(id, listBody);
+        const out = unwrap<{ preview?: AudiencePreview; warnings?: string[] }>(res);
+        setValidation({ preview: out.preview ?? null, warnings: out.warnings ?? [] });
+      },
+      'Campaign validated.',
+    );
+
+  const doSendNow = async () => {
+    const ok = await run(
+      'Send',
+      () => marketingService.scheduleCampaign(id, { ...listBody, send_now: true }),
+      'Sending started. Performance updates every 15 seconds.',
+    );
+    setDialog(null);
+    if (ok) setTab('performance');
+  };
+
+  const doSchedule = async () => {
+    const when = new Date(scheduleAt);
+    if (Number.isNaN(when.getTime())) {
+      setFlash({ tone: 'error', text: 'Pick a valid date and time.' });
+      return;
+    }
+    if (when.getTime() < Date.now()) {
+      setFlash({ tone: 'error', text: 'Scheduled time is in the past — use Send now instead.' });
+      return;
+    }
+    const ok = await run(
+      'Schedule',
+      () => marketingService.scheduleCampaign(id, { ...listBody, scheduled_at: when.toISOString() }),
+      `Scheduled for ${fmtDateTime(when.toISOString())}.`,
+    );
+    if (ok) setDialog(null);
+  };
+
+  const doReject = async () => {
+    const ok = await run(
+      'Reject',
+      () => marketingService.rejectCampaign(id, { reason: rejectReason.trim() || 'Needs changes' }),
+      'Campaign rejected and returned to draft.',
+    );
+    if (ok) setDialog(null);
+  };
+
+  const doRequestApproval = async () => {
+    const ok = await run(
+      'Request approval',
+      () => marketingService.requestApproval(id, { notes: approvalNotes.trim() || undefined }),
+      'Approval requested.',
+    );
+    if (ok) setDialog(null);
+  };
+
+  const doDuplicate = async () => {
+    setBusy('Duplicate');
+    try {
+      const res = await marketingService.duplicateCampaign(id, dupName.trim() ? { name: dupName.trim() } : {});
+      const row = unwrap<Campaign>(res);
+      setDialog(null);
+      router.push(`/dashboard/opsapi-marketing/campaigns/${row.uuid}?tab=content`);
+    } catch (e: unknown) {
+      setFlash({ tone: 'error', text: apiErrorMessage(e, 'Duplicate failed') });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doCancel = async () => {
+    await run('Cancel', () => marketingService.cancelCampaign(id), 'Campaign cancelled. Queued messages were skipped.');
+    setDialog(null);
+  };
+
+  const saveName = async () => {
+    const name = nameDraft.trim();
+    if (!campaign || !name || name === campaign.name) {
+      setRenaming(false);
+      return;
+    }
+    setBusy('Rename');
+    try {
+      const res = await marketingService.updateCampaign(id, { name });
+      setCampaign(normaliseCampaign(unwrap<Campaign>(res)));
+      setRenaming(false);
+    } catch (e: unknown) {
+      setFlash({ tone: 'error', text: apiErrorMessage(e, 'Rename failed') });
+    } finally {
+      setBusy(null);
     }
   };
 
   if (!campaign) {
     return (
-      <div className="p-6">
-        {error ? <p className="text-sm text-destructive">{error}</p> : <p className="text-sm text-muted-foreground">Loading…</p>}
+      <div className="space-y-3 p-6">
+        <Link
+          href="/dashboard/opsapi-marketing/campaigns"
+          className="inline-flex items-center gap-1 text-sm text-secondary-500 hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All campaigns
+        </Link>
+        {loadError ? <Notice tone="error">{loadError}</Notice> : <p className="text-sm text-secondary-500">Loading…</p>}
       </div>
     );
   }
 
-  const selectedList = lists.find((l) => l.uuid === listUuid);
+  const s: CampaignStatus = campaign.status;
+  const editable = EDITABLE_STATUSES.includes(s);
+  const abEditable = AB_EDITABLE_STATUSES.includes(s);
+  const defaultTab: TabKey = LIVE_STATUSES.includes(s) ? 'performance' : 'content';
+  const activeTab: TabKey = tab ?? defaultTab;
+  const isBusy = busy !== null;
+
+  const hasContent =
+    campaign.channel === 'email'
+      ? !!(campaign.subject?.trim() && (campaign.body_html?.trim() || campaign.body_text?.trim()))
+      : !!campaign.body_text?.trim();
+  const hasAudience = !!listUuid || !!campaign.list_id;
+  const steps: { key: TabKey; label: string; done: boolean; hint: string }[] = [
+    { key: 'content', label: 'Content', done: hasContent, hint: hasContent ? 'Ready' : 'Add a subject and body' },
+    { key: 'audience', label: 'Audience', done: hasAudience, hint: hasAudience ? 'List selected' : 'Pick a list' },
+    {
+      key: 'tracking',
+      label: 'Tracking',
+      done: true,
+      hint: campaign.tracking && Object.keys(campaign.tracking).length > 0 ? 'Customised' : 'Defaults (all on)',
+    },
+    {
+      key: 'audience',
+      label: 'Review & validate',
+      done: s === 'validated',
+      hint: s === 'validated' ? 'Validated' : 'Run Validate',
+    },
+  ];
+
+  const canSend = s === 'draft' || s === 'validated' || s === 'scheduled';
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title={campaign.name}
-        description={`${campaign.channel} · ${campaign.status}${campaign.message_type ? ` · ${campaign.message_type}` : ''}`}
-        icon={<Send className="h-6 w-6" />}
-        actions={
-          <Link href="/dashboard/opsapi-marketing/campaigns" className="text-sm text-muted-foreground underline">
-            All campaigns
-          </Link>
-        }
-      />
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <p className="text-xs text-muted-foreground">
-        This page has no draft Save — use Validate, then Send now. The audience list must have contacts (static
-        members, or a dynamic list with a segment rule).
-      </p>
+    <div className="space-y-5 p-6">
+      <Link
+        href="/dashboard/opsapi-marketing/campaigns"
+        className="inline-flex items-center gap-1 text-sm text-secondary-500 hover:underline"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All campaigns
+      </Link>
 
-      <div className="flex flex-wrap gap-2">
-        {(campaign.status === 'draft' || campaign.status === 'validated') && (
-          <Button
-            size="sm"
-            leftIcon={<CheckCircle className="h-4 w-4" />}
-            disabled={busy}
-            onClick={() =>
-              void act(async () => {
-                const res = await marketingService.validateCampaign(id, listUuid ? { list_uuid: listUuid } : {});
-                const data = res.data?.data ?? res.data;
-                if (data?.preview) setPreview(data.preview as Preview);
-              })
-            }
-          >
-            Validate
-          </Button>
-        )}
-        {campaign.status === 'awaiting_approval' && (
-          <>
-            <Button
-              size="sm"
-              leftIcon={<Shield className="h-4 w-4" />}
-              disabled={busy}
-              onClick={() => void act(() => marketingService.approveCampaign(id))}
+      {/* Header */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1">
+          {renaming ? (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveName();
+              }}
             >
-              Approve
-            </Button>
+              <label htmlFor="campaign-name" className="sr-only">
+                Campaign name
+              </label>
+              <input
+                id="campaign-name"
+                className={`${INPUT_CLASS} w-full max-w-md text-lg font-semibold`}
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setRenaming(false);
+                }}
+                maxLength={255}
+                autoFocus
+              />
+              <Button type="submit" size="sm" isLoading={busy === 'Rename'} aria-label="Save name">
+                <Check className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(false)} aria-label="Cancel rename">
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-2xl font-bold tracking-tight text-secondary-900">{campaign.name}</h1>
+              {editable && (
+                <button
+                  type="button"
+                  className="rounded p-1 text-secondary-500 hover:bg-secondary-100"
+                  onClick={() => {
+                    setNameDraft(campaign.name);
+                    setRenaming(true);
+                  }}
+                  aria-label="Rename campaign"
+                  title="Rename"
+                >
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+              <StatusBadge status={s} />
+            </div>
+          )}
+          <p className="text-sm text-secondary-500">
+            {campaign.channel.toUpperCase()}
+            {campaign.message_type ? ` · ${campaign.message_type}` : ''}
+            {s === 'scheduled' && campaign.scheduled_at ? ` · sends ${fmtDateTime(campaign.scheduled_at)}` : ''}
+            {campaign.started_at ? ` · started ${fmtDateTime(campaign.started_at)}` : ''}
+            {campaign.completed_at ? ` · completed ${fmtDateTime(campaign.completed_at)}` : ''}
+            {campaign.max_deliveries ? ` · budget ${fmtInt(campaign.max_deliveries)}` : ''}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2" role="toolbar" aria-label="Campaign actions">
+          {(s === 'draft' || s === 'validated') && (
             <Button
               size="sm"
               variant="outline"
-              disabled={busy}
-              onClick={() => void act(() => marketingService.rejectCampaign(id, { reason: 'Needs changes' }))}
+              leftIcon={<CheckCircle className="h-4 w-4" />}
+              isLoading={busy === 'Validate'}
+              disabled={isBusy}
+              onClick={() => void doValidate()}
             >
+              {s === 'validated' ? 'Re-validate' : 'Validate'}
+            </Button>
+          )}
+          {(s === 'draft' || s === 'validated') && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Shield className="h-4 w-4" />}
+              disabled={isBusy}
+              onClick={() => {
+                setApprovalNotes('');
+                setDialog('approval');
+              }}
+            >
+              Request approval
+            </Button>
+          )}
+          {s === 'awaiting_approval' && (
+            <>
+              <Button
+                size="sm"
+                leftIcon={<ShieldCheck className="h-4 w-4" />}
+                isLoading={busy === 'Approve'}
+                disabled={isBusy}
+                onClick={() =>
+                  void run('Approve', () => marketingService.approveCampaign(id), 'Approved — ready to send.')
+                }
+              >
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<ThumbsDown className="h-4 w-4" />}
+                disabled={isBusy}
+                onClick={() => {
+                  setRejectReason('');
+                  setDialog('reject');
+                }}
+              >
+                Reject
+              </Button>
+            </>
+          )}
+          {canSend && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Calendar className="h-4 w-4" />}
+                disabled={isBusy}
+                onClick={() => {
+                  setScheduleAt(toLocalInput(s === 'scheduled' ? campaign.scheduled_at : null));
+                  setDialog('schedule');
+                }}
+              >
+                {s === 'scheduled' ? 'Reschedule…' : 'Schedule…'}
+              </Button>
+              <Button
+                size="sm"
+                leftIcon={<Send className="h-4 w-4" />}
+                disabled={isBusy}
+                onClick={() => setDialog('send')}
+              >
+                Send now
+              </Button>
+            </>
+          )}
+          {(s === 'sending' || s === 'scheduled') && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Pause className="h-4 w-4" />}
+              isLoading={busy === 'Pause'}
+              disabled={isBusy}
+              onClick={() =>
+                void run('Pause', () => marketingService.pauseCampaign(id), 'Paused. Queued messages are held.')
+              }
+            >
+              Pause
+            </Button>
+          )}
+          {s === 'paused' && (
+            <Button
+              size="sm"
+              leftIcon={<Play className="h-4 w-4" />}
+              isLoading={busy === 'Resume'}
+              disabled={isBusy}
+              onClick={() => void run('Resume', () => marketingService.resumeCampaign(id), 'Resumed.')}
+            >
+              Resume
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<Copy className="h-4 w-4" />}
+            disabled={isBusy}
+            onClick={() => {
+              setDupName(`${campaign.name} (copy)`);
+              setDialog('duplicate');
+            }}
+          >
+            Duplicate
+          </Button>
+          {s !== 'completed' && s !== 'cancelled' && (
+            <Button
+              size="sm"
+              variant="danger"
+              leftIcon={<XCircle className="h-4 w-4" />}
+              disabled={isBusy}
+              onClick={() => setDialog('cancel')}
+            >
+              Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Status context */}
+      {s === 'draft' && campaign.rejected_reason && (
+        <Notice tone="warn">
+          <span className="font-medium">Rejected:</span> {campaign.rejected_reason}
+        </Notice>
+      )}
+      {s === 'awaiting_approval' && (
+        <Notice tone="info">
+          Waiting for approval.{campaign.approval_notes ? ` Notes: ${campaign.approval_notes}` : ''}
+        </Notice>
+      )}
+      {s === 'failed' && <Notice tone="error">This campaign failed. Duplicate it to fix and resend.</Notice>}
+      {flash && (
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <Notice tone={flash.tone}>{flash.text}</Notice>
+          </div>
+          <button
+            type="button"
+            className="mt-1.5 rounded p-1 text-secondary-500 hover:bg-secondary-100"
+            onClick={() => setFlash(null)}
+            aria-label="Dismiss message"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      {validation && validation.warnings.length > 0 && (
+        <Notice tone="warn">
+          <span className="font-medium">Validation warnings:</span>{' '}
+          {validation.warnings.map((w) => w.replace(/_/g, ' ')).join(', ')}
+        </Notice>
+      )}
+
+      {/* Draft checklist */}
+      {(s === 'draft' || s === 'validated') && (
+        <nav aria-label="Campaign setup steps">
+          <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {steps.map((st, i) => (
+              <li key={st.label}>
+                <button
+                  type="button"
+                  onClick={() => setTab(st.key)}
+                  className="flex w-full items-center gap-3 rounded-lg border border-secondary-200 p-3 text-left hover:bg-secondary-100/60"
+                >
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                      st.done
+                        ? 'bg-green-600 text-white dark:bg-green-500'
+                        : 'border border-secondary-200 text-secondary-500'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {st.done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">
+                      {st.label}
+                      <span className="sr-only">{st.done ? ' (done)' : ' (to do)'}</span>
+                    </span>
+                    <span className="block truncate text-xs text-secondary-500">{st.hint}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
+
+      {/* Tabs */}
+      <div role="tablist" aria-label="Campaign workspace" className="flex gap-1 overflow-x-auto border-b border-secondary-200">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            id={`tab-${t.key}`}
+            aria-selected={activeTab === t.key}
+            aria-controls={`panel-${t.key}`}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm ${
+              activeTab === t.key
+                ? 'border-primary-500 font-medium text-secondary-900'
+                : 'border-transparent text-secondary-500 hover:text-secondary-900'
+            }`}
+          >
+            {t.icon}
+            {t.label}
+            {t.key === 'ab' && campaign.ab_config?.enabled && (
+              <span className="rounded bg-secondary-100 px-1 text-[10px] font-medium">ON</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'performance' && (
+        <div role="tabpanel" id="panel-performance" aria-labelledby="tab-performance">
+          {s === 'draft' || s === 'validated' || s === 'awaiting_approval' ? (
+            <p className="text-sm text-secondary-500">
+              No sends yet. Performance appears here once the campaign starts sending.
+            </p>
+          ) : (
+            <PerformanceTab campaignUuid={campaign.uuid} refreshKey={refreshKey} live={s === 'sending'} />
+          )}
+        </div>
+      )}
+      {/* Editing tabs stay mounted so unsaved edits survive switching tabs. */}
+      <div role="tabpanel" id="panel-content" aria-labelledby="tab-content" hidden={activeTab !== 'content'}>
+        <ContentTab campaign={campaign} editable={editable} onSaved={onSaved} />
+      </div>
+      <div role="tabpanel" id="panel-audience" aria-labelledby="tab-audience" hidden={activeTab !== 'audience'}>
+        <AudienceTab
+          campaign={campaign}
+          lists={lists}
+          listUuid={listUuid}
+          onListChange={setListUuid}
+          editable={editable}
+          onSaved={onSaved}
+          initialPreview={validation?.preview ?? null}
+        />
+      </div>
+      <div role="tabpanel" id="panel-tracking" aria-labelledby="tab-tracking" hidden={activeTab !== 'tracking'}>
+        <TrackingTab campaign={campaign} editable={editable} onSaved={onSaved} />
+      </div>
+      <div role="tabpanel" id="panel-ab" aria-labelledby="tab-ab" hidden={activeTab !== 'ab'}>
+        <AbTestTab campaign={campaign} editable={abEditable} onSaved={onSaved} />
+      </div>
+
+      {/* Dialogs */}
+      <Modal
+        isOpen={dialog === 'schedule'}
+        onClose={() => setDialog(null)}
+        title={s === 'scheduled' ? 'Reschedule campaign' : 'Schedule campaign'}
+        description={
+          s === 'draft' ? 'The campaign is validated first; sending starts automatically at this time.' : undefined
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialog(null)}>
+              Close
+            </Button>
+            <Button
+              leftIcon={<Calendar className="h-4 w-4" />}
+              onClick={() => void doSchedule()}
+              isLoading={busy === 'Schedule'}
+              disabled={!scheduleAt}
+            >
+              Schedule
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-sm">
+          <span className="font-medium">Send at (your local time)</span>
+          <input
+            type="datetime-local"
+            className={`${INPUT_CLASS} mt-1 block w-full`}
+            value={scheduleAt}
+            onChange={(e) => setScheduleAt(e.target.value)}
+          />
+        </label>
+        {!hasAudience && (
+          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+            No audience list selected — choose one on the Audience tab first.
+          </p>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={dialog === 'reject'}
+        onClose={() => setDialog(null)}
+        title="Reject campaign"
+        description="The campaign returns to draft with your reason shown to its author."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialog(null)}>
+              Close
+            </Button>
+            <Button variant="danger" onClick={() => void doReject()} isLoading={busy === 'Reject'}>
               Reject
             </Button>
           </>
-        )}
-        {(campaign.status === 'validated' || campaign.status === 'draft') && (
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void act(() =>
-                marketingService.scheduleCampaign(id, {
-                  list_uuid: listUuid || undefined,
-                  send_now: true,
-                }),
-              )
-            }
-          >
-            Send now
-          </Button>
-        )}
-        {(campaign.status === 'sending' || campaign.status === 'scheduled') && (
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<Pause className="h-4 w-4" />}
-            disabled={busy}
-            onClick={() => void act(() => marketingService.pauseCampaign(id))}
-          >
-            Pause
-          </Button>
-        )}
-        {campaign.status === 'paused' && (
-          <Button
-            size="sm"
-            leftIcon={<Play className="h-4 w-4" />}
-            disabled={busy}
-            onClick={() => void act(() => marketingService.resumeCampaign(id))}
-          >
-            Resume
-          </Button>
-        )}
-        {campaign.status !== 'completed' && campaign.status !== 'cancelled' && (
-          <Button
-            size="sm"
-            variant="danger"
-            leftIcon={<XCircle className="h-4 w-4" />}
-            disabled={busy}
-            onClick={() => void act(() => marketingService.cancelCampaign(id))}
-          >
-            Cancel
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          leftIcon={<Copy className="h-4 w-4" />}
-          disabled={busy}
-          onClick={() => void act(() => marketingService.duplicateCampaign(id))}
-        >
-          Duplicate
-        </Button>
-      </div>
+        }
+      >
+        <label className="block text-sm">
+          <span className="font-medium">Reason</span>
+          <textarea
+            className={`${INPUT_CLASS} mt-1 block h-24 w-full`}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="What needs to change?"
+          />
+        </label>
+      </Modal>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-3 rounded-lg border border-border p-4">
-          <h2 className="text-sm font-medium">Audience</h2>
-          <label className="block text-sm">
-            List
-            <select
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5"
-              value={listUuid}
-              onChange={(e) => setListUuid(e.target.value)}
+      <Modal
+        isOpen={dialog === 'approval'}
+        onClose={() => setDialog(null)}
+        title="Request approval"
+        description="An approver must approve before this campaign can be sent."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialog(null)}>
+              Close
+            </Button>
+            <Button
+              leftIcon={<Shield className="h-4 w-4" />}
+              onClick={() => void doRequestApproval()}
+              isLoading={busy === 'Request approval'}
             >
-              <option value="">— select —</option>
-              {lists.map((l) => (
-                <option key={l.uuid} value={l.uuid}>
-                  {l.name}
-                  {l.list_type ? ` (${l.list_type})` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedList?.list_type === 'dynamic' && (
-            <p className="text-xs text-amber-800 dark:text-amber-200">
-              Dynamic lists need a segment rule, then Validate will sync members automatically.
-            </p>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              void act(async () => {
-                const res = await marketingService.audiencePreview(id, listUuid ? { list_uuid: listUuid } : {});
-                setPreview((res.data?.data ?? res.data) as Preview);
-              })
-            }
-          >
-            Preview eligibility
-          </Button>
-          {preview && (
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Audience</dt>
-                <dd className="font-medium">{preview.audience_total}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Eligible</dt>
-                <dd className="font-medium text-green-700 dark:text-green-400">{preview.eligible}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Suppressed</dt>
-                <dd>{preview.suppressed}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">No consent</dt>
-                <dd>{preview.no_consent}</dd>
-              </div>
-              {!preview.exact && (
-                <p className="col-span-2 text-xs text-muted-foreground">Counts extrapolated from a sample.</p>
-              )}
-            </dl>
-          )}
-        </div>
+              Request approval
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-sm">
+          <span className="font-medium">Notes for the approver (optional)</span>
+          <textarea
+            className={`${INPUT_CLASS} mt-1 block h-24 w-full`}
+            value={approvalNotes}
+            onChange={(e) => setApprovalNotes(e.target.value)}
+          />
+        </label>
+      </Modal>
 
-        <div className="space-y-3 rounded-lg border border-border p-4">
-          <h2 className="text-sm font-medium">Delivery</h2>
-          <p className="text-sm">
-            Subject: <span className="font-medium">{campaign.subject || '—'}</span>
-          </p>
-          {campaign.max_deliveries && (
-            <p className="text-sm text-muted-foreground">Budget: max {campaign.max_deliveries} deliveries</p>
-          )}
-          {stats && (
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Total rows</dt>
-                <dd className="font-medium">{stats.total}</dd>
-              </div>
-              {Object.entries(stats.by_state || {}).map(([k, v]) => (
-                <div key={k}>
-                  <dt className="text-muted-foreground">{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {stats?.by_variant && Object.keys(stats.by_variant).length > 0 && (
-            <div className="text-sm">
-              <p className="mb-1 font-medium">A/B variants</p>
-              {Object.entries(stats.by_variant).map(([k, v]) => (
-                <p key={k} className="text-muted-foreground">
-                  {k}: {v.total ?? 0} ({v.accepted || 0} accepted)
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      <Modal
+        isOpen={dialog === 'duplicate'}
+        onClose={() => setDialog(null)}
+        title="Duplicate campaign"
+        description="Creates a new draft with the same content, list, tracking and A/B settings."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialog(null)}>
+              Close
+            </Button>
+            <Button
+              leftIcon={<Copy className="h-4 w-4" />}
+              onClick={() => void doDuplicate()}
+              isLoading={busy === 'Duplicate'}
+            >
+              Duplicate
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-sm">
+          <span className="font-medium">New campaign name</span>
+          <input
+            className={`${INPUT_CLASS} mt-1 block w-full`}
+            value={dupName}
+            onChange={(e) => setDupName(e.target.value)}
+            maxLength={255}
+          />
+        </label>
+      </Modal>
+
+      <ConfirmDialog
+        isOpen={dialog === 'send'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => void doSendNow()}
+        title="Send now?"
+        message={
+          validation?.preview
+            ? `This sends to about ${fmtInt(validation.preview.eligible)} eligible contacts immediately. Consent and suppressions are re-checked per contact.`
+            : 'This validates the campaign (if needed) and starts sending to every eligible contact immediately.'
+        }
+        confirmText="Send now"
+        variant="warning"
+        isLoading={busy === 'Send'}
+      />
+
+      <ConfirmDialog
+        isOpen={dialog === 'cancel'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => void doCancel()}
+        title="Cancel campaign?"
+        message="Cancelling is permanent. Messages not yet sent are skipped. Already-sent messages are not recalled."
+        confirmText="Cancel campaign"
+        cancelText="Keep campaign"
+        variant="danger"
+        isLoading={busy === 'Cancel'}
+      />
     </div>
   );
 }

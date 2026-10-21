@@ -13,7 +13,7 @@ export default function MarketingSettingsPage() {
         description="Channel providers, rates and quiet hours are configured per workspace."
         icon={<Settings className="h-6 w-6" />}
       />
-      <p className="text-sm text-muted-foreground max-w-xl">
+      <p className="text-sm text-secondary-500 max-w-xl">
         Open{' '}
         <Link href="/dashboard/settings/plugins" className="underline underline-offset-2">
           Workspace → Plugins → Marketing Cloud

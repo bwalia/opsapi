@@ -20,6 +20,10 @@ return function(app)
         return sdk.ok(Analytics.campaign(ns, campaign.id))
     end))
 
+    app:get("/analytics/attribution", sdk.handler({ permission = "opsapi_marketing_analytics.read" }, function(self)
+        return sdk.ok(Analytics.attribution(sdk.namespace_id(self), self.params.days))
+    end))
+
     app:get("/analytics/contacts/:contact_uuid", sdk.handler({ permission = "opsapi_marketing_analytics.read" }, function(self)
         local ns = sdk.namespace_id(self)
         return sdk.ok(Analytics.contact_timeline(ns, self.params.contact_uuid, self.params.limit))
