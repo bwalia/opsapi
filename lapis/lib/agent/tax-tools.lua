@@ -25,6 +25,7 @@
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local http = require("resty.http")
 local TaxCalc = require("lib.tax-calc")
 
 local TaxTools = {}
@@ -60,6 +61,34 @@ local function money(n) return string.format("£%.2f", tonumber(n) or 0) end
 
 local function year_of(ctx, args)
     return (args and args.tax_year) or ctx.tax_year or TaxCalc.current_tax_year()
+end
+
+-- Authenticated internal call to an existing HMRC route, AS the user (forwards
+-- their JWT + namespace headers). Reuses the tested filing endpoints rather than
+-- re-implementing the binding HMRC sequence. 120s: HMRC trigger+poll can be slow.
+local function hmrc_api(ctx, method, path, body)
+    local httpc = http.new()
+    httpc:set_timeout(120000)
+    local headers = { ["Content-Type"] = "application/json", ["Accept"] = "application/json" }
+    for k, v in pairs(ctx.forward_headers or {}) do headers[k] = v end
+    local res, err = httpc:request_uri("http://127.0.0.1:" .. (ctx.port or 80) .. path, {
+        method = method,
+        headers = headers,
+        body = body and cjson.encode(body) or nil,
+    })
+    if not res then return nil, "Couldn't reach HMRC: " .. tostring(err) end
+    local ok, decoded = pcall(cjson.decode, res.body or "")
+    decoded = ok and decoded or {}
+    return { status = res.status, data = decoded.data or decoded, raw = decoded }
+end
+
+-- Turn an HMRC error envelope into one readable sentence for the model to relay.
+local function hmrc_error(r)
+    local e = r.raw or {}
+    local msg = e.error or e.message or ("HMRC returned HTTP " .. tostring(r.status))
+    if type(e.detail) == "string" and e.detail ~= "" then msg = msg .. " (" .. e.detail .. ")" end
+    if type(e.hmrc) == "table" and e.hmrc.code then msg = msg .. " [" .. tostring(e.hmrc.code) .. "]" end
+    return msg
 end
 
 -- ============================ tools ============================
@@ -323,11 +352,12 @@ register({
     end,
 })
 
--- Read-only HMRC connection status (actual filing is a later phase).
+-- HMRC connection status. The OAuth connect itself is NOT in chat — it happens
+-- on the Tax → File screen — so this tells the agent whether a preview can run.
 register({
     name = "hmrc_status",
-    description = "Check whether the user has connected their HMRC account. Read-only; "
-        .. "filing to HMRC is not available in the chat yet.",
+    description = "Check whether the user has connected their HMRC account. Call before "
+        .. "offering a preview. The HMRC connection itself is done on the Tax → File screen.",
     perms = { { "tax_file", "access" } },
     parameters = { type = "object", properties = {} },
     handler = function(ctx)
@@ -335,9 +365,56 @@ register({
         local connected = rows and rows[1] ~= nil
         return {
             connected = connected,
-            note = connected and "HMRC is connected. Submitting the return in chat is coming soon; "
-                    .. "for now the user can file from the Tax → File screen."
-                or "Not connected to HMRC yet. The user can connect from the Tax → File screen.",
+            note = connected and "HMRC is connected — you can run a non-binding preview calculation. Filing the "
+                    .. "final return is done on the Tax → File screen."
+                or "Not connected to HMRC yet. Ask the user to connect on the Tax → File screen, then come back.",
+        }
+    end,
+})
+
+-- HMRC obligations (what updates/declarations are due for the year). Read-only.
+register({
+    name = "get_obligations",
+    description = "Fetch the user's HMRC Self Assessment obligations for the tax year "
+        .. "(what's due). Requires an HMRC connection.",
+    perms = { { "tax_file", "access" } },
+    parameters = {
+        type = "object",
+        properties = { tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." } },
+    },
+    handler = function(ctx, args)
+        local tax_year = year_of(ctx, args)
+        local r, err = hmrc_api(ctx, "POST", "/api/v2/hmrc/obligations/fetch", { tax_year = tax_year })
+        if not r then return nil, err end
+        if r.status >= 400 then return nil, hmrc_error(r) end
+        return { tax_year = tax_year, obligations = r.data }
+    end,
+})
+
+-- Non-binding: submit the period figures to HMRC and return HMRC's OWN calculated
+-- figures (the authoritative numbers, as a preview — does NOT file the return).
+register({
+    name = "preview_calculation",
+    description = "Send the user's figures to HMRC for a NON-BINDING calculation and return "
+        .. "HMRC's own calculated tax for the year. Does NOT file the return. Requires an HMRC "
+        .. "connection; tell the user you're sending their figures to HMRC for a preview first.",
+    perms = { { "tax_file", "access" } },
+    parameters = {
+        type = "object",
+        properties = { tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." } },
+    },
+    handler = function(ctx, args)
+        local tax_year = year_of(ctx, args)
+        local r, err = hmrc_api(ctx, "POST", "/api/v2/tax/hmrc/calculate-preview", { tax_year = tax_year })
+        if not r then return nil, err end
+        if r.status >= 400 then return nil, hmrc_error(r) end
+        return {
+            tax_year = tax_year,
+            calculation_id = r.data.calculation_id,
+            figures = r.data.figures,
+            sandbox_placeholder = r.data.sandbox_placeholder,
+            note = "These are HMRC's non-binding calculated figures — not filed. To file the return, "
+                .. "the user uses the Tax → File screen.",
         }
     end,
 })
