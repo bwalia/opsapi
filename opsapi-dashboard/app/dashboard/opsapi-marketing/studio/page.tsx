@@ -237,7 +237,7 @@ export default function MarketingStudioPage() {
         }
       />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-error-600">{error}</p>}
       {warnings.length > 0 && (
         <ul className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
           {warnings.map((w) => (
@@ -250,7 +250,7 @@ export default function MarketingStudioPage() {
         <aside className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium">Templates</h2>
-            <button type="button" className="text-xs text-muted-foreground underline" onClick={newDraft}>
+            <button type="button" className="text-xs text-secondary-500 underline" onClick={newDraft}>
               New
             </button>
           </div>
@@ -260,19 +260,19 @@ export default function MarketingStudioPage() {
                 <button
                   type="button"
                   onClick={() => selectTemplate(t)}
-                  className={`w-full rounded px-2 py-1.5 text-left hover:bg-muted ${
-                    selected?.uuid === t.uuid ? 'bg-muted font-medium' : ''
+                  className={`w-full rounded px-2 py-1.5 text-left hover:bg-secondary-100 ${
+                    selected?.uuid === t.uuid ? 'bg-secondary-100 font-medium' : ''
                   }`}
                 >
                   <span className="block truncate">{t.name}</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-secondary-500">
                     {t.channel} · {t.status || 'draft'}
                   </span>
                 </button>
               </li>
             ))}
             {templates.length === 0 && (
-              <li className="text-xs text-muted-foreground">No templates yet. Seed defaults or create one.</li>
+              <li className="text-xs text-secondary-500">No templates yet. Seed defaults or create one.</li>
             )}
           </ul>
         </aside>
@@ -282,7 +282,7 @@ export default function MarketingStudioPage() {
             <label className="text-sm">
               Channel
               <select
-                className="ml-2 rounded border border-border bg-background px-2 py-1"
+                className="ml-2 rounded border border-secondary-200 bg-surface px-2 py-1"
                 value={channel}
                 onChange={(e) => setChannel(e.target.value as 'email' | 'sms')}
               >
@@ -293,7 +293,7 @@ export default function MarketingStudioPage() {
             <label className="flex-1 text-sm">
               Name
               <input
-                className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5"
+                className="mt-1 w-full rounded border border-secondary-200 bg-surface px-3 py-1.5"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -305,7 +305,7 @@ export default function MarketingStudioPage() {
               <label className="block text-sm">
                 Subject
                 <input
-                  className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5"
+                  className="mt-1 w-full rounded border border-secondary-200 bg-surface px-3 py-1.5"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                   placeholder="{{contact.first_name}}, your update"
@@ -314,7 +314,7 @@ export default function MarketingStudioPage() {
               <label className="block text-sm">
                 Preview text
                 <input
-                  className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5"
+                  className="mt-1 w-full rounded border border-secondary-200 bg-surface px-3 py-1.5"
                   value={previewText}
                   onChange={(e) => setPreviewText(e.target.value)}
                 />
@@ -323,7 +323,7 @@ export default function MarketingStudioPage() {
               <label className="block text-sm">
                 Plain-text alternative
                 <textarea
-                  className="mt-1 w-full rounded border border-border bg-background px-3 py-2 font-mono text-xs"
+                  className="mt-1 w-full rounded border border-secondary-200 bg-surface px-3 py-2 font-mono text-xs"
                   rows={3}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
@@ -336,7 +336,7 @@ export default function MarketingStudioPage() {
             <label className="block text-sm">
               SMS body ({text.length}/1600)
               <textarea
-                className="mt-1 w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm"
+                className="mt-1 w-full rounded border border-secondary-200 bg-surface px-3 py-2 font-mono text-sm"
                 rows={6}
                 maxLength={1600}
                 value={text}
@@ -352,13 +352,13 @@ export default function MarketingStudioPage() {
           {preview && (
             <div
               ref={previewRef}
-              className="rounded-lg border border-border bg-muted/20 p-4"
+              className="rounded-lg border border-secondary-200 bg-secondary-100/20 p-4"
               data-testid="marketing-studio-preview"
             >
               <h3 className="mb-1 text-sm font-medium">
                 Preview{preview.opens_estimated ? ' · opens estimated' : ''}
               </h3>
-              <p className="mb-3 text-xs text-muted-foreground">
+              <p className="mb-3 text-xs text-secondary-500">
                 Sample recipient: Alex Example · merge fields filled with demo data (not sent).
               </p>
               <p className="mb-2 text-sm font-medium">
@@ -366,7 +366,7 @@ export default function MarketingStudioPage() {
                 {preview.subject?.trim() ? (
                   preview.subject
                 ) : (
-                  <span className="font-normal text-muted-foreground">(none)</span>
+                  <span className="font-normal text-secondary-500">(none)</span>
                 )}
               </p>
               {preview.html ? (
@@ -385,7 +385,7 @@ export default function MarketingStudioPage() {
 
         <aside className="space-y-3">
           <h2 className="text-sm font-medium">Merge fields</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary-500">
             Only registry keys are allowed. Values are HTML-escaped unless marked rich.
           </p>
           <ul className="max-h-[40vh] space-y-1 overflow-y-auto text-sm">
@@ -393,12 +393,12 @@ export default function MarketingStudioPage() {
               <li key={f.key}>
                 <button
                   type="button"
-                  className="w-full rounded border border-transparent px-2 py-1 text-left hover:border-border hover:bg-muted"
+                  className="w-full rounded border border-transparent px-2 py-1 text-left hover:border-secondary-200 hover:bg-secondary-100"
                   onClick={() => insertMerge(f.key)}
                   title={f.key}
                 >
                   <span className="font-medium">{f.label}</span>
-                  <span className="block font-mono text-xs text-muted-foreground">{`{{${f.key}}}`}</span>
+                  <span className="block font-mono text-xs text-secondary-500">{`{{${f.key}}}`}</span>
                 </button>
               </li>
             ))}

@@ -160,15 +160,21 @@ return function(app)
                         email, phone ~= "" and phone or db.NULL, owner)
                     contact = { uuid = uuid }
                     created = created + 1
-                    if body.grant_consent == true then
-                        E.opt_in(ns, uuid, list.channel or "email", {
-                            list_id = list.id,
-                            source = "csv_import",
-                            legal_basis = body.legal_basis or "consent",
-                            evidence = "csv_import_row_" .. r,
-                            actor_uuid = owner,
-                        })
-                    end
+                end
+                -- Record consent for new contacts and for existing ones with no prior
+                -- decision on this channel; never override an earlier opt-out.
+                local channel = list.channel or "email"
+                if body.grant_consent == true and not U.one([[
+                    SELECT id FROM mkt_subscriptions WHERE namespace_id = ? AND contact_uuid = ? AND channel = ?
+                    LIMIT 1
+                ]], ns, contact.uuid, channel) then
+                    E.opt_in(ns, contact.uuid, channel, {
+                        list_id = list.id,
+                        source = "csv_import",
+                        legal_basis = body.legal_basis or "consent",
+                        evidence = "csv_import_row_" .. r,
+                        actor_uuid = owner,
+                    })
                 end
                 db.query([[
                     INSERT INTO mkt_list_members (namespace_id, list_id, contact_uuid, source)

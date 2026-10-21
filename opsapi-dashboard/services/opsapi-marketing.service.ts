@@ -45,6 +45,9 @@ export const marketingService = {
   addListMember: (id: string, contact_uuid: string) =>
     apiClient.post(`${BASE}/lists/${id}/members`, { contact_uuid }, JSON_BODY),
   listMembers: (id: string) => apiClient.get(`${BASE}/lists/${id}/members`),
+  removeListMember: (id: string, contactUuid: string) =>
+    apiClient.delete(`${BASE}/lists/${id}/members/${contactUuid}`),
+  deleteList: (id: string) => apiClient.delete(`${BASE}/lists/${id}`),
 
   listTemplates: (params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/templates`, { params }),
@@ -92,6 +95,26 @@ export const marketingService = {
   campaignAnalytics: (id: string) => apiClient.get(`${BASE}/analytics/campaigns/${id}`),
   contactTimeline: (contactUuid: string, params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/analytics/contacts/${contactUuid}`, { params }),
+
+  attribution: (params?: { days?: number }) => apiClient.get(`${BASE}/analytics/attribution`, { params }),
+
+  listPixels: () => apiClient.get(`${BASE}/pixels`),
+  getPixel: (id: string) => apiClient.get(`${BASE}/pixels/${id}`),
+  createPixel: (body: { name: string; allowed_domains?: string[]; attribution_window_days?: number }) =>
+    apiClient.post(`${BASE}/pixels`, body, JSON_BODY),
+  updatePixel: (
+    id: string,
+    body: { name?: string; allowed_domains?: string[]; attribution_window_days?: number; is_active?: boolean },
+  ) => apiClient.put(`${BASE}/pixels/${id}`, body, JSON_BODY),
+  deletePixel: (id: string) => apiClient.delete(`${BASE}/pixels/${id}`),
+  rotatePixelKey: (id: string) => apiClient.post(`${BASE}/pixels/${id}/rotate-key`, {}, JSON_BODY),
+  pixelSnippet: (id: string) => apiClient.get(`${BASE}/pixels/${id}/snippet`),
+  pixelEvents: (id: string, params?: { limit?: number; after_id?: number }) =>
+    apiClient.get(`${BASE}/pixels/${id}/events`, { params }),
+  pixelTestEvent: (id: string, body?: { event?: string; url?: string }) =>
+    apiClient.post(`${BASE}/pixels/${id}/test-event`, body || {}, JSON_BODY),
+  pixelStats: (id: string, params?: { days?: number }) => apiClient.get(`${BASE}/pixels/${id}/stats`, { params }),
+  pixelForwards: (params?: { limit?: number }) => apiClient.get(`${BASE}/pixel-forwards`, { params }),
 
   listReplies: (params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/replies`, { params }),

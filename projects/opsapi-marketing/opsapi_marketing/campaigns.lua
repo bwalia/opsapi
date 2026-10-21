@@ -29,6 +29,10 @@ local function sdk_emit(ns, name, data)
     end)
 end
 
+function C.editable(status)
+    return EDITABLE[status] == true
+end
+
 function C.find(ns, id)
     if U.is_uuid(id) then
         return U.one("SELECT * FROM mkt_campaigns WHERE namespace_id = ? AND uuid = ?", ns, id)
@@ -361,8 +365,8 @@ function C.duplicate(ns, campaign_id, name)
         INSERT INTO mkt_campaigns
             (namespace_id, name, objective, channel, message_type, status, list_id, template_id,
              subject, preview_text, body_html, body_text, from_email, from_name, reply_to,
-             approval_required, exclusion_rules, ab_config, max_deliveries)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             approval_required, exclusion_rules, ab_config, max_deliveries, tracking)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
     ]], ns, name or (row.name .. " (copy)"), nvl(row.objective), row.channel, row.message_type,
         nvl(row.list_id), nvl(row.template_id), nvl(row.subject), nvl(row.preview_text),
@@ -370,7 +374,8 @@ function C.duplicate(ns, campaign_id, name)
         nvl(row.reply_to), row.approval_required == true,
         type(row.exclusion_rules) == "string" and row.exclusion_rules or cjson.encode(U.json(row.exclusion_rules) or {}),
         type(row.ab_config) == "string" and row.ab_config or cjson.encode(U.json(row.ab_config) or {}),
-        nvl(row.max_deliveries))[1]
+        nvl(row.max_deliveries),
+        type(row.tracking) == "string" and row.tracking or cjson.encode(U.json(row.tracking) or {}))[1]
     return created
 end
 
@@ -446,5 +451,4 @@ function C.budget_remaining(campaign)
     return math.max(0, max - (sent and sent.n or 0))
 end
 
-assert(EDITABLE)
 return C

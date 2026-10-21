@@ -13,40 +13,80 @@ local cjson = require("cjson")
 local db = require("lapis.db")
 
 return function(app)
-    sdk.crud(app, "/campaigns", {
+    -- status is driven only by the lifecycle routes below (validate/approve/schedule/...),
+    -- never by create/update — otherwise an update could skip validation or approval.
+    local FIELDS = {
+        name = { type = "string", required = true },
+        objective = { type = "text" },
+        channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
+        message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
+        subject = { type = "string", max = 998 },
+        preview_text = { type = "string", max = 255 },
+        body_html = { type = "text" },
+        body_text = { type = "text" },
+        from_email = { type = "email" },
+        from_name = { type = "string" },
+        reply_to = { type = "email" },
+        scheduled_at = { type = "datetime" },
+        approval_required = { type = "boolean" },
+        max_deliveries = { type = "integer", min = 1 },
+        -- { track_opens, track_clicks, attribution, utm = { enabled, source, medium, campaign, content },
+        --   goal_event }
+        tracking = { type = "json" },
+    }
+
+    local R = sdk.crud(app, "/campaigns", {
         table = "mkt_campaigns",
         module = "opsapi_marketing_campaigns",
-        fields = {
-            name = { type = "string", required = true },
-            objective = { type = "text" },
-            channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
-            message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
-            status = { type = "string", enum = {
-                "draft", "validated", "awaiting_approval", "scheduled", "sending",
-                "completed", "paused", "cancelled", "failed",
-            } },
-            subject = { type = "string", max = 998 },
-            preview_text = { type = "string", max = 255 },
-            body_html = { type = "text" },
-            body_text = { type = "text" },
-            from_email = { type = "email" },
-            from_name = { type = "string" },
-            reply_to = { type = "email" },
-            scheduled_at = { type = "datetime" },
-            approval_required = { type = "boolean" },
-            max_deliveries = { type = "integer", min = 1 },
-        },
+        only = { "list", "show", "create", "delete" },
+        fields = FIELDS,
         searchable = { "name", "subject", "status", "channel" },
         filterable = { "status", "channel", "message_type" },
         sortable = { "name", "status", "channel", "scheduled_at", "created_at", "updated_at" },
         ui = {
             label = "Campaigns",
-            columns = { "name", "channel", "status", "message_type", "scheduled_at" },
+            columns = { "name", "channel", "message_type", "scheduled_at" },
             form = { "name", "channel", "message_type", "subject", "preview_text",
                      "from_email", "from_name", "body_html", "body_text", "scheduled_at",
                      "approval_required", "max_deliveries", "objective" },
         },
     })
+
+    -- What changes the message or who gets it: re-validation (and re-approval) required.
+    local REVALIDATE = {
+        channel = true, message_type = true, subject = true, preview_text = true, body_html = true,
+        body_text = true, from_email = true, from_name = true, reply_to = true, approval_required = true,
+    }
+
+    app:put("/campaigns/:id", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local campaign = Camp.find(ns, self.params.id)
+        if not campaign then return sdk.not_found("campaign") end
+        if not Camp.editable(campaign.status) then
+            return sdk.error(409, "Campaign can't be edited while " .. tostring(campaign.status)
+                .. " — pause it first, or duplicate it.", { code = "not_editable" })
+        end
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
+        local data, errors = sdk.validate(body, FIELDS, true)
+        if not data then return sdk.error(422, "Validation failed", errors) end
+        local row, status, msg = R.update(ns, campaign.uuid, data)
+        if status then return sdk.error(status, msg) end
+        if not row then return sdk.not_found("campaign") end
+
+        local changed = false
+        for k in pairs(data) do
+            if REVALIDATE[k] then changed = true end
+        end
+        if changed and (campaign.status == "validated" or campaign.status == "awaiting_approval") then
+            db.query([[
+                UPDATE mkt_campaigns SET status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = NOW()
+                WHERE id = ?
+            ]], campaign.id)
+            row = Camp.find(ns, campaign.id)
+        end
+        return sdk.ok(row)
+    end))
 
     app:get("/campaigns/:id/stats", sdk.handler({ permission = "opsapi_marketing_campaigns.read" }, function(self)
         local ns = sdk.namespace_id(self)
