@@ -1,0 +1,285 @@
+'use client';
+
+/**
+ * File my tax — conversational agent.
+ *
+ * One chat that drives UK self-assessment prep end to end: the AI asks the
+ * profile, asks for a bank statement (uploaded + classified via the existing tax
+ * endpoints), reviews the classifications and shows a DETERMINISTIC running tax
+ * estimate (computed server-side by lib/tax-calc — never by the model).
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
+import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { formatCurrency } from '@/lib/utils';
+import taxAgentService, { type TaxEstimate, type UploadPrompt } from '@/services/tax-agent.service';
+import taxService from '@/services/tax.service';
+
+interface ChatMsg {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  uploadPrompt?: UploadPrompt | null;
+}
+
+let msgSeq = 0;
+const newId = () => `m${Date.now()}_${msgSeq++}`;
+
+function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
+  if (!estimate) {
+    return (
+      <div className="rounded-xl border border-secondary-200 bg-secondary-50 p-5 text-sm text-secondary-500">
+        Your estimated tax will appear here as we go — once we&apos;ve classified some transactions.
+      </div>
+    );
+  }
+  const row = (label: string, value: string, strong = false) => (
+    <div className="flex items-center justify-between py-1.5">
+      <span className={strong ? 'font-medium text-secondary-900' : 'text-secondary-600'}>{label}</span>
+      <span className={strong ? 'font-semibold text-secondary-900' : 'text-secondary-800'}>{value}</span>
+    </div>
+  );
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50 to-white p-5">
+      <div className="text-xs font-medium uppercase tracking-wide text-indigo-500">Estimated tax {estimate.tax_year}</div>
+      <div className="mt-1 text-3xl font-bold text-indigo-700">{formatCurrency(estimate.total_tax_due)}</div>
+      <div className="mt-0.5 text-xs text-secondary-500">Estimate only — the figure HMRC confirms at filing is the one that counts.</div>
+      <div className="mt-4 divide-y divide-secondary-100 text-sm">
+        {row('Income', formatCurrency(estimate.gross_income))}
+        {row('Allowable expenses', formatCurrency(estimate.total_expenses))}
+        {row('Taxable profit', formatCurrency(estimate.trading_profit), true)}
+        {row('Personal allowance', formatCurrency(estimate.personal_allowance))}
+        {row('Income tax', formatCurrency(estimate.income_tax.total))}
+        {row('National Insurance', formatCurrency(estimate.national_insurance.total))}
+        {row('Effective rate', `${estimate.effective_rate}%`)}
+      </div>
+      {!!estimate.unreviewed_count && estimate.unreviewed_count > 0 && (
+        <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {estimate.unreviewed_count} transaction{estimate.unreviewed_count === 1 ? '' : 's'} still need review — the estimate will firm up once they&apos;re categorised.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaxAgentChat() {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [estimate, setEstimate] = useState<TaxEstimate | null>(null);
+  const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, busy]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await taxAgentService.createSession();
+        if (cancelled) return;
+        setSessionId(s.id);
+        const existing: ChatMsg[] = (s.messages || []).map((m) => ({
+          id: newId(), role: m.role, text: m.text, uploadPrompt: m.upload_prompt,
+        }));
+        if (existing.length === 0) {
+          existing.push({
+            id: newId(), role: 'assistant',
+            text: "Hi! I'll help you get your tax sorted. To start — are you self-employed, a landlord, both, or something else?",
+          });
+        }
+        setMessages(existing);
+        setAwaitingConfirm(s.pending?.summary ?? null);
+      } catch {
+        toast.error('Could not start the tax assistant.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const applyTurn = useCallback((turn: Awaited<ReturnType<typeof taxAgentService.sendMessage>>) => {
+    setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: turn.message, uploadPrompt: turn.upload_prompt }]);
+    if (turn.estimate) setEstimate(turn.estimate);
+    setAwaitingConfirm(turn.awaiting_confirm ? (turn.confirm_card?.summary ?? 'Confirm this change?') : null);
+  }, []);
+
+  const send = useCallback(async (text: string) => {
+    if (!sessionId || !text.trim() || busy) return;
+    setMessages((prev) => [...prev, { id: newId(), role: 'user', text }]);
+    setInput('');
+    setBusy(true);
+    try {
+      applyTurn(await taxAgentService.sendMessage(sessionId, text));
+    } catch {
+      toast.error('The assistant did not respond. Please try again.');
+      setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: 'Sorry — something went wrong. Please try again.' }]);
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, busy, applyTurn]);
+
+  const confirm = useCallback(async (approve: boolean) => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setAwaitingConfirm(null);
+    try {
+      applyTurn(await taxAgentService.confirm(sessionId, approve));
+    } catch {
+      toast.error('Could not record your choice. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, busy, applyTurn]);
+
+  const handleUpload = useCallback(async (file: File) => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setMessages((prev) => [...prev, { id: newId(), role: 'user', text: `📎 Uploading ${file.name}…` }]);
+    try {
+      const accounts = await taxService.getBankAccounts();
+      let acctId = accounts[0]?.id as string | undefined;
+      if (!acctId) {
+        const created = await taxService.createBankAccount({ bank_name: 'My business account' } as never);
+        acctId = (created.id || created.uuid) as string;
+      }
+      const stmt = await taxService.uploadStatement(file, acctId as string);
+      const stmtId = (stmt as { id?: number | string; uuid?: string }).id ?? (stmt as { uuid?: string }).uuid;
+      await taxService.extractTransactions(stmtId as number);
+      await taxService.classifyTransactions(stmtId as number);
+      await send("I've uploaded my bank statement — please review the transactions and show my estimate.");
+    } catch {
+      toast.error('Upload failed. You can also upload from Tax → Statements.');
+      setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: "That upload didn't work. You can also upload on the Tax → Statements page, then come back and tell me it's ready." }]);
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, busy, send]);
+
+  const latestUpload = [...messages].reverse().find((m) => m.role === 'assistant' && m.uploadPrompt)?.uploadPrompt;
+
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+      {/* Conversation */}
+      <div className="flex min-h-[70vh] flex-col overflow-hidden rounded-xl border border-secondary-200 bg-white">
+        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+          {loading ? (
+            <div className="flex h-40 items-center justify-center text-sm text-secondary-500">Starting your tax assistant…</div>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                <div
+                  className={
+                    m.role === 'user'
+                      ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-indigo-600 px-4 py-2.5 text-sm text-white'
+                      : 'max-w-[85%] rounded-2xl rounded-bl-sm bg-secondary-100 px-4 py-2.5 text-sm text-secondary-900'
+                  }
+                >
+                  <p className="whitespace-pre-wrap">{m.text}</p>
+                  {m.uploadPrompt && (
+                    <button
+                      type="button"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={busy}
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      ⬆ {m.uploadPrompt.button_label}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          {busy && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl rounded-bl-sm bg-secondary-100 px-4 py-2.5 text-sm text-secondary-500">…thinking</div>
+            </div>
+          )}
+        </div>
+
+        {/* Confirm bar */}
+        {awaitingConfirm && (
+          <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 sm:px-6">
+            <p className="text-sm text-amber-900">{awaitingConfirm}</p>
+            <div className="mt-2 flex gap-2">
+              <button type="button" onClick={() => confirm(true)} disabled={busy}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                Confirm
+              </button>
+              <button type="button" onClick={() => confirm(false)} disabled={busy}
+                className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-secondary-700 ring-1 ring-secondary-300 hover:bg-secondary-50 disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Composer */}
+        <div className="border-t border-secondary-200 p-3 sm:p-4">
+          <form
+            onSubmit={(e) => { e.preventDefault(); send(input); }}
+            className="flex items-end gap-2"
+          >
+            {latestUpload && (
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+                title="Upload a bank statement"
+                className="shrink-0 rounded-lg border border-secondary-300 px-3 py-2 text-sm text-secondary-600 hover:bg-secondary-50 disabled:opacity-50">
+                📎
+              </button>
+            )}
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
+              rows={1}
+              placeholder="Type your answer…"
+              disabled={busy || loading}
+              className="min-h-[42px] flex-1 resize-none rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-secondary-50"
+            />
+            <button type="submit" disabled={busy || loading || !input.trim()}
+              className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              Send
+            </button>
+          </form>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.csv,image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+          />
+        </div>
+      </div>
+
+      {/* Live estimate */}
+      <div className="lg:sticky lg:top-6 lg:self-start">
+        <EstimatePanel estimate={estimate} />
+        <p className="mt-3 px-1 text-xs text-secondary-400">
+          The assistant never calculates tax itself — every figure is computed by OpsAPI and confirmed by HMRC at filing.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function TaxAgentPage() {
+  return (
+    <ProtectedPage module="tax_transactions">
+      <div className="space-y-6">
+        <PageHeader
+          title="File with AI"
+          description="Chat with the tax assistant — it collects your figures, classifies them, and shows your estimate."
+        />
+        <TaxAgentChat />
+      </div>
+    </ProtectedPage>
+  );
+}
