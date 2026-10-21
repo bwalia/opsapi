@@ -46,6 +46,17 @@ return function(app)
         return (ok and type(result) == "table") and result or {}
     end
 
+    -- Request fields from a JSON body OR Lapis-parsed form/query params. The
+    -- dashboard api-client posts application/x-www-form-urlencoded by default, so
+    -- (like every other route here) we read self.params; a JSON body still wins.
+    local function read_body(self)
+        local data = parse_json_body()
+        for k, v in pairs(self.params or {}) do
+            if data[k] == nil then data[k] = v end
+        end
+        return data
+    end
+
     local function require_user(self)
         local u = self.current_user
         return (u and u.uuid) and u or nil
@@ -274,7 +285,7 @@ return function(app)
     app:post("/api/v2/tax/agent/sessions", auth(function(self)
         local user = require_user(self); if not user then return { status = 401, json = { error = "Unauthorized" } } end
         local uid = user_pk(user.uuid); if not uid then return { status = 401, json = { error = "User not found" } } end
-        local data = parse_json_body()
+        local data = read_body(self)
         local tax_year = type(data.tax_year) == "string" and data.tax_year or TaxCalc.current_tax_year()
         local income_types = type(data.income_types) == "table" and data.income_types or {}
 
@@ -328,7 +339,7 @@ return function(app)
         local session = session_by_uuid(self.namespace.id, uid, self.params.uuid)
         if not session then return { status = 404, json = { error = "Session not found" } } end
 
-        local data = parse_json_body()
+        local data = read_body(self)
         local text = type(data.text) == "string" and data.text:gsub("^%s+", ""):gsub("%s+$", "") or ""
         if text == "" then return { status = 400, json = { error = "text is required" } } end
         if #text > 4000 then return { status = 400, json = { error = "message is too long (max 4000)" } } end
@@ -384,7 +395,7 @@ return function(app)
         if not pending or not pending.tool then
             return { status = 409, json = { error = "There's nothing waiting for confirmation." } }
         end
-        local data = parse_json_body()
+        local data = read_body(self)
         local approve = data.approve == true or data.approve == "true"
         set_pending(session, nil)
 
