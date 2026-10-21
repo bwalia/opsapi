@@ -335,6 +335,15 @@ return function(app)
         local session = session_by_uuid(self.namespace.id, uid, self.params.uuid)
         if not session then return { status = 404, json = { error = "Session not found" } } end
         db.query("UPDATE tax_agent_sessions SET archived = TRUE, status = 'archived' WHERE id = ?", session.id)
+        -- Purge = start completely fresh: delete the statements + transactions this
+        -- user uploaded for the session's tax year (so nothing lingers in the new chat).
+        local data = read_body(self)
+        if (data.purge == true or data.purge == "true") and session.tax_year then
+            db.query([[DELETE FROM tax_transactions WHERE user_id = ?
+                AND statement_id IN (SELECT id FROM tax_statements WHERE user_id = ? AND tax_year = ?)]],
+                uid, uid, session.tax_year)
+            db.query("DELETE FROM tax_statements WHERE user_id = ? AND tax_year = ?", uid, session.tax_year)
+        end
         return { status = 200, json = { success = true } }
     end))
 

@@ -312,8 +312,10 @@ function TaxAgentChat() {
     if (busy || loading || !sessionId) return;
     setShowNewChat(false);
     setBusy(true);
+    stopPolling();
+    setProcessing([]);
     try {
-      await taxAgentService.archive(sessionId);
+      await taxAgentService.archive(sessionId, true); // purge old statements/transactions
       const s = await taxAgentService.createSession({ force_new: true });
       setSessionId(s.id);
       setEstimate(null);
@@ -329,7 +331,7 @@ function TaxAgentChat() {
     } finally {
       setBusy(false);
     }
-  }, [sessionId, busy, loading]);
+  }, [sessionId, busy, loading, stopPolling]);
 
   const latestUpload = [...messages].reverse().find((m) => m.role === 'assistant' && m.uploadPrompt)?.uploadPrompt;
 
@@ -522,10 +524,10 @@ function TaxAgentChat() {
         )}
       >
         <p className="text-sm text-secondary-600">
-          This clears the current conversation so you can begin from scratch — useful if the chat has the wrong details.
+          This clears the current conversation <span className="font-medium">and the bank statements you uploaded in it</span>, so you can begin completely from scratch — useful if the chat has the wrong details.
         </p>
         <p className="mt-2 text-sm text-secondary-500">
-          Your uploaded statements and transactions are <span className="font-medium">not</span> deleted.
+          You can upload your statements again in the new chat.
         </p>
       </Modal>
     </div>

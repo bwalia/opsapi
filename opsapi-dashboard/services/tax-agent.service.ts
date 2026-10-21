@@ -125,8 +125,12 @@ export const taxAgentService = {
     return data<AgentTurn>(r);
   },
 
-  async archive(id: string): Promise<void> {
-    await apiClient.post(`${BASE}/sessions/${id}/archive`, {});
+  // Archive a session. purge=true also deletes the statements/transactions uploaded
+  // for that session's tax year — a true "start from scratch".
+  async archive(id: string, purge = false): Promise<void> {
+    const params = new URLSearchParams();
+    if (purge) params.append('purge', 'true');
+    await apiClient.post(`${BASE}/sessions/${id}/archive`, params.toString());
   },
 
   // Kick off SERVER-SIDE background processing (extract + classify) for statements.
