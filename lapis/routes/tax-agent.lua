@@ -168,8 +168,10 @@ return function(app)
                     .. "(e.g. \"Self-employed\", \"Landlord\", \"Both\", \"Something else\").",
                 "- To get their figures, call request_bank_statement so they can upload a statement; it is extracted "
                     .. "and classified automatically. Then call get_review_queue for anything needing a human check.",
-                "- When the user tells you the correct category for a transaction, call apply_classification_fix — "
-                    .. "the user confirms before it saves. Only use category keys that exist (from get_review_queue).",
+                "- To recategorise a flagged transaction: FIRST call get_review_queue in THIS turn to get that "
+                    .. "transaction's exact uuid (never guess or reuse a uuid from an earlier turn), THEN call "
+                    .. "apply_classification_fix with that uuid and a valid category key from the queue. The user "
+                    .. "confirms before it saves.",
                 "- After classification, call compute_estimate and tell the user their estimated tax in one sentence.",
                 "- For a landlord (property income only), remember property income is NOT subject to Class 2/4 "
                     .. "National Insurance — the estimate already reflects this; mention it if it helps.",
