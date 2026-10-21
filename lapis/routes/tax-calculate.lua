@@ -37,7 +37,7 @@ local function aggregateStatements(statement_ids, user_id)
     local id_list = table.concat(statement_ids, ",")
     local result = db.query(string.format([[
         SELECT
-            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' AND is_tax_deductible IS NOT FALSE THEN amount ELSE 0 END), 0) as gross_income,
+            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE 0 END), 0) as gross_income,
             COALESCE(SUM(CASE WHEN transaction_type = 'DEBIT' AND is_tax_deductible = true THEN amount ELSE 0 END), 0) as total_expenses
         FROM tax_transactions
         WHERE statement_id IN (%s) AND user_id = ?
