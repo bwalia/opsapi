@@ -41,13 +41,17 @@ return function(app)
     -- Sanitise + analyse without saving
     app:post("/templates/analyse", sdk.handler({ permission = "opsapi_marketing_templates.read" }, function(self)
         local ns = sdk.namespace_id(self)
-        local body = sdk.body(self) or {}
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
         return sdk.ok(T.analyse(ns, body))
     end))
 
     app:post("/templates/preview", sdk.handler({ permission = "opsapi_marketing_templates.read" }, function(self)
         local ns = sdk.namespace_id(self)
-        local body = sdk.body(self) or {}
+        -- Do not coerce a failed parse to {}: form-urlencoded bodies used to
+        -- "succeed" with an empty payload and look like a blank preview.
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
         local sample = body.sample
         local payload = body.template or body
         if body.template_uuid or body.uuid then
@@ -93,7 +97,8 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local row = find_template(ns, self.params.id)
         if not row then return sdk.not_found("template") end
-        local body = sdk.body(self) or {}
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
         local prepared = T.prepare_payload({
             name = body.name or row.name,
             channel = body.channel or row.channel,
