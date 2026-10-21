@@ -10,6 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -63,6 +64,14 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
           {estimate.unreviewed_count} transaction{estimate.unreviewed_count === 1 ? '' : 's'} still need review — the estimate will firm up once they&apos;re categorised.
         </div>
       )}
+      {/* Binding filing is done on the dedicated File screen — a deliberate, explicit
+          step for a legally-binding declaration, not a chat action. */}
+      <Link
+        href="/dashboard/tax/file"
+        className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+      >
+        Ready to file? Open the File screen →
+      </Link>
     </div>
   );
 }
