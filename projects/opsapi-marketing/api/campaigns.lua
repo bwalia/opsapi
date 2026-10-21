@@ -55,11 +55,22 @@ return function(app)
         return sdk.ok(Camp.delivery_stats(ns, campaign.id))
     end))
 
+    local function fail(err)
+        return sdk.error(400, Camp.friendly_error(err), { code = err })
+    end
+
+    local function read_body(self)
+        local body, berr = sdk.body(self)
+        if not body then return nil, sdk.error(400, berr) end
+        return body
+    end
+
     app:post("/campaigns/:id/audience-preview", sdk.handler({ permission = "opsapi_marketing_campaigns.read" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
             if list then
@@ -67,21 +78,24 @@ return function(app)
                 campaign.list_id = list.id
             end
         end
-        return sdk.ok(Camp.audience_preview(ns, campaign, body))
+        local preview, err = Camp.audience_preview(ns, campaign, body)
+        if not preview then return fail(err) end
+        return sdk.ok(preview)
     end))
 
     app:post("/campaigns/:id/validate", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
-            if not list then return sdk.error(400, "list not found") end
+            if not list then return fail("list_not_found") end
             db.query("UPDATE mkt_campaigns SET list_id = ? WHERE id = ?", list.id, campaign.id)
         end
         local out, err = Camp.validate(ns, campaign.id, body)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -89,9 +103,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.request_approval(ns, campaign.id, body.notes)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -102,7 +117,7 @@ return function(app)
         if not campaign then return sdk.not_found("campaign") end
         local user = sdk.user(self) or {}
         local out, err = Camp.approve(ns, campaign.id, user.uuid)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -111,9 +126,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.reject(ns, campaign.id, body.reason)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -121,9 +137,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.schedule(ns, campaign.id, body)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -132,7 +149,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.pause(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -141,7 +158,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.resume(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -150,7 +167,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.cancel(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -158,9 +175,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.duplicate(ns, campaign.id, body.name)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.created(out)
     end))
 
