@@ -249,12 +249,17 @@ function Classifier.classify_transaction(transaction, opts)
 
     local ok_llm, LLMClient = pcall(require, "lib.llm-client")
     if not ok_llm then
+        -- Graceful degradation: never silently guess. Flag for human review
+        -- explicitly (not just via the confidence gate) so model-down transactions
+        -- are always surfaced to the user, never auto-filed.
         return {
             category = "uncategorised_expense",
             hmrc_category = "otherExpenses",
             confidence = 0,
-            reasoning = "LLM client not available",
+            needs_review = true,
+            reasoning = "Couldn't auto-classify (the AI model is unavailable) — flagged for your review.",
             is_tax_deductible = false,
+            classified_by = "fallback",
         }
     end
 
@@ -342,13 +347,17 @@ function Classifier.classify_transaction(transaction, opts)
     })
 
     if not classification then
+        -- Model down / refused: flag for review explicitly so it is never
+        -- auto-filed, regardless of the downstream confidence threshold.
+        ngx.log(ngx.WARN, "[tax-classifier] classify failed, flagging for review: ", tostring(err))
         return {
             category = "uncategorised_expense",
             hmrc_category = "other_expenses",
             confidence = 0,
-            reasoning = "Classification failed: " .. tostring(err),
+            needs_review = true,
+            reasoning = "Couldn't auto-classify (the AI model did not respond) — flagged for your review.",
             is_tax_deductible = false,
-            classified_by = "error",
+            classified_by = "fallback",
         }
     end
 
