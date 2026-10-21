@@ -59,6 +59,7 @@ export interface AgentTurn {
   upload_prompt?: UploadPrompt | null;
   estimate?: TaxEstimate | null;
   review?: ReviewItem[] | null;
+  quick_replies?: string[] | null;
   confirm_card?: { summary: string } | null;
   awaiting_confirm?: boolean;
   progress: AgentProgress;

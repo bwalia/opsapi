@@ -23,6 +23,7 @@ interface ChatMsg {
   role: 'user' | 'assistant';
   text: string;
   uploadPrompt?: UploadPrompt | null;
+  quickReplies?: string[] | null;
 }
 
 let msgSeq = 0;
@@ -35,6 +36,25 @@ const STARTERS = [
   'I have both self-employment and rental income',
   'What do I need to file my tax return?',
 ];
+
+// UK tax years, newest first (the current one leads). Tax year runs 6 Apr–5 Apr.
+function ukTaxYears(count = 3): string[] {
+  const now = new Date();
+  let start = now.getFullYear();
+  if (now.getMonth() < 3 || (now.getMonth() === 3 && now.getDate() < 6)) start -= 1;
+  return Array.from({ length: count }, (_, i) => {
+    const y = start - i;
+    return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+  });
+}
+
+// Suggestions to show under the question: the agent's own quick replies, or a
+// sensible fallback for the tax-year question (current year first).
+function suggestionsFor(message: string | undefined, quickReplies: string[] | null | undefined): string[] {
+  if (quickReplies && quickReplies.length > 0) return quickReplies;
+  if (message && /tax year/i.test(message)) return ukTaxYears();
+  return [];
+}
 
 function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
   if (!estimate) {
@@ -89,6 +109,7 @@ function TaxAgentChat() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [estimate, setEstimate] = useState<TaxEstimate | null>(null);
   const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
+  const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -107,7 +128,7 @@ function TaxAgentChat() {
         if (cancelled) return;
         setSessionId(s.id);
         const existing: ChatMsg[] = (s.messages || []).map((m) => ({
-          id: newId(), role: m.role, text: m.text, uploadPrompt: m.upload_prompt,
+          id: newId(), role: m.role, text: m.text, uploadPrompt: m.upload_prompt, quickReplies: m.quick_replies,
         }));
         if (existing.length === 0) {
           existing.push({
@@ -117,6 +138,8 @@ function TaxAgentChat() {
         }
         setMessages(existing);
         setAwaitingConfirm(s.pending?.summary ?? null);
+        const lastA = [...existing].reverse().find((m) => m.role === 'assistant');
+        setQuickReplies(lastA ? suggestionsFor(lastA.text, lastA.quickReplies) : []);
       } catch {
         toast.error('Could not start the tax assistant.');
       } finally {
@@ -127,15 +150,17 @@ function TaxAgentChat() {
   }, []);
 
   const applyTurn = useCallback((turn: Awaited<ReturnType<typeof taxAgentService.sendMessage>>) => {
-    setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: turn.message, uploadPrompt: turn.upload_prompt }]);
+    setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: turn.message, uploadPrompt: turn.upload_prompt, quickReplies: turn.quick_replies }]);
     if (turn.estimate) setEstimate(turn.estimate);
     setAwaitingConfirm(turn.awaiting_confirm ? (turn.confirm_card?.summary ?? 'Confirm this change?') : null);
+    setQuickReplies(suggestionsFor(turn.message, turn.quick_replies));
   }, []);
 
   const send = useCallback(async (text: string) => {
     if (!sessionId || !text.trim() || busy) return;
     setMessages((prev) => [...prev, { id: newId(), role: 'user', text }]);
     setInput('');
+    setQuickReplies([]);
     setBusy(true);
     try {
       applyTurn(await taxAgentService.sendMessage(sessionId, text));
@@ -226,6 +251,7 @@ function TaxAgentChat() {
       setSessionId(s.id);
       setEstimate(null);
       setAwaitingConfirm(null);
+      setQuickReplies([]);
       setInput('');
       setMessages([{
         id: newId(), role: 'assistant',
@@ -328,6 +354,21 @@ function TaxAgentChat() {
 
         {/* Composer */}
         <div className="border-t border-secondary-200 p-3 sm:p-4">
+          {quickReplies.length > 0 && !awaitingConfirm && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {quickReplies.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => send(q)}
+                  disabled={busy}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
           <form
             onSubmit={(e) => { e.preventDefault(); send(input); }}
             className="flex items-end gap-2"

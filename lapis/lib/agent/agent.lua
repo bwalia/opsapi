@@ -217,7 +217,8 @@ function Agent.run(opts)
             if name == "ask_user" or name == "ask_followup"
                 or name == "ask_clarification" or name == "ask_question" then
                 local question = args.question or args.message or args.text or msg.content or ""
-                return { reply = question, actions = actions }
+                -- Surface any suggested answers so the UI can show them as chips.
+                return { reply = question, quick_replies = args.quick_replies, actions = actions }
             end
 
             -- A model that keeps re-sending a call that already failed is stuck:
