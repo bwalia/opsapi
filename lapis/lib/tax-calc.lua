@@ -126,7 +126,10 @@ function TaxCalc.compute(gross_income, total_expenses, rates, opts)
                 nic4 = nic4 + (trading_profit - rates.nic_upper) * rates.nic_additional_rate
             end
         end
-        if trading_profit >= rates.class2_threshold then
+        -- Class 2 NIC: from 2024/25, profits above the Small Profits Threshold are
+        -- credited a qualifying year WITHOUT payment (nic2 stays 0); below the SPT it
+        -- is voluntary and not auto-charged. Historic years can re-enable via rates.
+        if rates.class2_charge_above_spt and trading_profit >= rates.class2_threshold then
             nic2 = rates.class2_annual
         end
     end
@@ -153,6 +156,172 @@ function TaxCalc.compute(gross_income, total_expenses, rates, opts)
         },
         total_tax_due = math.floor(total_tax * 100 + 0.5) / 100,
         effective_rate = math.floor(effective_rate * 100) / 100,
+    }
+end
+
+--- Full UK Self Assessment computation (England/rUK), following the HMRC order:
+--  1 net income per source  2 total income  3 adjusted net income (Gift Aid/pension)
+--  4 taper PA  5 allocate PA (non-savings, savings, dividends)  6 extend bands by Gift Aid
+--  7 tax non-savings, savings (SRS, PSA, bands), dividends  8 tax reductions (finance costs)
+--  9 Class 4/2 NIC  10 deduct tax at source, compute payments on account.
+-- Every intermediate figure is returned. See lib/tax-calc-full_test.lua (validated
+-- against the "Sample UK Tax Computation 2025/26" developer reference, total £20,723.70).
+-- Inputs (all optional, £): employment_income, employment_expenses, paye_deducted;
+--   se_turnover, se_expenses, se_capital_allowances (or trading_profit directly);
+--   property_rents, property_expenses (or property_profit), property_finance_costs,
+--   finance_costs_brought_forward; savings_interest; dividends; gift_aid_net, pension_ras;
+--   payments_on_account_made. `rates` overrides any 2025/26 default below.
+function TaxCalc.compute_full(inp, rates)
+    inp = inp or {}
+    rates = rates or {}
+    local function num(x) return tonumber(x) or 0 end
+    local function pos(x, d) local n = tonumber(x); return (n and n > 0) and n or d end
+    local function r2(x) return math.floor(num(x) * 100 + 0.5) / 100 end
+
+    local p = {
+        pa = pos(rates.personal_allowance, 12570),
+        taper = pos(rates.taper_threshold, 100000),
+        basic_band = pos(rates.basic_rate_band, 37700),
+        add_threshold = pos(rates.additional_rate_threshold, 125140),
+        basic_rate = pos(rates.basic_rate, 0.20),
+        higher_rate = pos(rates.higher_rate, 0.40),
+        add_rate = pos(rates.additional_rate, 0.45),
+        srs = rates.starting_rate_for_savings or 5000,
+        psa_basic = rates.psa_basic or 1000,
+        psa_higher = rates.psa_higher or 500,
+        psa_add = rates.psa_additional or 0,
+        div_allowance = rates.dividend_allowance or 500,
+        div_basic = rates.dividend_basic_rate or 0.0875,
+        div_higher = rates.dividend_higher_rate or 0.3375,
+        div_add = rates.dividend_additional_rate or 0.3935,
+        fin_reduction = rates.finance_cost_reduction_rate or 0.20,
+        nic4_lower = pos(rates.nic_lower, 12570),
+        nic4_upper = pos(rates.nic_upper, 50270),
+        nic4_main = pos(rates.nic_main_rate, 0.06),
+        nic4_add = pos(rates.nic_additional_rate, 0.02),
+        class2_spt = pos(rates.class2_threshold, 6845),
+        trading_allowance = rates.trading_allowance or 1000,
+        property_allowance = rates.property_allowance or 1000,
+    }
+
+    -- Step 1: net income per source (trading/property allowance = lower resulting profit).
+    local employment = math.max(0, num(inp.employment_income) - num(inp.employment_expenses))
+    local se_turnover = num(inp.se_turnover)
+    local trading_profit = inp.trading_profit and num(inp.trading_profit) or math.min(
+        math.max(0, se_turnover - num(inp.se_expenses) - num(inp.se_capital_allowances)),
+        math.max(0, se_turnover - math.min(p.trading_allowance, se_turnover)))
+    local prop_rents = num(inp.property_rents)
+    local property_profit = inp.property_profit and num(inp.property_profit) or math.min(
+        math.max(0, prop_rents - num(inp.property_expenses)),
+        math.max(0, prop_rents - math.min(p.property_allowance, prop_rents)))
+    local finance_costs = num(inp.property_finance_costs) + num(inp.finance_costs_brought_forward)
+    local savings = num(inp.savings_interest)
+    local dividends = num(inp.dividends)
+
+    -- Step 2 + 3: total and adjusted net income.
+    local non_savings = employment + trading_profit + property_profit
+    local total_income = non_savings + savings + dividends
+    local gift_aid_gross = r2(num(inp.gift_aid_net) * 100 / 80)
+    local pension_gross = r2(num(inp.pension_ras) * 100 / 80)
+    local adjusted_net_income = total_income - gift_aid_gross - pension_gross
+
+    -- Step 4: taper the personal allowance.
+    local pa = p.pa
+    if adjusted_net_income > p.taper then
+        pa = math.max(0, pa - math.floor((adjusted_net_income - p.taper) / 2))
+    end
+
+    -- Step 5: allocate PA — non-savings first, then savings, then dividends.
+    local pa_left = pa
+    local taxable_non_savings = math.max(0, non_savings - pa_left); pa_left = math.max(0, pa_left - non_savings)
+    local taxable_savings = math.max(0, savings - pa_left); pa_left = math.max(0, pa_left - savings)
+    local taxable_dividends = math.max(0, dividends - pa_left)
+
+    -- Step 6: extend bands by gross Gift Aid + pension.
+    local basic_limit = p.basic_band + gift_aid_gross + pension_gross
+    local higher_limit = p.add_threshold + gift_aid_gross + pension_gross
+
+    local total_taxable = taxable_non_savings + taxable_savings + taxable_dividends
+    local psa = p.psa_basic
+    if total_taxable > higher_limit then psa = p.psa_add
+    elseif total_taxable > basic_limit then psa = p.psa_higher end
+
+    -- Step 7: tax by band. A slice sits on top of `floor` (band space already used).
+    local function tax_bands(amount, floor, rb, rh, ra)
+        local tax, rem = 0, amount
+        local inb = math.min(rem, math.max(0, basic_limit - floor)); tax = tax + inb * rb; rem = rem - inb; floor = floor + inb
+        local inh = math.min(rem, math.max(0, higher_limit - floor)); tax = tax + inh * rh; rem = rem - inh; floor = floor + inh
+        tax = tax + rem * ra; floor = floor + rem
+        return tax, floor
+    end
+
+    local floor = 0
+    local tax_non_savings; tax_non_savings, floor = tax_bands(taxable_non_savings, floor, p.basic_rate, p.higher_rate, p.add_rate)
+
+    -- Savings: starting-rate-for-savings (0%) and PSA (0%) consume band space; rest at main rates.
+    local srs_band = math.max(0, p.srs - taxable_non_savings)
+    local srs_used = math.min(taxable_savings, srs_band); floor = floor + srs_used
+    local after_srs = taxable_savings - srs_used
+    local psa_used = math.min(after_srs, psa); floor = floor + psa_used
+    local tax_savings; tax_savings, floor = tax_bands(after_srs - psa_used, floor, p.basic_rate, p.higher_rate, p.add_rate)
+
+    -- Dividends: allowance (0%) consumes band space; rest at dividend rates.
+    local div_used = math.min(taxable_dividends, p.div_allowance); floor = floor + div_used
+    local tax_dividends; tax_dividends, floor = tax_bands(taxable_dividends - div_used, floor, p.div_basic, p.div_higher, p.div_add)
+
+    local income_tax_before_reductions = tax_non_savings + tax_savings + tax_dividends
+
+    -- Step 8: residential finance cost reduction = 20% of the lowest of
+    -- (finance costs) / (property profit) / (adjusted income above PA).
+    local adj_income_above_pa = math.max(0, non_savings - pa)
+    local fc_lowest = math.min(finance_costs, property_profit, adj_income_above_pa)
+    local finance_cost_reduction = r2(fc_lowest * p.fin_reduction)
+    local income_tax_due = math.max(0, income_tax_before_reductions - finance_cost_reduction)
+
+    -- Step 9: NIC. Class 4 on trading profit only; Class 2 credited free above the SPT.
+    local class4 = 0
+    if trading_profit > p.nic4_lower then
+        class4 = (math.min(trading_profit, p.nic4_upper) - p.nic4_lower) * p.nic4_main
+        if trading_profit > p.nic4_upper then class4 = class4 + (trading_profit - p.nic4_upper) * p.nic4_add end
+    end
+    class4 = r2(class4)
+    local class2 = 0
+
+    -- Step 10: total, tax at source, payments on account.
+    local total_liability = r2(income_tax_due + class4 + class2)
+    local paye = num(inp.paye_deducted)
+    local balancing = r2(total_liability - paye - num(inp.payments_on_account_made))
+    local relevant_for_poa = r2(total_liability - paye) -- income tax + Class 4 not collected at source
+    local collected_pct = total_liability > 0 and (paye / total_liability) or 0
+    local poa_each = (relevant_for_poa > 1000 and collected_pct < 0.80) and r2(relevant_for_poa / 2) or 0
+
+    return {
+        schedules = {
+            employment = employment, trading_profit = trading_profit, property_profit = property_profit,
+            savings = savings, dividends = dividends, finance_costs = finance_costs,
+        },
+        non_savings = non_savings, savings_income = savings, dividend_income = dividends,
+        total_income = total_income,
+        gift_aid_gross = gift_aid_gross, pension_gross = pension_gross,
+        adjusted_net_income = adjusted_net_income,
+        personal_allowance = pa,
+        taxable_non_savings = taxable_non_savings, taxable_savings = taxable_savings,
+        taxable_dividends = taxable_dividends, total_taxable = total_taxable,
+        basic_limit = basic_limit, higher_limit = higher_limit,
+        starting_rate_for_savings_used = srs_used, personal_savings_allowance = psa, psa_used = psa_used,
+        dividend_allowance_used = div_used,
+        tax_non_savings = r2(tax_non_savings), tax_savings = r2(tax_savings), tax_dividends = r2(tax_dividends),
+        income_tax_before_reductions = r2(income_tax_before_reductions),
+        finance_cost_reduction = finance_cost_reduction,
+        finance_costs_carried_forward = math.max(0, finance_costs - fc_lowest),
+        income_tax_due = r2(income_tax_due),
+        class4_nic = class4, class2_nic = class2,
+        total_liability = total_liability,
+        paye_deducted = paye,
+        balancing_payment = balancing,
+        payment_on_account_each = poa_each,
+        total_due_31_jan = r2(balancing + poa_each),
+        is_estimate = true,
     }
 end
 

@@ -43,8 +43,8 @@ check("c1 personal_allowance", c1.personal_allowance, 12570)
 check("c1 taxable_income", c1.taxable_income, 37430)
 check("c1 income_tax", c1.income_tax.total, 7486)       -- 37430 * 20%
 check("c1 class4", c1.national_insurance.class4, 2245.8) -- 37430 * 6%
-check("c1 class2", c1.national_insurance.class2, 179.40)
-check("c1 total_tax_due", c1.total_tax_due, 9911.2)
+check("c1 class2", c1.national_insurance.class2, 0)      -- Class 2 credited free above SPT (2024/25+)
+check("c1 total_tax_due", c1.total_tax_due, 9731.8)      -- 7486 + 2245.80 (no Class 2)
 
 -- Case 2: additional-rate, personal allowance fully tapered away. profit 130,000.
 local c2 = TaxCalc.compute(130000, 0, RATES)
@@ -52,7 +52,7 @@ check("c2 personal_allowance", c2.personal_allowance, 0)   -- tapered to 0 above
 check("c2 taxable_income", c2.taxable_income, 130000)
 check("c2 income_tax", c2.income_tax.total, 42189)         -- 10054 + 29948 + 2187
 check("c2 class4", c2.national_insurance.class4, 3856.6)    -- 2262 + 1594.6
-check("c2 total_tax_due", c2.total_tax_due, 46225.0)
+check("c2 total_tax_due", c2.total_tax_due, 46045.6)       -- 42189 + 3856.60 (no Class 2)
 
 -- Case 3: profit below the personal allowance AND the Class 2 threshold → no tax.
 local c3 = TaxCalc.compute(10000, 0, RATES)
