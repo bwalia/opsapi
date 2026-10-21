@@ -28,6 +28,14 @@ interface ChatMsg {
 let msgSeq = 0;
 const newId = () => `m${Date.now()}_${msgSeq++}`;
 
+// Starter prompts shown in the empty state so users know how to begin.
+const STARTERS = [
+  "I'm self-employed and want to file my tax",
+  "I'm a landlord with rental income",
+  'I have both self-employment and rental income',
+  'What do I need to file my tax return?',
+];
+
 function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
   if (!estimate) {
     return (
@@ -104,7 +112,7 @@ function TaxAgentChat() {
         if (existing.length === 0) {
           existing.push({
             id: newId(), role: 'assistant',
-            text: "Hi! I'll help you get your tax sorted. To start — are you self-employed, a landlord, both, or something else?",
+            text: "Hi! I'm your tax assistant — I'll help you get your Self Assessment sorted, step by step. Tell me a bit about you to start (tap a suggestion below, or type your own).",
           });
         }
         setMessages(existing);
@@ -209,6 +217,24 @@ function TaxAgentChat() {
                 </div>
               </div>
             ))
+          )}
+          {!loading && !messages.some((m) => m.role === 'user') && (
+            <div className="space-y-2 pl-1">
+              <p className="text-xs text-secondary-400">Get started:</p>
+              <div className="flex flex-wrap gap-2">
+                {STARTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => send(s)}
+                    disabled={busy}
+                    className="rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1.5 text-left text-sm text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {busy && (
             <div className="flex justify-start">
