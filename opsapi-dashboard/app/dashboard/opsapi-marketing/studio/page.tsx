@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { isAxiosError } from 'axios';
 import { Palette, Save, Eye, Sparkles, Send } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui';
@@ -26,6 +27,17 @@ type Preview = {
   warnings?: string[];
   opens_estimated?: boolean;
 };
+
+function apiErrorMessage(e: unknown, fallback: string): string {
+  if (isAxiosError(e)) {
+    const data = e.response?.data as { error?: string; message?: string; details?: unknown } | undefined;
+    if (data?.error) return String(data.error);
+    if (data?.message) return String(data.message);
+    if (e.message) return e.message;
+  }
+  if (e instanceof Error) return e.message;
+  return fallback;
+}
 
 export default function MarketingStudioPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -54,7 +66,7 @@ export default function MarketingStudioPage() {
       const mData = mRes.data?.data ?? mRes.data ?? [];
       setMergeFields(Array.isArray(mData) ? mData : []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load studio');
+      setError(apiErrorMessage(e, 'Failed to load studio'));
     }
   }, []);
 
@@ -95,7 +107,7 @@ export default function MarketingStudioPage() {
       setPreview(data);
       setWarnings(data.warnings || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Preview failed');
+      setError(apiErrorMessage(e, 'Preview failed'));
     } finally {
       setBusy(false);
     }
@@ -130,7 +142,7 @@ export default function MarketingStudioPage() {
       }
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(apiErrorMessage(e, 'Save failed'));
     } finally {
       setBusy(false);
     }
@@ -154,7 +166,7 @@ export default function MarketingStudioPage() {
       await marketingService.publishTemplate(selected.uuid);
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Publish failed');
+      setError(apiErrorMessage(e, 'Publish failed'));
     } finally {
       setBusy(false);
     }
@@ -166,7 +178,7 @@ export default function MarketingStudioPage() {
       await marketingService.seedTemplates();
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Seed failed');
+      setError(apiErrorMessage(e, 'Seed failed'));
     } finally {
       setBusy(false);
     }
