@@ -157,11 +157,13 @@ function TaxAgentChat() {
           quickReplies: ['Show my estimate'],
         }]);
         setQuickReplies(['Show my estimate']);
+        // Figures just landed — show the estimate panel without waiting for a click.
+        if (sessionId) taxAgentService.getEstimate(sessionId).then((est) => { if (est) setEstimate(est); });
       }
     } catch {
       /* transient poll error — keep trying */
     }
-  }, [stopPolling]);
+  }, [stopPolling, sessionId]);
 
   const startPolling = useCallback(() => {
     stopPolling();
@@ -195,6 +197,8 @@ function TaxAgentChat() {
         setAwaitingConfirm(s.pending?.summary ?? null);
         const lastA = [...existing].reverse().find((m) => m.role === 'assistant');
         setQuickReplies(lastA ? suggestionsFor(lastA.text, lastA.quickReplies) : []);
+        // Re-show the estimate if this session already has classified figures.
+        taxAgentService.getEstimate(s.id).then((est) => { if (!cancelled && est) setEstimate(est); });
       } catch {
         toast.error('Could not start the tax assistant.');
       } finally {

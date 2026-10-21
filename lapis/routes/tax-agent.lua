@@ -181,15 +181,15 @@ return function(app)
     -- upload that already happened and knows when an estimate is possible.
     local function data_state(session)
         local uid, ty = session.user_id, session.tax_year
-        -- NULL-tolerant on statement tax_year (see tax-tools.lua) so the model sees
-        -- real uploads even though the upload flow doesn't stamp tax_year yet.
+        -- Scoped to the session's tax_year: uploads are stamped at processing time, so
+        -- this is exact (no NULL-tolerance — that leaked other-year data between chats).
         local r = db.query([[SELECT
             (SELECT count(*) FROM tax_statements
-                WHERE user_id = ? AND (tax_year = ? OR tax_year IS NULL)) AS stmts,
+                WHERE user_id = ? AND tax_year = ?) AS stmts,
             (SELECT count(*) FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-                WHERE t.user_id = ? AND (s.tax_year = ? OR s.tax_year IS NULL)) AS txns,
+                WHERE t.user_id = ? AND s.tax_year = ?) AS txns,
             (SELECT count(*) FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-                WHERE t.user_id = ? AND (s.tax_year = ? OR s.tax_year IS NULL)
+                WHERE t.user_id = ? AND s.tax_year = ?
                   AND t.classification_status = 'NEEDS_REVIEW') AS review]],
             uid, ty, uid, ty, uid, ty)
         local row = r and r[1] or {}
@@ -398,23 +398,39 @@ return function(app)
         return { status = 200, json = { success = true, data = session_json(session) } }
     end))
 
+    -- The current deterministic estimate, so the UI can re-show it on reload without a
+    -- model turn. Returns estimate=null when there are no transactions for the year yet.
+    app:get("/api/v2/tax/agent/sessions/:uuid/estimate", auth(function(self)
+        local user = require_user(self); if not user then return { status = 401, json = { error = "Unauthorized" } } end
+        local uid = user_pk(user.uuid); if not uid then return { status = 401, json = { error = "User not found" } } end
+        local session = session_by_uuid(self.namespace.id, uid, self.params.uuid)
+        if not session then return { status = 404, json = { error = "Session not found" } } end
+        local cnt = db.query([[SELECT count(*) AS n FROM tax_transactions t
+            JOIN tax_statements s ON s.id = t.statement_id
+            WHERE t.user_id = ? AND s.tax_year = ?]], uid, session.tax_year)
+        if not (cnt and cnt[1] and tonumber(cnt[1].n) and tonumber(cnt[1].n) > 0) then
+            return { status = 200, json = { success = true, data = { estimate = nil } } }
+        end
+        local ctx = build_ctx(self, self.namespace.id, uid, user.uuid, session, false)
+        local est = TaxTools.execute(ctx, "compute_estimate", {})
+        return { status = 200, json = { success = true, data = { estimate = est } } }
+    end))
+
     app:post("/api/v2/tax/agent/sessions/:uuid/archive", auth(function(self)
         local user = require_user(self); if not user then return { status = 401, json = { error = "Unauthorized" } } end
         local uid = user_pk(user.uuid); if not uid then return { status = 401, json = { error = "User not found" } } end
         local session = session_by_uuid(self.namespace.id, uid, self.params.uuid)
         if not session then return { status = 404, json = { error = "Session not found" } } end
         db.query("UPDATE tax_agent_sessions SET archived = TRUE, status = 'archived' WHERE id = ?", session.id)
-        -- Purge = start completely fresh: delete the statements + transactions this
-        -- user uploaded for the session's tax year. Also clear NULL-tax_year rows
-        -- (legacy uploads before we stamped the year) — the agent's reads are
-        -- NULL-tolerant, so leaving them would leak old data into the new chat.
+        -- Purge = start fresh for THIS tax year only: delete the statements +
+        -- transactions stamped with the session's tax_year. Scoped strictly to the exact
+        -- year (never NULL/other years) so it can never wipe the user's other data.
         local data = read_body(self)
         if (data.purge == true or data.purge == "true") and session.tax_year then
             db.query([[DELETE FROM tax_transactions WHERE user_id = ?
-                AND statement_id IN (SELECT id FROM tax_statements WHERE user_id = ?
-                    AND (tax_year = ? OR tax_year IS NULL))]], uid, uid, session.tax_year)
-            db.query([[DELETE FROM tax_statements WHERE user_id = ?
-                AND (tax_year = ? OR tax_year IS NULL)]], uid, session.tax_year)
+                AND statement_id IN (SELECT id FROM tax_statements WHERE user_id = ? AND tax_year = ?)]],
+                uid, uid, session.tax_year)
+            db.query("DELETE FROM tax_statements WHERE user_id = ? AND tax_year = ?", uid, session.tax_year)
         end
         return { status = 200, json = { success = true } }
     end))

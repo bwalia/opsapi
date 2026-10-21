@@ -114,6 +114,17 @@ export const taxAgentService = {
     return data<TaxAgentSession>(r);
   },
 
+  // The current deterministic estimate for the session's tax year, so the panel can
+  // re-show it on reload without a model turn. null = no transactions yet.
+  async getEstimate(id: string): Promise<TaxEstimate | null> {
+    try {
+      const r = await apiClient.get(`${BASE}/sessions/${id}/estimate`);
+      return (data<{ estimate: TaxEstimate | null }>(r)?.estimate) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
   async sendMessage(id: string, text: string): Promise<AgentTurn> {
     // The model turn can take tens of seconds on a local model — allow 5 minutes.
     const r = await apiClient.post(`${BASE}/sessions/${id}/message`, { text }, { timeout: 300000 });
