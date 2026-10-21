@@ -412,7 +412,8 @@ check("a broken jobs file is reported", #job_errors == 1 and job_errors[1]:find(
 
 -- "Off" must be a hard switch everywhere work happens for a workspace.
 local ns_mw, events_src = read_file("middleware/namespace.lua"), read_file("helper/plugin-events.lua")
-check("off: plugin routes 404 (requireNamespace gate)", ns_mw:find("handler = plugin_gate(handler)", 1, true)
+check("off: plugin routes 404 (requireNamespace gate; platform admin bypasses)", ns_mw:find("handler = plugin_gate(handler)", 1, true)
+    and ns_mw:find("not self.is_platform_admin", 1, true)
     and ns_mw:find("PLUGIN_DISABLED", 1, true))
 local _, trigger_checks = events_src:gsub("opsapi_plugin_enabled%(split_part%(subscriber", "")
 check("off: no event deliveries (trigger + emit)", trigger_checks >= 3, trigger_checks)
