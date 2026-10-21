@@ -72,11 +72,13 @@ export default function CampaignDetailPage() {
       if (aRes) {
         const a = (aRes.data?.data ?? aRes.data) as { deliveries?: Stats & { opened_estimated?: number; clicked?: number } };
         if (a?.deliveries) {
+          // Capture so the narrowing survives into the setStats callback (closure).
+          const d = a.deliveries;
           setStats((prev) => ({
             ...(prev || {}),
-            ...a.deliveries,
-            opened_estimated: a.deliveries.opened_estimated,
-            clicked: a.deliveries.clicked,
+            ...d,
+            opened_estimated: d.opened_estimated,
+            clicked: d.clicked,
           }));
         }
       }
