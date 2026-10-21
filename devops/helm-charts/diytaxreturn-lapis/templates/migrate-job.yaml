@@ -36,7 +36,11 @@ spec:
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}
+        # NOT `app: {{ .Release.Name }}`: that is the Service selector, and this
+        # pod has no readiness probe, so it was added to the Service the moment
+        # it started and took live traffic it can't serve — every deploy's
+        # pre-upgrade migrate returned a burst of 502s.
+        app: {{ .Release.Name }}-migrate
         job: migrate
     spec:
       restartPolicy: Never
