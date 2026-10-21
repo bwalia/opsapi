@@ -72,13 +72,15 @@ end
 -- @param handler function The route handler
 -- @return function Wrapped handler
 -- A plugin turned off for this workspace (helper/plugin-workspaces.lua)
--- answers 404 on every route that resolves the namespace, whatever the
--- caller's role. self.project is set by the plugin route wrapper
--- (helper/project-loader.lua) before this middleware runs.
+-- answers 404 on every route that resolves the namespace. Platform
+-- super-admins (administrative) bypass so they can open every menu and
+-- operate the plugin without enabling it first. self.project is set by
+-- the plugin route wrapper (helper/project-loader.lua) before this runs;
+-- self.is_platform_admin is set by requireNamespace before plugin_gate.
 local function plugin_gate(handler)
     return function(self)
         local plugin = self.project
-        if plugin and self.namespace
+        if plugin and self.namespace and not self.is_platform_admin
             and not require("helper.plugin-workspaces").isEnabled(plugin.code, self.namespace.id) then
             return {
                 status = 404,
