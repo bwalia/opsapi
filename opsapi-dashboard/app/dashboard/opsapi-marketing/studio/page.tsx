@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { Palette, Save, Eye, Sparkles, Send } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -39,6 +39,14 @@ function apiErrorMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
+function unwrapPreview(res: { data?: unknown }): Preview {
+  const root = res?.data as { data?: Preview } | Preview | undefined;
+  if (root && typeof root === 'object' && 'data' in root && root.data && typeof root.data === 'object') {
+    return root.data as Preview;
+  }
+  return (root || {}) as Preview;
+}
+
 export default function MarketingStudioPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [mergeFields, setMergeFields] = useState<MergeField[]>([]);
@@ -53,6 +61,7 @@ export default function MarketingStudioPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -103,10 +112,19 @@ export default function MarketingStudioPage() {
         body_text: text,
         name,
       });
-      const data = (res.data?.data ?? res.data) as Preview;
+      const data = unwrapPreview(res);
+      if (!data.html && !data.text && !data.subject) {
+        setError('Preview returned empty content — try Save draft, then Preview again');
+        setPreview(null);
+        return;
+      }
       setPreview(data);
       setWarnings(data.warnings || []);
+      requestAnimationFrame(() => {
+        previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
     } catch (e: unknown) {
+      setPreview(null);
       setError(apiErrorMessage(e, 'Preview failed'));
     } finally {
       setBusy(false);
@@ -332,18 +350,34 @@ export default function MarketingStudioPage() {
           )}
 
           {preview && (
-            <div className="rounded-lg border border-border p-4">
-              <h3 className="mb-2 text-sm font-medium">
+            <div
+              ref={previewRef}
+              className="rounded-lg border border-border bg-muted/20 p-4"
+              data-testid="marketing-studio-preview"
+            >
+              <h3 className="mb-1 text-sm font-medium">
                 Preview{preview.opens_estimated ? ' · opens estimated' : ''}
               </h3>
-              {preview.subject && <p className="mb-2 text-sm font-medium">{preview.subject}</p>}
+              <p className="mb-3 text-xs text-muted-foreground">
+                Sample recipient: Alex Example · merge fields filled with demo data (not sent).
+              </p>
+              <p className="mb-2 text-sm font-medium">
+                Subject:{' '}
+                {preview.subject?.trim() ? (
+                  preview.subject
+                ) : (
+                  <span className="font-normal text-muted-foreground">(none)</span>
+                )}
+              </p>
               {preview.html ? (
                 <div
-                  className="prose prose-sm max-w-none rounded bg-white p-3 text-black"
+                  className="prose prose-sm max-w-none rounded bg-white p-3 text-black shadow-sm"
                   dangerouslySetInnerHTML={{ __html: preview.html }}
                 />
               ) : (
-                <pre className="whitespace-pre-wrap text-sm">{preview.text}</pre>
+                <pre className="whitespace-pre-wrap rounded bg-white p-3 text-sm text-black shadow-sm">
+                  {preview.text || '(empty)'}
+                </pre>
               )}
             </div>
           )}
@@ -354,7 +388,7 @@ export default function MarketingStudioPage() {
           <p className="text-xs text-muted-foreground">
             Only registry keys are allowed. Values are HTML-escaped unless marked rich.
           </p>
-          <ul className="max-h-[50vh] space-y-1 overflow-y-auto text-sm">
+          <ul className="max-h-[40vh] space-y-1 overflow-y-auto text-sm">
             {mergeFields.map((f) => (
               <li key={f.key}>
                 <button
