@@ -27,28 +27,31 @@ end
 
 local function load_contact(ns, contact_uuid)
     return U.one([[
-        SELECT uuid, namespace_id, first_name, last_name, email, phone, mobile, status, deleted_at,
-               account_id, metadata
-        FROM crm_contacts
-        WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL
+        SELECT c.uuid, c.namespace_id, c.first_name, c.last_name, c.email, c.phone, c.mobile, c.status,
+               c.deleted_at, c.account_id, c.metadata, a.name AS account_name
+        FROM crm_contacts c
+        LEFT JOIN crm_accounts a ON a.id = c.account_id AND a.namespace_id = c.namespace_id
+        WHERE c.namespace_id = ? AND c.uuid = ? AND c.deleted_at IS NULL
     ]], ns, contact_uuid)
 end
 
-local function merge_context(contact, campaign)
-    return {
+-- The same registry context the preview uses (defaults such as "there" for a missing first
+-- name). Company: the CRM account, else the company an import recorded on the contact.
+local function merge_context(ns, contact, campaign, links)
+    local meta = U.json(contact.metadata)
+    if type(meta) ~= "table" then meta = {} end
+    return require("opsapi_marketing.merge_fields").build_context(ns, {
         contact = {
             first_name = contact.first_name,
             last_name = contact.last_name,
             email = contact.email,
             phone = contact.phone or contact.mobile,
-            company = contact.company_name,
+            company = contact.account_name or meta.company,
         },
-        campaign = {
-            name = campaign.name,
-            uuid = campaign.uuid,
-            channel = campaign.channel,
-        },
-    }
+        campaign = { name = campaign.name },
+        unsubscribe_url = links.unsubscribe_url,
+        preferences_url = links.preferences_url,
+    })
 end
 
 --- Absolute base for tracking/unsubscribe links: workspace setting, else OPSAPI_PUBLIC_URL.
@@ -222,12 +225,15 @@ function S.dispatch(delivery_id, opts)
             end
         end
 
-        local payload, rerr = adapter.render(template, merge_context(contact, campaign), {
+        local prefs = base ~= "" and Tokens.preferences_url(d.namespace_id, d.contact_uuid, base) or nil
+        local merge = merge_context(d.namespace_id, contact, campaign, { unsubscribe_url = unsub, preferences_url = prefs })
+        local payload, rerr = adapter.render(template, merge, {
             unsubscribe_url = unsub,
             open_pixel_url = pixel,
             link_rewriter = link_rewriter,
             link_skip = { "/public/unsubscribe", "/public/preferences", "/public/c?" },
             preheader = campaign.preview_text,
+            sender_address = settings.sender_address,
         })
         if not payload then
             db.query("UPDATE mkt_deliveries SET state = 'failed', reason = ?, failed_at = NOW(), updated_at = NOW() WHERE id = ?",
@@ -287,17 +293,20 @@ end
 
 --- Process up to `limit` queued deliveries for a namespace (used by campaign_sender job).
 function S.process_queue(ns, limit)
-    limit = tonumber(limit) or 50
-    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped in dispatch).
-    -- In quiet hours marketing messages wait in the queue, so pick only the other kinds.
     local settings = U.settings(ns)
+    -- Default: as many as the per-minute rate allows (the rate limiter still applies per message).
+    limit = tonumber(limit) or math.min(500, math.max(tonumber(settings.email_rate_per_min) or 60,
+        tonumber(settings.sms_rate_per_min) or 30))
+    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped in dispatch),
+    -- and only deliveries whose batch is due. In quiet hours marketing messages wait in the queue.
     local quiet = U.in_quiet_hours(ns, settings.quiet_hours_from or "21:00", settings.quiet_hours_to or "08:00")
     local rows = db.query([[
         SELECT d.id FROM mkt_deliveries d
         JOIN mkt_campaigns c ON c.id = d.campaign_id
         WHERE d.namespace_id = ? AND d.state = 'queued' AND c.status = 'sending'
+          AND (d.send_after IS NULL OR d.send_after <= NOW())
           AND (? = false OR c.message_type <> 'marketing')
-        ORDER BY d.queued_at ASC
+        ORDER BY COALESCE(d.send_after, d.queued_at), d.id
         LIMIT ?
     ]], ns, quiet, limit)
     local sent, skipped, failed = 0, 0, 0
@@ -321,6 +330,52 @@ function S.process_queue(ns, limit)
         else failed = failed + 1 end
     end
     return { sent = sent, skipped = skipped, failed = failed, claimed = #rows }
+end
+
+--- Queue an email campaign's whole list in one statement (bought lists run to tens of
+-- thousands; one INSERT … SELECT, not a query per contact). One delivery per address.
+-- With batches set, the nth waits until floor(n / batch_size) * interval from now:
+-- e.g. 400 now, 400 an hour later, ...
+local function enqueue_list_email(ns, campaign)
+    local done = U.one("SELECT COUNT(*)::int AS n FROM mkt_deliveries WHERE campaign_id = ? AND attempt_key = '1'",
+        campaign.id).n
+    local max = tonumber(campaign.max_deliveries)
+    local room = max and math.max(0, max - done) or 2147483647
+    local size, every = tonumber(campaign.batch_size), tonumber(campaign.batch_interval_minutes)
+    local batched = (size and size > 0 and every and every > 0) and true or false
+    local res = db.query([==[
+        WITH audience AS (
+            SELECT a.*, row_number() OVER (ORDER BY a.member_id) - 1 AS n
+            FROM (
+                SELECT DISTINCT ON (lower(trim(c.email)))
+                       m.id AS member_id, m.contact_uuid, lower(trim(c.email)) AS address,
+                       NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS display_name
+                FROM mkt_list_members m
+                JOIN crm_contacts c ON c.uuid = m.contact_uuid AND c.namespace_id = m.namespace_id
+                                    AND c.deleted_at IS NULL
+                WHERE m.namespace_id = ? AND m.list_id = ? AND m.removed_at IS NULL
+                  AND lower(trim(c.email)) ~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$'
+                  AND NOT EXISTS (SELECT 1 FROM mkt_deliveries d
+                                  WHERE d.campaign_id = ? AND d.attempt_key = '1'
+                                    AND (d.contact_uuid = m.contact_uuid OR d.address = lower(trim(c.email))))
+                ORDER BY lower(trim(c.email)), m.id
+            ) a
+            ORDER BY a.member_id
+            LIMIT ?
+        ), recipients AS (
+            INSERT INTO mkt_campaign_recipients (namespace_id, campaign_id, contact_uuid, address, display_name)
+            SELECT ?, ?, contact_uuid, address, display_name FROM audience
+            ON CONFLICT (namespace_id, campaign_id, contact_uuid) DO NOTHING
+        )
+        INSERT INTO mkt_deliveries (namespace_id, campaign_id, contact_uuid, channel, address, attempt_key,
+            state, send_after)
+        SELECT ?, ?, contact_uuid, 'email', address, '1', 'queued',
+               CASE WHEN ? THEN NOW() + (n / ?) * make_interval(mins => ?) END
+        FROM audience
+        ON CONFLICT (namespace_id, campaign_id, contact_uuid, channel, attempt_key) DO NOTHING
+    ]==], ns, campaign.list_id, campaign.id, room, ns, campaign.id, ns, campaign.id,
+        batched, batched and size or 1, batched and every or 0)
+    return res.affected_rows or 0
 end
 
 --- Start a scheduled/sending campaign: materialise recipients from list, enqueue, emit.
@@ -347,10 +402,12 @@ function S.start_campaign(ns, campaign_id)
                     require("opsapi_marketing.segments").sync_list(ns, campaign.list_id)
                 end)
             end
-            members = db.query([[
-                SELECT contact_uuid FROM mkt_list_members
-                WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL
-            ]], ns, campaign.list_id)
+            if (campaign.channel or "email") ~= "email" then
+                members = db.query([[
+                    SELECT contact_uuid FROM mkt_list_members
+                    WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL
+                ]], ns, campaign.list_id)
+            end
         else
             members = db.query([[
                 SELECT contact_uuid FROM mkt_campaign_recipients
@@ -360,6 +417,9 @@ function S.start_campaign(ns, campaign_id)
 
         local max = tonumber(campaign.max_deliveries)
         local queued = 0
+        if not members then
+            queued = enqueue_list_email(ns, campaign)
+        end
         for _, m in ipairs(members or {}) do
             if max and queued >= max then break end
             local row = S.enqueue(ns, campaign, m.contact_uuid)

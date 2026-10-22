@@ -125,6 +125,10 @@ return {
         default_from_name = {
             type = "string", label = "Default from name", default = "Marketing",
         },
+        sender_address = {
+            type = "text", label = "Business name and postal address (email footer)", default = "",
+            description = "Shown in every marketing email. UK PECR and US CAN-SPAM require it for promotional email.",
+        },
         email_rate_per_min = {
             type = "integer", label = "Email sends per minute", default = 60, min = 1, max = 10000,
         },

@@ -7,18 +7,12 @@ import time
 import urllib.error
 import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mktest import API, P, USERS, call, check, enable, expect, finish, new_uuid, sql, workspace  # noqa: E402
+from mktest import (  # noqa: E402
+    API, P, USERS, call, check, code, data, enable, expect, finish, new_uuid, run_sender, sql, workspace,
+)
 
 OWNER = USERS["owner_a"][0]
 PLUGINS = API + "/api/v2/namespace/plugins/opsapi_marketing"
-
-
-def data(b):
-    return (b.get("data") or b) if isinstance(b, dict) else {}
-
-
-def code(res):
-    return ((res[1] if isinstance(res[1], dict) else {}).get("details") or {}).get("code")
 
 
 def setup(name, **settings):
@@ -58,21 +52,6 @@ def campaign(ns, user="owner_a", **kw):
     return data(expect("campaign", call("POST", P + "/campaigns", user, ns, body), 201))["uuid"]
 
 
-def run_sender(ns):
-    """Run the campaign sender for this workspace once and wait for it to finish."""
-    q = (f"SELECT COALESCE(j.last_run_at::text, 'never') FROM plugin_jobs j JOIN namespaces n "
-         f"ON n.id = j.namespace_id WHERE j.job = 'opsapi_marketing.campaign_sender' AND n.uuid = '{ns}'")
-    deadline = time.time() + 90  # a new workspace's job row is seeded within a minute
-    while time.time() < deadline and not sql(q):
-        time.sleep(2)
-    before = sql(q)
-    sql(f"UPDATE plugin_jobs SET next_run_at = NOW() FROM namespaces n WHERE n.id = plugin_jobs.namespace_id "
-        f"AND plugin_jobs.job = 'opsapi_marketing.campaign_sender' AND n.uuid = '{ns}'")
-    deadline = time.time() + 45
-    while time.time() < deadline and sql(q) == before:
-        time.sleep(2)
-
-
 def drain(ns, cid, rounds=5):
     for _ in range(rounds):
         run_sender(ns)
@@ -92,7 +71,7 @@ def status(cid):
 # ---------------------------------------------------------------- platform: auth bypass
 def raw_get(path):
     try:
-        with urllib.request.urlopen(urllib.request.Request(API + path), timeout=10) as r:
+        with urllib.request.urlopen(urllib.request.Request(API + path), timeout=60) as r:  # 1st hit loads routes
             return r.status
     except urllib.error.HTTPError as e:
         return e.code
@@ -146,7 +125,9 @@ check("broken template test-send fails, not accepted", s == ["failed"], s)
 cu = contact(W1, "obrien@p9.invalid", first="Seán O'Brien & Co")
 cid = campaign(W1)
 call("POST", P + f"/campaigns/{cid}/test-send", "owner_a", W1, {"contact_uuid": cu})
-row = sql(f"SELECT d.subject || '|' || d.body_text || '|' || d.body_html FROM mkt_deliveries d "
+# One output line per row: bodies have line breaks (the plain-text unsubscribe footer).
+row = sql(f"SELECT d.subject || '|' || replace(d.body_text, E'\\n', ' ') || '|' || replace(d.body_html, E'\\n', ' ') "
+          f"FROM mkt_deliveries d "
           f"JOIN mkt_campaigns c ON c.id = d.campaign_id WHERE c.uuid = '{cid}'")
 parts = (row[0] if row else "||").split("|", 2)
 check("subject not HTML-escaped", parts[0] == "Hi Seán O'Brien & Co", parts[0])

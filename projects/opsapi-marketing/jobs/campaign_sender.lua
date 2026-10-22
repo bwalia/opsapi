@@ -34,8 +34,9 @@ return {
             end
         end
 
-        -- Dispatch queued deliveries (re-checks can_send per message)
-        local out = Send.process_queue(ns, 50)
+        -- Dispatch due queued deliveries, as many as the per-minute rate setting allows
+        -- (re-checks can_send per message)
+        local out = Send.process_queue(ns)
         if out.sent + out.skipped + out.failed > 0 then
             ngx.log(ngx.NOTICE, "[opsapi_marketing] ns=", ns,
                 " sent=", out.sent, " skipped=", out.skipped, " failed=", out.failed)

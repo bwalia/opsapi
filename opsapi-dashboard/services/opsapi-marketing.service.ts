@@ -82,6 +82,10 @@ export const marketingService = {
   syncList: (id: string) => apiClient.post(`${BASE}/lists/${id}/sync`, {}, JSON_BODY),
   importListCsv: (id: string, body: Record<string, unknown>) =>
     apiClient.post(`${BASE}/lists/${id}/import`, body, JSON_BODY),
+  // A CSV / XLSX / PDF of contacts (base64): commit=false previews, commit=true imports.
+  // Large files take a while to read; never queued offline.
+  importContactsFile: (id: string, body: Record<string, unknown>) =>
+    apiClient.post(`${BASE}/lists/${id}/prospects`, body, { ...ACTION, timeout: 120000 }),
 
   listSuppressions: (params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/suppressions`, { params }),

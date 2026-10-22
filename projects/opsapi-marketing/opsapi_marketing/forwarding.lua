@@ -82,6 +82,10 @@ local function post(url, body)
     return res.status, (res.body or ""):sub(1, 500)
 end
 
+-- Dry runs log the whole payload: JSON key order isn't stable, so a short cut could drop
+-- event_name, the very thing a dry run is there to check.
+local DRY_RUN_LOG = 4000
+
 local function log(ns, ev_id, dest, status, http_status, response)
     db.query([[
         INSERT INTO mkt_pixel_forwards (namespace_id, web_event_id, destination, status, http_status, response)
@@ -98,7 +102,7 @@ function F.forward(ns, ev, settings)
     if (settings.meta_pixel_id or "") ~= "" and (settings.meta_capi_access_token or "") ~= "" then
         local body = F.meta_payload(ev, settings, email)
         if dry then
-            log(ns, ev.id, "meta", "dry_run", nil, cjson.encode(body):sub(1, 500))
+            log(ns, ev.id, "meta", "dry_run", nil, cjson.encode(body):sub(1, DRY_RUN_LOG))
         else
             local url = "https://graph.facebook.com/v21.0/" .. ngx.escape_uri(settings.meta_pixel_id)
                 .. "/events?access_token=" .. ngx.escape_uri(settings.meta_capi_access_token)
@@ -110,7 +114,7 @@ function F.forward(ns, ev, settings)
     if (settings.ga4_measurement_id or "") ~= "" and (settings.ga4_api_secret or "") ~= "" then
         local body = F.ga4_payload(ev, visitor and visitor.visitor_key)
         if dry then
-            log(ns, ev.id, "ga4", "dry_run", nil, cjson.encode(body):sub(1, 500))
+            log(ns, ev.id, "ga4", "dry_run", nil, cjson.encode(body):sub(1, DRY_RUN_LOG))
         else
             local url = "https://www.google-analytics.com/mp/collect?measurement_id="
                 .. ngx.escape_uri(settings.ga4_measurement_id) .. "&api_secret=" .. ngx.escape_uri(settings.ga4_api_secret)

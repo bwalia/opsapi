@@ -30,6 +30,9 @@ return function(app)
         scheduled_at = { type = "datetime" },
         approval_required = { type = "boolean" },
         max_deliveries = { type = "integer", min = 1 },
+        -- Send in batches: batch_size messages, then the next batch batch_interval_minutes later.
+        batch_size = { type = "integer", min = 1, max = 100000 },
+        batch_interval_minutes = { type = "integer", min = 1, max = 10080 },
         -- { track_opens, track_clicks, attribution, utm = { enabled, source, medium, campaign, content },
         --   goal_event }
         tracking = { type = "json" },

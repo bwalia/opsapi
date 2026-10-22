@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { isAxiosError } from 'axios';
-import { Plus, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react';
+import { FileUp, Plus, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
@@ -22,8 +22,38 @@ type Member = {
   last_name?: string;
   email?: string;
   phone?: string;
+  company?: string;
   source?: string;
 };
+
+type LegalBasis = 'legitimate_interest' | 'consent';
+
+/** What a contacts file holds (preview), or what was imported from it. */
+type FileScan = {
+  file_type: string;
+  found: number;
+  importable: number;
+  new_contacts: number;
+  existing_contacts: number;
+  skipped: { duplicates: number; personal: number; unsubscribed: number };
+  personal_rule: boolean;
+  sample?: { email: string; first_name?: string; last_name?: string; company?: string }[];
+  imported?: number;
+  created_contacts?: number;
+};
+
+const ACCEPT_FILES = '.csv,.txt,.xlsx,.pdf';
+const MAX_FILE_BYTES = 7 * 1024 * 1024;
+
+/** File → base64 (without the data: prefix). */
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(new Error('Could not read the file'));
+    reader.readAsDataURL(file);
+  });
+}
 
 type Condition = { field: string; op: string; value: string };
 
@@ -113,6 +143,13 @@ export default function MarketingListsPage() {
 
   const [csvText, setCsvText] = useState('');
   const [grantConsent, setGrantConsent] = useState(false);
+  const [memberTotal, setMemberTotal] = useState<number | null>(null);
+
+  const [upload, setUpload] = useState<{ name: string; base64: string } | null>(null);
+  const [basis, setBasis] = useState<LegalBasis>('legitimate_interest');
+  const [sourceNote, setSourceNote] = useState('');
+  const [scan, setScan] = useState<FileScan | null>(null);
+  const [lawful, setLawful] = useState(false);
 
   const [fields, setFields] = useState<string[]>([]);
   const [ops, setOps] = useState<string[]>([]);
@@ -132,6 +169,7 @@ export default function MarketingListsPage() {
     const res = await marketingService.listMembers(list.uuid);
     const data = res.data?.data ?? res.data ?? [];
     setMembers(Array.isArray(data) ? data : []);
+    setMemberTotal(typeof res.data?.meta?.total === 'number' ? res.data.meta.total : null);
   }, []);
 
   useEffect(() => {
@@ -154,6 +192,9 @@ export default function MarketingListsPage() {
     setNotice(null);
     setSegmentCount(null);
     setCsvText('');
+    setUpload(null);
+    setScan(null);
+    setLawful(false);
     const parsed = parseRule(list.segment_rule);
     setMatch(parsed.match);
     setConditions(parsed.conditions);
@@ -203,6 +244,54 @@ export default function MarketingListsPage() {
       setCsvText('');
       await loadMembers(selected);
       return `Added ${r.added ?? 0} (new contacts: ${r.created ?? 0}, skipped: ${r.skipped ?? 0}).`;
+    });
+
+  const previewFile = (file: { name: string; base64: string }, legalBasis: LegalBasis) =>
+    act(async () => {
+      if (!selected) return;
+      setScan(null);
+      setLawful(false);
+      const res = await marketingService.importContactsFile(selected.uuid, {
+        file_name: file.name,
+        content_base64: file.base64,
+        legal_basis: legalBasis,
+      });
+      setScan((res.data?.data ?? res.data) as FileScan);
+    });
+
+  const chooseFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > MAX_FILE_BYTES) {
+      setError('That file is over 7 MB. Split it, or save it as CSV (much smaller than Excel or PDF).');
+      return;
+    }
+    try {
+      const picked = { name: file.name, base64: await readBase64(file) };
+      setUpload(picked);
+      await previewFile(picked, basis);
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, 'Could not read the file'));
+    }
+  };
+
+  const importFile = () =>
+    act(async () => {
+      if (!selected || !upload) return;
+      const res = await marketingService.importContactsFile(selected.uuid, {
+        file_name: upload.name,
+        content_base64: upload.base64,
+        legal_basis: basis,
+        source_note: sourceNote.trim() || undefined,
+        commit: true,
+        confirm: true,
+      });
+      const r = (res.data?.data ?? res.data) as FileScan;
+      setUpload(null);
+      setScan(null);
+      setLawful(false);
+      setSourceNote('');
+      await loadMembers(selected);
+      return `Imported ${r.imported ?? 0} contacts from ${upload.name} (${r.created_contacts ?? 0} new to the CRM).`;
     });
 
   const removeMember = (contactUuid: string) =>
@@ -335,7 +424,8 @@ export default function MarketingListsPage() {
               <h2 className="text-lg font-semibold">
                 {selected.name}{' '}
                 <span className="text-sm font-normal text-secondary-500">
-                  ({selected.list_type || 'static'}, {members.length} member{members.length === 1 ? '' : 's'})
+                  ({selected.list_type || 'static'}, {(memberTotal ?? members.length).toLocaleString('en-GB')} member
+                  {(memberTotal ?? members.length) === 1 ? '' : 's'})
                 </span>
               </h2>
               <Button
@@ -443,6 +533,146 @@ export default function MarketingListsPage() {
               </div>
             )}
 
+            {!isDynamic && (selected.channel || 'email') === 'email' && (
+              <div className="space-y-3 rounded-lg border border-secondary-200 p-4">
+                <h3 className="flex items-center gap-1.5 text-sm font-medium">
+                  <FileUp className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Import from a file
+                </h3>
+                <p className="text-xs text-secondary-500">
+                  A CSV, Excel (.xlsx) or PDF of contacts, up to 7 MB. Every email in it is found, in any column, along
+                  with name, company, phone and website when the file has those columns. You see what will be imported
+                  before anything is added.
+                </p>
+                <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="Why you may email them">
+                  {(
+                    [
+                      ['legitimate_interest', 'Business contacts (B2B, legitimate interest)'],
+                      ['consent', 'They opted in to hear from us'],
+                    ] as [LegalBasis, string][]
+                  ).map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        name="legal-basis"
+                        checked={basis === value}
+                        onChange={() => {
+                          setBasis(value);
+                          if (upload) void previewFile(upload, value);
+                        }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <label className="block text-sm">
+                  <span className="sr-only">Contacts file</span>
+                  <input
+                    type="file"
+                    accept={ACCEPT_FILES}
+                    disabled={busy}
+                    className="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-secondary-100 file:px-3 file:py-1.5 file:text-sm"
+                    onChange={(e) => {
+                      void chooseFile(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {busy && upload && !scan && <p className="text-sm text-secondary-500">Reading {upload.name}…</p>}
+
+                {scan && upload && (
+                  <div className="space-y-3 rounded-md bg-secondary-50 p-3 text-sm dark:bg-secondary-900/40">
+                    <p>
+                      <strong>{upload.name}</strong> ({scan.file_type.toUpperCase()}): {scan.found.toLocaleString('en-GB')}{' '}
+                      email{scan.found === 1 ? '' : 's'} found.
+                    </p>
+                    <ul className="grid gap-1 sm:grid-cols-2">
+                      <li className="text-success-700 dark:text-success-400">
+                        Will import: <strong>{scan.importable.toLocaleString('en-GB')}</strong> (
+                        {scan.new_contacts.toLocaleString('en-GB')} new, {scan.existing_contacts.toLocaleString('en-GB')}{' '}
+                        already in your CRM)
+                      </li>
+                      <li>Duplicates in the file: {scan.skipped.duplicates.toLocaleString('en-GB')}</li>
+                      <li>
+                        Already unsubscribed (never emailed again):{' '}
+                        {scan.skipped.unsubscribed.toLocaleString('en-GB')}
+                      </li>
+                      {scan.personal_rule && (
+                        <li>
+                          Personal addresses skipped (gmail, hotmail…):{' '}
+                          {scan.skipped.personal.toLocaleString('en-GB')}
+                        </li>
+                      )}
+                    </ul>
+                    {scan.personal_rule && scan.skipped.personal > 0 && (
+                      <p className="text-xs text-secondary-500">
+                        UK and EU law (PECR) treats personal mailboxes as private individuals: they must opt in before you
+                        send them marketing, so business-contact imports leave them out.
+                      </p>
+                    )}
+                    {scan.sample && scan.sample.length > 0 && (
+                      <table className="w-full text-xs">
+                        <thead className="text-left text-secondary-500">
+                          <tr>
+                            <th className="py-1 pr-2">Email</th>
+                            <th className="py-1 pr-2">Name</th>
+                            <th className="py-1">Company</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scan.sample.slice(0, 8).map((r) => (
+                            <tr key={r.email} className="border-t border-secondary-200">
+                              <td className="py-1 pr-2">{r.email}</td>
+                              <td className="py-1 pr-2">{[r.first_name, r.last_name].filter(Boolean).join(' ') || '—'}</td>
+                              <td className="py-1">{r.company || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {scan.importable > 0 && (
+                      <>
+                        <label className="block text-sm">
+                          <span className="text-xs text-secondary-500">
+                            Where did this data come from? (optional, kept as a record)
+                          </span>
+                          <input
+                            className="mt-1 w-full rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
+                            value={sourceNote}
+                            onChange={(e) => setSourceNote(e.target.value)}
+                            placeholder="e.g. Bought from ExampleData Ltd, October 2026"
+                            maxLength={1000}
+                          />
+                        </label>
+                        <label className="flex items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={lawful}
+                            onChange={(e) => setLawful(e.target.checked)}
+                          />
+                          <span>
+                            {basis === 'consent'
+                              ? 'These people opted in to marketing from us.'
+                              : 'These are business contacts I have a legitimate reason to email about our products.'}{' '}
+                            Every email will say who we are and include an unsubscribe link, and anyone who unsubscribes
+                            is never emailed again.
+                          </span>
+                        </label>
+                        <Button
+                          size="sm"
+                          leftIcon={<Upload className="h-4 w-4" />}
+                          disabled={busy || !lawful}
+                          onClick={() => void importFile()}
+                        >
+                          Import {scan.importable.toLocaleString('en-GB')} contacts
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!isDynamic && (
               <div className="space-y-3 rounded-lg border border-secondary-200 p-4">
                 <h3 className="text-sm font-medium">Add contacts</h3>
@@ -485,6 +715,7 @@ export default function MarketingListsPage() {
                   <tr>
                     <th className="p-2">Name</th>
                     <th className="p-2">Email</th>
+                    <th className="p-2">Company</th>
                     <th className="p-2">Source</th>
                     <th className="p-2" />
                   </tr>
@@ -492,7 +723,7 @@ export default function MarketingListsPage() {
                 <tbody>
                   {members.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="p-4 text-secondary-500">
+                      <td colSpan={5} className="p-4 text-secondary-500">
                         No members yet — campaigns using this list will fail Validate until it has contacts.
                       </td>
                     </tr>
@@ -501,6 +732,7 @@ export default function MarketingListsPage() {
                     <tr key={m.contact_uuid} className="border-t border-secondary-200">
                       <td className="p-2">{[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}</td>
                       <td className="p-2">{m.email || m.phone || '—'}</td>
+                      <td className="p-2 text-secondary-500">{m.company || '—'}</td>
                       <td className="p-2 text-secondary-500">{m.source}</td>
                       <td className="p-2 text-right">
                         {m.source !== 'segment' && (

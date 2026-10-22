@@ -181,6 +181,8 @@ local FRIENDLY = {
     self_approval = "You can't approve a campaign you created. Ask another admin to approve it.",
     list_locked = "The audience can't change once sending has started. Duplicate the campaign to send to another list.",
     template_error = "The message can't be rendered. Fix the template, then validate again.",
+    public_url_required = "Set the public tracking/unsubscribe URL (Workspace → Plugins → Marketing Cloud) first: "
+        .. "without it the unsubscribe link in your emails can't work.",
 }
 
 --- detail: extra text for the message (e.g. the template error and where it is).
@@ -250,6 +252,11 @@ function C.validate(ns, campaign_id, opts)
     end
     local ok, err = content_ok(campaign)
     if not ok then return nil, err end
+    local settings = U.settings(ns)
+    if (campaign.channel or "email") == "email" and campaign.message_type == "marketing"
+        and require("opsapi_marketing.send").public_base(settings) == "" then
+        return nil, "public_url_required"
+    end
     local rendered, rerr = renders(ns, campaign)
     if not rendered then return nil, "template_error", rerr end
 
@@ -260,6 +267,9 @@ function C.validate(ns, campaign_id, opts)
         body_text = campaign.body_text,
     })
     if #(analysis.unknown_merge or {}) > 0 then return nil, "unknown_merge_fields" end
+    if (campaign.channel or "email") == "email" and not tostring(settings.sender_address or ""):match("%S") then
+        analysis.warnings[#analysis.warnings + 1] = "missing_sender_address"
+    end
 
     local preview, perr = C.audience_preview(ns, campaign, { skip_quiet_hours = true })
     if not preview then return nil, perr end
