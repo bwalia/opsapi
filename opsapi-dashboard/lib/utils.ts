@@ -38,10 +38,12 @@ export function formatRelativeTime(date: string | Date): string {
 /**
  * Format currency
  */
+// Defaults to GBP: OpsAPI is a UK platform (HMRC Self Assessment, UK accounting).
+// Callers needing another currency pass it explicitly (e.g. bank accounts, USD AI costs).
 export function formatCurrency(
   amount: number | string,
-  currency: string = 'USD',
-  locale: string = 'en-US'
+  currency: string = 'GBP',
+  locale: string = 'en-GB'
 ): string {
   const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(numAmount)) return '-';

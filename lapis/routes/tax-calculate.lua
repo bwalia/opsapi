@@ -7,12 +7,16 @@
     GET  /api/v2/tax/calculate/:statement_id        — Single-statement tax calculation
     POST /api/v2/tax/calculate/multi                — Multi-statement aggregation
     GET  /api/v2/tax/calculate/summary/:statement_id — Formatted tax summary
+
+    Tax maths + per-year rate loading live in lib/tax-calc (TaxCalc) — the single
+    source of truth shared with the conversational tax agent (lib/agent/tax-tools)
+    so the two can never disagree.
 ]]
 
 local db = require("lapis.db")
-local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
+local TaxCalc = require("lib.tax-calc")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -20,134 +24,10 @@ local function getUserId(user)
     return rows and rows[1] and rows[1].id
 end
 
-local function getCurrentTaxYear()
-    local now = os.date("*t")
-    local year = now.year
-    if now.month < 4 or (now.month == 4 and now.day < 6) then
-        year = year - 1
-    end
-    return year .. "-" .. string.format("%02d", (year + 1) % 100)
-end
-
 local function getTaxYearDates(tax_year_str)
     local start_year = tonumber(tax_year_str:sub(1, 4))
     if not start_year then return nil, nil end
     return string.format("%d-04-06", start_year), string.format("%d-04-05", start_year + 1)
-end
-
-local function loadTaxRates(tax_year)
-    local rows = db.query("SELECT * FROM tax_rates WHERE tax_year = ? LIMIT 1", tax_year)
-    if rows and #rows > 0 then
-        local r = rows[1]
-        return {
-            personal_allowance = tonumber(r.personal_allowance) or 12570,
-            taper_threshold = tonumber(r.personal_allowance_taper_threshold) or 100000,
-            basic_rate = tonumber(r.basic_rate) or 0.20,
-            basic_rate_upper = tonumber(r.basic_rate_upper) or 50270,
-            higher_rate = tonumber(r.higher_rate) or 0.40,
-            higher_rate_upper = tonumber(r.higher_rate_upper) or 125140,
-            additional_rate = tonumber(r.additional_rate) or 0.45,
-            nic_main_rate = tonumber(r.nic_class4_main_rate) or 0.06,
-            nic_lower = tonumber(r.nic_class4_lower_threshold) or 12570,
-            nic_upper = tonumber(r.nic_class4_upper_threshold) or 50270,
-            nic_additional_rate = tonumber(r.nic_class4_additional_rate) or 0.02,
-            class2_annual = tonumber(r.nic_class2_annual) or 179.40,
-            class2_threshold = tonumber(r.nic_class2_threshold) or 12570,
-        }
-    end
-    return {
-        personal_allowance = 12570, taper_threshold = 100000,
-        basic_rate = 0.20, basic_rate_upper = 50270,
-        higher_rate = 0.40, higher_rate_upper = 125140,
-        additional_rate = 0.45,
-        nic_main_rate = 0.06, nic_lower = 12570, nic_upper = 50270,
-        nic_additional_rate = 0.02,
-        class2_annual = 179.40, class2_threshold = 12570,
-    }
-end
-
---- Calculate full UK tax breakdown from gross income and expenses
-local function calculateTax(gross_income, total_expenses, rates)
-    local trading_profit = math.max(0, gross_income - total_expenses)
-
-    -- Personal allowance (tapered for income > 100k)
-    local pa = rates.personal_allowance
-    if trading_profit > rates.taper_threshold then
-        local excess = trading_profit - rates.taper_threshold
-        pa = math.max(0, pa - math.floor(excess / 2))
-    end
-
-    local taxable_income = math.max(0, trading_profit - pa)
-
-    -- Income tax bands
-    local basic_tax = 0
-    local higher_tax = 0
-    local additional_tax = 0
-
-    local remaining = taxable_income
-
-    -- Basic rate band
-    local basic_band = rates.basic_rate_upper - pa
-    if basic_band > 0 then
-        local basic_amount = math.min(remaining, basic_band)
-        basic_tax = basic_amount * rates.basic_rate
-        remaining = remaining - basic_amount
-    end
-
-    -- Higher rate band
-    if remaining > 0 then
-        local higher_band = rates.higher_rate_upper - rates.basic_rate_upper
-        local higher_amount = math.min(remaining, higher_band)
-        higher_tax = higher_amount * rates.higher_rate
-        remaining = remaining - higher_amount
-    end
-
-    -- Additional rate
-    if remaining > 0 then
-        additional_tax = remaining * rates.additional_rate
-    end
-
-    local income_tax = basic_tax + higher_tax + additional_tax
-
-    -- National Insurance Class 4
-    local nic4 = 0
-    if trading_profit > rates.nic_lower then
-        local main_band = math.min(trading_profit, rates.nic_upper) - rates.nic_lower
-        nic4 = main_band * rates.nic_main_rate
-        if trading_profit > rates.nic_upper then
-            nic4 = nic4 + (trading_profit - rates.nic_upper) * rates.nic_additional_rate
-        end
-    end
-
-    -- Class 2 NIC
-    local nic2 = 0
-    if trading_profit >= rates.class2_threshold then
-        nic2 = rates.class2_annual
-    end
-
-    local total_tax = income_tax + nic4 + nic2
-    local effective_rate = trading_profit > 0 and (total_tax / trading_profit * 100) or 0
-
-    return {
-        gross_income = gross_income,
-        total_expenses = total_expenses,
-        trading_profit = trading_profit,
-        personal_allowance = pa,
-        taxable_income = taxable_income,
-        income_tax = {
-            basic = { amount = basic_tax, rate = rates.basic_rate },
-            higher = { amount = higher_tax, rate = rates.higher_rate },
-            additional = { amount = additional_tax, rate = rates.additional_rate },
-            total = income_tax,
-        },
-        national_insurance = {
-            class4 = nic4,
-            class2 = nic2,
-            total = nic4 + nic2,
-        },
-        total_tax_due = math.floor(total_tax * 100 + 0.5) / 100,
-        effective_rate = math.floor(effective_rate * 100) / 100,
-    }
 end
 
 --- Aggregate income/expenses from transactions for given statement IDs
@@ -157,7 +37,7 @@ local function aggregateStatements(statement_ids, user_id)
     local id_list = table.concat(statement_ids, ",")
     local result = db.query(string.format([[
         SELECT
-            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' AND is_tax_deductible IS NOT FALSE THEN amount ELSE 0 END), 0) as gross_income,
+            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE 0 END), 0) as gross_income,
             COALESCE(SUM(CASE WHEN transaction_type = 'DEBIT' AND is_tax_deductible = true THEN amount ELSE 0 END), 0) as total_expenses
         FROM tax_transactions
         WHERE statement_id IN (%s) AND user_id = ?
@@ -179,7 +59,7 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            local tax_year = self.params.tax_year or getCurrentTaxYear()
+            local tax_year = self.params.tax_year or TaxCalc.current_tax_year()
             local start_date, end_date = getTaxYearDates(tax_year)
             if not start_date then
                 return { status = 400, json = { error = "Invalid tax year format (e.g. 2025-26)" } }
@@ -223,11 +103,11 @@ return function(app)
             end
 
             local stmt = statements[1]
-            local tax_year = stmt.tax_year or getCurrentTaxYear()
-            local rates = loadTaxRates(tax_year)
+            local tax_year = stmt.tax_year or TaxCalc.current_tax_year()
+            local rates = TaxCalc.load_rates(tax_year)
 
             local gross_income, total_expenses = aggregateStatements({ self.params.statement_id }, user_id)
-            local calculation = calculateTax(gross_income, total_expenses, rates)
+            local calculation = TaxCalc.compute(gross_income, total_expenses, rates)
             calculation.tax_year = tax_year
             calculation.statement_id = tonumber(self.params.statement_id)
 
@@ -244,7 +124,7 @@ return function(app)
             end
 
             local statement_ids = self.params.statement_ids
-            local tax_year = self.params.tax_year or getCurrentTaxYear()
+            local tax_year = self.params.tax_year or TaxCalc.current_tax_year()
 
             if not statement_ids or type(statement_ids) ~= "table" or #statement_ids == 0 then
                 return { status = 400, json = { error = "statement_ids array is required" } }
@@ -260,9 +140,9 @@ return function(app)
                 return { status = 403, json = { error = "Some statements not found or not owned by user" } }
             end
 
-            local rates = loadTaxRates(tax_year)
+            local rates = TaxCalc.load_rates(tax_year)
             local gross_income, total_expenses = aggregateStatements(statement_ids, user_id)
-            local calculation = calculateTax(gross_income, total_expenses, rates)
+            local calculation = TaxCalc.compute(gross_income, total_expenses, rates)
             calculation.tax_year = tax_year
             calculation.statement_ids = statement_ids
 
@@ -325,11 +205,11 @@ return function(app)
             end
 
             local stmt = statements[1]
-            local tax_year = stmt.tax_year or getCurrentTaxYear()
-            local rates = loadTaxRates(tax_year)
+            local tax_year = stmt.tax_year or TaxCalc.current_tax_year()
+            local rates = TaxCalc.load_rates(tax_year)
 
             local gross_income, total_expenses = aggregateStatements({ self.params.statement_id }, user_id)
-            local calc = calculateTax(gross_income, total_expenses, rates)
+            local calc = TaxCalc.compute(gross_income, total_expenses, rates)
 
             -- Category breakdown
             local categories = db.select([[

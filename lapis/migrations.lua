@@ -100,6 +100,8 @@ local tax_categories_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.TA
 
 -- Tax Profile Guidance: opsApi-owned per-profile HMRC guidance (form, persona, rules)
 local tax_profile_guidance_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-profile-guidance") or {}
+local tax_agent_sessions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-sessions") or {}
+local tax_agent_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-menu-item") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -2079,6 +2081,11 @@ local _migrations = {
     ['708_billing_drop_payment_accounts'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 9),
     ['709_billing_payments_invoice_unique'] = conditional_array({ ProjectConfig.FEATURES.TAX_COPILOT, ProjectConfig.FEATURES.BILLING }, billing_system_migrations, 10),
     ['710_tax_profile_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_profile_guidance_migrations, 1),
+    -- 'zz_' so it sorts (as a string) after every numbered migration — it only needs
+    -- namespaces + users, created far earlier. Conversational tax agent sessions.
+    ['zz_tax_agent_sessions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_agent_sessions_migrations, 1),
+    -- 'zz_tax_agent_zz_menu' sorts after tax-copilot-menu-items (the 'tax' parent must exist first).
+    ['zz_tax_agent_zz_menu'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_agent_menu_migrations, 1),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),

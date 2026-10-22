@@ -140,6 +140,19 @@ function LLMClient.classify(opts)
     -- platform's one setting (lib/agent/llm).
     local provider = Llm.default.provider
 
+    -- Direction steering: a credit is income, a debit is an expense. Without this the
+    -- model reads only the description and files money-in as a cost (and vice versa).
+    -- The candidate category list is already filtered to the right direction upstream.
+    local direction_block = ""
+    if opts.is_credit == true then
+        direction_block = "DIRECTION — CRITICAL: this is a CREDIT (money IN), so it is INCOME, not an "
+            .. "expense. You MUST choose an INCOME category from the list (e.g. sales_income for "
+            .. "client/invoice payments and sales revenue). NEVER choose an expense category for a credit.\n\n"
+    elseif opts.is_credit == false then
+        direction_block = "DIRECTION: this is a DEBIT (money OUT) — an expense or a personal/transfer "
+            .. "payment. Choose the best expense category; use personal_expense for clearly personal spending.\n\n"
+    end
+
     -- Build category list for the prompt
     local cat_list = ""
     if opts.categories and #opts.categories > 0 then
@@ -186,7 +199,7 @@ function LLMClient.classify(opts)
             rules_text = "\n\nProfile-specific HMRC guidance:\n" .. opts.rules_markdown
         end
 
-        system_prompt = persona .. "\n\n"
+        system_prompt = persona .. "\n\n" .. direction_block
             .. "Classify the transaction into one system category and map it to the "
             .. "correct HMRC box.\n\n"
             .. "Respond with VALID JSON ONLY, no other text:\n"
@@ -207,7 +220,7 @@ function LLMClient.classify(opts)
     else
         -- Legacy prompt (feature flag off / no box map supplied). NOTE: emits camelCase
         -- HMRC keys — retained only for backward-compatible opt-out.
-        system_prompt = [[You are a UK tax classification expert. Classify the following bank transaction into one of the given categories.
+        system_prompt = direction_block .. [[You are a UK tax classification expert. Classify the following bank transaction into one of the given categories.
 
 You MUST respond with valid JSON only, no other text. Use this exact format:
 {"category": "category_name", "hmrc_category": "hmrc_key", "confidence": 0.95, "reasoning": "brief explanation", "is_tax_deductible": true}
