@@ -19,7 +19,10 @@ P = API + "/api/v2/opsapi-marketing"
 USERS = {
     "owner_a": ("a1111111-0000-4000-8000-000000000001", "owner.a@mkt.invalid"),
     "owner_b": ("b2222222-0000-4000-8000-000000000002", "owner.b@mkt.invalid"),
+    # Platform admin (JWT role): approves campaigns it didn't create (authors can't self-approve).
+    "approver": ("c3333333-0000-4000-8000-000000000003", "approver@mkt.invalid"),
 }
+ROLES = {"approver": "administrative"}
 
 failures = 0
 
@@ -28,8 +31,10 @@ def jwt(user):
     uid, email = USERS[user]
     b = lambda d: base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).rstrip(b"=")
     h = b({"typ": "JWT", "alg": "HS256"})
-    p = b({"userinfo": {"uuid": uid, "email": email}, "iat": int(time.time()), "exp": int(time.time()) + 3600,
-           "iss": "opsapi"})
+    info = {"uuid": uid, "email": email}
+    if user in ROLES:
+        info["roles"] = ROLES[user]
+    p = b({"userinfo": info, "iat": int(time.time()), "exp": int(time.time()) + 3600, "iss": "opsapi"})
     sig = base64.urlsafe_b64encode(hmac.new(SECRET.encode(), h + b"." + p, hashlib.sha256).digest()).rstrip(b"=")
     return (h + b"." + p + b"." + sig).decode()
 
@@ -94,3 +99,26 @@ def finish():
 
 def new_uuid():
     return str(uuid.uuid4())
+
+
+def data(b):
+    return (b.get("data") or b) if isinstance(b, dict) else {}
+
+
+def code(res):
+    return ((res[1] if isinstance(res[1], dict) else {}).get("details") or {}).get("code")
+
+
+def run_sender(ns):
+    """Run the campaign sender for this workspace once and wait for it to finish."""
+    q = (f"SELECT COALESCE(j.last_run_at::text, 'never') FROM plugin_jobs j JOIN namespaces n "
+         f"ON n.id = j.namespace_id WHERE j.job = 'opsapi_marketing.campaign_sender' AND n.uuid = '{ns}'")
+    deadline = time.time() + 90  # a new workspace's job row is seeded within a minute
+    while time.time() < deadline and not sql(q):
+        time.sleep(2)
+    before = sql(q)
+    sql(f"UPDATE plugin_jobs SET next_run_at = NOW() FROM namespaces n WHERE n.id = plugin_jobs.namespace_id "
+        f"AND plugin_jobs.job = 'opsapi_marketing.campaign_sender' AND n.uuid = '{ns}'")
+    deadline = time.time() + 45
+    while time.time() < deadline and sql(q) == before:
+        time.sleep(2)

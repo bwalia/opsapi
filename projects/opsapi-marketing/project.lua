@@ -1,5 +1,5 @@
 -- OpsAPI Marketing Cloud — multi-channel marketing automation plugin.
--- Channel-agnostic: email (v1 reference), sms (second channel), push/webhook adapters.
+-- Channel-agnostic: email (v1 reference) and sms adapters (opsapi_marketing/channels).
 -- Reliable delivery: Postgres transactional outbox + leased plugin jobs (NOT Kafka).
 local ProjectConfig = require("helper.project-config")
 
@@ -110,6 +110,10 @@ return {
             enum = { "uk", "eu", "us", "other" },
             description = "Drives consent and List-Unsubscribe expectations.",
         },
+        require_approval = {
+            type = "boolean", label = "Every campaign needs approval", default = false,
+            description = "Someone with Campaigns manage access, other than the campaign's author, must approve it.",
+        },
         dry_run = {
             type = "boolean", label = "Dry-run sends (no provider calls)", default = false,
             description = "Accept deliveries without calling SMTP/SMS. Use in non-prod.",
@@ -120,6 +124,10 @@ return {
         },
         default_from_name = {
             type = "string", label = "Default from name", default = "Marketing",
+        },
+        sender_address = {
+            type = "text", label = "Business name and postal address (email footer)", default = "",
+            description = "Shown in every marketing email. UK PECR and US CAN-SPAM require it for promotional email.",
         },
         email_rate_per_min = {
             type = "integer", label = "Email sends per minute", default = 60, min = 1, max = 10000,

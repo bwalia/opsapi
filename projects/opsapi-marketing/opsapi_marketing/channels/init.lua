@@ -1,9 +1,8 @@
--- Channel provider registry.
+-- Channel provider registry. Push and webhook were removed: CRM contacts have no
+-- device token or endpoint URL, so those campaigns could never deliver.
 local R = {
     email = require("opsapi_marketing.channels.email"),
     sms = require("opsapi_marketing.channels.sms"),
-    push = require("opsapi_marketing.channels.push"),
-    webhook = require("opsapi_marketing.channels.webhook"),
 }
 
 local M = {}

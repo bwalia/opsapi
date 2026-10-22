@@ -68,8 +68,11 @@ check("status awaiting_approval", (vd.get("campaign") or {}).get("status") == "a
 blocked = call("POST", P + f"/campaigns/{cid}/schedule", "owner_a", A, {"send_now": True})
 check("schedule blocked pending approval", blocked[0] == 400, blocked)
 
-# Approve
-apr = expect("approve", call("POST", P + f"/campaigns/{cid}/approve", "owner_a", A, {}), 200)
+# The author can't approve their own campaign; another admin can.
+own = call("POST", P + f"/campaigns/{cid}/approve", "owner_a", A, {})
+check("author can't self-approve", own[0] == 400 and ((own[1] or {}).get("details") or {}).get("code") == "self_approval",
+      own)
+apr = expect("approve", call("POST", P + f"/campaigns/{cid}/approve", "approver", A, {}), 200)
 check("approved → validated", ((apr.get("data") or apr).get("status") == "validated"), apr)
 
 # A/B config
@@ -84,7 +87,11 @@ ab = expect("set ab", call("PUT", P + f"/campaigns/{cid}/ab-config", "owner_a", 
          "body_text": "B"},
     ],
 }), 200)
-check("ab enabled", True, ab)
+check("A/B edit after approval → back to draft", (ab.get("data") or ab).get("status") == "draft", ab)
+again = call("POST", P + f"/campaigns/{cid}/schedule", "owner_a", A, {"send_now": True})
+check("send blocked until approved again",
+      again[0] == 400 and ((again[1] or {}).get("details") or {}).get("code") == "approval_required", again)
+expect("re-approve", call("POST", P + f"/campaigns/{cid}/approve", "approver", A, {}), 200)
 
 # Send now (budget 2)
 send = expect("send now", call("POST", P + f"/campaigns/{cid}/schedule", "owner_a", A, {

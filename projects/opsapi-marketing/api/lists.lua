@@ -17,26 +17,8 @@ local function find_list(ns, id)
     return U.one("SELECT * FROM mkt_lists WHERE namespace_id = ? AND id = ?", ns, tonumber(id))
 end
 
-local function parse_csv_line(line)
-    local fields, field, in_q = {}, "", false
-    local i, n = 1, #line
-    while i <= n do
-        local ch = line:sub(i, i)
-        if in_q then
-            if ch == '"' then
-                if line:sub(i + 1, i + 1) == '"' then field = field .. '"'; i = i + 1
-                else in_q = false end
-            else field = field .. ch end
-        else
-            if ch == '"' then in_q = true
-            elseif ch == "," then fields[#fields + 1] = field; field = ""
-            else field = field .. ch end
-        end
-        i = i + 1
-    end
-    fields[#fields + 1] = field
-    return fields
-end
+local Prospects = require("opsapi_marketing.prospects")
+local parse_csv_line = Prospects.parse_csv_line
 
 return function(app)
     sdk.crud(app, "/lists", {
@@ -46,7 +28,7 @@ return function(app)
             name = { type = "string", required = true },
             description = { type = "text" },
             list_type = { type = "string", enum = { "static", "dynamic" } },
-            channel = { type = "string", enum = { "email", "sms", "push", "webhook" } },
+            channel = { type = "string", enum = U.CHANNEL_ENUM },
         },
         searchable = { "name", "description" },
         filterable = { "list_type", "channel" },
@@ -143,7 +125,9 @@ return function(app)
                 end
                 local first = clean(col.first_name and cols[col.first_name] or "") or "Contact"
                 local last = clean(col.last_name and cols[col.last_name] or "") or ""
-                local phone = clean(col.phone and cols[col.phone] or "") or ""
+                -- Stored as E.164 when it parses: clean() would strip the leading "+".
+                local raw_phone = col.phone and cols[col.phone] or ""
+                local phone = U.e164(raw_phone) or clean(raw_phone) or ""
 
                 local contact = U.one([[
                     SELECT uuid FROM crm_contacts
@@ -188,6 +172,44 @@ return function(app)
         return sdk.ok({ added = added, created = created, skipped = skipped, errors = sdk.array(errors) })
     end))
 
+    -- Contacts from a file (CSV, XLSX or PDF of business contacts): every email in it is
+    -- found; commit=false previews what would be imported, commit=true (+ confirm) imports.
+    app:post("/lists/:id/prospects", sdk.handler({ permission = "opsapi_marketing_lists.update" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local list = find_list(ns, self.params.id)
+        if not list then return sdk.not_found("list") end
+        if list.list_type == "dynamic" or (list.channel and list.channel ~= "email") then
+            return sdk.error(400, "Import into a static email list")
+        end
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
+        local b64 = type(body.content_base64) == "string" and body.content_base64:gsub("^data:[^,]*,", "")
+        local bytes = b64 and ngx.decode_base64(b64)
+        if not bytes or #bytes == 0 then return sdk.error(400, "content_base64 (the file, base64) is required") end
+        if #bytes > Prospects.MAX_BYTES then return sdk.error(413, "File too large: the limit is 7 MB") end
+        local basis = body.legal_basis or "legitimate_interest"
+        if basis ~= "legitimate_interest" and basis ~= "consent" then
+            return sdk.error(422, "legal_basis must be legitimate_interest or consent")
+        end
+        local file_name = tostring(body.file_name or "upload")
+        local scan, err = Prospects.scan(ns, file_name, bytes, basis)
+        if not scan then return sdk.error(400, err) end
+        if body.commit ~= true then return sdk.ok(scan.summary) end
+        if #scan.importable == 0 then return sdk.error(400, "Nothing to import from this file") end
+        if body.confirm ~= true then
+            return sdk.error(400, "Confirm you may email these contacts and that every email lets them unsubscribe.",
+                { code = "confirm_required" })
+        end
+        local user = sdk.user(self) or {}
+        if not user.uuid then return sdk.error(400, "missing user") end
+        return sdk.ok(Prospects.import(ns, list, scan, {
+            file_name = file_name,
+            source_note = type(body.source_note) == "string" and body.source_note:sub(1, 1000) or nil,
+            legal_basis = basis,
+            actor_uuid = user.uuid,
+        }))
+    end))
+
     app:post("/lists/:id/members", sdk.handler({ permission = "opsapi_marketing_lists.update" }, function(self)
         local ns = sdk.namespace_id(self)
         local list = find_list(ns, self.params.id)
@@ -227,12 +249,18 @@ return function(app)
         if not list then return sdk.not_found("list") end
         local rows = db.query([[
             SELECT m.uuid, m.contact_uuid, m.source, m.added_at,
-                   c.first_name, c.last_name, c.email, c.phone
+                   c.first_name, c.last_name, c.email, c.phone,
+                   COALESCE(a.name, c.metadata->>'company') AS company
             FROM mkt_list_members m
             LEFT JOIN crm_contacts c ON c.uuid = m.contact_uuid AND c.namespace_id = m.namespace_id
+            LEFT JOIN crm_accounts a ON a.id = c.account_id AND a.namespace_id = c.namespace_id
             WHERE m.namespace_id = ? AND m.list_id = ? AND m.removed_at IS NULL
             ORDER BY m.added_at DESC LIMIT 500
         ]], ns, list.id)
-        return sdk.ok(sdk.array(rows))
+        -- The newest 500 are listed; meta.total is the real size (imports run to thousands).
+        local total = U.one([[
+            SELECT COUNT(*)::int AS n FROM mkt_list_members WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL
+        ]], ns, list.id)
+        return sdk.ok(sdk.array(rows), { total = total and total.n or #rows })
     end))
 end

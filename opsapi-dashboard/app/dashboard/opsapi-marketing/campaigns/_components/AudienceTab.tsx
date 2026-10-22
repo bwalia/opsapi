@@ -67,6 +67,11 @@ export default function AudienceTab({
   const [error, setError] = useState<string | null>(null);
   const [budget, setBudget] = useState(campaign.max_deliveries ? String(campaign.max_deliveries) : '');
   const [savingBudget, setSavingBudget] = useState(false);
+  const [batchSize, setBatchSize] = useState(campaign.batch_size ? String(campaign.batch_size) : '');
+  const [batchEvery, setBatchEvery] = useState(
+    campaign.batch_interval_minutes ? String(campaign.batch_interval_minutes) : '60',
+  );
+  const [savingBatches, setSavingBatches] = useState(false);
   const [members, setMembers] = useState<ListMember[]>([]);
   const [membersFor, setMembersFor] = useState('');
   const [contactUuid, setContactUuid] = useState('');
@@ -141,6 +146,35 @@ export default function AudienceTab({
     }
   };
 
+  const saveBatches = async () => {
+    const size = batchSize.trim() === '' ? null : Number(batchSize);
+    const every = Number(batchEvery);
+    if (size !== null && (!Number.isInteger(size) || size < 1)) {
+      setError('Batch size must be a whole number of at least 1, or empty to send all at once.');
+      return;
+    }
+    if (size !== null && (!Number.isInteger(every) || every < 1)) {
+      setError('Minutes between batches must be a whole number of at least 1.');
+      return;
+    }
+    setSavingBatches(true);
+    setError(null);
+    try {
+      const res = await marketingService.updateCampaign(campaign.uuid, {
+        batch_size: size,
+        batch_interval_minutes: size === null ? null : every,
+      });
+      onSaved(
+        unwrap<Campaign>(res),
+        size ? `Sends ${fmtInt(size)} at a time, every ${every} minutes.` : 'Batches off: sends as fast as allowed.',
+      );
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, 'Could not save batches'));
+    } finally {
+      setSavingBatches(false);
+    }
+  };
+
   const testSend = async () => {
     if (!contactUuid) return;
     setTesting(true);
@@ -164,6 +198,9 @@ export default function AudienceTab({
 
   const other = preview ? (preview.other ?? preview.other_excluded ?? 0) : 0;
   const budgetDirty = budget !== (campaign.max_deliveries ? String(campaign.max_deliveries) : '');
+  const batchesDirty =
+    batchSize !== (campaign.batch_size ? String(campaign.batch_size) : '') ||
+    (batchSize !== '' && batchEvery !== String(campaign.batch_interval_minutes ?? ''));
 
   return (
     <div className="space-y-4">
@@ -226,7 +263,8 @@ export default function AudienceTab({
           </p>
         )}
         <p className="text-xs text-secondary-500">
-          The selected list is attached to the campaign when you preview, validate or send.
+          The selected list is attached to the campaign when you validate or send. Choosing a different list after
+          validating means validating (and approval) again.
         </p>
 
         {preview && (
@@ -292,6 +330,62 @@ export default function AudienceTab({
               Save
             </Button>
           </div>
+
+          <h2 id="aud-batches" className="pt-2 text-sm font-medium">
+            Send in batches
+          </h2>
+          <p className="text-xs text-secondary-500">
+            For large lists: send this many at once, then the next batch after a pause. Leave empty to send everything
+            as fast as the workspace rate allows.
+          </p>
+          <div className="flex flex-wrap items-end gap-2" aria-labelledby="aud-batches">
+            <label className="block text-sm">
+              <span className="text-xs text-secondary-500">Per batch</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                className={`${INPUT_CLASS} w-32`}
+                value={batchSize}
+                onChange={(e) => setBatchSize(e.target.value)}
+                placeholder="All at once"
+                disabled={!editable}
+                aria-label="Emails per batch"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-secondary-500">Minutes between batches</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                className={`${INPUT_CLASS} w-32`}
+                value={batchEvery}
+                onChange={(e) => setBatchEvery(e.target.value)}
+                disabled={!editable || batchSize.trim() === ''}
+                aria-label="Minutes between batches"
+              />
+            </label>
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Save className="h-4 w-4" />}
+              onClick={() => void saveBatches()}
+              isLoading={savingBatches}
+              disabled={!editable || !batchesDirty}
+            >
+              Save
+            </Button>
+          </div>
+          {preview && Number(batchSize) > 0 && preview.eligible > Number(batchSize) && (
+            <p className="text-xs text-secondary-500">
+              About {fmtInt(Math.ceil(preview.eligible / Number(batchSize)))} batches; the last starts roughly{' '}
+              {fmtInt(Math.ceil((Math.ceil(preview.eligible / Number(batchSize)) - 1) * Number(batchEvery)))} minutes
+              after sending begins.
+            </p>
+          )}
         </section>
 
         <section aria-labelledby="aud-test" className="space-y-3 rounded-lg border border-secondary-200 p-4">

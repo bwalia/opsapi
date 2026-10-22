@@ -21,7 +21,7 @@ return function(app)
         module = "opsapi_marketing_templates",
         fields = {
             name = { type = "string", required = true },
-            channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
+            channel = { type = "string", required = true, enum = U.CHANNEL_ENUM },
             subject = { type = "string", max = 998 },
             preview_text = { type = "string", max = 255 },
             body_html = { type = "text" },

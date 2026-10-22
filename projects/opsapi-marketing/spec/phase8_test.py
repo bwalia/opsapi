@@ -119,6 +119,8 @@ check("queued 4", send.get("queued") == 4, send)
 # Drain the queue (the job runs every minute; dispatch is idempotent).
 deadline = time.time() + 90
 while time.time() < deadline:
+    # A new workspace's first job run is spread over up to 5 minutes: run it now.
+    sql("UPDATE plugin_jobs SET next_run_at = NOW() WHERE job = 'opsapi_marketing.campaign_sender'")
     n = sql(f"SELECT count(*) FROM mkt_deliveries d JOIN mkt_campaigns c ON c.id = d.campaign_id "
             f"WHERE c.uuid = '{cid}' AND d.state = 'accepted'")
     if n == ["4"]:

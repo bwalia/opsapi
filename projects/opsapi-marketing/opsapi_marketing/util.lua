@@ -5,7 +5,8 @@ local db = require("lapis.db")
 local U = {}
 
 U.UUID = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
-U.CHANNELS = { email = true, sms = true, push = true, webhook = true }
+U.CHANNELS = { email = true, sms = true }
+U.CHANNEL_ENUM = { "email", "sms" } -- request validation (fields `enum`)
 U.MESSAGE_TYPES = { marketing = true, transactional = true, other = true }
 
 function U.is_uuid(v)

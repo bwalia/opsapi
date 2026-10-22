@@ -24,7 +24,7 @@ function A.overview(ns)
             COUNT(*) FILTER (WHERE state = 'skipped')::int AS skipped,
             COUNT(*) FILTER (WHERE opened_at IS NOT NULL)::int AS opened_est,
             COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)::int AS clicked
-        FROM mkt_deliveries WHERE namespace_id = ?
+        FROM mkt_deliveries WHERE namespace_id = ? AND attempt_key NOT LIKE 'test-%'
     ]], ns) or {}
 
     local replies = U.one([[
@@ -97,6 +97,7 @@ local function ab_winner(variants, metric)
     }
 end
 
+-- Delivery counts leave out test sends (attempt_key 'test-…'): they aren't campaign sends.
 function A.campaign(ns, campaign_id)
     local del = U.one([[
         SELECT
@@ -111,7 +112,7 @@ function A.campaign(ns, campaign_id)
             COUNT(*) FILTER (WHERE opened_at IS NOT NULL)::int AS opened_estimated,
             COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)::int AS clicked,
             COUNT(*) FILTER (WHERE converted_at IS NOT NULL)::int AS converted
-        FROM mkt_deliveries WHERE namespace_id = ? AND campaign_id = ?
+        FROM mkt_deliveries WHERE namespace_id = ? AND campaign_id = ? AND attempt_key NOT LIKE 'test-%'
     ]], ns, campaign_id) or {}
 
     local conv = U.one([[
@@ -129,7 +130,7 @@ function A.campaign(ns, campaign_id)
                COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)::int AS clicked,
                COUNT(*) FILTER (WHERE converted_at IS NOT NULL)::int AS converted,
                COALESCE(SUM(conversion_value), 0)::float AS revenue
-        FROM mkt_deliveries WHERE namespace_id = ? AND campaign_id = ?
+        FROM mkt_deliveries WHERE namespace_id = ? AND campaign_id = ? AND attempt_key NOT LIKE 'test-%'
         GROUP BY COALESCE(variant_key, '_default') ORDER BY 1
     ]], ns, campaign_id)
     for _, v in ipairs(variants) do
@@ -219,7 +220,7 @@ function A.attribution(ns, days, limit)
                    COUNT(*) FILTER (WHERE opened_at IS NOT NULL)::int AS opened,
                    COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)::int AS clicked,
                    COUNT(*) FILTER (WHERE converted_at IS NOT NULL)::int AS converted
-            FROM mkt_deliveries WHERE campaign_id = c.id
+            FROM mkt_deliveries WHERE campaign_id = c.id AND attempt_key NOT LIKE 'test-%'
         ) d ON true
         LEFT JOIN LATERAL (
             SELECT COUNT(*)::int AS conversions, SUM(value) AS revenue

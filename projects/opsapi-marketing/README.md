@@ -22,6 +22,27 @@ plugin jobs** (`helper/plugin-jobs.lua`) — not Kafka.
 | 4 Tracking + replies + analytics | Done — overview API, reply ingest/classify, conversations UI (`spec/phase4_test.py`) |
 | 5 AI agents + knowledge | Done — `mkt_*` tools + `opsapi-marketing.md` scope (`spec/phase5_test.py`) |
 | 6 SMS E2E + §9 hardening | Done — SMS dry-run, STOP webhook, cross-tenant (`spec/phase6_test.py`) |
+| 9 Production fixes (step 1) | Quiet hours defer, budgets, caps, template errors, four-eyes approval, admin-only transactional; runs with quiet hours on (`spec/phase9_test.py`) |
+| 10 Contact files + batches | CSV/XLSX/PDF import of business contacts (preview → confirm), batched sending, unsubscribe = never again (`spec/phase10_test.py`) |
+
+## Promoting to bought / business contact lists
+
+1. **Lists → Import from a file**: a CSV, Excel (.xlsx) or PDF, up to 7 MB / 50,000 emails. Every
+   email in it is found (any column, or anywhere in a PDF), with name/company/phone/website when
+   the file has those columns. The preview shows what will be imported and what is skipped:
+   duplicates, anyone already unsubscribed, and — for B2B "legitimate interest" imports under
+   UK/EU rules — personal mailboxes (gmail, hotmail…), which need consent first. Nothing is added
+   until you confirm. Each import is recorded in `mkt_list_imports` (file, who, when, source note).
+2. **Campaign → Audience → Send in batches**: e.g. 400 per batch every 60 minutes. Deliveries get a
+   `send_after` slot; the sender only picks due ones, at up to `email_rate_per_min` per run.
+3. **Unsubscribe**: every email carries a working link (and List-Unsubscribe headers). An
+   unsubscribe suppresses the address for the whole workspace: later campaigns skip it and later
+   imports never re-add it. Email campaigns can't be validated until a public base URL is set
+   (setting `public_base_url` or env `OPSAPI_PUBLIC_URL`); set `sender_address` so every email
+   names the sender.
+
+Channels: email and SMS. Push and webhook adapters were removed — CRM contacts have no
+device token or endpoint URL, so those campaigns could never deliver.
 
 ## Tests
 

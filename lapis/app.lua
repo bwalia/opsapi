@@ -290,7 +290,10 @@ end)
 -- ============================================
 
 app:before_filter(function(self)
-    local uri = ngx.var.uri
+    -- The path Lapis routes on (raw request_uri), not ngx.var.uri: nginx decodes and
+    -- normalises that one, so /api/v2/modules/..%2Fpublic%2Fx looked like the public
+    -- /api/v2/public/x here while the router ran the protected route with no auth.
+    local uri = (ngx.var.request_uri or ngx.var.uri or ""):match("^[^?]*")
 
     -- AI assistant calls (lib/agent/tools call_api) send a JSON body. Mirror its
     -- fields into self.params the way the dashboard's toFormData would (scalars

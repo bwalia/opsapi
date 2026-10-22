@@ -13,7 +13,7 @@ return function(app)
         table = "mkt_suppressions",
         module = "opsapi_marketing_consent",
         fields = {
-            channel = { type = "string", enum = { "email", "sms", "push", "webhook" } },
+            channel = { type = "string", enum = U.CHANNEL_ENUM },
             address = { type = "string", required = true },
             reason = { type = "string", required = true },
             source = { type = "string" },

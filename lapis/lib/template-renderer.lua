@@ -562,16 +562,22 @@ end
 --- Render a template string with data context
 -- @param template_html string The HTML template with {{variables}} and {% control %}
 -- @param data table The data context (company, invoice, client, theme, etc.)
--- @param options table Optional: {css = "...", escape_html = true}
+-- @param options table Optional: {css = "...", escape_html = true, strict = false}
+--   strict: raise on a template error instead of returning an <!-- error --> comment
+--   (callers that send the output, e.g. marketing, must not ship the comment)
 -- @return string Rendered HTML
 function TemplateRenderer.render(template_html, data, options)
     if not template_html then return "" end
     options = options or {}
     data = data or {}
+    local function failed(msg)
+        if options.strict then error(msg, 0) end
+        return "<!-- " .. html_escape(msg) .. " -->"
+    end
 
     -- Enforce template size limit
     if #template_html > MAX_TEMPLATE_SIZE then
-        return "<!-- template exceeds maximum size of 500KB -->"
+        return failed("template exceeds maximum size of 500KB")
     end
 
     -- Check cache for pre-compiled AST
@@ -590,7 +596,7 @@ function TemplateRenderer.render(template_html, data, options)
         local tokens = tokenize(template_html)
         ast, err = build_ast(tokens)
         if err then
-            return "<!-- template error: " .. html_escape(err) .. " -->"
+            return failed("template error: " .. err)
         end
         -- Store in cache
         _template_cache[cache_key] = ast
@@ -601,7 +607,7 @@ function TemplateRenderer.render(template_html, data, options)
     local rendered
     rendered, err = evaluate(ast, data, options)
     if err then
-        return "<!-- render error: " .. html_escape(err) .. " -->"
+        return failed("render error: " .. err)
     end
 
     -- Inject CSS if provided

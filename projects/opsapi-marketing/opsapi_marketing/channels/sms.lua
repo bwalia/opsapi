@@ -40,7 +40,8 @@ end
 function C.render(template, merge_context, ctx)
     local data = merge_context or {}
     local src = template.body_text or template.text or ""
-    local ok, text = pcall(TemplateRenderer.render, src, data)
+    -- SMS is plain text: no HTML escaping; strict so a template error fails the send.
+    local ok, text = pcall(TemplateRenderer.render, src, data, { strict = true, escape_html = false })
     if not ok then return nil, "sms render failed: " .. tostring(text) end
     text = tostring(text):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
     if ctx and ctx.unsubscribe_hint ~= false then

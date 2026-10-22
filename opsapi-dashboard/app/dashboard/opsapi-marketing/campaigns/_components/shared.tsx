@@ -63,6 +63,9 @@ export type Campaign = {
   scheduled_at?: string | null;
   approval_required?: boolean | null;
   max_deliveries?: number | null;
+  /** Send in batches: batch_size messages, then the next batch batch_interval_minutes later. */
+  batch_size?: number | null;
+  batch_interval_minutes?: number | null;
   ab_config?: AbConfig | null;
   tracking?: TrackingConfig | null;
   rejected_reason?: string | null;
