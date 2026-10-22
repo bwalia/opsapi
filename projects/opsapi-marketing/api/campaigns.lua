@@ -13,40 +13,80 @@ local cjson = require("cjson")
 local db = require("lapis.db")
 
 return function(app)
-    sdk.crud(app, "/campaigns", {
+    -- status is driven only by the lifecycle routes below (validate/approve/schedule/...),
+    -- never by create/update — otherwise an update could skip validation or approval.
+    local FIELDS = {
+        name = { type = "string", required = true },
+        objective = { type = "text" },
+        channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
+        message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
+        subject = { type = "string", max = 998 },
+        preview_text = { type = "string", max = 255 },
+        body_html = { type = "text" },
+        body_text = { type = "text" },
+        from_email = { type = "email" },
+        from_name = { type = "string" },
+        reply_to = { type = "email" },
+        scheduled_at = { type = "datetime" },
+        approval_required = { type = "boolean" },
+        max_deliveries = { type = "integer", min = 1 },
+        -- { track_opens, track_clicks, attribution, utm = { enabled, source, medium, campaign, content },
+        --   goal_event }
+        tracking = { type = "json" },
+    }
+
+    local R = sdk.crud(app, "/campaigns", {
         table = "mkt_campaigns",
         module = "opsapi_marketing_campaigns",
-        fields = {
-            name = { type = "string", required = true },
-            objective = { type = "text" },
-            channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
-            message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
-            status = { type = "string", enum = {
-                "draft", "validated", "awaiting_approval", "scheduled", "sending",
-                "completed", "paused", "cancelled", "failed",
-            } },
-            subject = { type = "string", max = 998 },
-            preview_text = { type = "string", max = 255 },
-            body_html = { type = "text" },
-            body_text = { type = "text" },
-            from_email = { type = "email" },
-            from_name = { type = "string" },
-            reply_to = { type = "email" },
-            scheduled_at = { type = "datetime" },
-            approval_required = { type = "boolean" },
-            max_deliveries = { type = "integer", min = 1 },
-        },
+        only = { "list", "show", "create", "delete" },
+        fields = FIELDS,
         searchable = { "name", "subject", "status", "channel" },
         filterable = { "status", "channel", "message_type" },
         sortable = { "name", "status", "channel", "scheduled_at", "created_at", "updated_at" },
         ui = {
             label = "Campaigns",
-            columns = { "name", "channel", "status", "message_type", "scheduled_at" },
+            columns = { "name", "channel", "message_type", "scheduled_at" },
             form = { "name", "channel", "message_type", "subject", "preview_text",
                      "from_email", "from_name", "body_html", "body_text", "scheduled_at",
                      "approval_required", "max_deliveries", "objective" },
         },
     })
+
+    -- What changes the message or who gets it: re-validation (and re-approval) required.
+    local REVALIDATE = {
+        channel = true, message_type = true, subject = true, preview_text = true, body_html = true,
+        body_text = true, from_email = true, from_name = true, reply_to = true, approval_required = true,
+    }
+
+    app:put("/campaigns/:id", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local campaign = Camp.find(ns, self.params.id)
+        if not campaign then return sdk.not_found("campaign") end
+        if not Camp.editable(campaign.status) then
+            return sdk.error(409, "Campaign can't be edited while " .. tostring(campaign.status)
+                .. " — pause it first, or duplicate it.", { code = "not_editable" })
+        end
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
+        local data, errors = sdk.validate(body, FIELDS, true)
+        if not data then return sdk.error(422, "Validation failed", errors) end
+        local row, status, msg = R.update(ns, campaign.uuid, data)
+        if status then return sdk.error(status, msg) end
+        if not row then return sdk.not_found("campaign") end
+
+        local changed = false
+        for k in pairs(data) do
+            if REVALIDATE[k] then changed = true end
+        end
+        if changed and (campaign.status == "validated" or campaign.status == "awaiting_approval") then
+            db.query([[
+                UPDATE mkt_campaigns SET status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = NOW()
+                WHERE id = ?
+            ]], campaign.id)
+            row = Camp.find(ns, campaign.id)
+        end
+        return sdk.ok(row)
+    end))
 
     app:get("/campaigns/:id/stats", sdk.handler({ permission = "opsapi_marketing_campaigns.read" }, function(self)
         local ns = sdk.namespace_id(self)
@@ -55,11 +95,22 @@ return function(app)
         return sdk.ok(Camp.delivery_stats(ns, campaign.id))
     end))
 
+    local function fail(err)
+        return sdk.error(400, Camp.friendly_error(err), { code = err })
+    end
+
+    local function read_body(self)
+        local body, berr = sdk.body(self)
+        if not body then return nil, sdk.error(400, berr) end
+        return body
+    end
+
     app:post("/campaigns/:id/audience-preview", sdk.handler({ permission = "opsapi_marketing_campaigns.read" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
             if list then
@@ -67,21 +118,24 @@ return function(app)
                 campaign.list_id = list.id
             end
         end
-        return sdk.ok(Camp.audience_preview(ns, campaign, body))
+        local preview, err = Camp.audience_preview(ns, campaign, body)
+        if not preview then return fail(err) end
+        return sdk.ok(preview)
     end))
 
     app:post("/campaigns/:id/validate", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
-            if not list then return sdk.error(400, "list not found") end
+            if not list then return fail("list_not_found") end
             db.query("UPDATE mkt_campaigns SET list_id = ? WHERE id = ?", list.id, campaign.id)
         end
         local out, err = Camp.validate(ns, campaign.id, body)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -89,9 +143,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.request_approval(ns, campaign.id, body.notes)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -102,7 +157,7 @@ return function(app)
         if not campaign then return sdk.not_found("campaign") end
         local user = sdk.user(self) or {}
         local out, err = Camp.approve(ns, campaign.id, user.uuid)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -111,9 +166,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.reject(ns, campaign.id, body.reason)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -121,9 +177,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.schedule(ns, campaign.id, body)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -132,7 +189,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.pause(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -141,7 +198,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.resume(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -150,7 +207,7 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local out, err = Camp.cancel(ns, campaign.id)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.ok(out)
     end))
 
@@ -158,9 +215,10 @@ return function(app)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
-        local body = sdk.body(self) or {}
+        local body, bad = read_body(self)
+        if not body then return bad end
         local out, err = Camp.duplicate(ns, campaign.id, body.name)
-        if not out then return sdk.error(400, err) end
+        if not out then return fail(err) end
         return sdk.created(out)
     end))
 

@@ -9,6 +9,7 @@ local U = require("opsapi_marketing.util")
 local E = require("opsapi_marketing.eligibility")
 local Channels = require("opsapi_marketing.channels")
 local Tokens = require("opsapi_marketing.tokens")
+local Links = require("opsapi_marketing.links")
 
 local S = {}
 
@@ -48,6 +49,13 @@ local function merge_context(contact, campaign)
             channel = campaign.channel,
         },
     }
+end
+
+--- Absolute base for tracking/unsubscribe links: workspace setting, else OPSAPI_PUBLIC_URL.
+function S.public_base(settings)
+    local base = settings and settings.public_base_url or ""
+    if base == "" then base = os.getenv("OPSAPI_PUBLIC_URL") or "" end
+    return (base:gsub("/+$", ""))
 end
 
 --- Queue or immediately process one recipient. Returns delivery row or nil, err.
@@ -176,11 +184,25 @@ function S.dispatch(delivery_id)
             return nil, "unknown_channel"
         end
 
-        local base = settings.public_base_url or ""
+        local base = S.public_base(settings)
         local unsub = Tokens.unsubscribe_url(d.namespace_id, d.contact_uuid, d.channel, campaign.list_id, base)
-        local pixel = d.channel == "email" and Tokens.open_pixel_url(d.namespace_id, d.uuid, base) or nil
-
         local variant_key, content = Camp.pick_variant(campaign, d.contact_uuid)
+
+        -- Tracking: open pixel, UTM tagging and click-through rewrite (email only). Without a
+        -- public base URL the links would be relative and broken, so only UTM is applied.
+        local tracking = U.json(campaign.tracking)
+        if type(tracking) ~= "table" then tracking = {} end
+        local pixel = d.channel == "email" and base ~= "" and tracking.track_opens ~= false
+            and Tokens.open_pixel_url(d.namespace_id, d.uuid, base) or nil
+        local link_rewriter
+        if d.channel == "email" then
+            local utm = Links.utm_params(campaign, tracking, variant_key)
+            link_rewriter = function(url)
+                local tagged = Links.add_params(url, utm)
+                if base == "" or tracking.track_clicks == false then return tagged end
+                return Tokens.click_url(d.namespace_id, d.uuid, tagged, base)
+            end
+        end
         local template = {
             subject = content.subject,
             body_html = content.body_html,
@@ -198,6 +220,9 @@ function S.dispatch(delivery_id)
         local payload, rerr = adapter.render(template, merge_context(contact, campaign), {
             unsubscribe_url = unsub,
             open_pixel_url = pixel,
+            link_rewriter = link_rewriter,
+            link_skip = { "/public/unsubscribe", "/public/preferences", "/public/c?" },
+            preheader = campaign.preview_text,
         })
         if not payload then
             db.query("UPDATE mkt_deliveries SET state = 'failed', reason = ?, failed_at = NOW(), updated_at = NOW() WHERE id = ?",
@@ -306,6 +331,13 @@ function S.start_campaign(ns, campaign_id)
 
         local members
         if campaign.list_id then
+            local list = U.one("SELECT list_type FROM mkt_lists WHERE id = ? AND namespace_id = ?",
+                campaign.list_id, ns)
+            if list and list.list_type == "dynamic" then
+                pcall(function()
+                    require("opsapi_marketing.segments").sync_list(ns, campaign.list_id)
+                end)
+            end
             members = db.query([[
                 SELECT contact_uuid FROM mkt_list_members
                 WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL

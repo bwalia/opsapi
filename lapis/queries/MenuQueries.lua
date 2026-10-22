@@ -14,6 +14,10 @@
       2. User's permissions within that namespace (namespace_roles.permissions)
       3. Platform admin status (for is_admin_only items)
       4. Always-show items (visible regardless of permissions)
+    - Platform super-admins (role "administrative") see every active menu
+      for the deployment — including plugins turned off in the workspace and
+      items toggled off in namespace_menu_config — so they can operate any
+      workspace without hunting for a toggle first.
 ]]
 
 local db = require("lapis.db")
@@ -348,65 +352,70 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
 
     for _, item in ipairs(items) do
         local should_include = false
+        local plugin_code = item.key and item.key:match("^plugin:([^:]+):")
 
-        -- Skip if disabled for this namespace
-        if not item.ns_enabled then
+        -- Plugin removed from the deployment: hide for everyone (incl. super-admin).
+        if plugin_code and not ProjectLoader.getByCode(plugin_code) then
+            goto continue
+        end
+        if item.key == "plugins" and #plugin_codes == 0 then
             goto continue
         end
 
-        -- Plugin pages only while their plugin is loaded in this deployment
-        -- (its rows stay in menu_items if the plugin is removed) and on in
-        -- this workspace; Workspace -> Plugins only when there are any.
-        do
-            local plugin_code = item.key and item.key:match("^plugin:([^:]+):")
-            if plugin_code and (not ProjectLoader.getByCode(plugin_code) or plugins_off[plugin_code]) then
-                goto continue
-            end
-            if item.key == "plugins" and #plugin_codes == 0 then
-                goto continue
-            end
-        end
-
-        -- Skip items whose module is not relevant to this project
-        -- (e.g., hide "orders" menu for tax_copilot even for owners)
-        -- Admin-only items bypass this check — they're platform-level, not project-scoped
-        if allowed_modules and item.module and not item.is_admin_only and not allowed_modules[item.module] then
-            goto continue
-        end
-
-        -- Platform admins (root) see the full menu for this namespace's project,
-        -- including when they aren't a member of it (they bypass RBAC everywhere
-        -- else, so the menu must match). Already filtered to project-relevant,
-        -- namespace-enabled items by the skips above.
+        -- Platform super-admin: every active menu in this deployment, including
+        -- workspace-disabled plugins and namespace_menu_config toggles. Project
+        -- module filter still applies so tax_copilot etc. don't show shop items
+        -- whose routes aren't loaded — unless the module is a registered plugin.
         if is_platform_admin then
+            if allowed_modules and item.module and not item.is_admin_only
+                and not allowed_modules[item.module] and not plugin_code then
+                goto continue
+            end
             should_include = true
-        -- Always show items marked as always_show (e.g., My Workspace)
-        elseif item.always_show then
-            should_include = true
-        -- Platform admin-only items only shown to platform admins (handled above)
-        elseif item.is_admin_only then
-            should_include = false
-        -- Role-driven: an owner's menu follows their role's permissions like any
-        -- member (the owner role grants everything by default; a limited role
-        -- limits the menu). Ownership no longer forces every item in.
-        elseif item.module then
-            -- Check if user has the required permission in this namespace
-            if namespace_permissions then
-                local module_perms = namespace_permissions[item.module]
-                if module_perms then
-                    -- Check if user has the required action or "manage" (which grants all)
-                    local required_action = item.required_action or "read"
-                    for _, action in ipairs(module_perms) do
-                        if action == required_action or action == "manage" then
-                            should_include = true
-                            break
+        else
+            -- Skip if disabled for this namespace
+            if not item.ns_enabled then
+                goto continue
+            end
+
+            -- Plugin pages only while the plugin is on in this workspace.
+            if plugin_code and plugins_off[plugin_code] then
+                goto continue
+            end
+
+            -- Skip items whose module is not relevant to this project
+            -- (e.g., hide "orders" menu for tax_copilot even for owners)
+            if allowed_modules and item.module and not item.is_admin_only
+                and not allowed_modules[item.module] then
+                goto continue
+            end
+
+            -- Always show items marked as always_show (e.g., My Workspace)
+            if item.always_show then
+                should_include = true
+            -- Platform admin-only items (already handled above for is_platform_admin)
+            elseif item.is_admin_only then
+                should_include = false
+            -- Role-driven: an owner's menu follows their role's permissions like any
+            -- member (the owner role grants everything by default; a limited role
+            -- limits the menu). Ownership no longer forces every item in.
+            elseif item.module then
+                if namespace_permissions then
+                    local module_perms = namespace_permissions[item.module]
+                    if module_perms then
+                        local required_action = item.required_action or "read"
+                        for _, action in ipairs(module_perms) do
+                            if action == required_action or action == "manage" then
+                                should_include = true
+                                break
+                            end
                         end
                     end
                 end
+            else
+                -- Items without module requirement are shown to all namespace members
+                should_include = true
             end
-        else
-            -- Items without module requirement are shown to all namespace members
-            should_include = true
         end
 
         if should_include then

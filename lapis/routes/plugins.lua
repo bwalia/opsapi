@@ -221,7 +221,8 @@ return function(app)
         if not page then
             return { status = 404, json = { success = false, error = "Page not found" } }
         end
-        if not PluginWorkspaces.isEnabled(m.code, self.namespace.id) then
+        if not self.is_platform_admin
+            and not PluginWorkspaces.isEnabled(m.code, self.namespace.id) then
             return { status = 404, json = { success = false, error = m.name .. " is turned off for this workspace",
                                             code = "PLUGIN_DISABLED" } }
         end

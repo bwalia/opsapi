@@ -52,9 +52,9 @@ export default function MarketingConversationsPage() {
         icon={<MessageSquare className="h-6 w-6" />}
       />
       <div className="flex flex-wrap gap-2 items-center">
-        <label className="text-sm text-muted-foreground">Classification</label>
+        <label className="text-sm text-secondary-500">Classification</label>
         <select
-          className="rounded border border-border bg-background px-2 py-1 text-sm"
+          className="rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         >
@@ -70,32 +70,32 @@ export default function MarketingConversationsPage() {
           Refresh
         </button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-error-600">{error}</p>}
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p className="text-sm text-secondary-500">Loading…</p>
       ) : replies.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No replies yet.</p>
+        <p className="text-sm text-secondary-500">No replies yet.</p>
       ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border">
+        <ul className="divide-y divide-secondary-200 rounded-lg border border-secondary-200">
           {replies.map((r) => (
             <li key={r.uuid} className="p-4 space-y-1">
               <div className="flex flex-wrap gap-2 text-sm">
                 <span className="font-medium">{r.classification}</span>
-                <span className="text-muted-foreground">{r.channel}</span>
+                <span className="text-secondary-500">{r.channel}</span>
                 {r.needs_human && (
                   <span className="text-amber-700 dark:text-amber-400">needs human</span>
                 )}
                 {r.confidence != null && (
-                  <span className="text-muted-foreground">
+                  <span className="text-secondary-500">
                     conf {(Number(r.confidence) * 100).toFixed(0)}%
                   </span>
                 )}
               </div>
               {r.subject && <p className="text-sm font-medium">{r.subject}</p>}
               {r.body_text && (
-                <p className="text-sm text-muted-foreground line-clamp-3">{r.body_text}</p>
+                <p className="text-sm text-secondary-500 line-clamp-3">{r.body_text}</p>
               )}
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-secondary-500">
                 {r.address || '—'} · {r.created_at || ''}
               </p>
             </li>

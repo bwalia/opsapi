@@ -21,6 +21,7 @@ ARG OPSAPI_BASE=bwalia/opsapi-base:latest
 FROM scratch AS property_deals_plugin
 FROM scratch AS property_pa_plugin
 FROM scratch AS ai_runner_plugin
+FROM scratch AS opsapi_marketing_plugin
 
 FROM ${OPSAPI_BASE}
 
@@ -119,6 +120,8 @@ COPY --from=property_deals_plugin . /app/projects/property-deals/
 COPY --from=property_pa_plugin . /app/projects/property-pa/
 # AI Runs (docs/AI_RUNNER.md): runners on people's machines run AI agents on kanban tasks.
 COPY --from=ai_runner_plugin . /app/projects/ai-runner/
+# Marketing Cloud: multi-channel campaigns, consent, TipTap studio (opsapi_marketing).
+COPY --from=opsapi_marketing_plugin . /app/projects/opsapi-marketing/
 COPY bin /app/bin
 ENV PATH="/app/bin:${PATH}"
 # The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,

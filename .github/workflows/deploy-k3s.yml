@@ -298,6 +298,7 @@ jobs:
             property_deals_plugin=./projects/property-deals
             property_pa_plugin=./projects/property-pa
             ai_runner_plugin=./projects/ai-runner
+            opsapi_marketing_plugin=./projects/opsapi-marketing
           push: true
           # Both tags point at the same image. :latest is what every
           # environment pulls; the versioned tag is what the smoke test
@@ -693,6 +694,12 @@ jobs:
             PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
           fi
 
+          # Remember the Deployment's spec generation: if helm changes the pod
+          # template (new image, chart change) Kubernetes rolls it by itself and
+          # the next step must not restart it a second time.
+          GEN=$(kubectl -n "${TARGET_ENV}" get "deploy/${RELEASE_NAME}" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)
+          echo "DEPLOY_GEN_BEFORE=${GEN:-0}" >> "$GITHUB_ENV"
+
           # No --wait here on purpose. The app's config.lua lives in a Secret
           # (rendered by the ExternalSecret), not the pod template, so a
           # config-only change does not alter the Deployment and helm --wait
@@ -714,12 +721,19 @@ jobs:
           # a stale/half-rendered one.
           kubectl -n "$NS" wait --for=condition=Ready "externalsecret/${REL}-secrets" --timeout=120s \
             || echo "::warning::ExternalSecret ${REL}-secrets not Ready within 120s — rolling anyway"
-          # Force a fresh rollout so pods pick up Secret/config changes even
-          # when the pod template is unchanged (this is what a Secret-only
-          # change is). This makes config-only deploys reliable and skips any
-          # stale pod stuck in CrashLoopBackOff.
-          kubectl -n "$NS" rollout restart "deploy/$REL"
-          kubectl -n "$NS" rollout status "deploy/$REL" --timeout=6m
+          # A pod-template change (new image tag, chart change) is already
+          # rolling — restarting again would roll every pod twice. Only a
+          # config-only deploy (same template; config lives in the Secret) needs
+          # a forced restart so pods pick up the Secret. Rollouts are zero-
+          # downtime: RollingUpdate maxUnavailable 0 + preStop graceful drain.
+          GEN_AFTER=$(kubectl -n "$NS" get "deploy/$REL" -o jsonpath='{.metadata.generation}')
+          if [ "${DEPLOY_GEN_BEFORE:-0}" = "$GEN_AFTER" ]; then
+            echo "Pod template unchanged (generation $GEN_AFTER) — restarting to pick up config"
+            kubectl -n "$NS" rollout restart "deploy/$REL"
+          else
+            echo "Pod template changed (generation ${DEPLOY_GEN_BEFORE:-0} -> $GEN_AFTER) — already rolling"
+          fi
+          kubectl -n "$NS" rollout status "deploy/$REL" --timeout=10m
           kubectl -n "$NS" get pods -o wide -l app="$REL"
 
       - name: Public URL probe (informational)

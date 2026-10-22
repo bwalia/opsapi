@@ -10,13 +10,46 @@ local U = require("opsapi_marketing.util")
 local E = require("opsapi_marketing.eligibility")
 local T = require("opsapi_marketing.tokens")
 local Sms = require("opsapi_marketing.channels.sms")
+local Bots = require("opsapi_marketing.bots")
+local Pixel = require("opsapi_marketing.pixel")
+local Links = require("opsapi_marketing.links")
+local cjson = require("cjson.safe")
 local db = require("lapis.db")
 
 local TRANSPARENT_GIF = ngx.decode_base64("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
 
-local function rate_public(key)
+local function rate_public(key, per_min)
     local n = RateLimit.incr("mkt:pub:" .. key .. ":" .. RateLimit.getClientIP(), 60)
-    return not n or n <= 60
+    return not n or n <= (per_min or 60)
+end
+
+local function user_agent()
+    return ngx.req.get_headers()["user-agent"]
+end
+
+local function raw_body()
+    ngx.req.read_body()
+    local raw = ngx.req.get_body_data()
+    if not raw then
+        local file = ngx.req.get_body_file()
+        if file then
+            local f = io.open(file, "rb")
+            if f then raw = f:read("*a"); f:close() end
+        end
+    end
+    return raw
+end
+
+local function gif_response()
+    return {
+        status = 200,
+        headers = {
+            ["Content-Type"] = "image/gif",
+            ["Cache-Control"] = "no-store, no-cache, must-revalidate, private",
+        },
+        layout = false,
+        TRANSPARENT_GIF,
+    }
 end
 
 local function require_plugin(ns)
@@ -60,8 +93,7 @@ return function(app)
             status = 200,
             headers = { ["Content-Type"] = "text/html; charset=utf-8" },
             layout = false,
-            render = false,
-            body = "<!doctype html><html><body><h1>You have been unsubscribed</h1>"
+            "<!doctype html><html><body><h1>You have been unsubscribed</h1>"
                 .. "<p>You will no longer receive marketing messages on this channel.</p></body></html>",
         }
     end))
@@ -100,57 +132,142 @@ return function(app)
         return sdk.ok({ contact_uuid = claims.contact_uuid, subscriptions = sdk.array(subs) })
     end))
 
-    -- Open tracking pixel (opens are estimated — scanners/proxies inflate counts)
+    -- Open tracking pixel (opens are estimated — scanners/proxies inflate counts; known
+    -- scanners are recorded but never set opened_at)
     app:get("/public/o.gif", sdk.handler({ namespace = false }, function(self)
-        if not rate_public("open") then
-            return { status = 200, content_type = "image/gif", layout = false, render = false, body = TRANSPARENT_GIF }
-        end
+        if not rate_public("open", 120) then return gif_response() end
         local claims = T.verify(self.params.t, "open")
         if claims and require_plugin(claims.namespace_id) then
             local d = U.one("SELECT id, campaign_id, contact_uuid, opened_at FROM mkt_deliveries WHERE uuid = ? AND namespace_id = ?",
                 claims.delivery_uuid, claims.namespace_id)
             if d then
+                local ua = user_agent()
+                local is_bot, reason = Bots.classify(ua, { method = ngx.req.get_method() })
                 db.query([[
                     INSERT INTO mkt_tracking_events
-                        (namespace_id, delivery_id, campaign_id, contact_uuid, event_type, is_estimated)
-                    VALUES (?, ?, ?, ?, 'open', true)
-                ]], claims.namespace_id, d.id, d.campaign_id, d.contact_uuid)
-                if not d.opened_at then
+                        (namespace_id, delivery_id, campaign_id, contact_uuid, event_type, is_estimated,
+                         user_agent, ip_hash, is_bot, bot_reason)
+                    VALUES (?, ?, ?, ?, 'open', true, ?, ?, ?, ?)
+                ]], claims.namespace_id, d.id, d.campaign_id, d.contact_uuid,
+                    ua and ua:sub(1, 512) or db.NULL, Pixel.ip_hash(RateLimit.getClientIP()) or db.NULL,
+                    is_bot, reason or db.NULL)
+                if not d.opened_at and not is_bot then
                     db.query("UPDATE mkt_deliveries SET opened_at = NOW(), updated_at = NOW() WHERE id = ?", d.id)
                 end
             end
         end
-        return {
-            status = 200,
-            headers = {
-                ["Content-Type"] = "image/gif",
-                ["Cache-Control"] = "no-store, no-cache, must-revalidate, private",
-            },
-            layout = false,
-            render = false,
-            body = TRANSPARENT_GIF,
-        }
+        return gif_response()
     end))
 
     app:get("/public/c", sdk.handler({ namespace = false }, function(self)
-        if not rate_public("click") then return sdk.error(429, "Too many requests") end
+        if not rate_public("click", 120) then return sdk.error(429, "Too many requests") end
         local claims, err = T.verify(self.params.t, "click")
         if not claims then return sdk.error(400, err or "invalid token") end
         if not require_plugin(claims.namespace_id) then return sdk.error(404, "plugin disabled") end
         local dest = safe_redirect(claims.dest)
         if not dest then return sdk.error(400, "invalid destination") end
 
-        local d = U.one("SELECT id, campaign_id, contact_uuid FROM mkt_deliveries WHERE uuid = ? AND namespace_id = ?",
-            claims.delivery_uuid, claims.namespace_id)
+        local d = U.one([[
+            SELECT id, uuid, campaign_id, contact_uuid,
+                   EXTRACT(EPOCH FROM (NOW() - accepted_at))::float AS since_send
+            FROM mkt_deliveries WHERE uuid = ? AND namespace_id = ?
+        ]], claims.delivery_uuid, claims.namespace_id)
         if d then
+            local ua = user_agent()
+            local is_bot, reason = Bots.classify(ua, {
+                method = ngx.req.get_method(), seconds_since_send = tonumber(d.since_send),
+            })
             db.query([[
                 INSERT INTO mkt_tracking_events
-                    (namespace_id, delivery_id, campaign_id, contact_uuid, event_type, url)
-                VALUES (?, ?, ?, ?, 'click', ?)
-            ]], claims.namespace_id, d.id, d.campaign_id, d.contact_uuid, dest)
-            db.query("UPDATE mkt_deliveries SET clicked_at = COALESCE(clicked_at, NOW()), updated_at = NOW() WHERE id = ?", d.id)
+                    (namespace_id, delivery_id, campaign_id, contact_uuid, event_type, url,
+                     user_agent, ip_hash, is_bot, bot_reason)
+                VALUES (?, ?, ?, ?, 'click', ?, ?, ?, ?, ?)
+            ]], claims.namespace_id, d.id, d.campaign_id, d.contact_uuid, dest,
+                ua and ua:sub(1, 512) or db.NULL, Pixel.ip_hash(RateLimit.getClientIP()) or db.NULL,
+                is_bot, reason or db.NULL)
+            if not is_bot then
+                -- A click proves the open even when images were blocked.
+                db.query([[
+                    UPDATE mkt_deliveries SET clicked_at = COALESCE(clicked_at, NOW()),
+                        opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
+                    WHERE id = ?
+                ]], d.id)
+                local camp = U.one("SELECT tracking FROM mkt_campaigns WHERE id = ?", d.campaign_id)
+                local tracking = camp and U.json(camp.tracking) or {}
+                if type(tracking) ~= "table" or tracking.attribution ~= false then
+                    local tok = T.attribution_token(claims.namespace_id, d.uuid)
+                    if tok then dest = Links.add_params(dest, { { "_mkt", tok } }) end
+                end
+            end
         end
         return { status = 302, redirect_to = dest }
+    end))
+
+    -- -----------------------------------------------------------------------
+    -- Website pixel (public key auth; called cross-origin from customer sites)
+    -- -----------------------------------------------------------------------
+
+    app:get("/public/px.js", sdk.handler({ namespace = false }, function(self)
+        local pixel = Pixel.find_by_key(self.params.k)
+        local js
+        if pixel and U.plugin_on(pixel.namespace_id) then
+            js = Pixel.script(pixel.public_key, Pixel.endpoints(Pixel.public_base(pixel.namespace_id, self)).events)
+        else
+            js = "/* OpsAPI pixel: unknown or inactive key */ window.mkt = window.mkt || function () {};"
+        end
+        return {
+            status = 200,
+            headers = {
+                ["Content-Type"] = "application/javascript; charset=utf-8",
+                ["Cache-Control"] = "public, max-age=300",
+                ["X-Content-Type-Options"] = "nosniff",
+            },
+            layout = false,
+            js,
+        }
+    end))
+
+    -- Beacon: text/plain JSON (no CORS preflight). One event, or { events = [...] } (max 25).
+    app:post("/public/px/e", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("px", 600) then return sdk.error(429, "Too many requests") end
+        local raw = raw_body()
+        if raw and #raw > 65536 then return sdk.error(413, "payload too large") end
+        local body = raw and raw ~= "" and cjson.decode(raw) or nil
+        if type(body) ~= "table" then return sdk.error(400, "JSON body required") end
+        local pixel = Pixel.find_by_key(self.params.k or body.k)
+        if not pixel or not U.plugin_on(pixel.namespace_id) then return sdk.error(404, "unknown pixel") end
+
+        local events = type(body.events) == "table" and body.events or { body }
+        if #events > 25 then return sdk.error(400, "max 25 events per batch") end
+        local h = ngx.req.get_headers()
+        local req = { ua = h["user-agent"], ip = RateLimit.getClientIP(), referer = h["referer"], method = "POST" }
+        local results, rejected = {}, nil
+        for _, ev in ipairs(events) do
+            if type(ev) == "table" then
+                local out, err = Pixel.ingest(pixel, ev, req)
+                if out then results[#results + 1] = out else rejected = err end
+            end
+        end
+        if #results == 0 and rejected == "domain_not_allowed" then
+            return sdk.error(403, "domain not allowed for this pixel")
+        end
+        if #results == 0 then return sdk.error(400, rejected or "no valid events") end
+        return { status = 202, json = { success = true, accepted = #results } }
+    end))
+
+    -- <noscript> / email-safe fallback: GET with e (event), u (url), v, cur, oid.
+    app:get("/public/px.gif", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("px", 600) then return gif_response() end
+        local pixel = Pixel.find_by_key(self.params.k)
+        if pixel and U.plugin_on(pixel.namespace_id) then
+            local h = ngx.req.get_headers()
+            pcall(Pixel.ingest, pixel, {
+                e = self.params.e or "page_view", u = self.params.u, v = self.params.v,
+                cur = self.params.cur, oid = self.params.oid, id = self.params.id,
+            }, { ua = h["user-agent"], ip = RateLimit.getClientIP(), referer = h["referer"],
+                 method = ngx.req.get_method() })
+        end
+        return gif_response()
     end))
 
     -- SMS inbound / STOP webhook (provider posts here)

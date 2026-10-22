@@ -137,6 +137,16 @@ function T.click_url(ns, delivery_uuid, dest, base)
     return root .. "/api/v2/opsapi-marketing/public/c?t=" .. ngx.escape_uri(tok)
 end
 
+--- Attribution token appended (as _mkt) to click-through destinations; the website
+-- pixel hands it back so the visit is tied to the delivery, campaign and contact.
+function T.attribution_token(ns, delivery_uuid, ttl_seconds)
+    return T.mint({
+        purpose = "attr",
+        namespace_id = tonumber(ns),
+        delivery_uuid = delivery_uuid,
+    }, ttl_seconds or 2592000)
+end
+
 --- Long-lived token for SMS gateway inbound webhook auth.
 function T.sms_inbound_token(ns, ttl_seconds)
     return T.mint({

@@ -3,6 +3,7 @@ local Mail = require("helper.mail")
 local NamespaceMail = require("helper.namespace-mail")
 local TemplateRenderer = require("lib.template-renderer")
 local U = require("opsapi_marketing.util")
+local Links = require("opsapi_marketing.links")
 
 local C = {}
 
@@ -51,6 +52,8 @@ end
 function C.render(template, merge_context, ctx)
     ctx = ctx or {}
     local data = merge_context or {}
+    -- Templates link the opt-out with {{unsubscribe_url}}.
+    if ctx.unsubscribe_url and data.unsubscribe_url == nil then data.unsubscribe_url = ctx.unsubscribe_url end
     local subject, serr = render_str(template.subject or "", data)
     if not subject then return nil, "subject render failed: " .. tostring(serr) end
     local html, herr = render_str(template.body_html or template.html or "", data)
@@ -63,6 +66,16 @@ function C.render(template, merge_context, ctx)
     if ctx.unsubscribe_url and not html:lower():find("unsubscribe", 1, true) then
         html = html .. '<p style="font-size:12px;color:#666"><a href="'
             .. ctx.unsubscribe_url .. '">Unsubscribe</a></p>'
+    end
+    if ctx.link_rewriter then
+        html = Links.rewrite_html(html, ctx.link_rewriter, ctx.link_skip)
+        text = Links.rewrite_text(text, ctx.link_rewriter, ctx.link_skip)
+    end
+    if type(ctx.preheader) == "string" and ctx.preheader ~= "" then
+        -- Inbox preview line; hidden in the body. Padding stops clients pulling body text in.
+        local pre = ctx.preheader:gsub("[<>&\"]", { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;", ['"'] = "&quot;" })
+        html = '<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">' .. pre
+            .. string.rep("&#847;&zwnj;&nbsp;", 40) .. "</div>" .. html
     end
     if ctx.open_pixel_url then
         html = html .. '<img src="' .. ctx.open_pixel_url

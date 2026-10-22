@@ -1,0 +1,27 @@
+# Stakater Reloader for k3s1 — rolling-restarts workloads annotated
+# `reloader.stakater.com/auto: "true"` (or secret./configmap.reloader...) when a
+# Secret/ConfigMap they reference changes, e.g. an ExternalSecret syncing a Vault
+# edit. Every workstation-opsapi, diytaxreturn, beacon and spectoncr Deployment
+# already carries the annotation; without this controller it did nothing.
+reloader:
+  # Patch a pod-template annotation instead of injecting env vars: plays well
+  # with Helm's 3-way merge (no drift fights on the next `helm upgrade`).
+  reloadStrategy: annotations
+  # Never restart everything on Reloader's own (re)start, and never on create —
+  # only on a real data change of an existing Secret/ConfigMap.
+  reloadOnCreate: false
+  syncAfterRestart: false
+  watchGlobally: true
+  ignoreNamespaces: "kube-system,kube-public,kube-node-lease"
+  logFormat: json
+  deployment:
+    # Stable LAN pool (the cloud edge nodes' link to the control plane blips).
+    nodeSelector:
+      net-region: home
+      kubernetes.io/arch: amd64
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

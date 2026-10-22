@@ -16,7 +16,7 @@ return {
     code = "opsapi_marketing",
     name = "Marketing Cloud",
     icon = "Megaphone",
-    version = "0.1.0",
+    version = "0.2.0",
     description = "Multi-channel campaigns, consent, suppression, and AI-assisted engagement on CRM data.",
     sdk_version = 1,
     depends = { "core", "crm" },
@@ -71,6 +71,7 @@ return {
         list = { table = "mkt_lists" },
         template = { table = "mkt_templates", hide = "body_html,body_text" },
         tracking_event = { table = "mkt_tracking_events", hide = "ip_hash,user_agent" },
+        conversion = { table = "mkt_conversions", emits = { "recorded" } },
         -- opsapi:publishes
     },
 
@@ -83,7 +84,10 @@ return {
           module = "opsapi_marketing_analytics", icon = "LayoutDashboard" },
         { label = "Campaigns", route = "/dashboard/opsapi-marketing/campaigns",
           module = "opsapi_marketing_campaigns", icon = "Send" },
-        { label = "Lists", resource = "lists", module = "opsapi_marketing_lists", icon = "Users" },
+        { label = "Lists", route = "/dashboard/opsapi-marketing/lists",
+          module = "opsapi_marketing_lists", icon = "Users" },
+        { label = "Pixels & attribution", route = "/dashboard/opsapi-marketing/pixels",
+          module = "opsapi_marketing_analytics", icon = "Radar" },
         { label = "Studio", route = "/dashboard/opsapi-marketing/studio",
           module = "opsapi_marketing_templates", icon = "Palette" },
         { label = "Templates", resource = "templates", module = "opsapi_marketing_templates", icon = "FileText" },
@@ -150,6 +154,28 @@ return {
         tracking_retention_days = {
             type = "integer", label = "Keep raw tracking events (days)", default = 365,
             min = 30, max = 3650,
+        },
+        meta_pixel_id = {
+            type = "string", label = "Meta pixel / dataset ID", default = "",
+            description = "Forward conversions server-side to Meta Conversions API.",
+        },
+        meta_capi_access_token = {
+            type = "string", label = "Meta Conversions API access token", secret = true,
+        },
+        meta_test_event_code = {
+            type = "string", label = "Meta test event code", default = "",
+            description = "Shows forwarded events in Events Manager → Test events. Clear for live.",
+        },
+        ga4_measurement_id = {
+            type = "string", label = "GA4 measurement ID", default = "",
+            description = "e.g. G-XXXXXXX — forward conversions via the Measurement Protocol.",
+        },
+        ga4_api_secret = {
+            type = "string", label = "GA4 Measurement Protocol API secret", secret = true,
+        },
+        forward_page_views = {
+            type = "boolean", label = "Also forward page views", default = false,
+            description = "Off by default: conversions and custom events only.",
         },
         public_base_url = {
             type = "string", label = "Public tracking/unsubscribe base URL", default = "",
