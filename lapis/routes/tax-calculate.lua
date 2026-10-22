@@ -37,7 +37,11 @@ local function aggregateStatements(statement_ids, user_id)
     local id_list = table.concat(statement_ids, ",")
     local result = db.query(string.format([[
         SELECT
-            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE 0 END), 0) as gross_income,
+            -- Credits in a non-business category (transfer, loan, drawings, personal) are
+            -- not income — same rule as compute_estimate and lib/tax-report.
+            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' AND NOT EXISTS (
+                SELECT 1 FROM tax_categories c WHERE c.key = tax_transactions.category AND c.hmrc_category_id IS NULL)
+                THEN amount ELSE 0 END), 0) as gross_income,
             COALESCE(SUM(CASE WHEN transaction_type = 'DEBIT' AND is_tax_deductible = true THEN amount ELSE 0 END), 0) as total_expenses
         FROM tax_transactions
         WHERE statement_id IN (%s) AND user_id = ?

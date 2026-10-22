@@ -319,13 +319,18 @@ register({
     },
     handler = function(ctx, args)
         local tax_year = year_of(ctx, args)
-        -- Income = all credits (is_tax_deductible applies to EXPENSES, not income —
-        -- every income category is stored is_tax_deductible=false). Expenses = debits
-        -- the classifier marked deductible. Matches routes/tax-calculate so the chat
-        -- estimate and the Calculate screen agree.
+        -- Income = credits, EXCEPT those classified into a non-business category (one
+        -- with no HMRC box: transfer, loan, drawings, personal) — a transfer from your own
+        -- savings or a loan is not taxable income. (is_tax_deductible applies to EXPENSES;
+        -- every income category is stored is_tax_deductible=false.) Expenses = debits the
+        -- classifier marked deductible. Same rules in routes/tax-calculate and
+        -- lib/tax-report, so the chat estimate, the Calculate screen and the filing
+        -- workbook all agree.
         local agg = db.query([[
             SELECT
-              COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END), 0) AS gross_income,
+              COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' AND NOT EXISTS (
+                   SELECT 1 FROM tax_categories c WHERE c.key = t.category AND c.hmrc_category_id IS NULL)
+                   THEN t.amount ELSE 0 END), 0) AS gross_income,
               COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
                    THEN t.amount ELSE 0 END), 0) AS total_expenses,
               COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
