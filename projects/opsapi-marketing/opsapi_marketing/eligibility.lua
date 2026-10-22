@@ -34,10 +34,6 @@ local function contact_address(contact, channel)
         return U.norm_email(contact.email or contact.address)
     elseif channel == "sms" then
         return U.e164(contact.phone or contact.mobile or contact.address)
-    elseif channel == "push" then
-        return contact.user_uuid or contact.address
-    elseif channel == "webhook" then
-        return contact.webhook_url or contact.address
     end
     return contact.address
 end
@@ -106,11 +102,15 @@ local function frequency_cap_hit(ns, contact_uuid, channel, message_type, settin
     if message_type ~= "marketing" then return false end
     local days = tonumber(settings.marketing_frequency_cap_days) or 7
     local cap = tonumber(settings.marketing_frequency_cap_count) or 3
+    -- Messages already sent, not queued ones: the delivery being checked is itself
+    -- queued, so counting queued made a cap of N allow only N-1 (and 1 allow none).
+    -- Test sends don't count.
     local row = U.one([[
         SELECT COUNT(*)::int AS n FROM mkt_deliveries
         WHERE namespace_id = ? AND contact_uuid = ? AND channel = ?
-          AND state IN ('accepted', 'delivered', 'queued')
-          AND queued_at > NOW() - make_interval(days => ?)
+          AND state IN ('accepted', 'delivered')
+          AND attempt_key NOT LIKE 'test-%'
+          AND accepted_at > NOW() - make_interval(days => ?)
     ]], ns, contact_uuid, channel, days)
     return row and row.n >= cap
 end

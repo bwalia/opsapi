@@ -23,6 +23,37 @@ local function nvl(v)
     return v
 end
 
+local function present(v)
+    return v ~= nil and v ~= db.NULL
+end
+
+--- Approval is needed when the campaign asks for it or the workspace requires it for all.
+local function needs_approval(ns, campaign)
+    return campaign.approval_required == true or U.settings(ns).require_approval == true
+end
+
+--- What's sent or who gets it changed: it must be validated (and approved) again.
+function C.invalidate(campaign_id)
+    db.query([[
+        UPDATE mkt_campaigns SET approved_by = NULL, approved_at = NULL, resume_status = NULL,
+            status = CASE WHEN status IN ('validated', 'awaiting_approval', 'scheduled', 'paused')
+                          THEN 'draft' ELSE status END,
+            updated_at = NOW()
+        WHERE id = ?
+    ]], campaign_id)
+end
+
+--- Attach the audience list. Changing it re-opens validation and approval; once
+-- sending has started the audience is fixed.
+function C.attach_list(ns, campaign, list_id)
+    if tonumber(campaign.list_id) == tonumber(list_id) then return campaign end
+    if present(campaign.started_at) then return nil, "list_locked" end
+    db.query("UPDATE mkt_campaigns SET list_id = ?, updated_at = NOW() WHERE id = ? AND namespace_id = ?",
+        list_id, campaign.id, ns)
+    C.invalidate(campaign.id)
+    return U.one("SELECT * FROM mkt_campaigns WHERE id = ?", campaign.id)
+end
+
 local function sdk_emit(ns, name, data)
     pcall(function()
         require("helper.plugin-sdk").emit(ns, name, data)
@@ -144,13 +175,18 @@ local FRIENDLY = {
     list_sync_failed = "Could not sync the dynamic list.",
     subject_required = "Email subject is required.",
     body_required = "Email body is required.",
+    sms_body_required = "SMS text is required.",
     unknown_merge_fields = "Template has merge fields that are not in the registry.",
-    approval_required = "Campaign is awaiting approval.",
+    approval_required = "This campaign needs approval before it can be sent.",
+    self_approval = "You can't approve a campaign you created. Ask another admin to approve it.",
+    list_locked = "The audience can't change once sending has started. Duplicate the campaign to send to another list.",
+    template_error = "The message can't be rendered. Fix the template, then validate again.",
 }
 
-function C.friendly_error(err)
+--- detail: extra text for the message (e.g. the template error and where it is).
+function C.friendly_error(err, detail)
     if type(err) ~= "string" then return "Campaign action failed" end
-    if FRIENDLY[err] then return FRIENDLY[err] end
+    if FRIENDLY[err] then return FRIENDLY[err] .. (detail and (" " .. detail) or "") end
     if err:match("^bad_status:") then
         return "Campaign status does not allow this action (" .. err:sub(12) .. ")"
     end
@@ -160,12 +196,42 @@ end
 local function content_ok(campaign)
     local channel = campaign.channel or "email"
     if channel == "email" then
-        if not campaign.subject or campaign.subject == "" then return nil, "subject required" end
-        if (not campaign.body_html or campaign.body_html == "") and (not campaign.body_text or campaign.body_text == "") then
-            return nil, "body required"
+        if not present(campaign.subject) or campaign.subject == "" then return nil, "subject_required" end
+        if (not present(campaign.body_html) or campaign.body_html == "")
+            and (not present(campaign.body_text) or campaign.body_text == "") then
+            return nil, "body_required"
         end
     elseif channel == "sms" then
-        if not campaign.body_text or campaign.body_text == "" then return nil, "sms body required" end
+        if not present(campaign.body_text) or campaign.body_text == "" then return nil, "sms_body_required" end
+    end
+    return true
+end
+
+--- Render the content (and every A/B variant) once with sample data: a template
+-- that doesn't render must fail validation, not reach the audience.
+local function renders(ns, campaign)
+    local parts = { { subject = campaign.subject, body_html = campaign.body_html, body_text = campaign.body_text } }
+    local ab = U.json(campaign.ab_config) or {}
+    if ab.enabled == true and type(ab.variants) == "table" then
+        for _, v in ipairs(ab.variants) do
+            parts[#parts + 1] = {
+                key = v.key,
+                subject = v.subject or campaign.subject,
+                body_html = v.body_html or campaign.body_html,
+                body_text = v.body_text or campaign.body_text,
+            }
+        end
+    end
+    for _, p in ipairs(parts) do
+        local out, err = T.preview(ns, {
+            channel = campaign.channel, name = campaign.name,
+            subject = present(p.subject) and p.subject or nil,
+            body_html = present(p.body_html) and p.body_html or nil,
+            body_text = present(p.body_text) and p.body_text or nil,
+        })
+        if not out then
+            return nil, (p.key and ("Variant " .. tostring(p.key) .. ": ") or "") .. tostring(err)
+        end
     end
     return true
 end
@@ -184,6 +250,8 @@ function C.validate(ns, campaign_id, opts)
     end
     local ok, err = content_ok(campaign)
     if not ok then return nil, err end
+    local rendered, rerr = renders(ns, campaign)
+    if not rendered then return nil, "template_error", rerr end
 
     local analysis = T.analyse(ns, {
         channel = campaign.channel,
@@ -198,8 +266,9 @@ function C.validate(ns, campaign_id, opts)
     if preview.audience_total == 0 then return nil, "empty_audience" end
     if preview.eligible == 0 then return nil, "no_eligible_recipients" end
 
+    -- Already approved and unchanged since (any change clears approved_at): stays approved.
     local next_status = "validated"
-    if campaign.approval_required == true then
+    if needs_approval(ns, campaign) and not present(campaign.approved_at) then
         next_status = "awaiting_approval"
     end
     db.query("UPDATE mkt_campaigns SET status = ?, updated_at = NOW() WHERE id = ?", next_status, campaign.id)
@@ -230,6 +299,9 @@ function C.approve(ns, campaign_id, actor_uuid)
     if not campaign then return nil, "not_found" end
     if campaign.status ~= "awaiting_approval" then
         return nil, "bad_status:" .. tostring(campaign.status)
+    end
+    if present(campaign.created_by) and tostring(campaign.created_by) == tostring(actor_uuid) then
+        return nil, "self_approval"
     end
     db.query([[
         UPDATE mkt_campaigns SET status = 'validated', approved_by = ?, approved_at = NOW(),
@@ -264,17 +336,20 @@ function C.schedule(ns, campaign_id, opts)
             and U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, list_uuid)
             or U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND id = ?", ns, tonumber(list_uuid))
         if not list then return nil, "list_not_found" end
-        db.query("UPDATE mkt_campaigns SET list_id = ?, updated_at = NOW() WHERE id = ?", list.id, campaign.id)
-        campaign.list_id = list.id
+        local attached, aerr = C.attach_list(ns, campaign, list.id)
+        if not attached then return nil, aerr end
+        campaign = attached
     end
 
-    -- Must be validated (or approved → validated) unless send_now from draft with force
+    -- Must be validated (or approved → validated) unless send_now from draft with force.
+    -- (Content changes go through PUT / ab-config, which send it back to draft.)
     if campaign.status == "draft" then
-        local v, verr = C.validate(ns, campaign.id)
-        if not v then return nil, verr end
+        local v, verr, vdetail = C.validate(ns, campaign.id)
+        if not v then return nil, verr, vdetail end
         campaign = v.campaign
     end
-    if campaign.status == "awaiting_approval" then
+    if campaign.status == "awaiting_approval"
+        or (needs_approval(ns, campaign) and not present(campaign.approved_at)) then
         return nil, "approval_required"
     end
     if campaign.status ~= "validated" and campaign.status ~= "scheduled" and campaign.status ~= "paused" then
@@ -283,9 +358,6 @@ function C.schedule(ns, campaign_id, opts)
 
     if opts.max_deliveries then
         db.query("UPDATE mkt_campaigns SET max_deliveries = ? WHERE id = ?", tonumber(opts.max_deliveries), campaign.id)
-    end
-    if opts.ab_config then
-        db.query("UPDATE mkt_campaigns SET ab_config = ?::jsonb WHERE id = ?", cjson.encode(opts.ab_config), campaign.id)
     end
 
     local when = opts.scheduled_at
@@ -358,15 +430,15 @@ function C.cancel(ns, campaign_id)
     return U.one("SELECT * FROM mkt_campaigns WHERE id = ?", campaign.id)
 end
 
-function C.duplicate(ns, campaign_id, name)
+function C.duplicate(ns, campaign_id, name, actor_uuid)
     local row = U.one("SELECT * FROM mkt_campaigns WHERE id = ? AND namespace_id = ?", campaign_id, ns)
     if not row then return nil, "not_found" end
     local created = db.query([[
         INSERT INTO mkt_campaigns
             (namespace_id, name, objective, channel, message_type, status, list_id, template_id,
              subject, preview_text, body_html, body_text, from_email, from_name, reply_to,
-             approval_required, exclusion_rules, ab_config, max_deliveries, tracking)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             approval_required, exclusion_rules, ab_config, max_deliveries, tracking, created_by)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
     ]], ns, name or (row.name .. " (copy)"), nvl(row.objective), row.channel, row.message_type,
         nvl(row.list_id), nvl(row.template_id), nvl(row.subject), nvl(row.preview_text),
@@ -375,7 +447,8 @@ function C.duplicate(ns, campaign_id, name)
         type(row.exclusion_rules) == "string" and row.exclusion_rules or cjson.encode(U.json(row.exclusion_rules) or {}),
         type(row.ab_config) == "string" and row.ab_config or cjson.encode(U.json(row.ab_config) or {}),
         nvl(row.max_deliveries),
-        type(row.tracking) == "string" and row.tracking or cjson.encode(U.json(row.tracking) or {}))[1]
+        type(row.tracking) == "string" and row.tracking or cjson.encode(U.json(row.tracking) or {}),
+        nvl(actor_uuid))[1]
     return created
 end
 
@@ -424,7 +497,7 @@ function C.delivery_stats(ns, campaign_id)
     local rows = db.query([[
         SELECT state, COUNT(*)::int AS n, variant_key
         FROM mkt_deliveries
-        WHERE namespace_id = ? AND campaign_id = ?
+        WHERE namespace_id = ? AND campaign_id = ? AND attempt_key NOT LIKE 'test-%'
         GROUP BY state, variant_key
     ]], ns, campaign_id)
     local by_state, by_variant = {}, {}
@@ -444,9 +517,11 @@ end
 function C.budget_remaining(campaign)
     local max = tonumber(campaign.max_deliveries)
     if not max or max < 1 then return nil end -- unlimited
+    -- Sent so far (not queued: the delivery asking is itself queued, so counting
+    -- queued dropped the first recipient). Enqueueing already stops at the budget.
     local sent = U.one([[
         SELECT COUNT(*)::int AS n FROM mkt_deliveries
-        WHERE campaign_id = ? AND state IN ('queued', 'accepted', 'delivered')
+        WHERE campaign_id = ? AND state IN ('accepted', 'delivered') AND attempt_key NOT LIKE 'test-%'
     ]], campaign.id)
     return math.max(0, max - (sent and sent.n or 0))
 end

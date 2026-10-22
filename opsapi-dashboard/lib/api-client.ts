@@ -19,11 +19,14 @@ function markReachable(reachable: boolean): void {
   if (store.online !== reachable) store.setOnline(reachable);
 }
 
-// Custom axios config flag: marks a request as an outbox replay so the offline
-// interceptor doesn't re-queue it (see lib/offline/sync.ts).
+// Custom axios config flags: _replay marks a request as an outbox replay so the
+// offline interceptor doesn't re-queue it (see lib/offline/sync.ts); _noOutbox is
+// for actions that must never run later behind the user's back (e.g. sending a
+// campaign) — offline, they fail instead of being queued.
 declare module 'axios' {
   interface AxiosRequestConfig {
     _replay?: boolean;
+    _noOutbox?: boolean;
   }
 }
 
@@ -243,8 +246,11 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const config = error.config as InternalAxiosRequestConfig | undefined;
     // A network error (no response) means unreachable — but a cancelled request
-    // (component unmount, aborted) is not "offline", so exclude it.
-    const isNetworkError = !error.response && error.code !== 'ERR_CANCELED';
+    // (component unmount, aborted) is not "offline", so exclude it. Nor is a
+    // timeout: the server got the request and may still be doing it, so queueing
+    // it would report a false success now and run it a second time later.
+    const isNetworkError =
+      !error.response && error.code !== 'ERR_CANCELED' && error.code !== 'ECONNABORTED' && error.code !== 'ETIMEDOUT';
     if (error.response) markReachable(true);
 
     // Offline / server unreachable: serve reads from the tenant-scoped cache, and
@@ -267,7 +273,10 @@ apiClient.interceptors.response.use(
             request: error.request,
           };
         }
-      } else if (method === 'post' || method === 'put' || method === 'patch' || method === 'delete') {
+      } else if (
+        !config._noOutbox &&
+        (method === 'post' || method === 'put' || method === 'patch' || method === 'delete')
+      ) {
         const queued = await enqueue({
           method,
           url: config.url || '',

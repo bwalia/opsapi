@@ -18,7 +18,7 @@ return function(app)
     local FIELDS = {
         name = { type = "string", required = true },
         objective = { type = "text" },
-        channel = { type = "string", required = true, enum = { "email", "sms", "push", "webhook" } },
+        channel = { type = "string", required = true, enum = U.CHANNEL_ENUM },
         message_type = { type = "string", enum = { "marketing", "transactional", "other" } },
         subject = { type = "string", max = 998 },
         preview_text = { type = "string", max = 255 },
@@ -38,7 +38,7 @@ return function(app)
     local R = sdk.crud(app, "/campaigns", {
         table = "mkt_campaigns",
         module = "opsapi_marketing_campaigns",
-        only = { "list", "show", "create", "delete" },
+        only = { "list", "show", "delete" }, -- create is below: it records the author
         fields = FIELDS,
         searchable = { "name", "subject", "status", "channel" },
         filterable = { "status", "channel", "message_type" },
@@ -51,6 +51,20 @@ return function(app)
                      "approval_required", "max_deliveries", "objective" },
         },
     })
+
+    -- The author can't approve their own campaign (opsapi_marketing.campaigns approve).
+    app:post("/campaigns", sdk.handler({ permission = "opsapi_marketing_campaigns.create" }, function(self)
+        return sdk.idempotent(self, function()
+            local body, berr = sdk.body(self)
+            if not body then return sdk.error(400, berr) end
+            local data, errors = sdk.validate(body, FIELDS)
+            if not data then return sdk.error(422, "Validation failed", errors) end
+            data.created_by = (sdk.user(self) or {}).uuid
+            local row, status, msg = R.create(sdk.namespace_id(self), data)
+            if not row then return sdk.error(status, msg) end
+            return sdk.created(row)
+        end)
+    end))
 
     -- What changes the message or who gets it: re-validation (and re-approval) required.
     local REVALIDATE = {
@@ -78,11 +92,9 @@ return function(app)
         for k in pairs(data) do
             if REVALIDATE[k] then changed = true end
         end
-        if changed and (campaign.status == "validated" or campaign.status == "awaiting_approval") then
-            db.query([[
-                UPDATE mkt_campaigns SET status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = NOW()
-                WHERE id = ?
-            ]], campaign.id)
+        if changed then
+            -- Also when paused: resuming would otherwise send unvalidated, unapproved content.
+            Camp.invalidate(campaign.id)
             row = Camp.find(ns, campaign.id)
         end
         return sdk.ok(row)
@@ -95,8 +107,8 @@ return function(app)
         return sdk.ok(Camp.delivery_stats(ns, campaign.id))
     end))
 
-    local function fail(err)
-        return sdk.error(400, Camp.friendly_error(err), { code = err })
+    local function fail(err, detail)
+        return sdk.error(400, Camp.friendly_error(err, detail), { code = err })
     end
 
     local function read_body(self)
@@ -105,6 +117,7 @@ return function(app)
         return body
     end
 
+    -- Read-only: previews a list without attaching it (validate / schedule attach it).
     app:post("/campaigns/:id/audience-preview", sdk.handler({ permission = "opsapi_marketing_campaigns.read" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
@@ -113,10 +126,8 @@ return function(app)
         if not body then return bad end
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
-            if list then
-                db.query("UPDATE mkt_campaigns SET list_id = ? WHERE id = ?", list.id, campaign.id)
-                campaign.list_id = list.id
-            end
+            if not list then return fail("list_not_found") end
+            campaign.list_id = list.id
         end
         local preview, err = Camp.audience_preview(ns, campaign, body)
         if not preview then return fail(err) end
@@ -132,10 +143,11 @@ return function(app)
         if body.list_uuid then
             local list = U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, body.list_uuid)
             if not list then return fail("list_not_found") end
-            db.query("UPDATE mkt_campaigns SET list_id = ? WHERE id = ?", list.id, campaign.id)
+            local attached, aerr = Camp.attach_list(ns, campaign, list.id)
+            if not attached then return fail(aerr) end
         end
-        local out, err = Camp.validate(ns, campaign.id, body)
-        if not out then return fail(err) end
+        local out, err, detail = Camp.validate(ns, campaign.id, body)
+        if not out then return fail(err, detail) end
         return sdk.ok(out)
     end))
 
@@ -150,8 +162,9 @@ return function(app)
         return sdk.ok(out)
     end))
 
-    -- Approval is a privileged action; owners/admins hold manage (or update via role grants).
-    app:post("/campaigns/:id/approve", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
+    -- Approval is a privileged action: manage (owners/admins), never just update — the
+    -- people who edit a campaign aren't the ones who sign it off.
+    app:post("/campaigns/:id/approve", sdk.handler({ permission = "opsapi_marketing_campaigns.manage" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
@@ -161,8 +174,7 @@ return function(app)
         return sdk.ok(out)
     end))
 
-    -- Owners/admins often have manage; also allow update if can() says so — fallback to update for owners
-    app:post("/campaigns/:id/reject", sdk.handler({ permission = "opsapi_marketing_campaigns.update" }, function(self)
+    app:post("/campaigns/:id/reject", sdk.handler({ permission = "opsapi_marketing_campaigns.manage" }, function(self)
         local ns = sdk.namespace_id(self)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
@@ -179,8 +191,15 @@ return function(app)
         if not campaign then return sdk.not_found("campaign") end
         local body, bad = read_body(self)
         if not body then return bad end
-        local out, err = Camp.schedule(ns, campaign.id, body)
-        if not out then return fail(err) end
+        -- Transactional / other messages skip consent, quiet hours and the frequency cap,
+        -- so only admins may send them.
+        if campaign.message_type ~= "marketing" and not sdk.can(self, "opsapi_marketing_campaigns", "manage") then
+            return sdk.error(403, "Only workspace admins can send " .. tostring(campaign.message_type)
+                .. " campaigns: they skip consent, quiet hours and the frequency cap.",
+                { code = "message_type_needs_manage" })
+        end
+        local out, err, detail = Camp.schedule(ns, campaign.id, body)
+        if not out then return fail(err, detail) end
         return sdk.ok(out)
     end))
 
@@ -217,7 +236,7 @@ return function(app)
         if not campaign then return sdk.not_found("campaign") end
         local body, bad = read_body(self)
         if not body then return bad end
-        local out, err = Camp.duplicate(ns, campaign.id, body.name)
+        local out, err = Camp.duplicate(ns, campaign.id, body.name, (sdk.user(self) or {}).uuid)
         if not out then return fail(err) end
         return sdk.created(out)
     end))
@@ -242,6 +261,7 @@ return function(app)
         ab.enabled = ab.enabled ~= false
         db.query("UPDATE mkt_campaigns SET ab_config = ?::jsonb, updated_at = NOW() WHERE id = ?",
             cjson.encode(ab), campaign.id)
+        Camp.invalidate(campaign.id) -- variants replace the content: validate (and approve) again
         return sdk.ok(U.one("SELECT * FROM mkt_campaigns WHERE id = ?", campaign.id))
     end))
 

@@ -22,6 +22,10 @@ plugin jobs** (`helper/plugin-jobs.lua`) — not Kafka.
 | 4 Tracking + replies + analytics | Done — overview API, reply ingest/classify, conversations UI (`spec/phase4_test.py`) |
 | 5 AI agents + knowledge | Done — `mkt_*` tools + `opsapi-marketing.md` scope (`spec/phase5_test.py`) |
 | 6 SMS E2E + §9 hardening | Done — SMS dry-run, STOP webhook, cross-tenant (`spec/phase6_test.py`) |
+| 9 Production fixes (step 1) | Quiet hours defer, budgets, caps, template errors, four-eyes approval, admin-only transactional; runs with quiet hours on (`spec/phase9_test.py`) |
+
+Channels: email and SMS. Push and webhook adapters were removed — CRM contacts have no
+device token or endpoint URL, so those campaigns could never deliver.
 
 ## Tests
 

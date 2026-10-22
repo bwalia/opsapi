@@ -92,14 +92,8 @@ local function resolve(data, path)
     return cur
 end
 
-local function html_escape(str)
-    str = tostring(str or "")
-    str = str:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
-    str = str:gsub('"', "&quot;"):gsub("'", "&#39;")
-    return str
-end
-
---- Build a safe context for TemplateRenderer: only registry keys, HTML-escaped unless allow_html.
+--- Build a context for TemplateRenderer: only registry keys. Values stay raw — the
+-- renderer HTML-escapes them in HTML bodies (escaping here as well showed "O&amp;#39;Brien").
 function M.build_context(ns, raw)
     local fields = M.for_namespace(ns)
     local ctx = {}
@@ -116,16 +110,12 @@ function M.build_context(ns, raw)
                 node = node[parts[i]]
             end
             local leaf = parts[#parts]
-            if f.allow_html then
-                node[leaf] = S.strip_html(tostring(val))
-            else
-                node[leaf] = html_escape(val)
-            end
+            node[leaf] = f.allow_html and S.strip_html(tostring(val)) or val
         end
     end
-    -- Also expose top-level unsubscribe_url etc if present in raw (already escaped above if registered)
+    -- Also expose top-level unsubscribe_url etc if present in raw
     if raw and raw.unsubscribe_url and not (ctx.unsubscribe_url) then
-        ctx.unsubscribe_url = html_escape(raw.unsubscribe_url)
+        ctx.unsubscribe_url = raw.unsubscribe_url
     end
     return ctx
 end

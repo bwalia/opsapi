@@ -30,9 +30,11 @@ local function strip_dangerous(html)
     return html
 end
 
-local function render_str(tpl, data)
+-- strict: a template error fails the message instead of sending the error comment.
+-- Only the HTML body is HTML-escaped; subject and plain text are not HTML.
+local function render_str(tpl, data, html)
     if type(tpl) ~= "string" or tpl == "" then return "" end
-    local ok, out = pcall(TemplateRenderer.render, tpl, data or {})
+    local ok, out = pcall(TemplateRenderer.render, tpl, data or {}, { strict = true, escape_html = html })
     if not ok then return nil, tostring(out) end
     return out
 end
@@ -54,13 +56,14 @@ function C.render(template, merge_context, ctx)
     local data = merge_context or {}
     -- Templates link the opt-out with {{unsubscribe_url}}.
     if ctx.unsubscribe_url and data.unsubscribe_url == nil then data.unsubscribe_url = ctx.unsubscribe_url end
-    local subject, serr = render_str(template.subject or "", data)
+    local subject, serr = render_str(template.subject or "", data, false)
     if not subject then return nil, "subject render failed: " .. tostring(serr) end
-    local html, herr = render_str(template.body_html or template.html or "", data)
+    local html, herr = render_str(template.body_html or template.html or "", data, true)
     if not html then return nil, "html render failed: " .. tostring(herr) end
     local text_src = template.body_text or template.text or ""
     if text_src == "" then text_src = (template.body_html or template.html or ""):gsub("<[^>]+>", " ") end
-    local text = render_str(text_src, data) or ""
+    local text, terr = render_str(text_src, data, false)
+    if not text then return nil, "text render failed: " .. tostring(terr) end
 
     html = strip_dangerous(html)
     if ctx.unsubscribe_url and not html:lower():find("unsubscribe", 1, true) then

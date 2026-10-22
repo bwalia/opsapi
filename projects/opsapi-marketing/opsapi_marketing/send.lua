@@ -69,8 +69,7 @@ function S.enqueue(ns, campaign, contact_uuid, opts)
 
     local address
     if channel == "email" then address = U.norm_email(contact.email)
-    elseif channel == "sms" then address = U.e164(contact.phone or contact.mobile)
-    else address = contact.email or contact.uuid end
+    elseif channel == "sms" then address = U.e164(contact.phone or contact.mobile) end
     if not address then return nil, "no_address" end
 
     -- Idempotent insert
@@ -122,13 +121,15 @@ function S.enqueue(ns, campaign, contact_uuid, opts)
     end)
 
     if opts.send_now then
-        return S.dispatch(row.id)
+        return S.dispatch(row.id, { skip_quiet_hours = campaign.skip_quiet_hours })
     end
     return row
 end
 
 --- Claim and send one queued delivery by id. Re-checks can_send.
-function S.dispatch(delivery_id)
+-- opts.skip_quiet_hours: test sends (the campaign row is reloaded, so it's passed here).
+function S.dispatch(delivery_id, opts)
+    opts = opts or {}
     return U.tx(function()
         local d = U.one("SELECT * FROM mkt_deliveries WHERE id = ? AND state = 'queued' FOR UPDATE SKIP LOCKED", delivery_id)
         if not d then return nil, "not_found_or_locked" end
@@ -168,7 +169,11 @@ function S.dispatch(delivery_id)
 
         -- CRITICAL: re-check eligibility at send time
         campaign.namespace_id = d.namespace_id
+        campaign.skip_quiet_hours = opts.skip_quiet_hours
         local gate = E.check(contact, campaign, d.channel, campaign.message_type or "marketing")
+        if gate.reason == "quiet_hours" then
+            return d, "quiet_hours" -- defer: stays queued and goes out when quiet hours end
+        end
         if not gate.allowed then
             db.query([[
                 UPDATE mkt_deliveries SET state = 'skipped', eligibility_reason = ?, reason = ?,
@@ -283,21 +288,23 @@ end
 --- Process up to `limit` queued deliveries for a namespace (used by campaign_sender job).
 function S.process_queue(ns, limit)
     limit = tonumber(limit) or 50
-    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped in dispatch)
+    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped in dispatch).
+    -- In quiet hours marketing messages wait in the queue, so pick only the other kinds.
+    local settings = U.settings(ns)
+    local quiet = U.in_quiet_hours(ns, settings.quiet_hours_from or "21:00", settings.quiet_hours_to or "08:00")
     local rows = db.query([[
         SELECT d.id FROM mkt_deliveries d
         JOIN mkt_campaigns c ON c.id = d.campaign_id
         WHERE d.namespace_id = ? AND d.state = 'queued' AND c.status = 'sending'
+          AND (? = false OR c.message_type <> 'marketing')
         ORDER BY d.queued_at ASC
         LIMIT ?
-    ]], ns, limit)
+    ]], ns, quiet, limit)
     local sent, skipped, failed = 0, 0, 0
     for _, r in ipairs(rows) do
         local d, err = S.dispatch(r.id)
-        if err == "not_found_or_locked" or err == "campaign_paused" then
+        if err == "not_found_or_locked" or err == "campaign_paused" or err == "quiet_hours" then
             -- leave for later
-        elseif d and d.state == "accepted" then sent = sent + 1
-        elseif d and d.state == "skipped" then skipped = skipped + 1
         elseif err == "rate_limited" then break
         elseif err == "budget_exhausted" then
             -- Cap reached: skip remaining queued for this campaign
@@ -306,9 +313,11 @@ function S.process_queue(ns, limit)
                     UPDATE mkt_deliveries SET state = 'skipped', reason = 'budget_exhausted', updated_at = NOW()
                     WHERE campaign_id = ? AND state = 'queued'
                 ]], d.campaign_id)
-                skipped = skipped + (n and n.affected_rows or 0)
+                skipped = skipped + 1 + (n and n.affected_rows or 0)
             end
             break
+        elseif d and d.state == "accepted" then sent = sent + 1
+        elseif d and d.state == "skipped" then skipped = skipped + 1
         else failed = failed + 1 end
     end
     return { sent = sent, skipped = skipped, failed = failed, claimed = #rows }

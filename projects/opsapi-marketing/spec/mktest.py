@@ -19,7 +19,10 @@ P = API + "/api/v2/opsapi-marketing"
 USERS = {
     "owner_a": ("a1111111-0000-4000-8000-000000000001", "owner.a@mkt.invalid"),
     "owner_b": ("b2222222-0000-4000-8000-000000000002", "owner.b@mkt.invalid"),
+    # Platform admin (JWT role): approves campaigns it didn't create (authors can't self-approve).
+    "approver": ("c3333333-0000-4000-8000-000000000003", "approver@mkt.invalid"),
 }
+ROLES = {"approver": "administrative"}
 
 failures = 0
 
@@ -28,8 +31,10 @@ def jwt(user):
     uid, email = USERS[user]
     b = lambda d: base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).rstrip(b"=")
     h = b({"typ": "JWT", "alg": "HS256"})
-    p = b({"userinfo": {"uuid": uid, "email": email}, "iat": int(time.time()), "exp": int(time.time()) + 3600,
-           "iss": "opsapi"})
+    info = {"uuid": uid, "email": email}
+    if user in ROLES:
+        info["roles"] = ROLES[user]
+    p = b({"userinfo": info, "iat": int(time.time()), "exp": int(time.time()) + 3600, "iss": "opsapi"})
     sig = base64.urlsafe_b64encode(hmac.new(SECRET.encode(), h + b"." + p, hashlib.sha256).digest()).rstrip(b"=")
     return (h + b"." + p + b"." + sig).decode()
 

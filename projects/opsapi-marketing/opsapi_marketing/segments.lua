@@ -130,30 +130,33 @@ function Seg.preview(ns, rule, limit)
     return { contacts = rows, total = total and total.n or #rows }
 end
 
---- Materialise dynamic list membership (replace active members).
+--- Materialise dynamic list membership (replace active members). One INSERT … SELECT,
+-- so every matching contact is added (it used to go through the 500-row preview).
 function Seg.sync_list(ns, list_id)
     local list = U.one("SELECT * FROM mkt_lists WHERE id = ? AND namespace_id = ?", list_id, ns)
     if not list then return nil, "not_found" end
     if list.list_type ~= "dynamic" then return nil, "not_dynamic" end
     local rule = U.json(list.segment_rule) or {}
-    local preview, err = Seg.preview(ns, rule, 5000)
-    if not preview then return nil, err end
+    local args, needs = { ns, list_id, ns }, {}
+    local where, err = compile(rule, args, needs)
+    if not where then return nil, err end
+    local join = needs.accounts
+        and " LEFT JOIN crm_accounts a ON a.id = c.account_id AND a.namespace_id = c.namespace_id " or ""
 
     return U.tx(function()
         db.query("UPDATE mkt_list_members SET removed_at = NOW() WHERE namespace_id = ? AND list_id = ? AND removed_at IS NULL AND source = 'segment'",
             ns, list_id)
-        local n = 0
-        for _, c in ipairs(preview.contacts) do
-            db.query([[
-                INSERT INTO mkt_list_members (namespace_id, list_id, contact_uuid, source)
-                VALUES (?, ?, ?, 'segment')
-                ON CONFLICT (namespace_id, list_id, contact_uuid)
-                DO UPDATE SET removed_at = NULL, source = 'segment', added_at = NOW()
-            ]], ns, list_id, c.uuid)
-            n = n + 1
-        end
+        local res = db.query([[
+            INSERT INTO mkt_list_members (namespace_id, list_id, contact_uuid, source)
+            SELECT ?, ?, c.uuid, 'segment'
+            FROM crm_contacts c ]] .. join .. [[
+            WHERE c.namespace_id = ? AND c.deleted_at IS NULL AND (]] .. where .. [[)
+            ON CONFLICT (namespace_id, list_id, contact_uuid)
+            DO UPDATE SET removed_at = NULL, source = 'segment', added_at = NOW()
+        ]], unpack(args))
         db.query("UPDATE mkt_lists SET updated_at = NOW() WHERE id = ?", list_id)
-        return { synced = n, total = preview.total }
+        local n = res and res.affected_rows or 0
+        return { synced = n, total = n }
     end)
 end
 

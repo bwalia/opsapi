@@ -148,8 +148,7 @@ export default function ContentTab({
     try {
       const res = await marketingService.updateCampaign(campaign.uuid, patch);
       const row = unwrap<Campaign>(res);
-      const demoted =
-        (campaign.status === 'validated' || campaign.status === 'awaiting_approval') && row.status === 'draft';
+      const demoted = campaign.status !== 'draft' && row.status === 'draft';
       onSaved(
         row,
         demoted
@@ -170,12 +169,14 @@ export default function ContentTab({
     <div className="space-y-4">
       {!editable && (
         <Notice tone="warn">
-          Content is locked while the campaign is {campaign.status.replace(/_/g, ' ')}. Pause it to make changes, or
-          duplicate it to start a new draft.
+          Content is locked while the campaign is {campaign.status.replace(/_/g, ' ')}. Pause it to make changes (it
+          then goes back to draft and needs validating, and approving, again), or duplicate it to start a new draft.
         </Notice>
       )}
-      {editable && (campaign.status === 'validated' || campaign.status === 'awaiting_approval') && (
-        <Notice tone="info">Saving content changes sends this campaign back to draft for re-validation.</Notice>
+      {editable && campaign.status !== 'draft' && (
+        <Notice tone="info">
+          Saving content changes sends this campaign back to draft: validate it (and get it approved) again.
+        </Notice>
       )}
       {error && <Notice tone="error">{error}</Notice>}
 

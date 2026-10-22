@@ -4,6 +4,8 @@ const BASE = '/api/v2/opsapi-marketing';
 
 /** Plugin SDK (sdk.body) requires a JSON object — not the apiClient default form encoding. */
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
+/** Lifecycle actions (send, approve, cancel…) must fail when offline, never be queued and run later. */
+const ACTION = { ...JSON_BODY, _noOutbox: true } as const;
 
 export const marketingService = {
   listCampaigns: (params?: Record<string, unknown>) =>
@@ -13,30 +15,31 @@ export const marketingService = {
     apiClient.post(`${BASE}/campaigns`, body, JSON_BODY),
   updateCampaign: (id: string, body: Record<string, unknown>) =>
     apiClient.put(`${BASE}/campaigns/${id}`, body, JSON_BODY),
+  // Send now builds the whole audience inside this request, which can take longer than 30s.
   scheduleCampaign: (id: string, body: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/schedule`, body, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/schedule`, body, { ...ACTION, timeout: 120000 }),
   validateCampaign: (id: string, body?: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/validate`, body || {}, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/validate`, body || {}, ACTION),
   audiencePreview: (id: string, body?: Record<string, unknown>) =>
     apiClient.post(`${BASE}/campaigns/${id}/audience-preview`, body || {}, JSON_BODY),
   requestApproval: (id: string, body?: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/request-approval`, body || {}, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/request-approval`, body || {}, ACTION),
   approveCampaign: (id: string) =>
-    apiClient.post(`${BASE}/campaigns/${id}/approve`, {}, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/approve`, {}, ACTION),
   rejectCampaign: (id: string, body?: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/reject`, body || {}, JSON_BODY),
-  pauseCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/pause`, {}, JSON_BODY),
-  resumeCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/resume`, {}, JSON_BODY),
-  cancelCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/cancel`, {}, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/reject`, body || {}, ACTION),
+  pauseCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/pause`, {}, ACTION),
+  resumeCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/resume`, {}, ACTION),
+  cancelCampaign: (id: string) => apiClient.post(`${BASE}/campaigns/${id}/cancel`, {}, ACTION),
   duplicateCampaign: (id: string, body?: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/duplicate`, body || {}, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/duplicate`, body || {}, ACTION),
   setAbConfig: (id: string, body: Record<string, unknown>) =>
     apiClient.put(`${BASE}/campaigns/${id}/ab-config`, body, JSON_BODY),
   campaignStats: (id: string) => apiClient.get(`${BASE}/campaigns/${id}/stats`),
   checkEligibility: (id: string, body: Record<string, unknown>) =>
     apiClient.post(`${BASE}/campaigns/${id}/eligibility`, body, JSON_BODY),
   testSend: (id: string, body: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/campaigns/${id}/test-send`, body, JSON_BODY),
+    apiClient.post(`${BASE}/campaigns/${id}/test-send`, body, ACTION),
 
   listLists: (params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/lists`, { params }),

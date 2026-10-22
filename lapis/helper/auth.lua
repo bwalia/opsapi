@@ -50,9 +50,9 @@ function _M.authenticate()
         return
     end
 
-    local uri = ngx.var.uri
-    -- ngx.say(uri)
-    -- ngx.exit(ngx.HTTP_OK)
+    -- The raw path Lapis routes on (see app.lua before_filter): the decoded,
+    -- normalised ngx.var.uri let ..%2F paths pass public and API-key scope checks.
+    local uri = (ngx.var.request_uri or ngx.var.uri or ""):match("^[^?]*")
     -- Skip authentication for public routes
     if _M.is_public_route(uri) then
         ngx.log(ngx.NOTICE, "Skipping authentication for public route: ", uri)

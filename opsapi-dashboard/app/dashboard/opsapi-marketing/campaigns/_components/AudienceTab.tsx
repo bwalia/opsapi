@@ -226,7 +226,8 @@ export default function AudienceTab({
           </p>
         )}
         <p className="text-xs text-secondary-500">
-          The selected list is attached to the campaign when you preview, validate or send.
+          The selected list is attached to the campaign when you validate or send. Choosing a different list after
+          validating means validating (and approval) again.
         </p>
 
         {preview && (

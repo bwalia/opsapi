@@ -46,7 +46,7 @@ return function(app)
             name = { type = "string", required = true },
             description = { type = "text" },
             list_type = { type = "string", enum = { "static", "dynamic" } },
-            channel = { type = "string", enum = { "email", "sms", "push", "webhook" } },
+            channel = { type = "string", enum = U.CHANNEL_ENUM },
         },
         searchable = { "name", "description" },
         filterable = { "list_type", "channel" },
@@ -143,7 +143,9 @@ return function(app)
                 end
                 local first = clean(col.first_name and cols[col.first_name] or "") or "Contact"
                 local last = clean(col.last_name and cols[col.last_name] or "") or ""
-                local phone = clean(col.phone and cols[col.phone] or "") or ""
+                -- Stored as E.164 when it parses: clean() would strip the leading "+".
+                local raw_phone = col.phone and cols[col.phone] or ""
+                local phone = U.e164(raw_phone) or clean(raw_phone) or ""
 
                 local contact = U.one([[
                     SELECT uuid FROM crm_contacts

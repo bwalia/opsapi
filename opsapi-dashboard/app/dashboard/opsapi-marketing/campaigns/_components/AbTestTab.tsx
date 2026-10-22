@@ -91,9 +91,13 @@ export default function AbTestTab({
     });
     try {
       const res = await marketingService.setAbConfig(campaign.uuid, { enabled, variants });
+      const row = normaliseCampaign(unwrap<Campaign>(res));
+      const saved = enabled ? 'A/B test saved and enabled.' : 'A/B variants saved (test disabled).';
       onSaved(
-        normaliseCampaign(unwrap<Campaign>(res)),
-        enabled ? 'A/B test saved and enabled.' : 'A/B variants saved (test disabled).',
+        row,
+        campaign.status !== 'draft' && row.status === 'draft'
+          ? `${saved} The campaign went back to draft — validate it again before sending.`
+          : saved,
       );
     } catch (e: unknown) {
       setError(apiErrorMessage(e, 'Could not save A/B test'));
