@@ -388,6 +388,22 @@ function TaxTransactionQueries.update(uuid, params, user)
         end
     end
 
+    -- A new category brings its HMRC box + deductibility from the catalogue (it's
+    -- authoritative), unless the caller set them explicitly — else the row keeps the
+    -- OLD category's box and lands in the wrong place on the return.
+    if params.category and params.category ~= "" and params.category ~= transaction.category then
+        local meta = require("lib.tax-classifier").category_meta()[params.category]
+        if meta then
+            if params.hmrc_category == nil then update_data.hmrc_category = meta.hmrc_key or db.NULL end
+            if params.is_tax_deductible == nil then update_data.is_tax_deductible = meta.deductible end
+        end
+    end
+
+    if update_data.classification_status == "CONFIRMED" then
+        update_data.classification_confirmed_at = db.raw("NOW()")
+        update_data.classification_confirmed_by = user_id
+    end
+
     -- If user is editing, mark as manually reviewed
     if params.category or params.description or params.amount then
         update_data.is_manually_reviewed = true

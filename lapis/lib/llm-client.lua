@@ -300,8 +300,17 @@ function LLMClient.extract_from_image(opts)
     if not Llm.configured(Llm.vision) then
         return nil, "No vision model is configured (set AI_VISION_PROVIDER / AI_VISION_MODEL or AI_PROVIDER)"
     end
-    local prompt = opts.prompt or [[Extract all transactions from this bank statement.
-Return a JSON array where each element has: {"date": "DD/MM/YYYY", "description": "text", "amount": number, "type": "DEBIT" or "CREDIT", "balance": number}
+    local prompt = opts.prompt or [[Extract every transaction from this bank statement.
+
+Each row has a Debit (money out) column, a Credit (money in) column, and a running
+Balance column. These are DIFFERENT numbers. For each transaction:
+- "amount": the transaction's value — the number in the Debit OR Credit column for that
+  row, as a POSITIVE number. NEVER use the running Balance as the amount.
+- "type": "DEBIT" if the value is in the Debit/money-out column, "CREDIT" if it is in the
+  Credit/money-in column. Salary, wages, refunds and payments received are CREDIT.
+- "balance": the running Balance for that row (the account balance after the transaction).
+
+Return a JSON array; each element: {"date": "DD/MM/YYYY", "description": "text", "amount": <positive debit or credit value, NOT the balance>, "type": "DEBIT" or "CREDIT", "balance": <running balance>}
 Also include: {"bank_name": "...", "account_number": "...", "sort_code": "...", "statement_period": "...", "opening_balance": number, "closing_balance": number}
 Respond with valid JSON only.]]
     local messages = { {

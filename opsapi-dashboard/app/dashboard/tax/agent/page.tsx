@@ -18,6 +18,7 @@ import { Modal } from '@/components/ui';
 import { formatCurrency } from '@/lib/utils';
 import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
+import taxFilingService from '@/services/tax-filing.service';
 
 interface ChatMsg {
   id: string;
@@ -110,11 +111,20 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
       {/* Binding filing is done on the dedicated File screen — a deliberate, explicit
           step for a legally-binding declaration, not a chat action. */}
       <Link
-        href="/dashboard/tax/file"
+        href={`/dashboard/tax/file?tax_year=${encodeURIComponent(estimate.tax_year)}`}
         className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
       >
         Ready to file? Open the File screen →
       </Link>
+      <button
+        type="button"
+        onClick={() => {
+          taxFilingService.downloadCalculation(estimate.tax_year).catch(() => toast.error('Could not download your tax sheet'));
+        }}
+        className="mt-2 w-full rounded-lg border border-primary-200 px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50"
+      >
+        Download tax sheet (.xlsx)
+      </button>
     </div>
   );
 }
@@ -300,7 +310,7 @@ function TaxAgentChat() {
       if (ids.length === 0) throw new Error('no statements uploaded');
       // Hand off to the SERVER-SIDE worker — extract + classify keep running even
       // if the user reloads or leaves. The UI follows progress by polling.
-      await taxAgentService.processStatements(ids, taxYear || undefined);
+      await taxAgentService.processStatements(ids, taxYear || undefined, sessionId || undefined);
       const bankLine = detectedBank ? `I read your bank as ${detectedBank}. ` : '';
       setMessages((prev) => [...prev, {
         id: newId(), role: 'assistant',

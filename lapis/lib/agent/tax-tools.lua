@@ -319,13 +319,18 @@ register({
     },
     handler = function(ctx, args)
         local tax_year = year_of(ctx, args)
-        -- Income = all credits (is_tax_deductible applies to EXPENSES, not income —
-        -- every income category is stored is_tax_deductible=false). Expenses = debits
-        -- the classifier marked deductible. Matches routes/tax-calculate so the chat
-        -- estimate and the Calculate screen agree.
+        -- Income = credits, EXCEPT those classified into a non-business category (one
+        -- with no HMRC box: transfer, loan, drawings, personal) — a transfer from your own
+        -- savings or a loan is not taxable income. (is_tax_deductible applies to EXPENSES;
+        -- every income category is stored is_tax_deductible=false.) Expenses = debits the
+        -- classifier marked deductible. Same rules in routes/tax-calculate and
+        -- lib/tax-report, so the chat estimate, the Calculate screen and the filing
+        -- workbook all agree.
         local agg = db.query([[
             SELECT
-              COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END), 0) AS gross_income,
+              COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' AND NOT EXISTS (
+                   SELECT 1 FROM tax_categories c WHERE c.key = t.category AND c.hmrc_category_id IS NULL)
+                   THEN t.amount ELSE 0 END), 0) AS gross_income,
               COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
                    THEN t.amount ELSE 0 END), 0) AS total_expenses,
               COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
@@ -373,7 +378,10 @@ register({
         full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
         full.trading_profit = full.profit
         full.taxable_income = full.total_taxable
-        full.nic_applied = (full.class4_nic or 0) > 0
+        -- "NIC applies to this profile?" — true for self-employment (even at a loss,
+        -- where the amount is just £0), false only for property-only income (no Class
+        -- 2/4). The frontend shows "N/A — property income" only when this is false.
+        full.nic_applied = not (only_property and not has_se)
         full.income_tax = { total = full.income_tax_due }
         full.national_insurance = { class4 = full.class4_nic, class2 = full.class2_nic,
             total = (full.class4_nic or 0) + (full.class2_nic or 0) }

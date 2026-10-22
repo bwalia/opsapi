@@ -4,12 +4,18 @@
  * Guided "File your tax" wizard.
  *
  * One linear path so a non-expert can file without hopping between pages:
- *   1. Connect to HMRC          (OAuth)
- *   2. Select your business     (pull from HMRC, pick the self-employment)
- *   3. Fetch obligations        (which period HMRC says is open to file)
- *   4. Check your figures       (aggregate classified tx; fix mis-filed credits inline)
- *   5. Preview calculation      (submit cumulative + in-year calc — non-binding)
- *   6. Finalise & declare       (the binding final declaration — next phase)
+ *   1. National Insurance number (both paths)
+ *   2. Check your transactions   (every extracted + classified row; the customer confirms
+ *                                 each — nothing is filed until all are confirmed)
+ *   then either "our accountant files it" (FileForMe) or, filing directly:
+ *   3. Connect to HMRC          (OAuth)
+ *   4. Select your business     (pull from HMRC, pick the self-employment)
+ *   5. Fetch obligations        (which period HMRC says is open to file)
+ *   6. Check your figures       (aggregate classified tx; fix mis-filed credits inline)
+ *   7. Preview calculation      (submit cumulative + in-year calc — non-binding)
+ *   8. Finalise & declare       (the binding final declaration)
+ *
+ * Layout: full-width main column + a sticky summary rail (figures, progress, key dates).
  *
  * Steps unlock in order; each shows done / active / locked. The hard gate before the
  * HMRC calculation is step 4: it must report no blocking issues (e.g. a negative period
@@ -39,9 +45,18 @@ import {
   AlertTriangle,
   AlertCircle,
   RefreshCw,
+  Download,
+  Fingerprint,
+  Landmark,
+  UserCheck,
+  ClipboardCheck,
+  CalendarDays,
 } from 'lucide-react';
-import { Card } from '@/components/ui';
+import { Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import FileForMe from '@/components/tax/FileForMe';
+import TransactionReview from '@/components/tax/TransactionReview';
+import { taxFilingService, type FilingOverview } from '@/services/tax-filing.service';
 import {
   taxService,
   type HmrcBusiness,
@@ -71,6 +86,73 @@ function taxYearOf(dateStr: string): string {
   const mo = parseInt(m[2], 10);
   const start = mo >= 4 ? y : y - 1;
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+// The tax year people file now: the last COMPLETED one (years start 6 April).
+// On 22 Oct 2026 that's "2025-26".
+function currentFilingYear(now = new Date()): string {
+  const afterApr6 = now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6);
+  const start = (afterApr6 ? now.getFullYear() : now.getFullYear() - 1) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+// UK NINO: two letters, six digits, suffix A–D (spaces allowed while typing).
+const NINO_RE = /^[A-Z]{2}\d{6}[A-D]$/;
+const cleanNino = (s: string) => s.replace(/\s+/g, '').toUpperCase();
+
+function PathOption({ active, onClick, icon, title, text, badge }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; title: string; text: string; badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`w-full rounded-xl border p-4 text-left transition-colors ${
+        active ? 'border-primary-400 bg-primary-50 ring-1 ring-primary-300' : 'border-secondary-200 bg-surface hover:border-primary-300'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span className={active ? 'text-primary-600' : 'text-secondary-500'}>{icon}</span>
+        <span className="font-semibold text-secondary-900">{title}</span>
+        {badge && (
+          <span className="ml-auto rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700">{badge}</span>
+        )}
+      </div>
+      <p className="mt-1 text-sm text-secondary-500">{text}</p>
+    </button>
+  );
+}
+
+// One step in the direct-filing stepper: a vertical connector runs from this step's
+// icon down to the next one, so the steps read as a single flow.
+function StepBlock({ children, last }: { children: React.ReactNode; last?: boolean }) {
+  return (
+    <div className={`relative ${last ? '' : 'pb-7'}`}>
+      {!last && <span aria-hidden className="absolute left-[17px] top-11 bottom-1 w-px bg-secondary-200" />}
+      {children}
+    </div>
+  );
+}
+
+function CheckItem({ state, label, hint }: { state: 'done' | 'warn' | 'todo'; label: string; hint?: string }) {
+  return (
+    <li className="flex items-start gap-3">
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+          state === 'done' ? 'bg-green-100 text-green-600'
+            : state === 'warn' ? 'bg-amber-100 text-amber-600' : 'border-2 border-secondary-200'
+        }`}
+      >
+        {state === 'done' && <CheckCircle2 className="h-3.5 w-3.5" />}
+        {state === 'warn' && <AlertTriangle className="h-3 w-3" />}
+      </span>
+      <span className="min-w-0">
+        <span className={`block text-sm ${state === 'todo' ? 'text-secondary-500' : 'text-secondary-900'}`}>{label}</span>
+        {hint && <span className="block text-xs text-secondary-500">{hint}</span>}
+      </span>
+    </li>
+  );
 }
 
 const bizId = (b: HmrcBusiness) => b.business_id || b.businessId || '';
@@ -203,9 +285,20 @@ function StepHeader({
 function FileWizardContent() {
   const searchParams = useSearchParams();
 
-  const [taxYear, setTaxYear] = useState('2025-26');
+  // "Ready to file?" in File with AI passes ?tax_year=; else the year people file now.
+  const [taxYear, setTaxYear] = useState(() => searchParams.get('tax_year') || currentFilingYear());
 
-  // Step 1 — connection
+  // Your figures + the downloadable tax sheet + any accountant request (routes/tax-filing).
+  const [overview, setOverview] = useState<FilingOverview | null>(null);
+  const [loadingOverview, setLoadingOverview] = useState(true);
+  const [downloadingSheet, setDownloadingSheet] = useState(false);
+  // How to file. Coming back from the HMRC OAuth redirect means the direct path.
+  const [path, setPath] = useState<'accountant' | 'direct'>(
+    searchParams.get('hmrc_connected') || searchParams.get('hmrc_error') ? 'direct' : 'accountant',
+  );
+  const [confirmRemoveNino, setConfirmRemoveNino] = useState(false);
+
+  // Step 2 — connection
   const [connected, setConnected] = useState(false);
   const [valid, setValid] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
@@ -257,6 +350,43 @@ function FileWizardContent() {
   const autoPreviewFor = useRef<string>('');
 
   const gbp = (n?: number) => (n == null ? '—' : formatCurrency(n, 'GBP', 'en-GB'));
+
+  // ── Your figures (both paths) ───────────────────────────────────────────────
+  const loadOverview = useCallback(async () => {
+    if (!taxYearBounds(taxYear)) {
+      setOverview(null);
+      setLoadingOverview(false);
+      return;
+    }
+    setLoadingOverview(true);
+    try {
+      setOverview(await taxFilingService.overview(taxYear));
+    } catch {
+      setOverview(null);
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, [taxYear]);
+
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
+
+  // Direct filing can be switched off (until we're an HMRC-recognised filer).
+  useEffect(() => {
+    if (overview && !overview.direct_filing_enabled) setPath('accountant');
+  }, [overview]);
+
+  const downloadSheet = async () => {
+    setDownloadingSheet(true);
+    try {
+      await taxFilingService.downloadCalculation(taxYear);
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, 'Could not download your tax sheet'));
+    } finally {
+      setDownloadingSheet(false);
+    }
+  };
 
   // ── Step 1: connection ──────────────────────────────────────────────────────
   const fetchStatus = useCallback(async () => {
@@ -322,7 +452,7 @@ function FileWizardContent() {
     }
     setSavingNino(true);
     try {
-      const r = await taxService.saveHmrcNino(ninoInput, ninoConsent);
+      const r = await taxService.saveHmrcNino(cleanNino(ninoInput), ninoConsent);
       setHasNino(true);
       setNinoLast4(r.last4);
       setNinoInput('');
@@ -340,11 +470,12 @@ function FileWizardContent() {
     }
   };
 
+  // Confirmed via the "Remove NINO?" modal.
   const removeNino = async () => {
-    if (!confirm('Remove your stored National Insurance number? You will need to re-enter it to file.')) return;
     setRemovingNino(true);
     try {
       await taxService.deleteHmrcNino();
+      setConfirmRemoveNino(false);
       setHasNino(false);
       setNinoLast4(undefined);
       setEditingNino(false);
@@ -548,7 +679,16 @@ function FileWizardContent() {
   };
 
   // ── Derived step states ───────────────────────────────────────────────────────
-  const s1: StepState = connected && valid ? 'done' : 'active';
+  // NINO first (both paths), then — for direct filing — connect, business, obligations…
+  const sNino: StepState = hasNino ? 'done' : 'active';
+  // Nothing is filed until the customer has confirmed every transaction (step 2).
+  const txTotal = overview?.estimate.transactions ?? 0;
+  const txConfirmed = overview?.estimate.confirmed ?? 0;
+  const allConfirmed = txTotal > 0 && txConfirmed >= txTotal;
+  const sReview: StepState = allConfirmed ? 'done' : 'active';
+  const s1: StepState = !hasNino ? 'locked' : connected && valid ? 'done' : 'active';
+  const ninoClean = cleanNino(ninoInput);
+  const ninoValid = NINO_RE.test(ninoClean);
   const s2: StepState = s1 !== 'done' ? 'locked' : selectedBusiness ? 'done' : 'active';
   const s3: StepState = s2 !== 'done' ? 'locked' : obligations !== null ? 'done' : 'active';
   // Obligations are informational, so step 4 unlocks once a business is chosen.
@@ -556,44 +696,316 @@ function FileWizardContent() {
   const figuresEmpty = !!preview && (((preview.stats.applied as number) ?? 0) === 0);
   const figuresOk = preview !== null && !preview.blocking && !figuresEmpty;
   const s4: StepState = s2 !== 'done' ? 'locked' : figuresOk ? 'done' : 'active';
-  const s5: StepState = !figuresOk ? 'locked' : calc ? 'done' : 'active';
+  const s5: StepState = !figuresOk || !allConfirmed ? 'locked' : calc ? 'done' : 'active';
   const s6: StepState = filed ? 'done' : !calc ? 'locked' : 'active';
 
   const openObligations = (obligations || []).filter(isOpen);
 
+  const changeYear = (y: string) => {
+    setTaxYear(y);
+    // Year change invalidates downstream data.
+    setObligations(null);
+    setPreview(null);
+    setCalc(null);
+  };
+  const yearOptions = Array.from({ length: 4 }, (_, i) => {
+    const y = parseInt(currentFilingYear().slice(0, 4), 10) - i;
+    return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+  });
+  if (!yearOptions.includes(taxYear)) yearOptions.unshift(taxYear);
+  const startYear = taxYearBounds(taxYear) ? parseInt(taxYear.slice(0, 4), 10) : null;
+
+  // Sidebar progress: the accountant path tracks the request, the direct path HMRC.
+  const req = overview?.request;
+  const sent = !!req && (req.open || req.status === 'filed');
+  const isFiled = path === 'accountant' ? req?.status === 'filed' : !!filed;
+
   return (
-    <div className="space-y-5 max-w-3xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">File your tax</h1>
-          <p className="text-sm text-secondary-500 mt-1">
-            A guided path from connecting HMRC to previewing your Self Assessment calculation.
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary-600">Self Assessment</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-secondary-900 sm:text-3xl">File your tax return</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-secondary-500">
+            Check what we read from your bank statements, confirm it, then choose how to file — our accountant
+            files it for you, or you file directly with HMRC.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-secondary-500">Tax year</label>
-          <input
+        <label className="flex shrink-0 items-center gap-2 text-sm">
+          <span className="font-medium text-secondary-600">Tax year</span>
+          <select
             value={taxYear}
-            onChange={(e) => {
-              setTaxYear(e.target.value);
-              // Year change invalidates downstream data.
-              setObligations(null);
-              setPreview(null);
-              setCalc(null);
-            }}
-            className="px-3 py-1.5 border border-secondary-300 rounded-lg text-sm bg-surface w-28"
-            placeholder="2025-26"
-          />
-        </div>
+            onChange={(e) => changeYear(e.target.value)}
+            className="rounded-lg border border-secondary-300 bg-surface px-3 py-2 text-sm font-medium text-secondary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
       </div>
 
-      {/* Step 1 — Connect */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
+        {/* Summary rail: first on mobile, a sticky right column on wide screens. */}
+        <aside className="space-y-5 xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1 xl:self-start">
+          <Card padding="none" className="overflow-hidden">
+            {loadingOverview && !overview ? (
+              <p className="flex items-center gap-2 p-5 text-sm text-secondary-500">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading your figures…
+              </p>
+            ) : !overview ? (
+              <p className="p-5 text-sm text-secondary-500">Pick a tax year to see your figures.</p>
+            ) : (
+              <>
+                <div className="bg-linear-to-br from-primary-600 to-primary-800 px-5 py-5 text-white">
+                  <p className="text-xs font-medium uppercase tracking-wider text-white/75">
+                    Estimated tax · {overview.tax_year}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums">{gbp(overview.estimate.total_tax_and_nic)}</p>
+                  <p className="mt-0.5 text-xs text-white/75">Income Tax and National Insurance</p>
+                </div>
+                <dl className="divide-y divide-secondary-100 px-5 text-sm">
+                  {([
+                    ['Income', overview.estimate.income],
+                    ['Allowable expenses', overview.estimate.expenses],
+                    ['Profit', overview.estimate.profit],
+                    ['Income Tax', overview.estimate.income_tax],
+                    ['Class 4 National Insurance', overview.estimate.class4_nic],
+                    ['Due by 31 January*', overview.estimate.total_due_31_jan],
+                  ] as Array<[string, number]>).map(([label, value], i, all) => (
+                    <div key={label} className="flex items-center justify-between gap-3 py-2.5">
+                      <dt className="text-secondary-500">{label}</dt>
+                      <dd className={`tabular-nums ${i === all.length - 1 ? 'font-semibold text-secondary-900' : 'font-medium text-secondary-800'}`}>
+                        {gbp(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="space-y-3 border-t border-secondary-100 p-5">
+                  <button
+                    onClick={downloadSheet}
+                    disabled={downloadingSheet || overview.estimate.transactions === 0}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-secondary-300 px-3 py-2 text-sm font-medium text-secondary-700 hover:bg-secondary-100 disabled:opacity-50"
+                  >
+                    {downloadingSheet ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    Download tax sheet (.xlsx)
+                  </button>
+                  <p className="text-xs leading-relaxed text-secondary-400">
+                    *Includes your first payment on account for next year. The tax sheet lists your figures by HMRC
+                    box (SA103F) with the matching Making Tax Digital field — ready for other HMRC-recognised
+                    software such as My Tax Digital.
+                  </p>
+                </div>
+              </>
+            )}
+          </Card>
+
+          <Card padding="lg">
+            <p className="text-sm font-semibold text-secondary-900">Your progress</p>
+            <ul className="mt-3 space-y-3">
+              <CheckItem
+                state={hasNino ? 'done' : 'todo'}
+                label="National Insurance number"
+                hint={hasNino ? `Ending ${ninoLast4 ?? '••••'}` : 'Needed whichever way you file'}
+              />
+              <CheckItem
+                state={allConfirmed ? 'done' : txConfirmed > 0 ? 'warn' : 'todo'}
+                label="Transactions checked"
+                hint={txTotal ? `${txConfirmed} of ${txTotal} confirmed` : 'Upload your statements first'}
+              />
+              {path === 'accountant' ? (
+                <CheckItem
+                  state={sent ? 'done' : 'todo'}
+                  label="Sent to our accountant"
+                  hint={sent ? (req?.status === 'needs_info' ? 'They have a question for you' : 'With our accountant') : undefined}
+                />
+              ) : (
+                <CheckItem state={connected && valid ? 'done' : 'todo'} label="Connected to HMRC" />
+              )}
+              <CheckItem
+                state={isFiled ? 'done' : 'todo'}
+                label="Filed with HMRC"
+                hint={isFiled && req?.hmrc_reference ? `Reference ${req.hmrc_reference}` : undefined}
+              />
+            </ul>
+          </Card>
+
+          {startYear && (
+            <Card padding="lg">
+              <p className="flex items-center gap-2 text-sm font-semibold text-secondary-900">
+                <CalendarDays className="h-4 w-4 text-secondary-400" /> Key dates
+              </p>
+              <dl className="mt-3 space-y-2.5 text-sm">
+                {([
+                  ['Tax year', `6 Apr ${startYear} – 5 Apr ${startYear + 1}`],
+                  ['Online return + tax due', `31 Jan ${startYear + 2}`],
+                  ['2nd payment on account (if due)', `31 Jul ${startYear + 2}`],
+                ] as Array<[string, string]>).map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3">
+                    <dt className="text-secondary-500">{label}</dt>
+                    <dd className="text-right font-medium text-secondary-900">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
+        </aside>
+
+        <div className="min-w-0 space-y-5 xl:col-start-1 xl:row-start-1">
+      {/* Step 1 — NINO (both paths) */}
       <Card padding="lg">
-        <StepHeader index={1} state={s1} icon={<Link2 className="w-4 h-4" />}
-          title="Connect to HMRC"
-          subtitle={s1 === 'done' ? 'Your HMRC authorisation is active.' : 'Authorise access to file via Making Tax Digital.'}
+        <StepHeader index={1} state={sNino} icon={<Fingerprint className="w-4 h-4" />}
+          title="Your National Insurance number"
+          subtitle={
+            hasNino
+              ? `Saved, ending ${ninoLast4 ?? '••••'} — stored encrypted.`
+              : 'HMRC identifies you by it, so it’s needed whichever way you file.'
+          }
         />
-        {s1 !== 'done' && (
+        {hasNino === null ? (
+          <p className="mt-3 pl-12 text-sm text-secondary-500 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Checking…
+          </p>
+        ) : hasNino && !editingNino ? (
+          <p className="mt-3 pl-12 text-xs text-secondary-500">
+            <button
+              onClick={() => { setEditingNino(true); setNinoInput(''); setNinoConsent(false); }}
+              className="text-primary-600 hover:underline"
+            >
+              Change
+            </button>
+            {' · '}
+            <button
+              onClick={() => setConfirmRemoveNino(true)}
+              disabled={removingNino}
+              className="text-red-600 hover:underline disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </p>
+        ) : (
+          <div className="mt-4 pl-12">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={ninoInput}
+                  onChange={(e) => setNinoInput(e.target.value.toUpperCase())}
+                  placeholder="QQ 12 34 56 C"
+                  maxLength={13}
+                  aria-label="National Insurance number"
+                  className="px-3 py-1.5 border border-secondary-300 rounded-lg text-sm bg-surface font-mono w-44"
+                />
+                <button
+                  onClick={saveNino}
+                  disabled={savingNino || !ninoValid || !ninoConsent}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingNino ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+                </button>
+                {hasNino && (
+                  <button
+                    onClick={() => { setEditingNino(false); setNinoInput(''); setNinoConsent(false); }}
+                    className="text-xs text-secondary-500 hover:underline"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {ninoClean.length >= 9 && !ninoValid && (
+                <p className="text-xs text-red-700">
+                  That doesn’t look like a National Insurance number — 2 letters, 6 numbers, then A, B, C or D.
+                </p>
+              )}
+              <label className="flex items-start gap-2 text-xs text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={ninoConsent}
+                  onChange={(e) => setNinoConsent(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  I consent to my National Insurance number being stored securely (encrypted) so my Self Assessment
+                  can be filed with HMRC — by me or by your accountant. I can remove it at any time.
+                </span>
+              </label>
+              <p className="text-xs text-amber-700">
+                Filing directly in the HMRC sandbox? It must match the test user you sign in to HMRC with — create one
+                under{' '}
+                <Link href="/dashboard/tax/settings" className="underline font-medium">HMRC settings</Link>.
+              </p>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Step 2 — the customer checks every extracted + classified transaction */}
+      <Card padding="lg">
+        <StepHeader index={2} state={sReview} icon={<ClipboardCheck className="w-4 h-4" />}
+          title="Check your transactions"
+          subtitle={
+            allConfirmed
+              ? `All ${txTotal} confirmed by you.`
+              : 'What we read from your statements and how we sorted each one. Confirm them before anything is filed.'
+          }
+        />
+        <div className="mt-4">
+          {overview ? (
+            <TransactionReview
+              key={taxYear}
+              taxYear={taxYear}
+              total={txTotal}
+              confirmed={txConfirmed}
+              toCheck={overview.estimate.unreviewed ?? 0}
+              onChanged={loadOverview}
+            />
+          ) : loadingOverview ? (
+            <p className="flex items-center gap-2 text-sm text-secondary-500">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading your transactions…
+            </p>
+          ) : null}
+        </div>
+      </Card>
+
+      {/* How to file */}
+      {overview?.direct_filing_enabled !== false && (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-secondary-900">How would you like to file?</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <PathOption
+              active={path === 'accountant'}
+              onClick={() => setPath('accountant')}
+              icon={<UserCheck className="w-4 h-4" />}
+              title="Our accountant files it"
+              badge="Recommended"
+              text="A qualified accountant checks your figures and files with HMRC-recognised software."
+            />
+            <PathOption
+              active={path === 'direct'}
+              onClick={() => setPath('direct')}
+              icon={<Landmark className="w-4 h-4" />}
+              title="File directly with HMRC"
+              text="Connect your HMRC account (Making Tax Digital) and submit the return yourself."
+            />
+          </div>
+        </div>
+      )}
+
+      {path === 'accountant' && overview && (
+        <FileForMe overview={overview} taxYear={taxYear} hasNino={!!hasNino} onChanged={loadOverview} />
+      )}
+
+      {path === 'direct' && (<Card padding="lg">
+      {/* Step 2 — Connect */}
+      <StepBlock>
+        <StepHeader index={3} state={s1} icon={<Link2 className="w-4 h-4" />}
+          title="Connect to HMRC"
+          subtitle={
+            s1 === 'done'
+              ? 'Your HMRC authorisation is active.'
+              : s1 === 'locked'
+                ? 'Add your National Insurance number first.'
+                : 'Authorise access to file via Making Tax Digital.'
+          }
+        />
+        {s1 === 'active' && (
           <div className="mt-4 pl-12">
             {loadingStatus ? (
               <span className="text-sm text-secondary-500 flex items-center gap-2">
@@ -623,11 +1035,11 @@ function FileWizardContent() {
             )}
           </div>
         )}
-      </Card>
+      </StepBlock>
 
       {/* Step 2 — Business */}
-      <Card padding="lg">
-        <StepHeader index={2} state={s2} icon={<Building2 className="w-4 h-4" />}
+      <StepBlock>
+        <StepHeader index={4} state={s2} icon={<Building2 className="w-4 h-4" />}
           title="Select your business"
           subtitle={
             s2 === 'done'
@@ -637,78 +1049,7 @@ function FileWizardContent() {
         />
         {s2 === 'active' && (
           <div className="mt-4 pl-12 space-y-3">
-            {/* NINO — required by HMRC to look up the business. */}
-            {hasNino && !editingNino ? (
-              <p className="text-xs text-secondary-500">
-                Using National Insurance number on file
-                {ninoLast4 ? <span className="font-mono"> ••• {ninoLast4}</span> : ''}{' '}
-                <span className="text-secondary-400">(stored encrypted)</span>.{' '}
-                <button
-                  onClick={() => { setEditingNino(true); setNinoInput(''); setNinoConsent(false); }}
-                  className="text-primary-600 hover:underline"
-                >
-                  Change
-                </button>
-                {' · '}
-                <button
-                  onClick={removeNino}
-                  disabled={removingNino}
-                  className="text-red-600 hover:underline disabled:opacity-50"
-                >
-                  Remove
-                </button>
-              </p>
-            ) : (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-                <p className="text-sm text-amber-900">
-                  HMRC needs your <strong>National Insurance number</strong> to find your business.
-                  {' '}It must match the test user you sign in to HMRC as.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={ninoInput}
-                    onChange={(e) => setNinoInput(e.target.value.toUpperCase())}
-                    placeholder="QQ123456C"
-                    className="px-3 py-1.5 border border-secondary-300 rounded-lg text-sm bg-surface font-mono w-40"
-                  />
-                  <button
-                    onClick={saveNino}
-                    disabled={savingNino || ninoInput.trim().length < 9 || !ninoConsent}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
-                  >
-                    {savingNino ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
-                  </button>
-                  {hasNino && (
-                    <button
-                      onClick={() => { setEditingNino(false); setNinoInput(''); setNinoConsent(false); }}
-                      className="text-xs text-secondary-500 hover:underline"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-                <label className="flex items-start gap-2 text-xs text-amber-900">
-                  <input
-                    type="checkbox"
-                    checked={ninoConsent}
-                    onChange={(e) => setNinoConsent(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    I consent to OpsAPI securely storing my National Insurance number (encrypted) so it
-                    can file my Self Assessment with HMRC. I can remove it at any time.
-                  </span>
-                </label>
-                <p className="text-xs text-amber-700">
-                  Testing? Create a sandbox test user under{' '}
-                  <Link href="/dashboard/tax/settings" className="underline font-medium">
-                    HMRC settings
-                  </Link>{' '}
-                  — then connect signing in with that test user.
-                </p>
-              </div>
-            )}
-
+            {/* The NINO is now step 1, so it's always on file by the time we get here. */}
             {loadingBiz && businesses.length === 0 ? (
               <p className="text-sm text-secondary-500 flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> Finding your business at HMRC…
@@ -777,11 +1118,11 @@ function FileWizardContent() {
             </p>
           </div>
         )}
-      </Card>
+      </StepBlock>
 
       {/* Step 3 — Obligations */}
-      <Card padding="lg">
-        <StepHeader index={3} state={s3} icon={<CalendarClock className="w-4 h-4" />}
+      <StepBlock>
+        <StepHeader index={5} state={s3} icon={<CalendarClock className="w-4 h-4" />}
           title="Your filing period"
           subtitle="We check with HMRC which period is open to file — no action needed."
         />
@@ -846,11 +1187,11 @@ function FileWizardContent() {
             )}
           </div>
         )}
-      </Card>
+      </StepBlock>
 
       {/* Step 4 — Check figures */}
-      <Card padding="lg">
-        <StepHeader index={4} state={s4} icon={<ListChecks className="w-4 h-4" />}
+      <StepBlock>
+        <StepHeader index={6} state={s4} icon={<ListChecks className="w-4 h-4" />}
           title="Check your figures"
           subtitle="Aggregate your classified transactions and fix anything that would be rejected."
         />
@@ -958,20 +1299,26 @@ function FileWizardContent() {
                   </div>
                 )}
 
-                {figuresOk && (
+                {figuresOk && allConfirmed && (
                   <p className="text-sm text-green-700 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" /> Your figures are ready to submit.
+                  </p>
+                )}
+                {figuresOk && !allConfirmed && (
+                  <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    Confirm your transactions in step 2 before sending anything to HMRC.
                   </p>
                 )}
               </div>
             )}
           </div>
         )}
-      </Card>
+      </StepBlock>
 
       {/* Step 5 — Preview calculation */}
-      <Card padding="lg">
-        <StepHeader index={5} state={s5} icon={<Calculator className="w-4 h-4" />}
+      <StepBlock>
+        <StepHeader index={7} state={s5} icon={<Calculator className="w-4 h-4" />}
           title="Preview your calculation"
           subtitle="Submit your figures to HMRC and get a non-binding tax calculation. This does not file your return."
         />
@@ -1029,11 +1376,11 @@ function FileWizardContent() {
             )}
           </div>
         )}
-      </Card>
+      </StepBlock>
 
       {/* Step 6 — Finalise */}
-      <Card padding="lg">
-        <StepHeader index={6} state={s6} icon={<FileCheck2 className="w-4 h-4" />}
+      <StepBlock last>
+        <StepHeader index={8} state={s6} icon={<FileCheck2 className="w-4 h-4" />}
           title="Finalise & declare"
           subtitle="The binding final declaration that files your return with HMRC."
         />
@@ -1104,7 +1451,41 @@ function FileWizardContent() {
             )}
           </div>
         )}
-      </Card>
+      </StepBlock>
+      </Card>)}
+        </div>
+      </div>
+
+      <Modal
+        isOpen={confirmRemoveNino}
+        onClose={() => setConfirmRemoveNino(false)}
+        title="Remove your National Insurance number?"
+        size="sm"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmRemoveNino(false)}
+              className="rounded-lg border border-secondary-300 px-4 py-2 text-sm font-medium text-secondary-700 hover:bg-secondary-50"
+            >
+              Keep it
+            </button>
+            <button
+              type="button"
+              onClick={removeNino}
+              disabled={removingNino}
+              className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {removingNino && <Loader2 className="w-4 h-4 animate-spin" />}
+              Remove
+            </button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-secondary-600">
+          We&apos;ll delete the encrypted copy we hold. You&apos;ll need to enter it again before your return can be filed.
+        </p>
+      </Modal>
     </div>
   );
 }
