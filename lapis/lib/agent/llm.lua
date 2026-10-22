@@ -6,23 +6,29 @@
     transaction classification, bookkeeping AI and bank-statement extraction
     all call Llm.chat. Changing provider or model is a secret change + restart.
 
-      AI_PROVIDER     ollama (default) | anthropic | openai
+      AI_PROVIDER     ollama (default) | anthropic | openai | google (= gemini)
                       ("openai" = the OpenAI Chat Completions protocol, so any
                       compatible API works: OpenAI, OpenRouter, Groq, Together,
-                      Mistral, vLLM, LM Studio, Ollama's /v1 ...)
+                      Mistral, vLLM, LM Studio, Ollama's /v1 ...). Switching the
+                      model in production is PURELY an env change — no code change:
+                        Anthropic: AI_PROVIDER=anthropic AI_API_KEY=sk-ant-… AI_MODEL=claude-opus-5-5
+                        OpenAI:    AI_PROVIDER=openai    AI_API_KEY=sk-…      AI_MODEL=gpt-4.1
+                        Gemini:    AI_PROVIDER=gemini    AI_API_KEY=…         AI_MODEL=gemini-2.5-flash
+                        Any OpenAI-compatible host: AI_PROVIDER=openai + AI_BASE_URL=…
       AI_MODEL        model id
       AI_API_KEY      API key
-      AI_BASE_URL     endpoint
+      AI_BASE_URL     endpoint (override; e.g. an OpenAI-compatible gateway)
       AI_VISION_PROVIDER / AI_VISION_MODEL
                       optional: reading statement images/PDFs needs a model that
-                      can see (e.g. Claude, gpt-4.1, or minicpm-v on Ollama).
+                      can see (e.g. Claude, gpt-4.1, gemini-2.5-flash, or minicpm-v on Ollama).
 
     Unset AI_* values fall back to the provider's own settings, which the
     deployments already carry: OLLAMA_URL / OLLAMA_MODEL / OLLAMA_API_KEY,
     ANTHROPIC_API_KEY / ANTHROPIC_MODEL / ANTHROPIC_VISION_MODEL,
-    OPENAI_API_KEY / OPENAI_MODEL — then built-in defaults (qwen3.8:latest,
-    claude-opus-5-5, gpt-4.1). The diy stack's LLM_PROVIDER is deliberately NOT
-    read, so its setting can't silently move OpsAPI's models.
+    OPENAI_API_KEY / OPENAI_MODEL, GEMINI_API_KEY / GEMINI_MODEL / GEMINI_BASE_URL
+    — then built-in defaults (qwen3.8:latest, claude-opus-5-5, gpt-4.1,
+    gemini-2.5-flash). The diy stack's LLM_PROVIDER is deliberately NOT read, so
+    its setting can't silently move OpsAPI's models.
 
     Until AI_PROVIDER is set, vision keeps what it used before: Claude when an
     Anthropic key exists, else Ollama.
@@ -83,6 +89,10 @@ local function env(name)
     return nil
 end
 
+-- Each provider declares which wire PROTOCOL it speaks (which adapter sends the
+-- request); it defaults to the provider name. Gemini and other OpenAI-compatible
+-- services set protocol = "openai" so they reuse the OpenAI adapter with their own
+-- base URL. Adding a new provider is data here, not new code.
 local PROVIDERS = {
     ollama = { model = "qwen3.8:latest", model_env = "OLLAMA_MODEL", key_env = "OLLAMA_API_KEY",
         url_env = "OLLAMA_URL", url = "https://ollama.workstation.co.uk", label = "Ollama" },
@@ -90,11 +100,16 @@ local PROVIDERS = {
         url = "https://api.anthropic.com", label = "Anthropic Claude" },
     openai = { model = "gpt-4.1", model_env = "OPENAI_MODEL", key_env = "OPENAI_API_KEY",
         url = "https://api.openai.com/v1", label = "OpenAI-compatible" },
+    -- Google Gemini via its OpenAI-compatible endpoint → reuses the OpenAI adapter.
+    google = { model = "gemini-2.5-flash", model_env = "GEMINI_MODEL", key_env = "GEMINI_API_KEY",
+        url_env = "GEMINI_BASE_URL", url = "https://generativelanguage.googleapis.com/v1beta/openai",
+        protocol = "openai", label = "Google Gemini" },
 }
 
 local function normalise(p)
     p = (p or ""):lower()
     if p == "claude" then p = "anthropic" end
+    if p == "gemini" then p = "google" end
     return PROVIDERS[p] and p or nil
 end
 
@@ -107,6 +122,7 @@ function Llm.config(provider, model)
     local main = provider == MAIN
     return {
         provider = provider,
+        protocol = d.protocol or provider,
         label = d.label,
         model = model or (main and env("AI_MODEL")) or env(d.model_env) or d.model,
         key = (main and env("AI_API_KEY")) or env(d.key_env),
@@ -579,7 +595,9 @@ local function attempt(cfg, messages, tools, opts, u, user, ns, deadline)
     ngx.update_time()
     local started = ngx.now()
     if deadline <= started then return nil, "Model request failed: timeout (no time left)" end
-    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools,
+    local adapter = ADAPTERS[cfg.protocol or cfg.provider]
+    if not adapter then return nil, "No adapter for provider '" .. tostring(cfg.provider) .. "'" end
+    local msg, err, status = adapter(cfg, messages, tools,
         setmetatable({ deadline = deadline }, { __index = opts }))
     ngx.update_time()
     record(cfg, u, user, ns, msg, err, math.floor((ngx.now() - started) * 1000))
