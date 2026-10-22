@@ -240,16 +240,39 @@ end
 function Extraction.extract_from_pdf(file_path)
     if not file_path then return nil, "file_path required" end
 
-    -- Shell out to pdftotext
-    local cmd = string.format("pdftotext -layout %q - 2>/dev/null", file_path)
-    local handle = io.popen(cmd)
-    if not handle then return nil, "Failed to run pdftotext" end
-
-    local text = handle:read("*a")
-    handle:close()
+    -- Run pdftotext to a temp FILE and read it back, rather than reading an io.popen
+    -- pipe. In an nginx worker the popen child-reaping races with nginx's own SIGCHLD
+    -- handler and INTERMITTENTLY returns empty output, which wrongly trips the
+    -- "scanned_pdf" vision fallback — and the vision model then misreads the running
+    -- Balance column as the transaction amount. os.execute + file read doesn't depend
+    -- on the child's exit status, so the text is read reliably.
+    -- Run pdftotext via ngx.pipe — OpenResty's native, non-blocking way to spawn a
+    -- subprocess from a worker. io.popen / os.execute race with nginx's SIGCHLD handling
+    -- and intermittently return EMPTY output, which wrongly trips the "scanned_pdf"
+    -- vision fallback — and the vision model then misreads the running Balance column
+    -- as the transaction amount (every amount becomes a ~£14k balance, all DEBIT). This
+    -- was the real cause of the garbage estimates. Falls back to os.execute + file read
+    -- outside the OpenResty runtime (e.g. `lapis exec` / CLI).
+    local text
+    local ok_pipe, pipe = pcall(require, "ngx.pipe")
+    if ok_pipe and pipe then
+        local proc = pipe.spawn({ "pdftotext", "-layout", file_path, "-" })
+        if proc then
+            proc:set_timeouts(nil, 15000, 15000, 15000)
+            text = proc:stdout_read_all()
+            proc:wait()
+        end
+    end
+    if not text or #text < 50 then
+        local out_path = file_path .. ".txt"
+        os.execute(string.format("pdftotext -layout %q %q 2>/dev/null", file_path, out_path))
+        local fh = io.open(out_path, "r")
+        if fh then text = fh:read("*a"); fh:close() end
+        os.remove(out_path)
+    end
 
     if not text or #text < 50 then
-        -- Likely a scanned PDF — fall back to image extraction
+        -- Genuinely no extractable text (scanned/image PDF) — fall back to vision.
         return nil, "scanned_pdf"
     end
 
@@ -305,17 +328,30 @@ function Extraction.extract_from_text(text)
     elseif text_lower:match("monzo") then bank = "monzo"
     end
 
-    -- Collect raw lines (preserve column spacing produced by pdftotext -layout).
+    -- Collect lines (preserve column spacing produced by pdftotext -layout). Normalise
+    -- multi-byte currency symbols to ONE byte first (£ is 2 bytes, € is 3) so that a
+    -- byte offset equals a visual column. Without this, every £ before an amount shifts
+    -- its byte position right of its visual column; the drift accumulates along the row
+    -- and across pages, so the Debit/Credit/Balance anchors (taken from the £-free
+    -- header) stop lining up and the running Balance gets misread as the transaction
+    -- amount on later rows (the "£14,340.67 Gym" garbage).
     local lines = {}
     for line in text:gmatch("[^\r\n]+") do
+        line = line:gsub("\194\163", " "):gsub("\226\130\172", " ")
         lines[#lines + 1] = line
     end
 
-    -- Locate the Debit/Credit/Balance columns once, from the header row.
+    -- Column anchors, re-detected per page. A multi-page statement repeats the header,
+    -- and later pages often sit at DIFFERENT column offsets than page 1. Using a single
+    -- global anchor set makes the running Balance on later pages fall nearest the Debit
+    -- anchor and get misread as a ~£14k expense. Seed with the first header; each
+    -- repeated header below updates the anchors for the rows that follow it.
     local cols = detect_amount_columns(lines)
 
     -- Parse line by line, looking for date-prefixed transaction rows
     for _, line in ipairs(lines) do
+        local hdr_cols = detect_amount_columns({ line })
+        if hdr_cols then cols = hdr_cols end
         -- Match a leading date (DD/MM/YYYY or DD Mon YYYY) and note where it ends.
         local date_str, date_end
         local _, e, cap = line:find("^%s*(%d%d?[/%-]%d%d?[/%-]%d%d%d?%d?)%s")

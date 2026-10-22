@@ -373,7 +373,10 @@ register({
         full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
         full.trading_profit = full.profit
         full.taxable_income = full.total_taxable
-        full.nic_applied = (full.class4_nic or 0) > 0
+        -- "NIC applies to this profile?" — true for self-employment (even at a loss,
+        -- where the amount is just £0), false only for property-only income (no Class
+        -- 2/4). The frontend shows "N/A — property income" only when this is false.
+        full.nic_applied = not (only_property and not has_se)
         full.income_tax = { total = full.income_tax_due }
         full.national_insurance = { class4 = full.class4_nic, class2 = full.class2_nic,
             total = (full.class4_nic or 0) + (full.class2_nic or 0) }
