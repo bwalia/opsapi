@@ -102,6 +102,7 @@ local tax_categories_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.TA
 local tax_profile_guidance_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-profile-guidance") or {}
 local tax_agent_sessions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-sessions") or {}
 local tax_agent_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-menu-item") or {}
+local tax_filing_requests_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-filing-requests") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -2086,6 +2087,10 @@ local _migrations = {
     ['zz_tax_agent_sessions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_agent_sessions_migrations, 1),
     -- 'zz_tax_agent_zz_menu' sorts after tax-copilot-menu-items (the 'tax' parent must exist first).
     ['zz_tax_agent_zz_menu'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_agent_menu_migrations, 1),
+    -- Accountant "file it for me" requests: table, then the RBAC module + menu item
+    -- (sorts after the 'tax' parent menu, like the agent menu above).
+    ['zz_tax_filing_requests_1'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_filing_requests_migrations, 1),
+    ['zz_tax_filing_requests_2'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_filing_requests_migrations, 2),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),

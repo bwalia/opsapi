@@ -28,6 +28,20 @@ local function set_status(id, status)
     db.update("tax_statements", { processing_status = status, updated_at = db.raw("NOW()") }, { id = id })
 end
 
+-- Add a line to the tax-agent chat this upload came from, so it survives a reload
+-- (and the model sees that statements were uploaded / processed). Best-effort.
+local function session_note(session, role, content, quick_replies)
+    if not session then return end
+    pcall(db.query, [[INSERT INTO tax_agent_messages
+        (uuid, session_id, namespace_id, user_id, role, content, quick_replies)
+        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?)]],
+        session.id, session.namespace_id, session.user_id, role, content,
+        quick_replies and db.raw(db.escape_literal(cjson.encode(quick_replies)) .. "::jsonb") or db.NULL)
+    pcall(db.query, "UPDATE tax_agent_sessions SET updated_at = NOW() WHERE id = ?", session.id)
+end
+
+local function plural(n) return n == 1 and "" or "s" end
+
 -- Authenticated internal call to an existing tax endpoint, AS the user.
 local function internal(method, path, body, auth, port)
     local httpc = http.new()
@@ -43,6 +57,7 @@ end
 -- Background worker: process each statement in turn (extract then classify).
 local function process_all(premature, job)
     if premature then return end
+    local failed = 0
     for _, s in ipairs(job.statements) do
         local ok, err = pcall(function()
             ngx.log(ngx.INFO, "[tax-process] extracting ", s.uuid)
@@ -59,7 +74,18 @@ local function process_all(premature, job)
         if not ok then
             ngx.log(ngx.ERR, "[tax-process] statement ", s.uuid, " failed: ", tostring(err))
             set_status(s.id, "ERROR")
+            failed = failed + 1
         end
+    end
+    local n = #job.statements
+    if failed == 0 then
+        session_note(job.session, "assistant",
+            "✅ Your statement" .. plural(n) .. (n == 1 and " is" or " are")
+            .. " processed and categorised. Want to see your tax estimate?", { "Show my estimate" })
+    else
+        session_note(job.session, "assistant", ("⚠️ I processed %d of %d statement%s — %d couldn't be read. "
+            .. "Try uploading %s again, or use Tax → Statements."):format(n - failed, n, plural(n), failed,
+            failed == 1 and "it" or "them"))
     end
 end
 
@@ -94,10 +120,18 @@ return function(app)
         local tax_year = tostring(data.tax_year or self.params.tax_year or "")
         if not tax_year:match("^%d%d%d%d%-%d%d$") then tax_year = nil end
 
+        -- The tax-agent chat this upload came from (optional; must be the caller's own).
+        local session
+        local sid = tostring(data.session_id or self.params.session_id or "")
+        if sid ~= "" then
+            session = db.query([[SELECT id, namespace_id, user_id FROM tax_agent_sessions
+                WHERE uuid = ? AND user_id = ? LIMIT 1]], sid, user_id)[1]
+        end
+
         local statements = {}
         for _, ident in ipairs(ids) do
             local rows = db.query(
-                "SELECT id, uuid FROM tax_statements WHERE (uuid = ? OR id::text = ?) AND user_id = ? LIMIT 1",
+                "SELECT id, uuid, file_name FROM tax_statements WHERE (uuid = ? OR id::text = ?) AND user_id = ? LIMIT 1",
                 ident, ident, user_id)
             if rows and rows[1] then
                 statements[#statements + 1] = rows[1]
@@ -110,8 +144,19 @@ return function(app)
         end
         if #statements == 0 then return { status = 404, json = { error = "No matching statements for this user" } } end
 
+        if session then
+            local names = {}
+            for _, s in ipairs(statements) do names[#names + 1] = s.file_name or "statement" end
+            local n = #statements
+            session_note(session, "user", ("📎 Uploaded %d statement%s: %s"):format(n, plural(n), table.concat(names, ", ")))
+            session_note(session, "assistant", ("Got %d statement%s. I'm reading and categorising the transactions "
+                .. "now — this keeps running in the background, so you can reload or leave this page and come back.")
+                :format(n, plural(n)))
+        end
+
         local ok = ngx.timer.at(0, process_all, {
             statements = statements,
+            session = session,
             auth = self.req.headers["authorization"],
             port = tonumber(ngx.var.server_port) or 80,
         })

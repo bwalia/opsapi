@@ -242,7 +242,9 @@ return function(app)
                 "- If the user is connected to HMRC (check hmrc_status), you can call get_obligations and "
                     .. "preview_calculation to show HMRC's OWN non-binding figures — always tell the user you're "
                     .. "sending their figures to HMRC for a preview first. Filing the binding final return is NOT "
-                    .. "done in chat: direct the user to the Tax → File screen to submit it.",
+                    .. "done in chat: direct the user to the Tax → File screen (the \"Ready to file?\" button). "
+                    .. "There they can send it to our accountant to file for them (recommended), or file directly "
+                    .. "with HMRC, and download their tax sheet (.xlsx) for other software such as My Tax Digital.",
                 "- Whenever you ask_user a question with a small set of likely answers, ALWAYS pass them in the "
                     .. "quick_replies argument (short tappable options) — and NEVER write those options, or a JSON "
                     .. "array, in the message text itself; the app shows them as buttons, so your message stays one "
