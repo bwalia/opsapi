@@ -74,6 +74,11 @@ export interface TaxTransaction {
   bank_account_uuid?: string;
   bank_name?: string;
   account_name?: string;
+  classified_by?: string;   // rule_engine | ai | fallback | user
+  reasoning?: string;       // why it was classified this way
+  hmrc_box?: string;        // SA103F box the row lands in
+  hmrc_label?: string;
+  non_business?: boolean;   // category with no HMRC box (transfer, loan, personal)
 }
 
 export interface TaxTransactionSummary {
@@ -99,6 +104,7 @@ export interface TaxCategory {
   hmrc_box?: string;
   category_type: 'income' | 'expense';
   is_deductible: boolean;
+  non_business?: boolean;
   description?: string;
   // true => seeded global category (read-only); false => owned by this namespace.
   is_global?: boolean;
@@ -170,7 +176,8 @@ export interface TaxTransactionFilters {
   transaction_type?: 'CREDIT' | 'DEBIT' | string;
   category?: string;
   hmrc_category?: string;
-  classification_status?: 'PENDING' | 'CONFIRMED' | 'MODIFIED' | string;
+  classification_status?: 'PENDING' | 'CONFIRMED' | 'MODIFIED' | 'UNCONFIRMED' | 'TO_CHECK' | string;
+  tax_year?: string;
   is_tax_deductible?: boolean;
   amount_min?: number;
   amount_max?: number;
@@ -450,6 +457,22 @@ export const taxService = {
     });
     const response = await apiClient.put(`${TAX_BASE}/transactions/${uuid}`, params.toString());
     return response.data?.data || response.data;
+  },
+
+  // The customer's "I've checked these" for a tax year: confirms every AI-classified
+  // row; flagged ones stay for an individual look.
+  async confirmTransactionsForYear(taxYear: string): Promise<{ confirmed: number; still_to_check: number }> {
+    const response = await apiClient.post(
+      `${TAX_BASE}/transactions/confirm-year`,
+      new URLSearchParams({ tax_year: taxYear, consent: 'true' }).toString(),
+    );
+    return response.data;
+  },
+
+  // Short-lived link to the original uploaded statement, to check extraction against.
+  async getStatementFileUrl(statementUuid: string): Promise<string> {
+    const response = await apiClient.get(`${TAX_BASE}/upload/presigned/${statementUuid}`);
+    return response.data?.data?.url || response.data?.url;
   },
 
   // ── Classification ──────────────────────────────────────────────────────────

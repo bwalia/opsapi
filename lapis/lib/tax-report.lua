@@ -92,7 +92,7 @@ function TaxReport.build(ctx)
         ORDER BY t.transaction_date ASC, t.id ASC]], ctx.user_id, ctx.tax_year)
 
     local boxes, rows = {}, {}
-    local other_in, excluded_in, unmapped_out, unreviewed = 0, 0, 0, 0
+    local other_in, excluded_in, unmapped_out, unreviewed, confirmed = 0, 0, 0, 0, 0
     local function box_row(key)
         local h = hmrc[key]
         if not boxes[key] then
@@ -135,6 +135,8 @@ function TaxReport.build(ctx)
         end
         if t.classification_status == "NEEDS_REVIEW" or t.classification_status == "PENDING" then
             unreviewed = unreviewed + 1
+        elseif t.classification_status == "CONFIRMED" then
+            confirmed = confirmed + 1
         end
         rows[#rows + 1] = {
             date = t.transaction_date and tostring(t.transaction_date):sub(1, 10) or "",
@@ -183,6 +185,7 @@ function TaxReport.build(ctx)
         totals = {
             other_money_in = r2(other_in), excluded_money_in = r2(excluded_in),
             unmapped_expenses = r2(unmapped_out), transactions = #txns, unreviewed = unreviewed,
+            confirmed = confirmed,
         },
         transactions = rows,
     }

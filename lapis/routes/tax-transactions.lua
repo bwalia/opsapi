@@ -103,10 +103,22 @@ local function build_user_filters(params, user_id)
 
     if params.classification_status and params.classification_status ~= "" then
         local cs = params.classification_status:upper()
-        if cs == "PENDING" or cs == "CONFIRMED" or cs == "MODIFIED" then
+        if cs == "UNCONFIRMED" then
+            -- Anything the customer hasn't confirmed yet (AI-classified or flagged).
+            table.insert(conds, "t.classification_status IS DISTINCT FROM 'CONFIRMED'")
+        elseif cs == "TO_CHECK" then
+            table.insert(conds, "t.classification_status IN ('PENDING','NEEDS_REVIEW')")
+        elseif cs == "PENDING" or cs == "CONFIRMED" or cs == "MODIFIED"
+            or cs == "CLASSIFIED" or cs == "NEEDS_REVIEW" then
             table.insert(conds, "t.classification_status = ?")
             table.insert(vals, cs)
         end
+    end
+
+    -- Same scoping as the estimate / tax sheet: the statement's stamped tax year.
+    if params.tax_year and tostring(params.tax_year):match("^%d%d%d%d%-%d%d$") then
+        table.insert(conds, "s.tax_year = ?")
+        table.insert(vals, params.tax_year)
     end
 
     if params.is_tax_deductible and params.is_tax_deductible ~= "" then
@@ -219,6 +231,19 @@ local function merge_params(self)
     end
 end
 
+-- The classifier's "why", for the customer: llm_response is plain text or JSON with
+-- `reasoning`; internal "[REVIEW: …]" debug tags are stripped.
+local function reasoning_of(raw)
+    if type(raw) ~= "string" or raw == "" then return nil end
+    local text = raw
+    if raw:sub(1, 1) == "{" then
+        local ok, parsed = pcall(cjson.decode, raw)
+        text = (ok and type(parsed) == "table" and type(parsed.reasoning) == "string") and parsed.reasoning or ""
+    end
+    text = text:gsub("%s*%[REVIEW:[^%]]*%]?", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    return text ~= "" and text or nil
+end
+
 return function(app)
     -- =========================================================================
     -- GET /api/v2/tax/transactions
@@ -289,13 +314,21 @@ return function(app)
                 t.is_manually_reviewed,
                 t.user_notes,
                 t.created_at,
+                t.classified_by,
+                t.llm_response,
                 s.uuid AS statement_uuid,
                 s.file_name AS statement_file_name,
                 s.tax_year AS statement_tax_year,
                 ba.uuid AS bank_account_uuid,
                 ba.bank_name,
-                ba.account_name
-        ]] .. from .. " " .. where ..
+                ba.account_name,
+                h.box AS hmrc_box,
+                h.label AS hmrc_label,
+                (c.key IS NOT NULL AND c.hmrc_category_id IS NULL) AS non_business
+        ]] .. from .. [[
+            LEFT JOIN tax_hmrc_categories h ON h.key = t.hmrc_category
+            LEFT JOIN tax_categories c ON c.key = t.category
+        ]] .. where ..
             " ORDER BY " .. sort_col .. " " .. sort_dir ..
             " LIMIT ? OFFSET ?"
 
@@ -331,6 +364,11 @@ return function(app)
                 bank_account_uuid = r.bank_account_uuid,
                 bank_name = r.bank_name,
                 account_name = r.account_name,
+                classified_by = r.classified_by,
+                reasoning = reasoning_of(r.llm_response),
+                hmrc_box = r.hmrc_box,
+                hmrc_label = r.hmrc_label,
+                non_business = r.non_business == true,
             }
         end
 
@@ -636,6 +674,62 @@ return function(app)
             json = result,
             status = 200
         }
+    end))
+
+    -- =========================================================================
+    -- POST /api/v2/tax/transactions/confirm-year  { tax_year, consent: true }
+    -- The customer confirms, after checking them, every AI-classified transaction
+    -- for a tax year. Flagged rows (PENDING / NEEDS_REVIEW) are NOT bulk-confirmed:
+    -- each needs its own look. Filing requires every row confirmed (routes/tax-filing).
+    -- =========================================================================
+    app:post("/api/v2/tax/transactions/confirm-year", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+        local user_id = resolveUserId(self.current_user)
+        if not user_id then
+            return { status = 401, json = { error = "User not found" } }
+        end
+        local year = tostring(self.params.tax_year or "")
+        if not year:match("^%d%d%d%d%-%d%d$") then
+            return { status = 400, json = { error = "tax_year must look like 2025-26" } }
+        end
+        local consent = self.params.consent
+        if not (consent == true or consent == "true" or consent == "1") then
+            return { status = 400, json = { error = "Please confirm you have checked these transactions." } }
+        end
+
+        local updated = db.query([[
+            UPDATE tax_transactions t
+            SET classification_status = 'CONFIRMED',
+                classification_confirmed_at = NOW(),
+                classification_confirmed_by = ?,
+                is_manually_reviewed = TRUE,
+                updated_at = NOW()
+            FROM tax_statements s
+            WHERE s.id = t.statement_id AND t.user_id = ? AND s.tax_year = ?
+              AND t.classification_status = 'CLASSIFIED'
+              AND COALESCE(t.category, '') NOT IN ('', 'uncategorised_expense')
+            RETURNING t.uuid
+        ]], user_id, user_id, year)
+        local left = db.query([[
+            SELECT COUNT(*) AS n FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
+            WHERE t.user_id = ? AND s.tax_year = ? AND t.classification_status IS DISTINCT FROM 'CONFIRMED'
+        ]], user_id, year)
+        local confirmed = #updated
+
+        TaxAuditLogQueries.log({
+            user_id = user_id,
+            user_email = self.current_user.email,
+            entity_type = "TRANSACTION",
+            entity_id = year,
+            action = "CONFIRM_TAX_YEAR",
+            new_values = cjson.encode({ tax_year = year, confirmed = confirmed }),
+            change_reason = "Customer checked and confirmed the classified transactions",
+        })
+
+        return { status = 200, json = {
+            confirmed = confirmed,
+            still_to_check = tonumber(left[1] and left[1].n) or 0,
+        } }
     end))
 
     -- Get, update, or patch a single transaction

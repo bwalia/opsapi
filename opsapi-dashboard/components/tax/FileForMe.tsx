@@ -98,7 +98,8 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
   const est = overview.estimate;
   const last = overview.request; // a closed (rejected / cancelled) one, if any
   const noFigures = (est.transactions ?? 0) === 0;
-  const canSend = hasNino && !noFigures && accepted && !sending;
+  const unconfirmed = Math.max((est.transactions ?? 0) - (est.confirmed ?? 0), 0);
+  const canSend = hasNino && !noFigures && unconfirmed === 0 && accepted && !sending;
 
   const send = async () => {
     setSending(true);
@@ -109,7 +110,7 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
     } catch (err: unknown) {
       const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
       toast.error(extractApiError(err, 'Could not send your request'));
-      if (code === 'FIGURES_CHANGED' || code === 'ALREADY_REQUESTED') onChanged();
+      if (code === 'FIGURES_CHANGED' || code === 'ALREADY_REQUESTED' || code === 'TRANSACTIONS_NOT_CONFIRMED') onChanged();
     } finally {
       setSending(false);
     }
@@ -162,12 +163,10 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
             <Link href="/dashboard/tax/agent" className="font-medium underline">File with AI</Link> first.
           </Warn>
         )}
-        {!noFigures && est.unreviewed > 0 && (
+        {!noFigures && unconfirmed > 0 && (
           <Warn>
-            {est.unreviewed} transaction{est.unreviewed === 1 ? '' : 's'} still need review. Our accountant will check
-            them, but reviewing them yourself in{' '}
-            <Link href="/dashboard/tax/agent" className="font-medium underline">File with AI</Link> makes your return
-            more accurate.
+            Confirm your transactions in step 2 first — {unconfirmed} still to confirm. We only send figures you&apos;ve
+            checked.
           </Warn>
         )}
         {!hasNino && <Warn>Add your National Insurance number in step 1 first.</Warn>}
@@ -184,7 +183,7 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
             type="checkbox"
             checked={accepted}
             onChange={(e) => setAccepted(e.target.checked)}
-            disabled={noFigures}
+            disabled={noFigures || unconfirmed > 0}
             className="mt-0.5"
           />
           <span>{overview.declaration_text}</span>

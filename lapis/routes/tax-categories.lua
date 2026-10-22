@@ -57,6 +57,8 @@ local function map_row(r)
         name = r.label,
         category_type = r.type,
         is_deductible = r.is_tax_deductible,
+        -- No HMRC box (transfer, loan, drawings, personal) → never on the return.
+        non_business = r.hmrc_category_id == nil,
         description = r.description,
         is_global = (r.namespace_id == nil or r.namespace_id == db.NULL),
     }
@@ -70,7 +72,7 @@ return function(app)
             function(self)
                 local ns_id = self.namespace.id
                 local ok, rows = pcall(db.query, [[
-                    SELECT id, uuid, key, label, type, is_tax_deductible, description, namespace_id
+                    SELECT id, uuid, key, label, type, is_tax_deductible, description, namespace_id, hmrc_category_id
                     FROM tax_categories
                     WHERE is_active = true AND (namespace_id IS NULL OR namespace_id = ?)
                     ORDER BY type, label

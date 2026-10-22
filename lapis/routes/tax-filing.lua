@@ -271,6 +271,13 @@ return function(app)
         if (report.totals.transactions or 0) == 0 then
             return fail(400, "NO_FIGURES", "Upload and categorise your bank statements for " .. year .. " first.")
         end
+        -- Nothing is filed on figures the customer hasn't checked row by row.
+        local unchecked = (report.totals.transactions or 0) - (report.totals.confirmed or 0)
+        if unchecked > 0 then
+            return fail(409, "TRANSACTIONS_NOT_CONFIRMED",
+                ("Check and confirm your transactions first — %d still to confirm."):format(unchecked),
+                { unconfirmed = unchecked })
+        end
         local hash = TaxReport.hash(report)
         if tostring(body.figures_hash or "") ~= hash then
             return fail(409, "FIGURES_CHANGED",

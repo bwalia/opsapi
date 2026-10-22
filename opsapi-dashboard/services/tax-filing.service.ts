@@ -47,6 +47,7 @@ export interface FilingEstimate {
   total_due_31_jan: number;
   transactions: number;
   unreviewed: number;
+  confirmed: number; // rows the customer has checked and confirmed
   other_money_in: number;
   excluded_money_in: number;
   unmapped_expenses: number;
