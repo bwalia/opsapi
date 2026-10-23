@@ -65,6 +65,9 @@ export const marketingService = {
   analyseTemplate: (body: Record<string, unknown>) =>
     apiClient.post(`${BASE}/templates/analyse`, body, JSON_BODY),
   seedTemplates: () => apiClient.post(`${BASE}/templates/seed`, {}, JSON_BODY),
+  // "Create a design with AI": the local model can take a minute or two.
+  aiDesign: (body: { brief: string; tone?: string; save?: boolean }) =>
+    apiClient.post(`${BASE}/templates/ai`, body, { ...ACTION, timeout: 180000 }),
   publishTemplate: (id: string) =>
     apiClient.post(`${BASE}/templates/${id}/publish`, {}, JSON_BODY),
   cloneTemplate: (id: string, body?: Record<string, unknown>) =>
@@ -93,6 +96,10 @@ export const marketingService = {
 
   listSuppressions: (params?: Record<string, unknown>) =>
     apiClient.get(`${BASE}/suppressions`, { params }),
+  // Never send to this address. Only blocks made this way can be removed again.
+  blockAddress: (body: { address: string; channel: 'email' | 'sms' }) =>
+    apiClient.post(`${BASE}/suppressions`, body, ACTION),
+  removeBlock: (id: string) => apiClient.delete(`${BASE}/suppressions/${id}`, { _noOutbox: true }),
   optIn: (body: Record<string, unknown>) =>
     apiClient.post(`${BASE}/consent/opt-in`, body, JSON_BODY),
   optOut: (body: Record<string, unknown>) =>
@@ -131,12 +138,4 @@ export const marketingService = {
     apiClient.post(`${BASE}/pixels/${id}/test-event`, body || {}, JSON_BODY),
   pixelStats: (id: string, params?: { days?: number }) => apiClient.get(`${BASE}/pixels/${id}/stats`, { params }),
   pixelForwards: (params?: { limit?: number }) => apiClient.get(`${BASE}/pixel-forwards`, { params }),
-
-  listReplies: (params?: Record<string, unknown>) =>
-    apiClient.get(`${BASE}/replies`, { params }),
-  getReply: (id: string) => apiClient.get(`${BASE}/replies/${id}`),
-  ingestReply: (body: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/replies/ingest`, body, JSON_BODY),
-  classifyPreview: (body: Record<string, unknown>) =>
-    apiClient.post(`${BASE}/replies/classify-preview`, body, JSON_BODY),
 };

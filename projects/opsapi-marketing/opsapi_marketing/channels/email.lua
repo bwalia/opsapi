@@ -78,7 +78,8 @@ function C.render(template, merge_context, ctx)
         foot[#foot + 1] = '<a href="' .. ctx.unsubscribe_url .. '">Unsubscribe</a>'
     end
     if #foot > 0 then
-        html = html .. '<p style="font-size:12px;color:#666">' .. table.concat(foot, " · ") .. "</p>"
+        html = html .. '<p style="max-width:600px;margin:16px auto 0;font-family:Helvetica,Arial,sans-serif;'
+            .. 'font-size:12px;line-height:1.5;color:#6b7280;text-align:center">' .. table.concat(foot, " · ") .. "</p>"
     end
     if ctx.unsubscribe_url and not text:find(ctx.unsubscribe_url, 1, true) then
         text_foot[#text_foot + 1] = "Unsubscribe: " .. ctx.unsubscribe_url

@@ -9,20 +9,10 @@ import {
   EmailStudioEditor,
   uploadEmailImage,
 } from '@/components/opsapi-marketing/EmailStudioEditor';
+import { DesignGallery, type Design } from '@/components/opsapi-marketing/DesignGallery';
 import { type Campaign, INPUT_CLASS, Notice, apiErrorMessage, unwrap, unwrapArray } from './shared';
 
 type MergeField = { key: string; label: string; field_type?: string };
-
-type Template = {
-  uuid: string;
-  name: string;
-  channel?: string;
-  status?: string;
-  subject?: string | null;
-  preview_text?: string | null;
-  body_html?: string | null;
-  body_text?: string | null;
-};
 
 type Rendered = { subject?: string; html?: string; text?: string; warnings?: string[] };
 
@@ -60,12 +50,6 @@ function fromCampaign(c: Campaign): FormState {
   };
 }
 
-/** A body that is one styled <div> around the content: the easy editor edits what's inside it. */
-function splitFrame(html: string): { open: string; inner: string } {
-  const m = html.match(/^\s*(<div\b[^>]*>)([\s\S]*)<\/div>\s*$/i);
-  return m ? { open: m[1], inner: m[2].trim() } : { open: '', inner: html };
-}
-
 /** Designs made with tables or full HTML pages lose their layout in the easy editor. */
 const madeWithCode = (html: string) => /<table|<style|<!doctype|<html/i.test(html);
 
@@ -89,7 +73,7 @@ export default function ContentTab({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mergeFields, setMergeFields] = useState<MergeField[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [target, setTarget] = useState<InsertTarget>('body_html');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [rendered, setRendered] = useState<Rendered | null>(null);
@@ -105,7 +89,6 @@ export default function ContentTab({
   const saved = useMemo(() => fromCampaign(campaign), [campaign]);
   const dirty = FIELDS.some((k) => form[k] !== saved[k]);
   const isEmail = campaign.channel === 'email';
-  const frame = useMemo(() => splitFrame(form.body_html), [form.body_html]);
 
   const switchEditor = async (toEasy: boolean) => {
     if (
@@ -130,14 +113,6 @@ export default function ContentTab({
       })
       .catch(() => {
         /* picker is optional — the backend still validates merge keys on Validate */
-      });
-    marketingService
-      .listTemplates({ channel: campaign.channel, per_page: 100 })
-      .then((res) => {
-        if (!cancelled) setTemplates(unwrapArray<Template>(res));
-      })
-      .catch(() => {
-        /* no templates: the picker stays hidden */
       });
     return () => {
       cancelled = true;
@@ -186,17 +161,16 @@ export default function ContentTab({
     if (key) insertInto(target, `{{${key}}}`);
   };
 
-  /** Copy a saved template's words and design into this email (it can then be edited freely). */
-  const applyTemplate = async (uuid: string) => {
-    const t = templates.find((x) => x.uuid === uuid);
-    if (!t) return;
+  /** Copy a design's words and look into this email (it can then be edited freely). */
+  const applyTemplate = async (t: Design) => {
+    setGalleryOpen(false);
     const hasContent = (form.body_html + form.body_text).trim() !== '';
     if (
       hasContent &&
       !(await confirmDialog({
-        title: `Use the template “${t.name}”?`,
+        title: `Use the design “${t.name}”?`,
         message: 'It replaces this email’s subject and words. You can still change anything afterwards.',
-        confirmText: 'Use template',
+        confirmText: 'Use this design',
       }))
     )
       return;
@@ -274,26 +248,23 @@ export default function ContentTab({
           <fieldset disabled={!editable} className="min-w-0 space-y-4">
             <legend className="sr-only">Message content</legend>
 
-            {templates.length > 0 && (
-              <label className="block rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm dark:bg-primary-900/30">
-                <span className="font-medium">Start from a template</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm dark:bg-primary-900/30">
+              <span>
+                <span className="font-medium">Start from a ready-made design</span>
                 <span className="block text-xs text-secondary-600">
-                  Copies a design you saved in the Studio into this email. You can still change anything.
+                  Welcome, newsletter, special offer, event invitation and more — then change the words.
                 </span>
-                <select
-                  className={`${INPUT_CLASS} mt-2 w-full`}
-                  value=""
-                  onChange={(e) => void applyTemplate(e.target.value)}
-                >
-                  <option value="">Choose a template…</option>
-                  {templates.map((t) => (
-                    <option key={t.uuid} value={t.uuid}>
-                      {t.name}
-                      {t.status && t.status !== 'published' ? ' (draft)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              </span>
+              <Button type="button" size="sm" variant="outline" onClick={() => setGalleryOpen(true)}>
+                Choose a design
+              </Button>
+            </div>
+            {galleryOpen && (
+              <DesignGallery
+                channel={campaign.channel}
+                onClose={() => setGalleryOpen(false)}
+                onPick={(d) => void applyTemplate(d)}
+              />
             )}
 
             {!isEmail && (
@@ -400,8 +371,8 @@ export default function ContentTab({
                 {easy ? (
                   <div className="mt-1">
                     <EmailStudioEditor
-                      value={frame.inner}
-                      onChange={(h) => set('body_html', frame.open ? `${frame.open}\n${h}\n</div>` : h)}
+                      value={form.body_html}
+                      onChange={(h) => set('body_html', h)}
                       placeholder="Write your email here…"
                       mergeFields={mergeFields}
                       readOnly={!editable}

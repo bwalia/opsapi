@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import { useEditor, useEditorState, EditorContent, Extension, type Editor } from '@tiptap/react';
@@ -304,11 +304,37 @@ function useSelectionInfo(editor: Editor | null) {
   });
 }
 
+/** A body that is one styled <div> around the content (the card of the ready-made designs):
+ * the editor edits what's inside and keeps the card. */
+export function splitFrame(html: string): { open: string; inner: string } {
+  const m = html.match(/^\s*(<div\b[^>]*>)([\s\S]*)<\/div>\s*$/i);
+  return m ? { open: m[1], inner: m[2].trim() } : { open: '', inner: html };
+}
+
+/** The card's inline style as a React style, so editing looks like the email. */
+function frameStyle(open: string): React.CSSProperties {
+  const css = open.match(/style="([^"]*)"/i)?.[1] ?? '';
+  const out: Record<string, string> = {};
+  for (const decl of css.split(';')) {
+    const i = decl.indexOf(':');
+    if (i < 1) continue;
+    const prop = decl.slice(0, i).trim().toLowerCase();
+    if (!/^(font-family|font-size|line-height|color|background|background-color|padding)$/.test(prop)) continue;
+    out[prop.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = decl.slice(i + 1).trim();
+  }
+  return out as React.CSSProperties;
+}
+
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
 export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [buttonDialog, setButtonDialog] = useState<(ButtonSpec & { editing: boolean }) | null>(null);
+  const frame = useMemo(() => splitFrame(value || ''), [value]);
+  const openRef = useRef(frame.open);
+  useEffect(() => {
+    openRef.current = frame.open;
+  }, [frame.open]);
   const editor = useEditor({
     immediatelyRender: false,
     editable: !readOnly,
@@ -327,8 +353,11 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
       Placeholder.configure({ placeholder: placeholder || 'Write your email…' }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
-    content: value || '',
-    onUpdate: ({ editor: ed }) => onChange(ed.getHTML()),
+    content: frame.inner,
+    onUpdate: ({ editor: ed }) => {
+      const html = ed.getHTML();
+      onChange(openRef.current ? `${openRef.current}\n${html}\n</div>` : html);
+    },
     editorProps: {
       attributes: {
         class: 'prose prose-sm max-w-none min-h-[280px] px-4 py-3 focus:outline-none text-foreground',
@@ -339,11 +368,11 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
 
   useEffect(() => {
     if (!editor) return;
-    const current = editor.getHTML();
-    if (value !== current && value !== undefined) {
-      editor.commands.setContent(value || '', { emitUpdate: false });
+    if (frame.inner !== editor.getHTML()) {
+      // cursor to the top: left at the end it sits in the footer's link and shows that link's bar
+      editor.chain().setContent(frame.inner, { emitUpdate: false }).setTextSelection(0).run();
     }
-  }, [value, editor]);
+  }, [frame.inner, editor]);
 
   useEffect(() => {
     editor?.setEditable(!readOnly);
@@ -660,7 +689,9 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
         </div>
       )}
 
-      <EditorContent editor={editor} />
+      <div style={frameStyle(frame.open)}>
+        <EditorContent editor={editor} />
+      </div>
 
       {buttonDialog && (
         <ButtonDialog initial={buttonDialog} onSave={saveButton} onClose={() => setButtonDialog(null)} />

@@ -22,7 +22,8 @@ const REASONS: { key: keyof AudiencePreview | 'other'; label: string; explain: s
   {
     key: 'suppressed',
     label: 'Unsubscribed or blocked',
-    explain: 'On a global or channel suppression list (hard bounce, complaint, manual block). Suppressions always win.',
+    explain:
+      'They unsubscribed, their address bounced, or you blocked it — see Marketing → Unsubscribed. Never sent to.',
   },
   {
     key: 'no_consent',

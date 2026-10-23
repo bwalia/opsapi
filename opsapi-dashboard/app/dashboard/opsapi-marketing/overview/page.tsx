@@ -7,7 +7,6 @@ import {
   Send,
   Users,
   ShieldOff,
-  MessageSquare,
   Radar,
   Palette,
   ArrowRight,
@@ -44,7 +43,7 @@ type Overview = {
   conversions_30d?: { conversions?: number; revenue?: number; attributed?: number };
   web?: { events_24h?: number; visitors_24h?: number; pixels?: number };
   top_campaigns?: AttributionRow[];
-  replies_30d?: number;
+  unsubscribed_30d?: number;
 };
 
 type Pixel = { uuid: string; name: string; install_status?: 'waiting' | 'active' | 'stale'; events_24h?: number };
@@ -107,7 +106,9 @@ export default function MarketingOverviewPage() {
       ? (Number(conv.attributed ?? 0) / Number(conv.conversions)) * 100
       : null;
   const activePixels = (pixels ?? []).filter((p) => p.install_status === 'active').length;
-  const pixelsNeedInstall = pixels !== null && (pixels.length === 0 || activePixels === 0);
+  // Website tracking is an advanced option (Settings): its results only show once a pixel exists.
+  const hasPixels = (pixels?.length ?? 0) > 0;
+  const pixelsNeedInstall = hasPixels && activePixels === 0;
 
   return (
     <div className="space-y-6 p-6">
@@ -124,32 +125,34 @@ export default function MarketingOverviewPage() {
 
       {stats && (
         <>
-          <section aria-labelledby="ov-results" className="space-y-2">
-            <h2 id="ov-results" className="text-sm font-medium">
-              Results — last 30 days
-            </h2>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <KpiTile label="Conversions" value={fmtInt(conv?.conversions)} />
-              <KpiTile label="Revenue" value={fmtMoney(conv?.revenue)} tone={Number(conv?.revenue ?? 0) > 0 ? 'good' : undefined} />
-              <KpiTile
-                label="Attributed to campaigns"
-                value={attributedShare === null ? '—' : fmtPct(attributedShare, 0)}
-                hint={`${fmtInt(conv?.attributed)} of ${fmtInt(conv?.conversions)} conversions`}
-              />
-              <KpiTile
-                label="Website visitors (24h)"
-                value={fmtInt(web?.visitors_24h)}
-                hint={`${fmtInt(web?.events_24h)} events · ${fmtInt(web?.pixels)} pixel${web?.pixels === 1 ? '' : 's'}`}
-              />
-            </div>
-            {unattributed && Number(unattributed.conversions ?? 0) > 0 && (
-              <p className="text-xs text-secondary-500">
-                {fmtInt(unattributed.conversions)} conversion{unattributed.conversions === 1 ? '' : 's'} worth{' '}
-                {fmtMoney(unattributed.revenue)} had no campaign click in their attribution window (direct, organic or
-                other channels).
-              </p>
-            )}
-          </section>
+          {hasPixels && (
+            <section aria-labelledby="ov-results" className="space-y-2">
+              <h2 id="ov-results" className="text-sm font-medium">
+                Results — last 30 days
+              </h2>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <KpiTile label="Conversions" value={fmtInt(conv?.conversions)} />
+                <KpiTile label="Revenue" value={fmtMoney(conv?.revenue)} tone={Number(conv?.revenue ?? 0) > 0 ? 'good' : undefined} />
+                <KpiTile
+                  label="Attributed to campaigns"
+                  value={attributedShare === null ? '—' : fmtPct(attributedShare, 0)}
+                  hint={`${fmtInt(conv?.attributed)} of ${fmtInt(conv?.conversions)} conversions`}
+                />
+                <KpiTile
+                  label="Website visitors (24h)"
+                  value={fmtInt(web?.visitors_24h)}
+                  hint={`${fmtInt(web?.events_24h)} events · ${fmtInt(web?.pixels)} pixel${web?.pixels === 1 ? '' : 's'}`}
+                />
+              </div>
+              {unattributed && Number(unattributed.conversions ?? 0) > 0 && (
+                <p className="text-xs text-secondary-500">
+                  {fmtInt(unattributed.conversions)} conversion{unattributed.conversions === 1 ? '' : 's'} worth{' '}
+                  {fmtMoney(unattributed.revenue)} had no campaign click in their attribution window (direct, organic or
+                  other channels).
+                </p>
+              )}
+            </section>
+          )}
 
           <section aria-labelledby="ov-delivery" className="space-y-2">
             <h2 id="ov-delivery" className="text-sm font-medium">
@@ -163,7 +166,7 @@ export default function MarketingOverviewPage() {
               <KpiTile label="Clicked" value={fmtInt(d?.clicked)} />
               <KpiTile label="Bounced" value={fmtInt(d?.bounced)} hint={`${fmtInt(d?.failed)} failed`} />
               <KpiTile label="Skipped" value={fmtInt(d?.skipped)} hint="Consent, suppression or budget" />
-              <KpiTile label="Replies (30d)" value={fmtInt(stats.replies_30d)} />
+              <KpiTile label="Unsubscribed" value={fmtInt(stats.unsubscribed_30d)} hint="Last 30 days" />
             </div>
             <p className="text-xs text-secondary-500">
               Opens are estimated — scanners and privacy proxies inflate raw counts. Accepted is not delivered.
@@ -173,10 +176,13 @@ export default function MarketingOverviewPage() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <section aria-labelledby="ov-top" className="rounded-lg border border-secondary-200 p-4 lg:col-span-2">
+        <section
+          aria-labelledby="ov-top"
+          className={`rounded-lg border border-secondary-200 p-4 ${hasPixels ? 'lg:col-span-2' : 'lg:col-span-3'}`}
+        >
           <div className="mb-3 flex items-center justify-between">
             <h2 id="ov-top" className="text-sm font-medium">
-              Top campaigns by revenue
+              {hasPixels ? 'Top campaigns by revenue' : 'Campaign results'}
             </h2>
             <Link href="/dashboard/opsapi-marketing/campaigns" className="text-xs text-secondary-500 underline">
               All campaigns
@@ -192,8 +198,8 @@ export default function MarketingOverviewPage() {
                     <th className="py-2 pr-3 font-medium">Campaign</th>
                     <th className="py-2 pr-3 text-right font-medium">Sent</th>
                     <th className="py-2 pr-3 text-right font-medium">Click rate</th>
-                    <th className="py-2 pr-3 text-right font-medium">Conversions</th>
-                    <th className="py-2 text-right font-medium">Revenue</th>
+                    {hasPixels && <th className="py-2 pr-3 text-right font-medium">Conversions</th>}
+                    {hasPixels && <th className="py-2 text-right font-medium">Revenue</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -214,8 +220,10 @@ export default function MarketingOverviewPage() {
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.sent)}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(r.click_rate)}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.conversions ?? r.converted)}</td>
-                      <td className="py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
+                      {hasPixels && (
+                        <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.conversions ?? r.converted)}</td>
+                      )}
+                      {hasPixels && <td className="py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -224,19 +232,13 @@ export default function MarketingOverviewPage() {
           )}
         </section>
 
-        <section aria-labelledby="ov-pixel" className="space-y-3 rounded-lg border border-secondary-200 p-4">
-          <h2 id="ov-pixel" className="flex items-center gap-1.5 text-sm font-medium">
-            <Radar className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Website pixel
-          </h2>
-          {pixels === null ? (
-            <p className="text-sm text-secondary-500">Checking…</p>
-          ) : pixels.length === 0 ? (
-            <p className="text-sm text-secondary-500">
-              No pixel installed. Add the pixel to your website to attribute visits, sign-ups and revenue to campaigns.
-            </p>
-          ) : (
+        {hasPixels && (
+          <section aria-labelledby="ov-pixel" className="space-y-3 rounded-lg border border-secondary-200 p-4">
+            <h2 id="ov-pixel" className="flex items-center gap-1.5 text-sm font-medium">
+              <Radar className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Website pixel
+            </h2>
             <ul className="space-y-2 text-sm">
-              {pixels.slice(0, 5).map((p) => {
+              {(pixels ?? []).slice(0, 5).map((p) => {
                 const st = PIXEL_STATUS[p.install_status ?? 'waiting'] ?? PIXEL_STATUS.waiting;
                 return (
                   <li key={p.uuid} className="flex items-start justify-between gap-2">
@@ -251,22 +253,18 @@ export default function MarketingOverviewPage() {
                 );
               })}
             </ul>
-          )}
-          <Link
-            href="/dashboard/opsapi-marketing/pixels"
-            className={buttonClass(pixelsNeedInstall ? 'primary' : 'outline', 'sm')}
-          >
-            {pixels !== null && pixels.length === 0
-              ? 'Install pixel'
-              : pixelsNeedInstall
-                ? 'Finish installing'
-                : 'Manage pixels'}
-            <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
-          </Link>
-        </section>
+            <Link
+              href="/dashboard/opsapi-marketing/pixels"
+              className={buttonClass(pixelsNeedInstall ? 'primary' : 'outline', 'sm')}
+            >
+              {pixelsNeedInstall ? 'Finish installing' : 'Manage pixels'}
+              <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
+            </Link>
+          </section>
+        )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <NavCard
           href="/dashboard/opsapi-marketing/studio"
           icon={<Palette className="mb-2 h-5 w-5 text-secondary-500" />}
@@ -286,22 +284,10 @@ export default function MarketingOverviewPage() {
           desc="Build audiences from CRM contacts with consent."
         />
         <NavCard
-          href="/dashboard/opsapi-marketing/pixels"
-          icon={<Radar className="mb-2 h-5 w-5 text-secondary-500" />}
-          title="Pixels & attribution"
-          desc="Track website visits and conversions, and credit them to campaigns."
-        />
-        <NavCard
-          href="/dashboard/opsapi-marketing/conversations"
-          icon={<MessageSquare className="mb-2 h-5 w-5 text-secondary-500" />}
-          title="Conversations"
-          desc="Inbound replies — classified, never auto-sent."
-        />
-        <NavCard
-          href="/dashboard/plugins/opsapi_marketing/suppressions"
+          href="/dashboard/opsapi-marketing/unsubscribed"
           icon={<ShieldOff className="mb-2 h-5 w-5 text-secondary-500" />}
-          title="Suppressions"
-          desc="Global and per-channel blocks that always win."
+          title="Unsubscribed"
+          desc="Everyone who asked to stop, and addresses you've blocked."
         />
       </div>
     </div>

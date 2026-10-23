@@ -9,62 +9,8 @@ local Channels = require("opsapi_marketing.channels")
 
 local T = {}
 
-local DEFAULTS = {
-    {
-        name = "Newsletter", channel = "email",
-        subject = "{{contact.first_name}}, what's new this week",
-        preview_text = "Your weekly update",
-        body_html = [[<h1>Hi {{contact.first_name}}</h1>
-<p>Here's what's new at {{contact.company}}.</p>
-<p><a href="https://example.com/news">Read more</a></p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a> · <a href="{{preferences_url}}">Preferences</a></p>]],
-        body_text = "Hi {{contact.first_name}}, here's what's new. Unsubscribe: {{unsubscribe_url}}",
-    },
-    {
-        name = "Product launch", channel = "email",
-        subject = "Introducing something new for {{contact.first_name}}",
-        preview_text = "Be the first to know",
-        body_html = [[<h1>It's here</h1><p>Hi {{contact.first_name}}, we just launched.</p>
-<p><a href="https://example.com/launch" style="background:#111;color:#fff;padding:12px 20px;text-decoration:none;border-radius:4px">See it now</a></p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a></p>]],
-        body_text = "Hi {{contact.first_name}}, we just launched. {{unsubscribe_url}}",
-    },
-    {
-        name = "Lead nurture", channel = "email",
-        subject = "Quick tip for {{contact.first_name}}",
-        body_html = [[<p>Hi {{contact.first_name}},</p><p>Thought this might help you move forward.</p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a></p>]],
-        body_text = "Hi {{contact.first_name}}, thought this might help. {{unsubscribe_url}}",
-    },
-    {
-        name = "Customer update", channel = "email",
-        subject = "An update on {{campaign.name}}",
-        body_html = [[<p>Hi {{contact.first_name}},</p><p>A short update on {{campaign.name}}.</p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a></p>]],
-        body_text = "Hi {{contact.first_name}}, update on {{campaign.name}}. {{unsubscribe_url}}",
-    },
-    {
-        name = "Sales outreach", channel = "email",
-        subject = "{{contact.first_name}}, worth a quick chat?",
-        body_html = [[<p>Hi {{contact.first_name}},</p><p>I noticed {{contact.company}} might benefit from a conversation.</p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a></p>]],
-        body_text = "Hi {{contact.first_name}}, worth a chat? {{unsubscribe_url}}",
-    },
-    {
-        name = "Event invite", channel = "email",
-        subject = "You're invited, {{contact.first_name}}",
-        body_html = [[<h1>Join us</h1><p>Hi {{contact.first_name}}, we'd love to see you.</p>
-<p><a href="https://example.com/event">RSVP</a></p>
-<p style="font-size:12px;color:#666"><a href="{{unsubscribe_url}}">Unsubscribe</a></p>]],
-        body_text = "Hi {{contact.first_name}}, you're invited. {{unsubscribe_url}}",
-    },
-    {
-        name = "SMS reminder", channel = "sms",
-        subject = nil,
-        body_html = nil,
-        body_text = "Hi {{contact.first_name}}, a quick reminder from us. Reply STOP to opt out.",
-    },
-}
+-- The ready-made templates (opsapi_marketing/designs.lua).
+local DEFAULTS = require("opsapi_marketing.designs")
 
 function T.prepare_payload(payload)
     local out = {
@@ -179,7 +125,17 @@ end
 function T.seed_defaults(ns)
     Merge.ensure_defaults(ns)
     local created = {}
-    for _, d in ipairs(DEFAULTS) do
+    -- The designs say "[Your business name]": use the workspace's name instead.
+    local ws = U.one("SELECT name FROM namespaces WHERE id = ?", ns)
+    local biz = ws and (tostring(ws.name):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;",
+        ['"'] = "&quot;", ["'"] = "&#39;" }):gsub("%%", "%%%%")) or nil
+    local function ours(v)
+        if type(v) ~= "string" or not biz then return v end
+        return (v:gsub("%[Your business name%]", biz))
+    end
+    for _, d0 in ipairs(DEFAULTS) do
+        local d = { name = d0.name, channel = d0.channel, subject = d0.subject, preview_text = d0.preview_text,
+            body_html = ours(d0.body_html), body_text = d0.body_text }
         local exists = U.one([[
             SELECT id FROM mkt_templates WHERE namespace_id = ? AND name = ? AND channel = ?
         ]], ns, d.name, d.channel)

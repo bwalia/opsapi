@@ -13,6 +13,7 @@ local Sms = require("opsapi_marketing.channels.sms")
 local Bots = require("opsapi_marketing.bots")
 local Pixel = require("opsapi_marketing.pixel")
 local Links = require("opsapi_marketing.links")
+local Pages = require("opsapi_marketing.pages")
 local cjson = require("cjson.safe")
 local db = require("lapis.db")
 
@@ -67,69 +68,176 @@ local function safe_redirect(url)
 end
 
 return function(app)
+    -- Unsubscribe / preferences: the link in an email opens a page; nothing changes until the
+    -- person presses a button there (mail scanners open links, they don't press buttons).
+    -- Mail apps' own one-click button (RFC 8058) POSTs "List-Unsubscribe=One-Click" and counts.
+
+    local function word(channel)
+        return channel == "sms" and "text messages" or "emails"
+    end
+
+    local function bad_link(sender)
+        return Pages.page({ status = 400, sender = sender, title = "This link isn’t working",
+            body = "<p>It may have been cut short when it was copied. To stop getting messages, open the "
+                .. "unsubscribe link in the latest one again, or reply to it and ask to be removed.</p>" })
+    end
+
+    local function too_many()
+        return Pages.page({ status = 429, title = "Please wait a moment",
+            body = "<p>There were too many tries in a short time. Please try again in a minute.</p>" })
+    end
+
+    local function stopped(sender)
+        return Pages.page({ status = 404, sender = sender, title = "These messages have stopped",
+            body = "<p>This sender no longer sends marketing messages from here, so there’s nothing to change.</p>" })
+    end
+
+    --- The person behind a link: their address on this channel and whether they're unsubscribed.
+    local function person(ns, contact_uuid, channel)
+        local c = U.one("SELECT uuid, email, phone, mobile FROM crm_contacts WHERE namespace_id = ? AND uuid = ?",
+            ns, contact_uuid)
+        local function nz(v)
+            if v == nil or v == db.NULL or v == "" then return nil end
+            return v
+        end
+        local address = c and (channel == "sms" and (nz(c.phone) or nz(c.mobile)) or nz(c.email)) or nil
+        local off = U.one([[
+            SELECT 1 AS x FROM mkt_subscriptions
+            WHERE namespace_id = ? AND contact_uuid = ? AND channel = ? AND status = 'unsubscribed' LIMIT 1
+        ]], ns, contact_uuid, channel) ~= nil
+        if not off and address then
+            off = U.one([[
+                SELECT 1 AS x FROM mkt_suppressions
+                WHERE namespace_id = ? AND (channel IS NULL OR channel = ?) AND lower(address) = lower(?) LIMIT 1
+            ]], ns, channel, address) ~= nil
+        end
+        return { contact = c, address = address, unsubscribed = off }
+    end
+
+    local function to_whom(address)
+        return address and (" at <b>" .. Pages.esc(address) .. "</b>") or ""
+    end
+
+    local function unsubscribed_page(sender, token, channel, address)
+        return Pages.page({ sender = sender, title = "You’re unsubscribed",
+            body = '<p class="done">Done.</p><p>You won’t get any more marketing ' .. word(channel) .. " from <b>"
+                .. Pages.esc(sender.name) .. "</b>" .. to_whom(address) .. ".</p>"
+                .. "<p>Unsubscribed by mistake?</p>"
+                .. Pages.form("unsubscribe", { token = token, action = "resubscribe" }, "Subscribe again", true) })
+    end
+
+    local function confirm_page(sender, token, channel, address, again)
+        return Pages.page({ sender = sender, title = again and "You’re subscribed again"
+                or ("Unsubscribe from " .. sender.name .. "?"),
+            body = (again and ('<p class="done">Welcome back.</p><p>You’ll get marketing ' .. word(channel)
+                    .. " from <b>" .. Pages.esc(sender.name) .. "</b>" .. to_whom(address) .. " again.</p>")
+                or ("<p>You’ll stop getting marketing " .. word(channel) .. " from <b>" .. Pages.esc(sender.name)
+                    .. "</b>" .. to_whom(address) .. ".</p>"))
+                .. Pages.form("unsubscribe", { token = token, action = "unsubscribe" }, "Unsubscribe", again) })
+    end
+
     app:get("/public/unsubscribe", sdk.handler({ namespace = false }, function(self)
-        if not rate_public("unsub") then return sdk.error(429, "Too many requests") end
-        local claims, err = T.verify(self.params.token, "unsubscribe")
-        if not claims then return sdk.error(400, err or "invalid token") end
-        local ns = claims.namespace_id
-        local okp, perr = require_plugin(ns)
-        if not okp then return sdk.error(404, perr) end
-
-        local contact = U.one("SELECT uuid, email, phone, mobile FROM crm_contacts WHERE namespace_id = ? AND uuid = ?",
-            ns, claims.contact_uuid)
-        local channel = claims.channel or "email"
-        local address = channel == "sms"
-            and (contact and (contact.phone or contact.mobile))
-            or (contact and contact.email)
-
-        E.opt_out(ns, claims.contact_uuid, channel, {
-            list_id = claims.list_id,
-            address = address,
-            source = "one_click_unsubscribe",
-            reason = "unsubscribe",
-        })
-
-        return {
-            status = 200,
-            headers = { ["Content-Type"] = "text/html; charset=utf-8" },
-            layout = false,
-            "<!doctype html><html><body><h1>You have been unsubscribed</h1>"
-                .. "<p>You will no longer receive marketing messages on this channel.</p></body></html>",
-        }
-    end))
-
-    -- RFC 8058 one-click POST
-    app:post("/public/unsubscribe", sdk.handler({ namespace = false }, function(self)
-        if not rate_public("unsub") then return sdk.error(429, "Too many requests") end
+        if not rate_public("unsub") then return too_many() end
         local token = self.params.token
-        local body = sdk.body(self)
-        if type(body) == "table" and body.token then token = body.token end
-        local claims, err = T.verify(token, "unsubscribe")
-        if not claims then return sdk.error(400, err or "invalid token") end
+        local claims = T.verify(token, "unsubscribe")
+        if not claims then return bad_link() end
         local ns = claims.namespace_id
-        if not require_plugin(ns) then return sdk.error(404, "plugin disabled") end
-        local contact = U.one("SELECT email, phone, mobile FROM crm_contacts WHERE namespace_id = ? AND uuid = ?",
-            ns, claims.contact_uuid)
+        local sender = Pages.sender(ns)
+        if not require_plugin(ns) then return stopped(sender) end
         local channel = claims.channel or "email"
+        local p = person(ns, claims.contact_uuid, channel)
+        if p.unsubscribed then return unsubscribed_page(sender, token, channel, p.address) end
+        return confirm_page(sender, token, channel, p.address, false)
+    end))
+
+    app:post("/public/unsubscribe", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("unsub") then return too_many() end
+        local token = self.params.token
+        if not token and (ngx.var.content_type or ""):find("json", 1, true) then
+            local body = sdk.body(self)
+            token = type(body) == "table" and body.token or nil
+        end
+        local claims = T.verify(token, "unsubscribe")
+        local page = self.params.action == "unsubscribe" or self.params.action == "resubscribe"
+        if not claims then
+            if page then return bad_link() end
+            return sdk.error(400, "invalid token")
+        end
+        local ns = claims.namespace_id
+        local sender = Pages.sender(ns)
+        if not require_plugin(ns) then
+            if page then return stopped(sender) end
+            return sdk.error(404, "plugin disabled")
+        end
+        local channel = claims.channel or "email"
+        local p = person(ns, claims.contact_uuid, channel)
+
+        if self.params.action == "resubscribe" then
+            E.resubscribe(ns, claims.contact_uuid, channel, claims.list_id, p.address, "unsubscribe_page")
+            return confirm_page(sender, token, channel, p.address, true)
+        end
+
         E.opt_out(ns, claims.contact_uuid, channel, {
             list_id = claims.list_id,
-            address = channel == "sms" and (contact and (contact.phone or contact.mobile)) or (contact and contact.email),
-            source = "list_unsubscribe_post",
+            address = p.address,
+            source = page and "unsubscribe_page" or "list_unsubscribe_post",
             reason = "unsubscribe",
         })
-        return { status = 200, json = { success = true } }
+        if page then return unsubscribed_page(sender, token, channel, p.address) end
+        return { status = 200, json = { success = true } } -- a mail app's one-click button (RFC 8058)
     end))
+
+    --- The preferences page: each channel the person can get, on or off, with a button.
+    local function preferences_page(ns, token, contact_uuid, notice)
+        local sender = Pages.sender(ns)
+        local rows = {}
+        for _, channel in ipairs({ "email", "sms" }) do
+            local p = person(ns, contact_uuid, channel)
+            if p.address then
+                rows[#rows + 1] = '<div class="row"><div><b>Marketing ' .. word(channel) .. "</b><br>"
+                    .. (p.unsubscribed and "Off" or "On") .. " — " .. Pages.esc(p.address) .. "</div>"
+                    .. Pages.form("preferences", { token = token, channel = channel,
+                        action = p.unsubscribed and "start" or "stop" },
+                        p.unsubscribed and "Turn on" or "Turn off", not p.unsubscribed)
+                    .. "</div>"
+            end
+        end
+        if #rows == 0 then
+            rows[1] = "<p>We don’t have an address for you any more, so you won’t get marketing messages.</p>"
+        end
+        return Pages.page({ sender = sender, title = "Your preferences",
+            body = (notice and ('<p class="done">' .. Pages.esc(notice) .. "</p>") or "")
+                .. "<p>Choose what <b>" .. Pages.esc(sender.name) .. "</b> may send you.</p>"
+                .. table.concat(rows) })
+    end
 
     app:get("/public/preferences", sdk.handler({ namespace = false }, function(self)
-        if not rate_public("prefs") then return sdk.error(429, "Too many requests") end
-        local claims, err = T.verify(self.params.token, "preferences")
-        if not claims then return sdk.error(400, err or "invalid token") end
-        if not require_plugin(claims.namespace_id) then return sdk.error(404, "plugin disabled") end
-        local subs = db.query([[
-            SELECT channel, list_id, status, changed_at FROM mkt_subscriptions
-            WHERE namespace_id = ? AND contact_uuid = ? ORDER BY channel
-        ]], claims.namespace_id, claims.contact_uuid)
-        return sdk.ok({ contact_uuid = claims.contact_uuid, subscriptions = sdk.array(subs) })
+        if not rate_public("prefs") then return too_many() end
+        local claims = T.verify(self.params.token, "preferences")
+        if not claims then return bad_link() end
+        if not require_plugin(claims.namespace_id) then return stopped(Pages.sender(claims.namespace_id)) end
+        return preferences_page(claims.namespace_id, self.params.token, claims.contact_uuid)
+    end))
+
+    app:post("/public/preferences", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("prefs") then return too_many() end
+        local token = self.params.token
+        local claims = T.verify(token, "preferences")
+        if not claims then return bad_link() end
+        local ns = claims.namespace_id
+        if not require_plugin(ns) then return stopped(Pages.sender(ns)) end
+        local channel = self.params.channel == "sms" and "sms" or "email"
+        local p = person(ns, claims.contact_uuid, channel)
+        local notice
+        if self.params.action == "stop" then
+            E.opt_out(ns, claims.contact_uuid, channel, { address = p.address, source = "preferences_page",
+                reason = "unsubscribe" })
+            notice = "Saved — you won’t get marketing " .. word(channel) .. " any more."
+        elseif self.params.action == "start" then
+            E.resubscribe(ns, claims.contact_uuid, channel, nil, p.address, "preferences_page")
+            notice = "Saved — you’ll get marketing " .. word(channel) .. " again."
+        end
+        return preferences_page(ns, token, claims.contact_uuid, notice)
     end))
 
     -- Images uploaded for emails. The address never changes, so mail clients may cache it for good.

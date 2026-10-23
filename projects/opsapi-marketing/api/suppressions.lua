@@ -9,9 +9,12 @@ local E = require("opsapi_marketing.eligibility")
 local db = require("lapis.db")
 
 return function(app)
+    -- Everyone who must not be sent to. An unsubscribe is the person's own choice, so only they can undo
+    -- it ("Subscribe again" on the unsubscribe page); the business adds and removes only its own blocks.
     sdk.crud(app, "/suppressions", {
         table = "mkt_suppressions",
         module = "opsapi_marketing_consent",
+        only = { "list", "show" },
         fields = {
             channel = { type = "string", enum = U.CHANNEL_ENUM },
             address = { type = "string", required = true },
@@ -28,6 +31,43 @@ return function(app)
             form = { "address", "channel", "reason", "source", "notes" },
         },
     })
+
+    -- "Block an address": never send to it, whoever it is.
+    app:post("/suppressions", sdk.handler({ permission = "opsapi_marketing_consent.create" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local body = sdk.body(self) or {}
+        local channel = body.channel == "sms" and "sms" or "email"
+        local address = channel == "sms" and U.e164(body.address) or U.norm_email(body.address)
+        if not address then
+            return sdk.error(422, channel == "sms" and "Enter a mobile number, like 07700 900123."
+                or "Enter an email address, like name@example.com.")
+        end
+        local notes = type(body.notes) == "string" and body.notes ~= "" and body.notes:sub(1, 500) or db.NULL
+        local row = U.one([[
+            INSERT INTO mkt_suppressions (namespace_id, channel, address, reason, source, notes, created_by)
+            VALUES (?, ?, ?, 'blocked', 'manual', ?, ?)
+            ON CONFLICT DO NOTHING RETURNING *
+        ]], ns, channel, address, notes, (sdk.user(self) or {}).uuid or db.NULL)
+        if row then return sdk.created(row) end
+        -- already blocked or unsubscribed
+        return sdk.ok(U.one([[
+            SELECT * FROM mkt_suppressions
+            WHERE namespace_id = ? AND COALESCE(channel, '') = ? AND lower(address) = lower(?)
+        ]], ns, channel, address))
+    end))
+
+    app:delete("/suppressions/:id", sdk.handler({ permission = "opsapi_marketing_consent.delete" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local row = U.one("SELECT id, source FROM mkt_suppressions WHERE namespace_id = ? AND uuid::text = ?",
+            ns, self.params.id)
+        if not row then return sdk.not_found("blocked address") end
+        if row.source ~= "manual" then
+            return sdk.error(409, "Only the person can undo this: the unsubscribe page in any of your emails "
+                .. "lets them press “Subscribe again”.")
+        end
+        db.query("DELETE FROM mkt_suppressions WHERE id = ?", row.id)
+        return sdk.ok()
+    end))
 
     app:post("/consent/opt-in", sdk.handler({ permission = "opsapi_marketing_consent.create" }, function(self)
         local ns = sdk.namespace_id(self)

@@ -12,7 +12,7 @@ const CAMPAIGNS = '/dashboard/opsapi-marketing/campaigns';
 const STUDIO = '/dashboard/opsapi-marketing/studio';
 const SETTINGS = '/dashboard/namespace/plugins#plugin-opsapi_marketing';
 const EMAIL = '/dashboard/namespace/email';
-const SUPPRESSIONS = '/dashboard/plugins/opsapi_marketing/suppressions';
+const UNSUBSCRIBED = '/dashboard/opsapi-marketing/unsubscribed';
 
 const TOPICS: [string, string][] = [
   ['connect-email', 'Connect your email account'],
@@ -403,7 +403,9 @@ export default function MarketingGuidePage() {
                 <Go href={CAMPAIGNS}>Marketing → Campaigns</Go>, type a name and press <B>Create draft</B>.
               </li>
               <li>
-                You’re on the <B>Content</B> tab. To use a design you saved, pick it in <B>Start from a template</B>.
+                You’re on the <B>Content</B> tab. Press <B>Choose a design</B> and pick a ready-made one — or press{' '}
+                <B>Create one with AI</B>, say what the email is about, and the AI writes it for you. Anything in
+                [square brackets] is for you to fill in.
               </li>
               <li>
                 Type the <B>Subject</B> — the line people see in their inbox. <B>+ First name</B> adds the person’s
@@ -470,10 +472,15 @@ export default function MarketingGuidePage() {
             <ul>
               <li>Every email has an unsubscribe link at the bottom. You never need to add it.</li>
               <li>
-                Anyone who clicks it is never emailed by this workspace again — even if you upload them again later.
+                The link opens a page with an <B>Unsubscribe</B> button. Once they press it, this workspace never emails
+                them again — even if you upload them again later.
               </li>
               <li>
-                You can see everyone who unsubscribed under <Go href={SUPPRESSIONS}>Marketing → Suppressions</Go>.
+                Only they can undo it: the same page has a <B>Subscribe again</B> button.
+              </li>
+              <li>
+                See everyone who unsubscribed under <Go href={UNSUBSCRIBED}>Marketing → Unsubscribed</Go>. You can also
+                block an address there yourself.
               </li>
             </ul>
           </Topic>

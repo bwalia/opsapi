@@ -213,17 +213,18 @@ export const STARTER = {
   subject: 'Hello {{contact.first_name}}',
   preview_text: 'A quick update we think you will find useful — take a look inside.',
   body_html: [
-    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937">',
-    '  <h1 style="font-size:22px;margin:0 0 16px">Hi {{contact.first_name}},</h1>',
-    '  <p style="font-size:15px;line-height:1.6">We have something new to share with you.</p>',
-    '  <p style="margin:24px 0">',
-    '    <a href="https://www.example.com/" style="background:#111827;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block">Find out more</a>',
-    '  </p>',
-    '  <p style="font-size:12px;color:#6b7280">Don’t want these emails? <a href="{{unsubscribe_url}}" style="color:#6b7280">Unsubscribe</a>.</p>',
+    '<div style="font-family:\'Helvetica Neue\',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:36px 32px;background:#ffffff;color:#1f2937;font-size:16px;line-height:1.65;border:1px solid #e5e7eb;border-radius:16px">',
+    '<p style="margin:0 0 28px;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#e11d48">[Your business name]</p>',
+    '<h1 style="margin:0 0 16px;font-size:28px;line-height:1.25;font-weight:800;color:#111827">Hi {{contact.first_name}},</h1>',
+    '<p style="margin:0 0 20px;font-size:18px;color:#374151">We have something new to share with you.</p>',
+    '<p style="margin:0 0 16px">[Write your message here. Keep it short: say what’s new, why it matters to them, and what to do next.]</p>',
+    '<p style="margin:28px 0;text-align:center"><a href="https://yourwebsite.co.uk" style="display:inline-block;background:#e11d48;color:#ffffff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600">Find out more</a></p>',
+    '<p style="margin:28px 0 0">Best wishes,<br><strong>[Your name]</strong><br>[Your business name]</p>',
+    '<p style="margin:32px 0 0;padding-top:20px;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.5;color:#6b7280;text-align:center">You’re getting this because you’re a customer or asked to hear from us.<br><a href="{{unsubscribe_url}}" style="color:#6b7280">Unsubscribe</a> · <a href="{{preferences_url}}" style="color:#6b7280">Email preferences</a></p>',
     '</div>',
   ].join('\n'),
   body_text:
-    'Hi {{contact.first_name}},\n\nWe have something new to share with you.\n\nFind out more: https://www.example.com/\n\nUnsubscribe: {{unsubscribe_url}}',
+    'Hi {{contact.first_name}},\n\nWe have something new to share with you.\n\nFind out more: https://yourwebsite.co.uk\n\nUnsubscribe: {{unsubscribe_url}}',
 };
 
 export const INPUT_CLASS = 'rounded border border-secondary-200 bg-surface px-2 py-1.5 text-sm text-secondary-900';
