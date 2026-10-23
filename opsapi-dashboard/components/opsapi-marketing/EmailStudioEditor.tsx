@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, Extension } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -49,7 +49,34 @@ type Props = {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  /** Shown as a "Personalise" menu that puts e.g. {{contact.first_name}} at the cursor. */
+  mergeFields?: { key: string; label: string }[];
+  /** Show the content without editing (e.g. a campaign that was already sent). */
+  readOnly?: boolean;
 };
+
+/** Keep inline styles (button colours, spacing, image sizes): emails rely on them. */
+const KeepStyles = Extension.create({
+  name: 'keepStyles',
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['paragraph', 'heading', 'link', 'image'],
+        attributes: {
+          style: {
+            default: null,
+            parseHTML: (el) => el.getAttribute('style'),
+            renderHTML: (attrs) => (attrs.style ? { style: attrs.style } : {}),
+          },
+        },
+      },
+    ];
+  },
+});
+
+/** Links may be https/mailto/# or a merge field such as {{unsubscribe_url}}. */
+const allowedHref = (url: string, ctx: { defaultValidate: (u: string) => boolean }) =>
+  /^\{\{\s*[\w.]+\s*\}\}$/.test(url) || ctx.defaultValidate(url);
 
 function Tb({
   onClick,
@@ -77,17 +104,20 @@ function Tb({
 }
 
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
-export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
+export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const editor = useEditor({
     immediatelyRender: false,
+    editable: !readOnly,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         codeBlock: false,
         code: false,
+        link: { openOnClick: false, isAllowedUri: allowedHref },
       }),
+      KeepStyles,
       Image.configure({ allowBase64: false }),
       Placeholder.configure({ placeholder: placeholder || 'Write your email…' }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
@@ -96,8 +126,7 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
     onUpdate: ({ editor: ed }) => onChange(ed.getHTML()),
     editorProps: {
       attributes: {
-        class:
-          'prose prose-sm max-w-none min-h-[280px] px-4 py-3 focus:outline-none text-foreground',
+        class: 'prose prose-sm max-w-none min-h-[280px] px-4 py-3 focus:outline-none text-foreground',
       },
     },
   });
@@ -157,7 +186,9 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-background">
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5">
+      <div
+        className={`flex flex-wrap items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5 ${readOnly ? 'hidden' : ''}`}
+      >
         <Tb title="Undo" onClick={() => editor.chain().focus().undo().run()}>
           <Undo2 className="h-4 w-4" />
         </Tb>
@@ -222,8 +253,9 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
               '<p><a href="https://example.com" style="display:inline-block;background:#111;color:#fff;padding:12px 20px;text-decoration:none;border-radius:4px">Call to action</a></p>',
             )
           }
+          title="A big button that links to your website"
         >
-          CTA
+          Button
         </button>
         <button
           type="button"
@@ -243,6 +275,21 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
         >
           Unsubscribe
         </button>
+        {mergeFields && mergeFields.length > 0 && (
+          <select
+            className="ml-auto rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+            value=""
+            aria-label="Personalise: insert the person's details"
+            onChange={(e) => e.target.value && insertHtml(`{{${e.target.value}}}`)}
+          >
+            <option value="">Personalise…</option>
+            {mergeFields.map((m) => (
+              <option key={m.key} value={m.key}>
+                Insert {m.label.toLowerCase()}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <EditorContent editor={editor} />
     </div>

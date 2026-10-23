@@ -200,6 +200,30 @@ check("now a regular list", made.get("list_type") == "static", made)
 expect("people can be added to it", call("POST", P + f"/lists/{smart['uuid']}/import", "owner_a", W,
                                          {"csv": "email\nsmart@p11.invalid\n", "grant_consent": True}), 200)
 
+# --- test emails go to any typed address; the chosen list saves on the email straight away ---
+cmp = data(expect("draft for tests", call("POST", P + "/campaigns", "owner_a", W, {
+    "name": "Tests " + new_uuid()[:6], "channel": "email", "message_type": "marketing",
+    "subject": "Hi {{contact.first_name}}", "body_html": "<p>Hello</p>"}), 201))["uuid"]
+lst = data(expect("list for tests", call("POST", P + "/lists", "owner_a", W,
+                                         {"name": "T " + new_uuid()[:6], "list_type": "static", "channel": "email"}), 201))
+saved = data(expect("choose a list", call("PUT", P + f"/campaigns/{cmp}", "owner_a", W, {"list_uuid": lst["uuid"]}), 200))
+check("the list is saved on the email", str(saved.get("list_id")) == str(lst.get("id")), saved)
+check("an unknown list is refused", call("PUT", P + f"/campaigns/{cmp}", "owner_a", W,
+                                          {"list_uuid": new_uuid()})[0] == 400)
+t = data(expect("test to a typed address", call("POST", P + f"/campaigns/{cmp}/test-send", "owner_a", W,
+                                                {"email": "Me.Myself@p11.invalid"}), 200))
+check("test accepted without recorded consent (dry run)", t.get("state") == "accepted", t)
+check("the test address isn't added to the list", sql(
+    f"SELECT count(*) FROM mkt_list_members m JOIN mkt_lists l ON l.id = m.list_id WHERE l.uuid = '{lst['uuid']}' "
+    f"AND m.removed_at IS NULL") == ["0"])
+check("a bad address is refused", call("POST", P + f"/campaigns/{cmp}/test-send", "owner_a", W,
+                                       {"email": "not-an-email"})[0] == 400)
+sql(f"""INSERT INTO mkt_suppressions (namespace_id, channel, address, reason, source)
+        SELECT id, 'email', 'gone@p11.invalid', 'unsubscribe', 'unsubscribe' FROM namespaces WHERE uuid = '{W}'""")
+g = data(expect("test to an unsubscribed address", call("POST", P + f"/campaigns/{cmp}/test-send", "owner_a", W,
+                                                         {"email": "gone@p11.invalid"}), 200))
+check("unsubscribed: not even a test", g.get("state") == "skipped" and str(g.get("reason", "")).startswith("suppressed"), g)
+
 # --- email images ---
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 img = data(expect("upload image", call("POST", P + "/images", "owner_a", W,

@@ -125,7 +125,7 @@ function S.enqueue(ns, campaign, contact_uuid, opts)
     end)
 
     if opts.send_now then
-        return S.dispatch(row.id, { skip_quiet_hours = campaign.skip_quiet_hours })
+        return S.dispatch(row.id, { skip_quiet_hours = campaign.skip_quiet_hours, test_send = campaign.test_send })
     end
     return row
 end
@@ -167,7 +167,7 @@ end
 
 --- Step 1. @return a job ({ ready = true, ... }) to deliver, or the delivery row and
 -- why it isn't being sent now (skipped, failed, or left queued for later).
--- opts.skip_quiet_hours: test sends (the campaign row is reloaded, so it's passed here).
+-- opts.skip_quiet_hours / opts.test_send: test sends (the campaign row is reloaded, so they're passed here).
 function S.prepare(delivery_id, opts)
     opts = opts or {}
     return U.tx(function()
@@ -210,6 +210,7 @@ function S.prepare(delivery_id, opts)
         -- CRITICAL: re-check eligibility at send time
         campaign.namespace_id = d.namespace_id
         campaign.skip_quiet_hours = opts.skip_quiet_hours
+        campaign.test_send = opts.test_send
         local gate = E.check(contact, campaign, d.channel, campaign.message_type or "marketing")
         if gate.reason == "quiet_hours" then
             return d, "quiet_hours" -- defer: stays queued and goes out when quiet hours end

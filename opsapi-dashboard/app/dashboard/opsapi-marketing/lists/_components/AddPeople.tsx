@@ -3,7 +3,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Check, ContactRound, FileUp, Keyboard, Search, UploadCloud } from 'lucide-react';
+import {
+  ArrowLeft,
+  Building2,
+  Check,
+  ContactRound,
+  FileUp,
+  Keyboard,
+  Search,
+  UploadCloud,
+  UserCheck,
+} from 'lucide-react';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import { crmService, type CrmContact } from '@/services/crm.service';
@@ -37,7 +47,7 @@ type Scan = {
 };
 
 /** People waiting for the check step: typed, from a file, or picked from contacts. */
-type Pending = { name: string; base64: string; how: Mode; note: string };
+type Pending = { name: string; base64: string; how: Mode; note: string; count?: number };
 
 const ACCEPT = '.csv,.txt,.xlsx,.pdf';
 const ACCEPT_RE = /\.(csv|txt|xlsx|pdf)$/i;
@@ -109,7 +119,8 @@ export function AddPeople({
   const [picked, setPicked] = useState<Record<string, string>>({}); // contact uuid -> email
 
   const [pending, setPending] = useState<Pending | null>(null);
-  const [basis, setBasis] = useState<LegalBasis>('legitimate_interest');
+  // Asked every time, nothing pre-chosen: the answer decides who can be added.
+  const [basis, setBasis] = useState<LegalBasis | null>(null);
   const [scan, setScan] = useState<Scan | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -170,7 +181,16 @@ export function AddPeople({
   const startCheck = (p: Pending) => {
     setError(null);
     setPending(p);
-    void check(p, basis);
+    setBasis(null);
+    setScan(null);
+    setCheckError(null);
+    setLawful(false);
+  };
+
+  const choose = (value: LegalBasis) => {
+    if (!pending) return;
+    setBasis(value);
+    void check(pending, value);
   };
 
   const typedEmails = findEmails(typed);
@@ -185,6 +205,7 @@ export function AddPeople({
       base64: textBase64(['email', ...typedEmails].join('\n')),
       how: 'type',
       note: 'Typed in by hand',
+      count: typedEmails.length,
     });
   };
 
@@ -196,6 +217,7 @@ export function AddPeople({
       base64: textBase64(['email', ...emails].join('\n')),
       how: 'contacts',
       note: 'Chosen from contacts',
+      count: emails.length,
     });
   };
 
@@ -234,7 +256,7 @@ export function AddPeople({
   };
 
   const confirmAdd = async () => {
-    if (!pending || adding) return;
+    if (!pending || !basis || adding) return;
     setAdding(true);
     setCheckError(null);
     try {
@@ -265,6 +287,7 @@ export function AddPeople({
   const back = () => {
     checkSeq.current++;
     setPending(null);
+    setBasis(null);
     setScan(null);
     setChecking(false);
     setCheckError(null);
@@ -507,111 +530,128 @@ export function AddPeople({
       )}
 
       {pending && (
-        <div className="space-y-4">
-          {checking && (
-            <div className="space-y-2" role="status" aria-live="polite">
-              <p className="text-base text-secondary-600">
-                {pending.how === 'file'
-                  ? `Reading ${pending.name} and checking the addresses…`
-                  : 'Checking the addresses…'}
-              </p>
-              <Skeleton className="h-24" />
-              <Skeleton className="h-32" />
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-secondary-50 px-4 py-3 text-base dark:bg-secondary-900/40">
+            <span className="text-secondary-700 dark:text-secondary-200">
+              {pending.how === 'file'
+                ? `From the file ${pending.name}`
+                : pending.how === 'contacts'
+                  ? `${people(pending.count ?? 0)} from your contacts`
+                  : `${(pending.count ?? 0).toLocaleString('en-GB')} email address${pending.count === 1 ? '' : 'es'} you typed`}
+            </span>
+            <button
+              type="button"
+              className="text-sm font-medium text-primary-700 underline underline-offset-2 dark:text-primary-300"
+              onClick={back}
+              disabled={adding}
+            >
+              Change
+            </button>
+          </div>
+
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-lg font-semibold text-secondary-900">1. Who are these people?</legend>
+            <div className="grid gap-2 @3xl:grid-cols-2">
+              {(
+                [
+                  [
+                    'consent',
+                    <UserCheck key="i" className="h-5 w-5" />,
+                    'People who asked to get my emails',
+                    'Customers, people who signed up, friends, or yourself. Any email address is fine.',
+                  ],
+                  [
+                    'legitimate_interest',
+                    <Building2 key="i" className="h-5 w-5" />,
+                    'Businesses I want to tell about my products',
+                    'Company addresses, e.g. from a directory or a list you bought. Personal addresses (Gmail, Hotmail…) are left out.',
+                  ],
+                ] as [LegalBasis, React.ReactNode, string, string][]
+              ).map(([value, icon, title, hint]) => (
+                <label
+                  key={value}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3.5 transition ${
+                    basis === value
+                      ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                      : 'border-secondary-200 hover:border-primary-400'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={`who-${list.uuid}`}
+                    className="mt-1 h-5 w-5 shrink-0 accent-primary-600"
+                    checked={basis === value}
+                    disabled={adding}
+                    onChange={() => choose(value)}
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-base font-semibold text-secondary-900">
+                      <span className="text-primary-600">{icon}</span>
+                      {title}
+                    </span>
+                    <span className="mt-0.5 block text-sm text-secondary-600">{hint}</span>
+                  </span>
+                </label>
+              ))}
             </div>
-          )}
+            {!basis && <p className="text-sm text-secondary-600">Pick one to continue.</p>}
+          </fieldset>
 
-          {checkError && <Alert onRetry={scan ? undefined : () => void check(pending, basis)}>{checkError}</Alert>}
+          {basis && (
+            <div className="space-y-4">
+              <h4 className="text-lg font-semibold text-secondary-900">2. Check and add</h4>
 
-          {scan && !checking && (
-            <>
-              <div className="rounded-xl bg-secondary-50 p-4 text-base dark:bg-secondary-900/40">
-                <p className="text-xl font-semibold text-secondary-900">
-                  {scan.importable > 0 ? `${people(scan.importable)} will be added` : 'Nobody new to add'}
-                </p>
-                <p className="text-secondary-600">
-                  We found {scan.found.toLocaleString('en-GB')} email address
-                  {scan.found === 1 ? '' : 'es'}
-                  {pending.how === 'file' ? ` in ${pending.name}` : ''}.
-                  {scan.importable > 0 && scan.new_contacts > 0
-                    ? ` ${scan.new_contacts.toLocaleString('en-GB')} will also be saved to your contacts.`
-                    : ''}
-                </p>
-                {(scan.skipped.duplicates > 0 ||
-                  scan.skipped.unsubscribed > 0 ||
-                  (scan.personal_rule && scan.skipped.personal > 0)) && (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-secondary-700 dark:text-secondary-300">
-                    {scan.skipped.duplicates > 0 && (
-                      <li>{scan.skipped.duplicates.toLocaleString('en-GB')} were listed twice (added once).</li>
-                    )}
-                    {scan.skipped.unsubscribed > 0 && (
-                      <li>
-                        {scan.skipped.unsubscribed.toLocaleString('en-GB')} asked not to get emails, so they are left
-                        out.
-                      </li>
-                    )}
-                    {scan.personal_rule && scan.skipped.personal > 0 && (
-                      <li>
-                        {scan.skipped.personal.toLocaleString('en-GB')} personal address
-                        {scan.skipped.personal === 1 ? '' : 'es'} (like Gmail or Hotmail) left out: the law only lets
-                        you email these people if they asked to hear from you. If they did, choose “People who asked to
-                        get my emails” below.
-                      </li>
-                    )}
-                  </ul>
-                )}
-                {scan.found === 0 && (
-                  <p className="mt-2 text-secondary-700 dark:text-secondary-300">
-                    Check that the file has email addresses in it, then go back and try again.
+              {checking && (
+                <div className="space-y-2" role="status" aria-live="polite">
+                  <p className="text-base text-secondary-600">
+                    {pending.how === 'file' ? `Reading ${pending.name}…` : 'Checking the addresses…'}
                   </p>
-                )}
-              </div>
-
-              <fieldset className="space-y-2">
-                <legend className="mb-1 text-base font-medium text-secondary-900">Who are these people?</legend>
-                <div className="grid gap-2 @3xl:grid-cols-2">
-                  {(
-                    [
-                      [
-                        'legitimate_interest',
-                        'Businesses I want to tell about my products',
-                        'Company addresses, e.g. from a directory or a list you bought.',
-                      ],
-                      [
-                        'consent',
-                        'People who asked to get my emails',
-                        'They signed up on my website, in my shop, or told me yes.',
-                      ],
-                    ] as [LegalBasis, string, string][]
-                  ).map(([value, title, hint]) => (
-                    <label
-                      key={value}
-                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3 transition ${
-                        basis === value
-                          ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                          : 'border-secondary-200 hover:border-primary-400'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`who-${list.uuid}`}
-                        className="mt-1 h-4 w-4 accent-primary-600"
-                        checked={basis === value}
-                        onChange={() => {
-                          setBasis(value);
-                          void check(pending, value);
-                        }}
-                      />
-                      <span>
-                        <span className="block text-base font-medium text-secondary-900">{title}</span>
-                        <span className="block text-sm text-secondary-600">{hint}</span>
-                      </span>
-                    </label>
-                  ))}
+                  <Skeleton className="h-24" />
                 </div>
-              </fieldset>
+              )}
 
-              {scan.importable > 0 && (
+              {checkError && <Alert onRetry={() => void check(pending, basis)}>{checkError}</Alert>}
+
+              {scan && !checking && scan.importable > 0 && (
                 <>
+                  <div className="rounded-xl border border-success-500/40 bg-success-500/10 p-4 text-base">
+                    <p className="flex items-center gap-2 text-xl font-semibold text-secondary-900">
+                      <Check className="h-6 w-6 text-success-600" aria-hidden="true" />
+                      {people(scan.importable)} will be added
+                    </p>
+                    {(scan.skipped.duplicates > 0 ||
+                      scan.skipped.unsubscribed > 0 ||
+                      (scan.personal_rule && scan.skipped.personal > 0) ||
+                      scan.new_contacts > 0) && (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-secondary-700 dark:text-secondary-300">
+                        {scan.new_contacts > 0 && (
+                          <li>{people(scan.new_contacts)} will also be saved to your contacts.</li>
+                        )}
+                        {scan.skipped.duplicates > 0 && (
+                          <li>{scan.skipped.duplicates.toLocaleString('en-GB')} were listed twice (added once).</li>
+                        )}
+                        {scan.skipped.unsubscribed > 0 && (
+                          <li>
+                            {scan.skipped.unsubscribed.toLocaleString('en-GB')} unsubscribed before, so they are left
+                            out.
+                          </li>
+                        )}
+                        {scan.personal_rule && scan.skipped.personal > 0 && (
+                          <li>
+                            {scan.skipped.personal.toLocaleString('en-GB')} personal address
+                            {scan.skipped.personal === 1 ? '' : 'es'} (Gmail, Hotmail…) left out.{' '}
+                            <button
+                              type="button"
+                              className="font-medium text-primary-700 underline underline-offset-2 dark:text-primary-300"
+                              onClick={() => choose('consent')}
+                            >
+                              They asked to get my emails — include them
+                            </button>
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
                   {pending.how === 'file' && (
                     <label className="block">
                       <span className="text-base text-secondary-900">
@@ -626,47 +666,75 @@ export function AddPeople({
                       />
                     </label>
                   )}
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-secondary-200 p-3 text-base text-secondary-900">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-secondary-200 p-3.5 text-base text-secondary-900">
                     <input
                       type="checkbox"
-                      className="mt-1 h-5 w-5 accent-primary-600"
+                      className="mt-1 h-5 w-5 shrink-0 accent-primary-600"
                       checked={lawful}
                       onChange={(e) => setLawful(e.target.checked)}
                     />
                     <span>
                       I’m allowed to email these people. Every email will show my business name and address, and anyone
-                      can unsubscribe with one click — they are never emailed again.
+                      can unsubscribe with one click.
                     </span>
                   </label>
+                  <Button
+                    size="lg"
+                    className="w-full @md:w-auto"
+                    leftIcon={<Check className="h-5 w-5" />}
+                    disabled={!lawful}
+                    isLoading={adding}
+                    onClick={() => void confirmAdd()}
+                  >
+                    {lawful ? `Add ${people(scan.importable)} to the list` : 'Tick the box above to continue'}
+                  </Button>
                 </>
               )}
-            </>
+
+              {scan && !checking && scan.importable === 0 && (
+                <div className="space-y-3 rounded-xl border border-warning-500/40 bg-warning-500/10 p-4 text-base">
+                  <p className="text-xl font-semibold text-secondary-900">Nobody can be added yet</p>
+                  {scan.found === 0 ? (
+                    <p className="text-secondary-700 dark:text-secondary-200">
+                      We couldn’t find any email addresses
+                      {pending.how === 'file' ? ` in ${pending.name}. Check the file has an email column` : ''}.
+                    </p>
+                  ) : scan.personal_rule && scan.skipped.personal > 0 ? (
+                    <>
+                      <p className="text-secondary-700 dark:text-secondary-200">
+                        {scan.skipped.personal === 1 ? 'This is a personal address' : 'These are personal addresses'}{' '}
+                        (like Gmail or Hotmail). You can only send marketing to people like this if they asked to hear
+                        from you. Did they?
+                      </p>
+                      <Button size="lg" className="w-full @md:w-auto" onClick={() => choose('consent')}>
+                        Yes, they asked to get my emails
+                      </Button>
+                    </>
+                  ) : scan.skipped.unsubscribed > 0 ? (
+                    <p className="text-secondary-700 dark:text-secondary-200">
+                      {scan.skipped.unsubscribed === 1 ? 'This person' : 'These people'} unsubscribed before, so they
+                      can never be emailed again. That’s the law, and it protects your reputation.
+                    </p>
+                  ) : (
+                    <p className="text-secondary-700 dark:text-secondary-200">
+                      Check the email addresses, then press “Add different people” to try again.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          <div className="flex flex-col gap-2 @md:flex-row @md:flex-wrap">
-            {scan && !checking && scan.importable > 0 && (
-              <Button
-                size="lg"
-                className="w-full @md:w-auto"
-                leftIcon={<Check className="h-5 w-5" />}
-                disabled={!lawful}
-                isLoading={adding}
-                onClick={() => void confirmAdd()}
-              >
-                {lawful ? `Add ${people(scan.importable)}` : 'Tick the box above to continue'}
-              </Button>
-            )}
-            <Button
-              size="lg"
-              variant="outline"
-              className="w-full @md:w-auto"
-              leftIcon={<ArrowLeft className="h-5 w-5" />}
-              disabled={adding}
-              onClick={back}
-            >
-              Back
-            </Button>
-          </div>
+          <Button
+            size="lg"
+            variant="ghost"
+            className="w-full @md:w-auto"
+            leftIcon={<ArrowLeft className="h-5 w-5" />}
+            disabled={adding}
+            onClick={back}
+          >
+            Add different people
+          </Button>
         </div>
       )}
     </section>

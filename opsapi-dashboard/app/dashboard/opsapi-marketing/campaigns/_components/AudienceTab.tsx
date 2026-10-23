@@ -3,43 +3,42 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Users, Eye, Send, Save } from 'lucide-react';
+import { useAuthStore } from '@/store/auth.store';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import {
   type AudiencePreview,
   type Campaign,
-  type ListMember,
   type MktList,
   INPUT_CLASS,
   KpiTile,
   Notice,
   apiErrorMessage,
-  contactLabel,
   fmtInt,
   unwrap,
-  unwrapArray,
 } from './shared';
 
 const REASONS: { key: keyof AudiencePreview | 'other'; label: string; explain: string }[] = [
   {
     key: 'suppressed',
-    label: 'Suppressed',
+    label: 'Unsubscribed or blocked',
     explain: 'On a global or channel suppression list (hard bounce, complaint, manual block). Suppressions always win.',
   },
   {
     key: 'no_consent',
-    label: 'No consent',
-    explain: 'No marketing opt-in recorded for this channel, or the contact has unsubscribed.',
+    label: 'No permission',
+    explain:
+      'They were added without saying they may get marketing (add them again and answer “Who are these people?”).',
   },
   {
     key: 'missing_address',
-    label: 'Missing / invalid address',
+    label: 'No email address',
     explain: 'No usable email address (or phone number for SMS) on the CRM contact.',
   },
   {
     key: 'other',
     label: 'Other',
-    explain: 'Deleted or inactive contacts, frequency caps and other policy checks.',
+    explain: 'Deleted contacts, or people who already got several emails recently.',
   },
 ];
 
@@ -72,9 +71,9 @@ export default function AudienceTab({
     campaign.batch_interval_minutes ? String(campaign.batch_interval_minutes) : '60',
   );
   const [savingBatches, setSavingBatches] = useState(false);
-  const [members, setMembers] = useState<ListMember[]>([]);
-  const [membersFor, setMembersFor] = useState('');
-  const [contactUuid, setContactUuid] = useState('');
+  const myEmail = useAuthStore((st) => st.user?.email ?? '');
+  const [testEmail, setTestEmail] = useState(myEmail);
+  const [dryRun, setDryRun] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
@@ -92,27 +91,21 @@ export default function AudienceTab({
 
   const selected = lists.find((l) => l.uuid === listUuid);
 
+  // Test mode (dry run) sends nothing, test emails included: say so next to "Send test".
   useEffect(() => {
-    if (!listUuid) return;
     let cancelled = false;
     marketingService
-      .listMembers(listUuid)
+      .sendingInfo()
       .then((res) => {
-        if (cancelled) return;
-        setMembers(unwrapArray<ListMember>(res));
-        setMembersFor(listUuid);
+        if (!cancelled) setDryRun(!!(res.data?.data ?? res.data)?.dry_run);
       })
       .catch(() => {
-        if (cancelled) return;
-        setMembers([]);
-        setMembersFor(listUuid);
+        /* no settings access: no warning */
       });
     return () => {
       cancelled = true;
     };
-  }, [listUuid]);
-
-  const visibleMembers = membersFor === listUuid ? members : [];
+  }, []);
 
   const runPreview = async () => {
     setPreviewing(true);
@@ -176,19 +169,28 @@ export default function AudienceTab({
   };
 
   const testSend = async () => {
-    if (!contactUuid) return;
+    const to = testEmail.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+      setError('Type the email address to send the test to, e.g. you@yourbusiness.co.uk');
+      return;
+    }
     setTesting(true);
     setError(null);
     setTestResult(null);
     try {
-      const res = await marketingService.testSend(campaign.uuid, { contact_uuid: contactUuid });
+      const res = await marketingService.testSend(campaign.uuid, { email: to });
       const row = unwrap<{ state?: string; reason?: string | null }>(res);
-      const who = visibleMembers.find((m) => m.contact_uuid === contactUuid);
-      setTestResult(
-        `Test sent to ${who ? contactLabel(who) : 'contact'}${row?.state ? ` — delivery ${row.state}` : ''}${
-          row?.reason ? ` (${row.reason})` : ''
-        }.`,
-      );
+      if (row?.reason === 'dry_run') {
+        setTestResult(`Test mode is on, so nothing was really sent to ${to}. Switch test mode off to receive it.`);
+      } else if (row?.state === 'accepted' || row?.state === 'delivered') {
+        setTestResult(`Sent to ${to}. Check that inbox (and the spam folder) in a minute.`);
+      } else if (row?.state === 'skipped' && String(row.reason || '').startsWith('suppressed')) {
+        setError(`${to} unsubscribed before, so they can’t be emailed — not even a test.`);
+      } else {
+        setError(
+          `The test didn’t go out${row?.reason ? ` (${row.reason})` : ''}. Check your email settings and try again.`,
+        );
+      }
     } catch (e: unknown) {
       setError(apiErrorMessage(e, 'Test send failed'));
     } finally {
@@ -209,7 +211,7 @@ export default function AudienceTab({
       <section aria-labelledby="aud-list" className="space-y-3 rounded-lg border border-secondary-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 id="aud-list" className="flex items-center gap-1.5 text-sm font-medium">
-            <Users className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Audience list
+            <Users className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Who gets this email
           </h2>
           <Link href="/dashboard/opsapi-marketing/lists" className="text-xs text-secondary-500 underline">
             Manage lists
@@ -224,11 +226,12 @@ export default function AudienceTab({
               onChange={(e) => onListChange(e.target.value)}
               disabled={!editable && campaign.status !== 'scheduled'}
             >
-              <option value="">— Select a list —</option>
+              <option value="">— Choose a list —</option>
               {lists.map((l) => (
                 <option key={l.uuid} value={l.uuid}>
-                  {l.name} · {l.list_type || 'static'}
-                  {l.channel ? ` · ${l.channel}` : ''}
+                  {l.name}
+                  {l.list_type === 'dynamic' ? ' (smart list)' : ''}
+                  {l.channel && l.channel !== campaign.channel ? ` · ${l.channel}` : ''}
                 </option>
               ))}
             </select>
@@ -240,7 +243,7 @@ export default function AudienceTab({
             isLoading={previewing}
             disabled={!listUuid && !campaign.list_id}
           >
-            Preview eligibility
+            Who will get it?
           </Button>
         </div>
         {lists.length === 0 && (
@@ -254,7 +257,7 @@ export default function AudienceTab({
         )}
         {selected?.list_type === 'dynamic' && (
           <p className="text-xs text-amber-700 dark:text-amber-300">
-            Dynamic list — membership is re-synced from its segment rule on preview, validate and send.
+            Smart list — it fills itself from its rules just before sending.
           </p>
         )}
         {selected && selected.channel && selected.channel !== campaign.channel && (
@@ -263,18 +266,17 @@ export default function AudienceTab({
           </p>
         )}
         <p className="text-xs text-secondary-500">
-          The selected list is attached to the campaign when you validate or send. Choosing a different list after
-          validating means validating (and approval) again.
+          If you change the list after pressing “Check it”, press it again before sending.
         </p>
 
         {preview && (
           <div className="space-y-3 pt-2">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <KpiTile label="In list" value={fmtInt(preview.audience_total)} />
-              <KpiTile label="Eligible" value={fmtInt(preview.eligible)} tone="good" />
-              <KpiTile label="Suppressed" value={fmtInt(preview.suppressed)} />
-              <KpiTile label="No consent" value={fmtInt(preview.no_consent)} />
-              <KpiTile label="Missing address" value={fmtInt(preview.missing_address)} />
+              <KpiTile label="In the list" value={fmtInt(preview.audience_total)} />
+              <KpiTile label="Will get it" value={fmtInt(preview.eligible)} tone="good" />
+              <KpiTile label="Unsubscribed" value={fmtInt(preview.suppressed)} />
+              <KpiTile label="No permission" value={fmtInt(preview.no_consent)} />
+              <KpiTile label="No email address" value={fmtInt(preview.missing_address)} />
               <KpiTile label="Other" value={fmtInt(other)} />
             </div>
             {preview.exact === false && (
@@ -295,144 +297,152 @@ export default function AudienceTab({
         )}
       </section>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <section aria-labelledby="aud-budget" className="space-y-3 rounded-lg border border-secondary-200 p-4">
-          <h2 id="aud-budget" className="text-sm font-medium">
-            Delivery budget
-          </h2>
-          <p className="text-xs text-secondary-500">
-            Cap the number of messages this campaign may send. Leave empty for no limit.
-          </p>
-          <div className="flex items-end gap-2">
-            <label className="block text-sm">
-              <span className="sr-only">Max deliveries</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                inputMode="numeric"
-                className={`${INPUT_CLASS} w-40`}
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                placeholder="No limit"
-                disabled={!editable}
-                aria-label="Max deliveries"
-              />
-            </label>
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Save className="h-4 w-4" />}
-              onClick={() => void saveBudget()}
-              isLoading={savingBudget}
-              disabled={!editable || !budgetDirty}
-            >
-              Save
-            </Button>
-          </div>
+      <section aria-labelledby="aud-test" className="space-y-3 rounded-lg border border-secondary-200 p-4">
+        <h2 id="aud-test" className="flex items-center gap-1.5 text-sm font-medium">
+          <Send className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Send yourself a test
+        </h2>
+        <p className="text-xs text-secondary-500">
+          See exactly what people will get. It sends the <strong>saved</strong> email to one address — yours, or
+          anyone’s — and doesn’t add them to the list.
+        </p>
+        {dryRun && (
+          <Notice tone="warn">
+            Test mode is on, so nothing is really sent — not even this test. Switch it off in{' '}
+            <Link href="/dashboard/namespace/plugins#plugin-opsapi_marketing" className="underline">
+              Marketing Cloud settings
+            </Link>{' '}
+            when you’re ready.
+          </Notice>
+        )}
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void testSend();
+          }}
+        >
+          <label className="block min-w-0 flex-1 text-sm">
+            <span className="text-xs text-secondary-500">Send the test to</span>
+            <input
+              type="email"
+              className={`${INPUT_CLASS} mt-1 w-full`}
+              value={testEmail}
+              onChange={(e) => setTestEmail(e.target.value)}
+              placeholder="you@yourbusiness.co.uk"
+              autoComplete="email"
+            />
+          </label>
+          <Button
+            type="submit"
+            leftIcon={<Send className="h-4 w-4" />}
+            isLoading={testing}
+            disabled={!testEmail.trim()}
+          >
+            Send test
+          </Button>
+        </form>
+        {testResult && <Notice tone="success">{testResult}</Notice>}
+      </section>
 
-          <h2 id="aud-batches" className="pt-2 text-sm font-medium">
-            Send in batches
-          </h2>
-          <p className="text-xs text-secondary-500">
-            For large lists: send this many at once, then the next batch after a pause. Leave empty to send everything
-            as fast as the workspace rate allows.
-          </p>
-          <div className="flex flex-wrap items-end gap-2" aria-labelledby="aud-batches">
-            <label className="block text-sm">
-              <span className="text-xs text-secondary-500">Per batch</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                inputMode="numeric"
-                className={`${INPUT_CLASS} w-32`}
-                value={batchSize}
-                onChange={(e) => setBatchSize(e.target.value)}
-                placeholder="All at once"
-                disabled={!editable}
-                aria-label="Emails per batch"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-secondary-500">Minutes between batches</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                inputMode="numeric"
-                className={`${INPUT_CLASS} w-32`}
-                value={batchEvery}
-                onChange={(e) => setBatchEvery(e.target.value)}
-                disabled={!editable || batchSize.trim() === ''}
-                aria-label="Minutes between batches"
-              />
-            </label>
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Save className="h-4 w-4" />}
-              onClick={() => void saveBatches()}
-              isLoading={savingBatches}
-              disabled={!editable || !batchesDirty}
-            >
-              Save
-            </Button>
-          </div>
-          {preview && Number(batchSize) > 0 && preview.eligible > Number(batchSize) && (
+      <details className="rounded-lg border border-secondary-200 p-4">
+        <summary className="cursor-pointer select-none text-sm font-medium">
+          More options{' '}
+          <span className="font-normal text-secondary-500">(optional — send in batches, limit how many)</span>
+        </summary>
+        <div className="mt-3">
+          <section aria-labelledby="aud-budget" className="space-y-3">
+            <h2 id="aud-budget" className="text-sm font-medium">
+              Send to at most…
+            </h2>
             <p className="text-xs text-secondary-500">
-              About {fmtInt(Math.ceil(preview.eligible / Number(batchSize)))} batches; the last starts roughly{' '}
-              {fmtInt(Math.ceil((Math.ceil(preview.eligible / Number(batchSize)) - 1) * Number(batchEvery)))} minutes
-              after sending begins.
+              Stop after this many emails. Leave empty to send to everyone on the list.
             </p>
-          )}
-        </section>
-
-        <section aria-labelledby="aud-test" className="space-y-3 rounded-lg border border-secondary-200 p-4">
-          <h2 id="aud-test" className="text-sm font-medium">
-            Send a test
-          </h2>
-          <p className="text-xs text-secondary-500">
-            Sends the <strong>saved</strong> content to one contact from the selected list, bypassing quiet hours.
-            Consent and suppression still apply.
-          </p>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="block min-w-56 flex-1 text-sm">
-              <span className="sr-only">Test recipient</span>
-              <select
-                className={`${INPUT_CLASS} w-full`}
-                value={contactUuid}
-                onChange={(e) => setContactUuid(e.target.value)}
-                disabled={!listUuid || visibleMembers.length === 0}
-                aria-label="Test recipient"
+            <div className="flex items-end gap-2">
+              <label className="block text-sm">
+                <span className="sr-only">Max deliveries</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  className={`${INPUT_CLASS} w-40`}
+                  value={budget}
+                  onChange={(e) => setBudget(e.target.value)}
+                  placeholder="No limit"
+                  disabled={!editable}
+                  aria-label="Max deliveries"
+                />
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Save className="h-4 w-4" />}
+                onClick={() => void saveBudget()}
+                isLoading={savingBudget}
+                disabled={!editable || !budgetDirty}
               >
-                <option value="">
-                  {!listUuid
-                    ? 'Select a list first'
-                    : visibleMembers.length === 0
-                      ? 'No members in this list'
-                      : '— Choose a contact —'}
-                </option>
-                {visibleMembers.map((m) => (
-                  <option key={m.contact_uuid} value={m.contact_uuid}>
-                    {contactLabel(m)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              size="sm"
-              leftIcon={<Send className="h-4 w-4" />}
-              onClick={() => void testSend()}
-              isLoading={testing}
-              disabled={!contactUuid}
-            >
-              Send test
-            </Button>
-          </div>
-          {testResult && <Notice tone="success">{testResult}</Notice>}
-        </section>
-      </div>
+                Save
+              </Button>
+            </div>
+
+            <h2 id="aud-batches" className="pt-2 text-sm font-medium">
+              Send in batches
+            </h2>
+            <p className="text-xs text-secondary-500">
+              For large lists: send this many at once, then the next batch after a pause. Leave empty to send everything
+              as fast as the workspace rate allows.
+            </p>
+            <div className="flex flex-wrap items-end gap-2" aria-labelledby="aud-batches">
+              <label className="block text-sm">
+                <span className="text-xs text-secondary-500">Per batch</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  className={`${INPUT_CLASS} w-32`}
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(e.target.value)}
+                  placeholder="All at once"
+                  disabled={!editable}
+                  aria-label="Emails per batch"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-secondary-500">Minutes between batches</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  className={`${INPUT_CLASS} w-32`}
+                  value={batchEvery}
+                  onChange={(e) => setBatchEvery(e.target.value)}
+                  disabled={!editable || batchSize.trim() === ''}
+                  aria-label="Minutes between batches"
+                />
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Save className="h-4 w-4" />}
+                onClick={() => void saveBatches()}
+                isLoading={savingBatches}
+                disabled={!editable || !batchesDirty}
+              >
+                Save
+              </Button>
+            </div>
+            {preview && Number(batchSize) > 0 && preview.eligible > Number(batchSize) && (
+              <p className="text-xs text-secondary-500">
+                About {fmtInt(Math.ceil(preview.eligible / Number(batchSize)))} batches; the last starts roughly{' '}
+                {fmtInt(Math.ceil((Math.ceil(preview.eligible / Number(batchSize)) - 1) * Number(batchEvery)))} minutes
+                after sending begins.
+              </p>
+            )}
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

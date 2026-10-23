@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,6 +9,7 @@ import {
   Calendar,
   Check,
   CheckCircle,
+  ChevronDown,
   Copy,
   FileText,
   FlaskConical,
@@ -100,6 +101,16 @@ function CampaignWorkspace({ id }: { id: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [scheduleAt, setScheduleAt] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [moreOpen]);
   const [rejectReason, setRejectReason] = useState('');
   const [approvalNotes, setApprovalNotes] = useState('');
   const [dupName, setDupName] = useState('');
@@ -122,12 +133,23 @@ function CampaignWorkspace({ id }: { id: string }) {
       const ls = lRes ? unwrapArray<MktList>(lRes) : [];
       setLists(ls);
       const current = ls.find((l) => l.id === c.list_id);
+      // Came from a list's "Write an email to them": save that list on the email now.
+      const wanted = searchParams.get('list');
+      const fromLink = wanted ? ls.find((l) => l.uuid === wanted) : undefined;
+      if (fromLink && fromLink.id !== c.list_id && EDITABLE_STATUSES.includes(c.status)) {
+        marketingService
+          .updateCampaign(id, { list_uuid: fromLink.uuid })
+          .then((res) => setCampaign(normaliseCampaign(unwrap<Campaign>(res))))
+          .catch(() => {
+            /* still chosen on screen; saved on Check it / send */
+          });
+      }
       if (current) setListUuid((prev) => prev || current.uuid);
       setLoadError(null);
     } catch (e: unknown) {
       setLoadError(apiErrorMessage(e, 'Failed to load campaign'));
     }
-  }, [loadCampaign]);
+  }, [loadCampaign, searchParams, id]);
 
   useEffect(() => {
     void load();
@@ -152,6 +174,18 @@ function CampaignWorkspace({ id }: { id: string }) {
     setCampaign(normaliseCampaign(c));
     setFlash({ tone: message.includes('back to draft') ? 'warn' : 'success', text: message });
   }, []);
+
+  /** Choosing who gets it saves straight away, so it's still chosen next time. */
+  const chooseList = async (uuid: string) => {
+    setListUuid(uuid);
+    if (!uuid) return;
+    try {
+      const res = await marketingService.updateCampaign(id, { list_uuid: uuid });
+      setCampaign(normaliseCampaign(unwrap<Campaign>(res)));
+    } catch (e: unknown) {
+      setFlash({ tone: 'error', text: apiErrorMessage(e, 'Could not save who gets this email') });
+    }
+  };
 
   const run = async (label: string, fn: () => Promise<unknown>, success: string) => {
     setBusy(label);
@@ -187,7 +221,7 @@ function CampaignWorkspace({ id }: { id: string }) {
         const out = unwrap<{ preview?: AudiencePreview; warnings?: string[] }>(res);
         setValidation({ preview: out.preview ?? null, warnings: out.warnings ?? [] });
       },
-      'Campaign validated.',
+      'All good — it’s ready. Press “Send now”, or “Schedule…” to pick a time.',
     );
 
   const doSendNow = async () => {
@@ -310,9 +344,9 @@ function CampaignWorkspace({ id }: { id: string }) {
     },
     {
       key: 'audience',
-      label: 'Review & validate',
+      label: 'Check',
       done: s === 'validated',
-      hint: s === 'validated' ? 'Validated' : 'Run Validate',
+      hint: s === 'validated' ? 'All good' : 'Press “Check it”',
     },
   ];
 
@@ -359,7 +393,13 @@ function CampaignWorkspace({ id }: { id: string }) {
               <Button type="submit" size="sm" isLoading={busy === 'Rename'} aria-label="Save name">
                 <Check className="h-4 w-4" aria-hidden="true" />
               </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(false)} aria-label="Cancel rename">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setRenaming(false)}
+                aria-label="Cancel rename"
+              >
                 <X className="h-4 w-4" aria-hidden="true" />
               </Button>
             </form>
@@ -403,21 +443,7 @@ function CampaignWorkspace({ id }: { id: string }) {
               disabled={isBusy}
               onClick={() => void doValidate()}
             >
-              {s === 'validated' ? 'Re-validate' : 'Validate'}
-            </Button>
-          )}
-          {(s === 'draft' || s === 'validated') && (
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Shield className="h-4 w-4" />}
-              disabled={isBusy}
-              onClick={() => {
-                setApprovalNotes('');
-                setDialog('approval');
-              }}
-            >
-              Request approval
+              {s === 'validated' ? 'Check again' : 'Check it'}
             </Button>
           )}
           {s === 'awaiting_approval' && (
@@ -496,29 +522,66 @@ function CampaignWorkspace({ id }: { id: string }) {
               Resume
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<Copy className="h-4 w-4" />}
-            disabled={isBusy}
-            onClick={() => {
-              setDupName(`${campaign.name} (copy)`);
-              setDialog('duplicate');
-            }}
-          >
-            Duplicate
-          </Button>
-          {s !== 'completed' && s !== 'cancelled' && (
+          <div className="relative" ref={moreRef}>
             <Button
               size="sm"
-              variant="danger"
-              leftIcon={<XCircle className="h-4 w-4" />}
+              variant="outline"
+              rightIcon={<ChevronDown className="h-4 w-4" />}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
               disabled={isBusy}
-              onClick={() => setDialog('cancel')}
+              onClick={() => setMoreOpen((o) => !o)}
             >
-              Cancel
+              More
             </Button>
-          )}
+            {moreOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-xl border border-secondary-200 bg-surface py-1 shadow-lg"
+                onKeyDown={(e) => e.key === 'Escape' && setMoreOpen(false)}
+              >
+                {(s === 'draft' || s === 'validated') && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-secondary-50 dark:hover:bg-secondary-800"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setApprovalNotes('');
+                      setDialog('approval');
+                    }}
+                  >
+                    <Shield className="h-4 w-4" aria-hidden="true" /> Ask someone to approve it
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-secondary-50 dark:hover:bg-secondary-800"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    setDupName(`${campaign.name} (copy)`);
+                    setDialog('duplicate');
+                  }}
+                >
+                  <Copy className="h-4 w-4" aria-hidden="true" /> Make a copy
+                </button>
+                {s !== 'completed' && s !== 'cancelled' && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-error-600 hover:bg-error-500/10"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setDialog('cancel');
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" aria-hidden="true" /> Cancel this email
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -592,7 +655,11 @@ function CampaignWorkspace({ id }: { id: string }) {
       )}
 
       {/* Tabs */}
-      <div role="tablist" aria-label="Campaign workspace" className="flex gap-1 overflow-x-auto border-b border-secondary-200">
+      <div
+        role="tablist"
+        aria-label="Campaign workspace"
+        className="flex gap-1 overflow-x-auto border-b border-secondary-200"
+      >
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -637,7 +704,7 @@ function CampaignWorkspace({ id }: { id: string }) {
           campaign={campaign}
           lists={lists}
           listUuid={listUuid}
-          onListChange={setListUuid}
+          onListChange={(uuid) => void chooseList(uuid)}
           editable={editable}
           onSaved={onSaved}
           initialPreview={validation?.preview ?? null}

@@ -69,6 +69,10 @@ return function(app)
         end)
     end))
 
+    local function fail(err, detail)
+        return sdk.error(400, Camp.friendly_error(err, detail), { code = err })
+    end
+
     -- What changes the message or who gets it: re-validation (and re-approval) required.
     local REVALIDATE = {
         channel = true, message_type = true, subject = true, preview_text = true, body_html = true,
@@ -85,11 +89,26 @@ return function(app)
         end
         local body, berr = sdk.body(self)
         if not body then return sdk.error(400, berr) end
+        -- Choosing who gets it saves straight away (not only on validate/send).
+        local list_uuid = body.list_uuid
+        body.list_uuid = nil
         local data, errors = sdk.validate(body, FIELDS, true)
         if not data then return sdk.error(422, "Validation failed", errors) end
-        local row, status, msg = R.update(ns, campaign.uuid, data)
-        if status then return sdk.error(status, msg) end
-        if not row then return sdk.not_found("campaign") end
+        local row = campaign
+        if next(data) ~= nil then
+            local status, msg
+            row, status, msg = R.update(ns, campaign.uuid, data)
+            if status then return sdk.error(status, msg) end
+            if not row then return sdk.not_found("campaign") end
+        end
+        if list_uuid ~= nil then
+            local list = U.is_uuid(list_uuid)
+                and U.one("SELECT id FROM mkt_lists WHERE namespace_id = ? AND uuid = ?", ns, list_uuid)
+            if not list then return fail("list_not_found") end
+            local attached, aerr = Camp.attach_list(ns, Camp.find(ns, campaign.id), list.id)
+            if not attached then return fail(aerr) end
+            row = Camp.find(ns, campaign.id)
+        end
 
         local changed = false
         for k in pairs(data) do
@@ -109,10 +128,6 @@ return function(app)
         if not campaign then return sdk.not_found("campaign") end
         return sdk.ok(Camp.delivery_stats(ns, campaign.id))
     end))
-
-    local function fail(err, detail)
-        return sdk.error(400, Camp.friendly_error(err, detail), { code = err })
-    end
 
     local function read_body(self)
         local body, berr = sdk.body(self)
@@ -290,10 +305,17 @@ return function(app)
         local campaign = Camp.find(ns, self.params.id)
         if not campaign then return sdk.not_found("campaign") end
         local body = sdk.body(self) or {}
-        if not U.is_uuid(body.contact_uuid) then return sdk.error(400, "contact_uuid required") end
+        -- A contact from the list, or any email address typed in (e.g. your own).
+        local contact_uuid = body.contact_uuid
+        if not U.is_uuid(contact_uuid) then
+            local email = U.norm_email(body.email)
+            if not email then return sdk.error(400, "Type the email address to send the test to") end
+            contact_uuid = Camp.test_contact(ns, email, sdk.user(self))
+        end
         campaign.namespace_id = ns
         campaign.skip_quiet_hours = true
-        local row, err = Send.enqueue(ns, campaign, body.contact_uuid, {
+        campaign.test_send = true
+        local row, err = Send.enqueue(ns, campaign, contact_uuid, {
             attempt_key = "test-" .. tostring(ngx.time()),
             send_now = true,
         })
