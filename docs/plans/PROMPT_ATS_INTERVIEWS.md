@@ -324,6 +324,75 @@ rejects a file with:
 The response is `{interview_uuid, application_uuid, candidate_uuid, job_uuid,
 created, dashboard_url}`.
 
+## 6b. Offline interviews and recruiter sign-up
+
+**Offline delivery.** An invite can say `delivery: "offline"` (dashboard
+`POST /api/v2/ats/interviews` and `/bulk`, and the app's
+`POST /api/v2/public/ats/integration/invites`; the default is `"online"`,
+anything else is 422). The candidate's Snazzy Pro app downloads the interview
+once, runs it on their Mac with an on-device model (the engine still asks the
+fixed questions in the fixed order; the model only words follow-ups) and
+uploads the transcript once. OpsAPI evaluates it and a person reviews it.
+- `ats_interviews.delivery` (`online` | `offline`), `offline_started_at`,
+  `result_uploaded_at` (migration `[4]`). Offline invites always return
+  `app_url` (`snazzypro://interview?link=…`), pack or not. The browser page
+  shows "Open in Snazzy Pro"; `/start`, `/answer` and `/event` answer 409.
+- `POST /api/v2/public/ats/interviews/:token/offline {device_id}` (10 a minute
+  per link): `{kit, notice, notice_hash, candidate: {name}, pack | null,
+  upload_by, interview_uuid}`. The kit is the invite's kit with every rubric
+  anchor blanked (`Kit.for_candidate`; anchors are the evaluator's alone). The
+  notice is the offline wording (`P.notice(kit, evaluator, {offline = true})`:
+  it runs on your computer, nothing is sent until the end, then the transcript
+  is summarised by the evaluator's provider and reviewed by a person) plus the
+  workspace's legal notice; each hash issued is remembered. The device is bound
+  as for `/pack` (the first device keeps the invite). 409 `online` (not an
+  offline invite), 410 `finished`, 402 `ats_inactive`, 403 `device_in_use`.
+  `upload_by` = link expiry + 7 days: a started offline interview may upload
+  until then (unless the recruiter revokes the link).
+- `POST /api/v2/public/ats/interviews/:token/result {device_id, interview}`
+  (≤ 1 MB, 5 a minute per link), `interview` being the `.snazzy_interview`
+  object. Checked by `lib/ats/offline.lua` (pure, unit-tested): same kit id,
+  the issued notice hash (not needed when the candidate asked for a person
+  before starting and gave no answers), an end state (completed |
+  human_requested | withdrawn | abandoned | expired), ≤ 400 turns of ≤ 20,000
+  characters, known roles and question ids, times clamped between the fetch
+  (− 5 minutes) and now. It is stored on the invite's own row with the
+  **server's** kit and candidate; the upload's `evaluation` and `review` are
+  ignored. `session.device_reported = true`; audit `offline_result_uploaded`;
+  then the stage moves and the evaluator runs as for any finished interview.
+  The response is the candidate view (self-ID is then offered as usual). The
+  same id again → 200; another → 409 `already_sent`.
+
+**Results for the recruiter's app** (integration token, namespace-scoped):
+- `GET /api/v2/public/ats/integration/interviews?state=&delivery=&since=&page=&per_page=`
+  → `[{uuid, candidate {name, email}, job_title, kit_title, state, delivery,
+  evaluation_status, decision, started_at, ended_at, updated_at,
+  result_uploaded_at, dashboard_url}]` + `meta`, newest change first; times are
+  ISO 8601 UTC; `since` filters `updated_at`.
+- `GET /api/v2/public/ats/integration/interviews/:uuid` → `{uuid, delivery,
+  evaluation_status, dashboard_url, file}`, `file` a `.snazzy_interview`
+  (`app: "OpsAPI"`) with the full kit, the server's evaluation and a person's
+  review. `interview.id` is the app's own id when it is a UUID, else the
+  interview's uuid.
+
+**Recruiter sign-up from the app** (public, each returns an integration token once):
+- `POST /api/v2/public/ats/recruiters/register {company, first_name, last_name,
+  email, password, device_name?}` (5 an hour per IP): the account (validated
+  like `/api/v2/register`), a workspace for the company with the person as owner
+  (`NamespaceQueries.createWithOwner`, owner role granted manage on every
+  `ats_*` module) and a token named "Snazzy Pro on <device>", in one
+  transaction. 201 `{token, namespace {uuid, name}, active, dashboard_url,
+  note}`; 409 `email_taken`.
+- `POST /api/v2/public/ats/recruiters/sign-in {email, password, namespace_uuid?,
+  device_name?}`: the password is checked like `/auth/login` (bcrypt, the same
+  per-account lockout, 10 per 15 minutes per IP). Anyone asked for a sign-in
+  code (MFA, on by default per workspace) gets 403 `mfa_required` and makes a
+  token in Hiring › Settings instead. 403 `no_workspace` when no workspace lets
+  them manage Hiring settings; `{choose: [{uuid, name}]}` when several do and
+  none was named; else `{token, namespace, active, dashboard_url}`. 401 "Wrong
+  email or password." otherwise.
+- A new workspace isn't active until it is paid for (§6).
+
 ## 7. Retention and deletion
 
 - Each interview gets `delete_after` = end + `retention_days` (default 180).

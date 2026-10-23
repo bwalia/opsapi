@@ -12,6 +12,15 @@
       POST /api/v2/public/ats/interviews/:token/pack       {device_id}: the Snazzy Pro app redeems its invite for
                                                            the interview pack (signed S3 link + key); the
                                                            first device keeps the invite
+      POST /api/v2/public/ats/interviews/:token/offline    {device_id}: an offline invite (delivery "offline"): the
+                                                           app fetches {kit (no rubric anchors), notice,
+                                                           notice_hash, candidate {name}, pack | null, upload_by,
+                                                           interview_uuid}; binds the device like /pack.
+                                                           409 online | 410 finished | 402 inactive | 403 other device
+      POST /api/v2/public/ats/interviews/:token/result     {device_id, interview: .snazzy_interview object} (≤ 1 MB):
+                                                           the finished offline interview, once; the candidate view
+                                                           back. Same id again → 200; another → 409 already_sent.
+                                                           The upload's evaluation and review are ignored.
 
     Snazzy Pro desktop app (Authorization: Bearer snz_<token>, from Hiring › Settings):
       GET  /api/v2/public/ats/integration/ping             {namespace, active}
@@ -20,7 +29,23 @@
       POST /api/v2/public/ats/integration/packs            {title, kit_uuid?, size_bytes, sha256, key}:
                                                            a signed S3 upload link for the encrypted pack
       POST /api/v2/public/ats/integration/packs/:uuid/complete
-      POST /api/v2/public/ats/integration/invites          {kit_uuid, pack_uuid?, candidates[], expires_in_days?}
+      POST /api/v2/public/ats/integration/invites          {kit_uuid, pack_uuid?, candidates[], expires_in_days?,
+                                                           delivery?: online | offline}
+      GET  /api/v2/public/ats/integration/interviews       ?state=&delivery=&since=<ISO 8601>&page=&per_page=
+                                                           newest change first, with meta (pagination)
+      GET  /api/v2/public/ats/integration/interviews/:uuid {uuid, delivery, evaluation_status, dashboard_url,
+                                                           file: a .snazzy_interview with the evaluation and review}
+
+    Recruiters from the Snazzy Pro app (no login; each returns an integration token once):
+      POST /api/v2/public/ats/recruiters/register          {company, first_name, last_name, email, password,
+                                                           device_name?}: a new account + workspace (owner);
+                                                           201 {token, namespace, active, dashboard_url, note}.
+                                                           409 email_taken. 5 an hour per IP
+      POST /api/v2/public/ats/recruiters/sign-in           {email, password, namespace_uuid?, device_name?}:
+                                                           {token, namespace, active, dashboard_url} or
+                                                           {choose: [{uuid, name}]}. 401 wrong credentials,
+                                                           403 mfa_required | no_workspace. 10 per 15 min per IP
+                                                           and per account (the /auth/login lockout)
 
     Stripe:
       POST /api/v2/public/ats/billing/webhook              activation events (signature checked, idempotent)
@@ -34,6 +59,7 @@ local Packs = require("queries.AtsPackQueries")
 local Engine = require("lib.ats.engine")
 local Activation = require("lib.ats.activation")
 local Interop = require("lib.ats.interop")
+local Recruiters = require("queries.AtsRecruiterQueries")
 
 local MAX_BODY = 64 * 1024
 
@@ -75,13 +101,14 @@ local function body(max)
     return data, raw
 end
 
--- The interview for :token, rate-limited per IP and per token.
-local function interview(self, per_token)
+-- The interview for :token, rate-limited per IP and per token (bucket: a separate
+-- per-token count for one endpoint, e.g. the offline upload).
+local function interview(self, per_token, bucket)
     local ip = RateLimit.getClientIP()
     local busy = limited("ip:" .. ip, 240, 60)
     if busy then return nil, busy end
     local token = self.params.token or ""
-    busy = limited("tok:" .. ngx.md5(token), per_token or 60, 60)
+    busy = limited("tok:" .. (bucket and (bucket .. ":") or "") .. ngx.md5(token), per_token or 60, 60)
     if busy then return nil, busy end
     local r, status = I.by_token(token)
     if not r then
@@ -145,6 +172,29 @@ function M.routes(app)
         return Packs.for_invite(r, b.device_id, Engine.is_finished(s))
     end, 10))
 
+    -- Offline interviews: the app fetches the interview once and sends the result once.
+    app:post("/api/v2/public/ats/interviews/:token/offline", function(self)
+        local r, err = interview(self, 10, "offline")
+        if not r then return err end
+        local b, _, berr = body()
+        if not b then return fail(berr == "too_large" and 413 or 400, "Bad request.") end
+        local data, oerr, status, code = I.offline(r, b)
+        if not data then return fail(status or 422, oerr, code) end
+        return ok(data)
+    end)
+    app:post("/api/v2/public/ats/interviews/:token/result", function(self)
+        local r, err = interview(self, 5, "result")
+        if not r then return err end
+        local b, _, berr = body(Interop.MAX_BYTES + 1024)
+        if not b then
+            if berr == "too_large" then return fail(413, "The interview is larger than 1 MB.", "too_large") end
+            return fail(400, "Bad request.", "bad_request")
+        end
+        local view, rerr, status, code = I.offline_result(r, b)
+        if not view then return fail(status or 422, rerr, code) end
+        return ok(view)
+    end)
+
     -- MARK: Snazzy Pro desktop integration
 
     app:get("/api/v2/public/ats/integration/ping", function(self)
@@ -180,6 +230,22 @@ function M.routes(app)
         return ok(res, res.created and 201 or 200)
     end)
 
+    -- Results for the recruiter's app (offline interviews and every other one).
+    app:get("/api/v2/public/ats/integration/interviews", function(self)
+        local t, err = integration(self)
+        if not t then return err end
+        local items, meta = I.integration_list(t.namespace_id, self.params)
+        if not items then return fail(422, meta, "invalid") end
+        return respond(200, { success = true, data = items, meta = meta })
+    end)
+    app:get("/api/v2/public/ats/integration/interviews/:uuid", function(self)
+        local t, err = integration(self)
+        if not t then return err end
+        local data, ferr = I.integration_file(t.namespace_id, self.params.uuid)
+        if not data then return fail(404, ferr, "not_found") end
+        return ok(data)
+    end)
+
     -- Interview packs from the recruiter's Mac: encrypted there, uploaded once to S3.
     local function integration_body(self, fn, max)
         local t, err = integration(self)
@@ -201,6 +267,33 @@ function M.routes(app)
     app:post("/api/v2/public/ats/integration/invites", function(self)
         return integration_body(self, function(t, b) return I.invite_many(t.namespace_id, b, "token:" .. t.uuid) end,
             512 * 1024)
+    end)
+
+    -- MARK: Recruiters from the Snazzy Pro app (sign up or sign in, get a token)
+
+    app:post("/api/v2/public/ats/recruiters/register", function(self)
+        local busy = limited("reg-ip:" .. RateLimit.getClientIP(), 5, 3600)
+        if busy then return busy end
+        local b, _, berr = body()
+        if not b then return fail(berr == "too_large" and 413 or 400, "Bad request.", "bad_request") end
+        local data, rerr, status, code = Recruiters.register(b)
+        if not data then return fail(status or 422, rerr, code) end
+        return ok(data, 201)
+    end)
+    app:post("/api/v2/public/ats/recruiters/sign-in", function(self)
+        local busy = limited("signin-ip:" .. RateLimit.getClientIP(), 10, 900)
+        if busy then return busy end
+        local b, _, berr = body()
+        if not b then return fail(berr == "too_large" and 413 or 400, "Bad request.", "bad_request") end
+        local data, serr, status, code, retry = Recruiters.sign_in(b)
+        if not data then
+            if status == 429 then
+                return respond(429, { success = false, error = serr, code = code },
+                    { ["Retry-After"] = tostring(math.max(tonumber(retry) or 60, 1)) })
+            end
+            return fail(status or 422, serr, code)
+        end
+        return ok(data)
     end)
 
     -- MARK: Stripe activation webhook

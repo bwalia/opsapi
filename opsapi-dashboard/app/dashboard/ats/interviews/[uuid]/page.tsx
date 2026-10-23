@@ -18,7 +18,7 @@ import { useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { AlertTriangle, Bot, RefreshCw } from 'lucide-react';
 import { Badge, Button, Card, Select, Textarea } from '@/components/ui';
-import { AtsShell } from '@/components/ats/AtsShell';
+import { AtsShell, OfflineBadge } from '@/components/ats/AtsShell';
 import { apiError } from '@/components/field-service/shared';
 import { atsService, when, type Decision, type InterviewDetail, type Quote } from '@/services/ats.service';
 
@@ -116,10 +116,22 @@ export default function ReviewPage() {
 
   return (
     <AtsShell title={`${d.candidate_name} · ${d.job_title}`} module="ats_interviews"
-      description={`${d.source === 'hosted' ? 'Online interview' : 'Interview run in Snazzy Pro'} · kit v${d.kit_version} · ${d.state.replace('_', ' ')}${d.ended_at ? ` · ended ${when(d.ended_at)}` : ''}`}
+      description={`${d.delivery === 'offline' ? 'Offline interview (candidate\'s Mac)' : d.source === 'hosted' ? 'Online interview' : 'Interview run in Snazzy Pro'} · kit v${d.kit_version} · ${d.state.replace('_', ' ')}${d.ended_at ? ` · ended ${when(d.ended_at)}` : ''}`}
       actions={<Link href={`/dashboard/ats/candidates/${d.candidate_uuid}`} className="text-sm font-medium text-primary-600 hover:underline">Candidate profile</Link>}>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-4">
+          {d.delivery === 'offline' && (
+            <Card>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-secondary-700">
+                <OfflineBadge delivery={d.delivery} />
+                <span>
+                  {d.result_uploaded_at || d.device_reported
+                    ? "Taken offline on the candidate's own Mac; the transcript was reported by their device."
+                    : "Runs offline in Snazzy Pro on the candidate's own Mac; the transcript arrives once they finish."}
+                </span>
+              </div>
+            </Card>
+          )}
           {d.flags.length > 0 && (
             <Card>
               <h2 className="mb-2 font-semibold">Flags</h2>

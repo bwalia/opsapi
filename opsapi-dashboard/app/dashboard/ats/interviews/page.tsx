@@ -14,7 +14,7 @@ import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Upload } from 'lucide-react';
 import { Badge, Button, Pagination, Select } from '@/components/ui';
-import { AtsShell, Empty } from '@/components/ats/AtsShell';
+import { AtsShell, Empty, OfflineBadge } from '@/components/ats/AtsShell';
 import { apiError } from '@/components/field-service/shared';
 import { atsService, when, type InterviewSummary, type Meta } from '@/services/ats.service';
 
@@ -95,7 +95,9 @@ function InterviewsInner() {
                 <tr key={i.uuid} className="hover:bg-secondary-50">
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/ats/interviews/${i.uuid}`} className="font-medium text-primary-600 hover:underline">{i.candidate_name}</Link>
-                    <div className="text-xs text-secondary-500">{i.source === 'hosted' ? 'Online' : 'Snazzy Pro'}</div>
+                    <div className="flex items-center gap-2 text-xs text-secondary-500">
+                      {i.delivery === 'offline' ? <OfflineBadge delivery={i.delivery} /> : i.source === 'hosted' ? 'Online' : 'Snazzy Pro'}
+                    </div>
                   </td>
                   <td className="px-4 py-3">{i.job_title}</td>
                   <td className="px-4 py-3">{STATE_LABEL[i.state] ?? i.state}</td>

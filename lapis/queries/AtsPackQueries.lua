@@ -150,15 +150,38 @@ function P.id_for_invite(namespace_id, uuid)
     return r.id
 end
 
+P.DEVICE_IN_USE = "This invite is already in use on another device. Ask the hiring team for a new link."
+
+local function valid_device_id(device_id)
+    return type(device_id) == "string" and #device_id >= 16 and #device_id <= 200
+end
+P.valid_device_id = valid_device_id
+
+--- One invite, one device: the first device to redeem the invite keeps it
+-- (pack or offline interview). bind = false only checks, never binds.
+-- @return true | nil, err, status
+function P.bind_device(r, device_id, bind)
+    if not valid_device_id(device_id) then return nil, "Send this device's id.", 400 end
+    local hash = Hash.sha256_hex("ats-device|" .. device_id)
+    local bound = v(r.device_hash)
+    if not bound and bind ~= false then
+        db.query("UPDATE ats_interviews SET device_hash = ? WHERE id = ? AND device_hash IS NULL", hash, r.id)
+        bound = db.select("device_hash FROM ats_interviews WHERE id = ?", r.id)[1].device_hash
+    end
+    if not require("lib.stripe")._secure_compare(v(bound) or "", hash) then
+        return nil, P.DEVICE_IN_USE, 403
+    end
+    r.device_hash = bound
+    return true
+end
+
 --- The candidate's app redeems its invite: a download link and the key.
 -- @param r the interview row (by link token), finished tells whether it ended
 -- @return {url, key, sha256, size_bytes, title, expires_in} | nil, err, status
 function P.for_invite(r, device_id, finished)
     if not v(r.pack_id) then return nil, "This interview has no pack: open the link in a browser instead.", 404 end
     if finished then return nil, "This interview has finished.", 410 end
-    if type(device_id) ~= "string" or #device_id < 16 or #device_id > 200 then
-        return nil, "Send this device's id.", 400
-    end
+    if not valid_device_id(device_id) then return nil, "Send this device's id.", 400 end
     if not Activation.is_active(r.namespace_id) then
         return nil, "This interview can't start right now. Please contact the hiring team.", 402
     end
@@ -166,16 +189,8 @@ function P.for_invite(r, device_id, finished)
     if not pack or pack.status ~= "ready" then
         return nil, "The interview pack isn't available. Please contact the hiring team.", 404
     end
-    -- One invite, one device: the first to redeem keeps it.
-    local hash = Hash.sha256_hex("ats-device|" .. device_id)
-    local bound = v(r.device_hash)
-    if not bound then
-        db.query("UPDATE ats_interviews SET device_hash = ? WHERE id = ? AND device_hash IS NULL", hash, r.id)
-        bound = db.select("device_hash FROM ats_interviews WHERE id = ?", r.id)[1].device_hash
-    end
-    if not require("lib.stripe")._secure_compare(bound or "", hash) then
-        return nil, "This invite is already in use on another device. Ask the hiring team for a new link.", 403
-    end
+    local bound, berr, bstatus = P.bind_device(r, device_id)
+    if not bound then return nil, berr, bstatus end
     local key, kerr = require("helper.secret-box").open(pack.key_sealed, P.KEY_PURPOSE)
     if not key then
         ngx.log(ngx.ERR, "[ats] pack key could not be opened: ", tostring(kerr))

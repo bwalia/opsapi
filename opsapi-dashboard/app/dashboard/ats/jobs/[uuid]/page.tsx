@@ -17,7 +17,7 @@ import { Button, Card, Input, Modal, Select, Textarea } from '@/components/ui';
 import { AtsShell, Empty, StageBadge } from '@/components/ats/AtsShell';
 import { apiError } from '@/components/field-service/shared';
 import {
-  atsService, STAGES, STAGE_LABEL, type Application, type Job, type KitSummary, type Stage,
+  atsService, STAGES, STAGE_LABEL, type Application, type Delivery, type Job, type KitSummary, type Stage,
 } from '@/services/ats.service';
 
 type Column = { stage: Stage; applications: Application[] };
@@ -57,12 +57,15 @@ function InviteModal({ app, job, onClose }: { app: Application | null; job: Job;
   const [kits, setKits] = useState<KitSummary[]>([]);
   const [kit, setKit] = useState('');
   const [days, setDays] = useState('7');
+  const [delivery, setDelivery] = useState<Delivery>('online');
   const [link, setLink] = useState<string | null>(null);
+  const [appLink, setAppLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!app) return;
     setLink(null);
+    setAppLink(null);
     atsService.kits({ approved: true }).then((k) => {
       setKits(k);
       setKit(job.kit_uuid && k.some((x) => x.uuid === job.kit_uuid) ? job.kit_uuid : k[0]?.uuid ?? '');
@@ -73,8 +76,9 @@ function InviteModal({ app, job, onClose }: { app: Application | null; job: Job;
     if (!app) return;
     setBusy(true);
     try {
-      const r = await atsService.invite(app.uuid, kit, Number(days));
+      const r = await atsService.invite(app.uuid, kit, Number(days), delivery);
       setLink(r.url);
+      setAppLink(r.app_url ?? null);
     } catch (e) {
       toast.error(apiError(e, 'Could not create the invitation'));
     } finally {
@@ -96,10 +100,16 @@ function InviteModal({ app, job, onClose }: { app: Application | null; job: Job;
             <Button variant="outline" leftIcon={<Copy className="h-4 w-4" />}
               onClick={() => navigator.clipboard.writeText(link).then(() => toast.success('Link copied'))}>Copy</Button>
           </div>
+          {delivery === 'offline' && (
+            <p className="text-sm text-secondary-600">
+              This interview runs offline in the Snazzy Pro app on the candidate&apos;s Mac: they open the link there
+              {appLink ? <> (or this app link: <code className="break-all text-xs">{appLink}</code>)</> : null}.
+            </p>
+          )}
           {app?.candidate?.email && (
             <a className="inline-flex items-center gap-1 text-sm text-primary-600 underline"
               href={`mailto:${app.candidate.email}?subject=${encodeURIComponent(`Your interview for ${job.title}`)}&body=${encodeURIComponent(
-                `Hello ${app.candidate.name},\n\nThank you for applying for ${job.title}. The first step is a short interview you can do online, at a time that suits you:\n\n${link}\n\nThe interviewer is an AI; a person on our team reviews your answers and makes the decision. You can ask for adjustments, or to speak to a person instead, on the first page.\n\nKind regards`)}`}>
+                `Hello ${app.candidate.name},\n\nThank you for applying for ${job.title}. The first step is a short interview you can do ${delivery === 'offline' ? 'in the Snazzy Pro app on your Mac (it runs on your own computer)' : 'online'}, at a time that suits you:\n\n${link}\n\nThe interviewer is an AI; a person on our team reviews your answers and makes the decision. You can ask for adjustments, or to speak to a person instead, on the first page.\n\nKind regards`)}`}>
               <Mail className="h-4 w-4" /> Open an email to {app.candidate.email}
             </a>
           )}
@@ -115,6 +125,10 @@ function InviteModal({ app, job, onClose }: { app: Application | null; job: Job;
           </Select>
           <Select label="Link works for" value={days} onChange={(e) => setDays(e.target.value)}>
             {[3, 7, 14, 30].map((d) => <option key={d} value={d}>{d} days</option>)}
+          </Select>
+          <Select label="Where it runs" value={delivery} onChange={(e) => setDelivery(e.target.value as Delivery)}>
+            <option value="online">Online in the browser</option>
+            <option value="offline">Offline in Snazzy Pro (candidate&apos;s Mac)</option>
           </Select>
         </div>
       )}

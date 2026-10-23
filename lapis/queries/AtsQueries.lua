@@ -546,7 +546,8 @@ function Q.kit_contract(r)
     local kit = Kit.normalise(decode(r.kit) or {})
     kit.id = v(r.external_kit_id) or r.uuid
     kit.version = r.version
-    kit.approved_at = v(r.approved_at) and tostring(r.approved_at) or nil
+    -- ISO 8601: the app's kit format (the column prints as "2026-10-18 10:00:00+00").
+    kit.approved_at = v(r.approved_at) and require("lib.ats.offline").to_iso(r.approved_at) or nil
     kit.approved_by = v(r.approved_by)
     return kit
 end

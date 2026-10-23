@@ -225,6 +225,18 @@ function Kit.validate(kit)
     return issues
 end
 
+--- The kit a candidate's device may hold (offline interviews): the rubric anchors
+-- (levels 1/3/5) are the evaluator's alone and are blanked; everything the
+-- interviewer needs (questions, competencies, weights, settings, facts, the job
+-- description) is kept. Returns a new table; the input is not changed.
+function Kit.for_candidate(kit)
+    local out = Kit.normalise(J.decode(J.encode(Kit.normalise(kit))))
+    for _, c in ipairs(out.competencies) do
+        c.anchors = { ["1"] = "", ["3"] = "", ["5"] = "" }
+    end
+    return out
+end
+
 function Kit.can_approve(kit)
     for _, i in ipairs(Kit.validate(kit)) do
         if i.severity == "error" then return false end

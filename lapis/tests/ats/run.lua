@@ -24,6 +24,8 @@ local P = require("lib.ats.prompts")
 local F = require("lib.ats.fairness")
 local Hash = require("lib.ats.hash")
 local Interop = require("lib.ats.interop")
+local Offline = require("lib.ats.offline")
+local T = require("lib.ats.text")
 
 local passed, failed = 0, 0
 local current = ""
@@ -553,6 +555,179 @@ test("reads a Snazzy InterviewSession and its file wrapper", function()
     check(big and big:find("1 MB", 1, true), "size check")
     local _, noid = Interop.parse(J.encode({ kit = session.kit, turns = {} }))
     check(noid, "needs an id")
+end)
+
+-- Offline interviews (run on the candidate's Mac, uploaded once)
+test("the candidate's kit has no rubric anchors", function()
+    local kit = sample_kit()
+    local safe = Kit.for_candidate(kit)
+    eq(#safe.competencies, 3)
+    for i, c in ipairs(safe.competencies) do
+        eq(c.anchors["1"], "", "anchor 1")
+        eq(c.anchors["3"], "", "anchor 3")
+        eq(c.anchors["5"], "", "anchor 5")
+        eq(c.weight, kit.competencies[i].weight, "weight kept")
+        eq(c.name, kit.competencies[i].name, "name kept")
+    end
+    eq(safe.job_description, kit.job_description, "job description kept")
+    eq(safe.id, kit.id, "id kept")
+    eq(#safe.questions, 3)
+    eq(safe.questions[2].text, kit.questions[2].text, "questions kept")
+    check(kit.competencies[1].anchors["1"] ~= "", "the input is unchanged")
+    check(not J.encode(safe):find("end to end", 1, true), "no anchor text anywhere")
+    -- The interviewer prompt never uses anchors: it is the same either way.
+    eq(P.interviewer_system(safe, false), P.interviewer_system(kit, false), "interviewer prompt")
+end)
+
+test("the offline notice says where it runs; the online one is unchanged", function()
+    local kit = sample_kit()
+    local online = P.notice(kit, "Anthropic (Claude)")
+    local offline = P.notice(kit, "Anthropic (Claude)", { offline = true })
+    check(online ~= offline, "differs")
+    eq(Hash.notice(online), "5de126d94618f8b1", "online wording unchanged (Swift parity)")
+    check(offline:find("on your own computer", 1, true), "own computer")
+    check(offline:find("Nothing is sent while you take it", 1, true), "nothing sent")
+    check(offline:find("summarised by Anthropic (Claude)", 1, true), "evaluator named")
+    check(offline:find("a person on the hiring team reviews", 1, true), "person reviews")
+    check(offline:find("does not analyse your face, voice", 1, true), "no analysis")
+    eq(Hash.notice(offline), Hash.notice(P.notice(kit, "Anthropic (Claude)", { offline = true })), "stable hash")
+    check(Hash.notice(offline) ~= Hash.notice(P.notice(kit, "another provider", { offline = true })), "names provider")
+end)
+
+test("reads ISO 8601 times", function()
+    eq(Offline.parse_iso("1970-01-01T00:00:00Z"), 0)
+    eq(Offline.parse_iso("2027-01-15T08:00:00Z"), 1800000000)
+    eq(Offline.parse_iso("2027-01-15T08:00:00.250Z"), 1800000000, "fraction")
+    eq(Offline.parse_iso("2027-01-15 08:00:00+00"), 1800000000, "postgres")
+    eq(Offline.parse_iso("2027-01-15 09:00:00.123456+01"), 1800000000, "postgres offset")
+    eq(Offline.to_iso("2027-01-15 08:00:00.5+00"), "2027-01-15T08:00:00Z", "to_iso")
+    eq(Offline.to_iso("not a date"), nil, "to_iso nil")
+    eq(Offline.parse_iso("2027-01-15T09:00:00+01:00"), 1800000000, "offset")
+    eq(Offline.parse_iso("2024-02-29T12:00:00Z"), 1709208000, "leap day")
+    eq(Offline.parse_iso("yesterday"), nil)
+    eq(Offline.parse_iso("2027-13-01T00:00:00Z"), nil)
+end)
+
+-- A finished offline interview, as the app uploads it.
+local function offline_upload(c, mutate)
+    local kit = Kit.for_candidate(sample_kit())
+    local e = engine(kit, c)
+    e:acknowledge("feedfacecafebeef", {})
+    e:start()
+    e:receive({ type = "answer", text = "Yes", input = "typed" })
+    e:receive({ type = "answer", text = "Yes", input = "typed" })
+    for _ = 1, 3 do
+        c.t = c.t + 60
+        e:receive({ type = "answer", text = "I coached a new adviser for two weeks.", input = "spoken" })
+        e:apply({ action = "move_on", say = "Thank you.", flags = {} })
+    end
+    e:receive({ type = "answer", text = "No questions.", input = "typed" })
+    local session = Interop.to_snazzy(e.session, "7C1D2C3B-8A7E-4B5C-9D0E-1F2A3B4C5D6E")
+    session.channel = "this_mac"
+    session.offline = { api = "https://api.example", interview_uuid = "x" } -- unknown fields are ignored
+    if mutate then mutate(session) end
+    local raw = J.decode(J.encode(session))
+    return Interop.parse(J.encode({ format = "snazzy-interview", version = 1, exported_at = T.iso(c.t),
+        app = "Snazzy Pro 1.0", interview = raw })), raw
+end
+
+test("accepts a finished offline interview and clamps its times", function()
+    local c = clock()
+    local fetched = c.t - 120
+    local rec, raw = offline_upload(c)
+    check(rec, "parsed")
+    eq(rec.state, "completed")
+    eq(rec.channel, "this_mac")
+    local now = c.t + 10
+    local ok, err = Offline.validate(rec, sample_kit(), { "0000000000000000", "feedfacecafebeef" }, fetched, now, raw)
+    check(ok, "valid: " .. tostring(err))
+    eq(ok.started_ts, 1800000000, "start kept")
+    eq(ok.ended_ts, c.t, "end kept")
+    eq(ok.before_start, false)
+    check(ok.candidate_turns >= 5, "candidate turns")
+    -- A start long before the app fetched the interview is clamped (5 minutes of skew allowed).
+    ok = Offline.validate(rec, sample_kit(), "feedfacecafebeef", c.t + 3600, c.t + 7200, raw)
+    eq(ok.started_ts, c.t + 3600 - 300, "start clamped")
+    eq(ok.ended_ts, c.t + 3600 - 300, "end not before start")
+    -- An end in the future is clamped to now.
+    ok = Offline.validate(rec, sample_kit(), "feedfacecafebeef", fetched, c.t - 30, raw)
+    eq(ok.ended_ts, c.t - 30, "end clamped to now")
+    check(ok.started_ts <= ok.ended_ts, "start <= end")
+end)
+
+test("rejects offline uploads that don't match the invite", function()
+    local c = clock()
+    local fetched, now = c.t - 60, c.t + 3600
+    local function reject(mutate, kit, hash, needle)
+        local rec, raw = offline_upload(clock(), mutate)
+        local ok, err = Offline.validate(rec, kit or sample_kit(), hash or "feedfacecafebeef", fetched, now, raw)
+        check(not ok, "rejected: " .. needle)
+        check(err and err:find(needle, 1, true), "message: " .. tostring(err) .. " ~ " .. needle)
+    end
+    local other = sample_kit()
+    other.id = "00000000-0000-0000-0000-000000000000"
+    reject(nil, other, nil, "different interview")
+    reject(nil, nil, "0123456789abcdef", "information page")
+    reject(function(s) s.state = "in_progress" end, nil, nil, "hasn't finished")
+    reject(function(s) s.state = "made_up" end, nil, nil, "hasn't finished")
+    reject(function(s) s.turns[3].role = "admin" end, nil, nil, "unknown role")
+    reject(function(s) s.turns[3].text = string.rep("a", Offline.MAX_TURN_CHARS + 1) end, nil, nil, "longer than")
+    reject(function(s) s.turns[3].question_id = "q99" end, nil, nil, "isn't in this interview")
+    reject(function(s)
+        for i = #s.turns + 1, Offline.MAX_TURNS + 1 do
+            s.turns[i] = { id = "t" .. i, role = "system", text = "", kind = "other" }
+        end
+    end, nil, nil, "more than 400 turns")
+end)
+
+test("asking for a person before starting needs no notice", function()
+    local c = clock()
+    local e = engine(Kit.for_candidate(sample_kit()), c)
+    e.session.state = "in_progress"
+    e.session.started_ts = nil
+    e:receive({ type = "person" })
+    eq(e.session.state, "human_requested")
+    local session = Interop.to_snazzy(e.session, "8C1D2C3B-8A7E-4B5C-9D0E-1F2A3B4C5D6E")
+    session.notice_hash, session.started_at = nil, nil
+    local raw = J.decode(J.encode(session))
+    local rec = Interop.parse(J.encode(raw))
+    local ok, err = Offline.validate(rec, sample_kit(), "feedfacecafebeef", c.t - 60, c.t + 60, raw)
+    check(ok, "accepted: " .. tostring(err))
+    eq(ok.before_start, true)
+    eq(ok.started_ts, nil, "never started")
+    eq(ok.notice_accepted_ts, nil, "no notice")
+    -- With candidate answers, the notice must match.
+    local rec2, raw2 = offline_upload(clock(), function(s) s.state = "human_requested" s.notice_hash = nil end)
+    check(not Offline.validate(rec2, sample_kit(), "feedfacecafebeef", c.t - 60, c.t + 60, raw2), "needs notice")
+end)
+
+test("a server interview round-trips as a .snazzy_interview file", function()
+    local s = finished_session()
+    local cand = candidate_turns(s)
+    s.evaluation = { competencies = { { id = "c1", level = 3, second_level = 3, agreed = true, reason = "Coached.",
+        evidence = { { turn = cand[1].id, quote = "Her resolution rate went from 60% to 80%." } } } },
+        injection = {}, notes_for_reviewer = "", dropped_quotes = 0, model = "anthropic/claude-opus-5-5",
+        prompt_version = "evaluator.v1", at = "2027-01-15T09:00:00Z" }
+    s.review = { reviewer = "Pat Recruiter", decision = "advance", reason = "", note = "Good evidence.",
+        levels = { c1 = 3 }, at = "2027-01-15T10:00:00Z" }
+    local id = "1b4e28ba-2fa1-11d2-883f-0016d3cca427"
+    local file = { format = Interop.FORMAT, version = Interop.VERSION, exported_at = "2027-01-15T10:00:00Z",
+        app = "OpsAPI", interview = Interop.to_snazzy(s, id) }
+    local rec, err = Interop.parse(J.encode(file))
+    check(rec, "parsed: " .. tostring(err))
+    eq(rec.external_id, id)
+    eq(rec.app, "OpsAPI")
+    eq(rec.state, "completed")
+    eq(#rec.turns, #s.turns, "turns")
+    eq(rec.turns[2].text, s.turns[2].text, "turn text")
+    eq(rec.started_at, T.iso(s.started_ts), "started")
+    eq(rec.ended_at, T.iso(s.ended_ts), "ended")
+    eq(rec.kit.competencies[1].anchors["1"], s.kit.competencies[1].anchors["1"], "full kit")
+    eq(#rec.evaluation.competencies[1].evidence, 1, "verbatim quote kept")
+    eq(rec.evaluation.competencies[1].level, 3)
+    eq(rec.review.decision, "advance")
+    eq(rec.review.reviewer, "Pat Recruiter")
+    eq(#rec.flags, #s.flags, "flags")
 end)
 
 print(("ATS tests: %d passed, %d failed"):format(passed, failed))

@@ -95,6 +95,17 @@ export function StageBadge({ stage }: { stage: Stage }) {
   );
 }
 
+/** A small badge for interviews taken offline in Snazzy Pro on the candidate's own Mac. */
+export function OfflineBadge({ delivery }: { delivery?: string }) {
+  if (delivery !== 'offline') return null;
+  return (
+    <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
+      title="Taken offline in Snazzy Pro on the candidate's own Mac">
+      Offline (candidate&apos;s Mac)
+    </span>
+  );
+}
+
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-xl border border-dashed border-secondary-300 p-8 text-center text-secondary-500">{children}</div>;
 }
