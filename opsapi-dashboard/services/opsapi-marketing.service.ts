@@ -52,6 +52,8 @@ export const marketingService = {
   listCounts: () => apiClient.get(`${BASE}/list-counts`),
   removeListMember: (id: string, contactUuid: string) =>
     apiClient.delete(`${BASE}/lists/${id}/members/${contactUuid}`),
+  updateList: (id: string, body: Record<string, unknown>) =>
+    apiClient.put(`${BASE}/lists/${id}`, body, JSON_BODY),
   deleteList: (id: string) => apiClient.delete(`${BASE}/lists/${id}`),
 
   listTemplates: (params?: Record<string, unknown>) =>

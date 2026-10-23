@@ -215,7 +215,7 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <section aria-labelledby="checklist-title" className="rounded-xl border border-secondary-200 p-5">
+    <section aria-labelledby="checklist-title" className="rounded-2xl border border-secondary-200 bg-surface p-5 shadow-sm sm:p-6">
       <h2 id="checklist-title" className="text-xl font-semibold">
         Your checklist
       </h2>
