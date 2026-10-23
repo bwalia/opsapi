@@ -148,7 +148,11 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   const [termUuid, setTermUuid] = useState('');
   const [folder, setFolder] = useState('');
   const [agent, setAgent] = useState('');
-  const [termPrompt, setTermPrompt] = useState('');
+  // The task prompt keeps {{repo_path}}; until the person edits it, the folder they type is shown in its place.
+  const [termPromptTpl, setTermPromptTpl] = useState('');
+  const [termPromptEdited, setTermPromptEdited] = useState<string | null>(null);
+  const termPrompt =
+    termPromptEdited ?? termPromptTpl.replace(/\{\{\s*repo_path\s*\}\}/g, folder.trim() || 'the folder you choose');
   const [launchUrl, setLaunchUrl] = useState<string | null>(null);
   const live = useRef(0);
   const terminal = terminals.find((t) => t.uuid === termUuid);
@@ -209,7 +213,8 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
         setTermUuid(offers[0]?.uuid || '');
         setFolder(offers[0]?.default_path || '');
         setAgent(firstAgent(offers[0]));
-        setTermPrompt(first.terminal_prompt || '');
+        setTermPromptTpl(first.terminal_prompt || '');
+        setTermPromptEdited(null);
         setLaunchUrl(null);
         setMode(initialMode || (offers.length ? 'terminal' : 'run'));
         const r = list.find(usable);
@@ -404,7 +409,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
                 </Select>
                 {agent !== 'shell' && (
                   <Textarea id="air-terminal-prompt" label="First message to the agent" rows={10} value={termPrompt}
-                    onChange={(e) => setTermPrompt(e.target.value)} className="font-mono text-xs" spellCheck={false}
+                    onChange={(e) => setTermPromptEdited(e.target.value)} className="font-mono text-xs" spellCheck={false}
                     helperText="The task, ready for the agent. Change it if you like; you can keep talking to the agent in the terminal." />
                 )}
                 <p className="text-xs text-secondary-500">

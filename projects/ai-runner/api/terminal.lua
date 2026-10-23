@@ -116,6 +116,7 @@ return function(app)
         for _, a in ipairs(T.agents(term)) do if a.id == d.agent then agent = a end end
         if not agent then U.invalid({ agent = "isn't one of this terminal's agents" }) end
         local prompt = type(d.prompt) == "string" and d.prompt ~= "" and U.clean(d.prompt) or T.prompt(ns, task)
+        prompt = T.with_folder(prompt, path)
         if #prompt > T.MAX_PROMPT then U.invalid({ prompt = "is too long (at most " .. T.MAX_PROMPT .. " bytes)" }) end
         local me = U.one("SELECT " .. R.name_sql("u") .. " AS name FROM users u WHERE u.uuid = ?", sdk.user(self).uuid)
         local row, launch_url = T.launch(ns, task, sdk.user(self).uuid, {

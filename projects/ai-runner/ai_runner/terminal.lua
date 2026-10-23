@@ -148,16 +148,21 @@ end
 local TERMINAL_OUTPUT = "commit your work on that branch, push it and open a pull request to the base branch "
     .. "(never merge). The person who opened this terminal is watching: tell them when you are done."
 
---- The task prompt for an agent in a terminal: the workspace template, in the folder the terminal opened.
+--- The task prompt for an agent in a terminal: the workspace template. `{{repo_path}}` is left in: the dialog shows
+-- the folder being typed there, and the launch fills in the folder actually chosen (T.with_folder).
 function T.prompt(ns, task)
     local defaults = R.defaults(ns, task)
     local ps = defaults.project_settings
     local snap = require("ai_runner.context").snapshot(ps, {})
     return U.clean(R.render(R.template(ns).body, task, {
-        repo_path = "this terminal's current folder", base_branch = defaults.base_branch,
+        repo_path = "{{repo_path}}", base_branch = defaults.base_branch,
         target_repo = type(ps.target_repo_url) == "string" and ps.target_repo_url or nil,
         output_text = TERMINAL_OUTPUT, context_snapshot = snap,
     }), T.MAX_PROMPT)
+end
+
+function T.with_folder(prompt, path)
+    return (prompt:gsub("{{%s*repo_path%s*}}", function() return path end))
 end
 
 local function remember_path(ns, project_uuid, terminal_uuid, path)
