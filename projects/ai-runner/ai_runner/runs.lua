@@ -1031,18 +1031,21 @@ local function try_claim(runner)
             .. "status IN " .. R.ACTIVE_SQL, runner.uuid, runner.namespace_id).n
         if busy >= math.max(cap, 1) then return nil end
         -- The runner row lock serialises this runner's claims; SKIP LOCKED steps over a run being cancelled.
+        -- MATERIALIZED: as a plain subquery Postgres may re-run the pick per row, and with SKIP LOCKED each re-run
+        -- picks another run: one claim then took several runs with the same token (unique violation → 409).
         return U.one([[
+            WITH pick AS MATERIALIZED (
+                SELECT q.id FROM ar_runs q JOIN ar_runners rn ON rn.uuid = q.runner_uuid
+                LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
+                WHERE q.namespace_id = ? AND q.runner_uuid = ? AND q.status = 'queued'
+                  AND q.profile NOT IN ]] .. unavailable_sql("rn") .. [[
+                ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
+                                         WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
+                LIMIT 1 FOR UPDATE OF q SKIP LOCKED)
             UPDATE ar_runs r SET status = 'claimed', claimed_at = NOW(), heartbeat_at = NOW(), updated_at = NOW(),
                 run_token_hash = ?, lease_until = ]] .. R.lease_sql() .. [[
-            FROM (SELECT q.id FROM ar_runs q JOIN ar_runners rn ON rn.uuid = q.runner_uuid
-                  LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
-                  WHERE q.namespace_id = ? AND q.runner_uuid = ? AND q.status = 'queued'
-                    AND q.profile NOT IN ]] .. unavailable_sql("rn") .. [[
-                  ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
-                                           WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
-                  LIMIT 1 FOR UPDATE OF q SKIP LOCKED) pick
-            WHERE r.id = pick.id RETURNING r.*
-        ]], hash, runner.namespace_id, runner.uuid)
+            FROM pick WHERE r.id = pick.id RETURNING r.*
+        ]], runner.namespace_id, runner.uuid, hash)
     end)
     if run then run.run_token = raw end
     return run

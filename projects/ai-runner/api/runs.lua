@@ -246,6 +246,8 @@ return function(app)
             })
             if not d then U.invalid(errors) end
             for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
+            -- A locked or disallowed executor is the real reason a start fails: say so before checking folders.
+            R.resolve_executor(self, ns, task, d, nil)
             -- JobShout runs inside JobShout: prefer the built-in runner as the OpsAPI host row when the client
             -- didn't pick a machine (or picked one by habit).
             if d.executor_kind == "jobshout" then

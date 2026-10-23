@@ -167,19 +167,21 @@ function B.claim()
         local busy = U.one([[SELECT COUNT(*)::int AS n FROM ar_runs a JOIN ar_runners rn ON rn.uuid = a.runner_uuid
             AND rn.namespace_id = a.namespace_id WHERE rn.kind = 'builtin' AND a.status IN ]] .. R.ACTIVE_SQL).n
         if busy >= p.builtin_max_runs then return nil end
+        -- MATERIALIZED, so the pick runs once (see try_claim in runs.lua): one claim takes one run.
         return U.one([[
+            WITH pick AS MATERIALIZED (
+                SELECT q.id FROM ar_runs q
+                JOIN ar_runners rn ON rn.uuid = q.runner_uuid AND rn.namespace_id = q.namespace_id
+                LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
+                WHERE q.status = 'queued' AND rn.kind = 'builtin' AND rn.status = 'active'
+                  AND (SELECT COUNT(*) FROM ar_runs a WHERE a.runner_uuid = q.runner_uuid
+                       AND a.namespace_id = q.namespace_id AND a.status IN ]] .. R.ACTIVE_SQL .. [[) < ?
+                ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
+                                         WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
+                LIMIT 1 FOR UPDATE OF q SKIP LOCKED)
             UPDATE ar_runs r SET status = 'claimed', claimed_at = NOW(), heartbeat_at = NOW(), updated_at = NOW(),
                 agent_session_id = 'builtin', lease_until = ]] .. R.lease_sql() .. [[
-            FROM (SELECT q.id FROM ar_runs q
-                  JOIN ar_runners rn ON rn.uuid = q.runner_uuid AND rn.namespace_id = q.namespace_id
-                  LEFT JOIN kanban_tasks t ON t.uuid = q.task_uuid
-                  WHERE q.status = 'queued' AND rn.kind = 'builtin' AND rn.status = 'active'
-                    AND (SELECT COUNT(*) FROM ar_runs a WHERE a.runner_uuid = q.runner_uuid
-                         AND a.namespace_id = q.namespace_id AND a.status IN ]] .. R.ACTIVE_SQL .. [[) < ?
-                  ORDER BY CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
-                                           WHEN 'low' THEN 4 ELSE 5 END, q.created_at, q.id
-                  LIMIT 1 FOR UPDATE OF q SKIP LOCKED) pick
-            WHERE r.id = pick.id RETURNING r.*
+            FROM pick WHERE r.id = pick.id RETURNING r.*
         ]], p.builtin_max_runs_per_workspace)
     end)
 end
