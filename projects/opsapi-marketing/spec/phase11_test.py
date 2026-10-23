@@ -192,6 +192,14 @@ busy = one(c2, "busy@p11.invalid", "d.state || '|' || d.attempts")
 check("gives up after 3 attempts", busy == ["failed|3"], busy)
 check("campaign completed after retries", sql(f"SELECT status FROM mkt_campaigns WHERE uuid = '{c2}'") == ["completed"])
 
+# --- a smart list can be turned into a regular one (people are then added by hand) ---
+smart = data(expect("smart list", call("POST", P + "/lists", "owner_a", W,
+                                       {"name": "Smart " + new_uuid()[:6], "list_type": "dynamic", "channel": "email"}), 201))
+made = data(expect("make it regular", call("PUT", P + f"/lists/{smart['uuid']}", "owner_a", W, {"list_type": "static"}), 200))
+check("now a regular list", made.get("list_type") == "static", made)
+expect("people can be added to it", call("POST", P + f"/lists/{smart['uuid']}/import", "owner_a", W,
+                                         {"csv": "email\nsmart@p11.invalid\n", "grant_consent": True}), 200)
+
 # --- email images ---
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 img = data(expect("upload image", call("POST", P + "/images", "owner_a", W,

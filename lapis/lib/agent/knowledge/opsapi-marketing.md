@@ -29,6 +29,7 @@ Multi-channel marketing (email + SMS) on CRM contacts. Consent, suppression and 
 - **Templates** (guide#templates): Studio → "Add ready-made templates" → edit like a document, picture button uploads images, Merge fields → First name → Save draft → Publish.
 - **Write an email** (guide#write-email): list → "Write an email to them" (or Campaigns → name → Create draft) → Content: "Start from a template", Subject, words, "Upload image" → Save content. Unsubscribe link and business address are added automatically.
 - **Send** (guide#send): Audience tab → List → Test recipient → "Send test" (needs test mode off) → optional "Per batch" + "Minutes between batches" (e.g. 400 / 60) → Validate → "Send now" or "Schedule…". Quiet hours 21:00–08:00 hold marketing until morning.
+- **List has no "Add people"** (guide#problems): it is a smart list (list_type dynamic, sparkle icon) that fills itself from rules (fields: email, names, company, job title, phone, status — no city). Button "Make it a regular list" on the list switches it to static.
 - **Nothing arrived** (guide#problems): test mode on? email connected? daily limit reached? quiet hours? spam folder?
 
 ## Answers

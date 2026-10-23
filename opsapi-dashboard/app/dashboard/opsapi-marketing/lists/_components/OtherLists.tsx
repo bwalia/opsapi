@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, RefreshCw, X } from 'lucide-react';
+import { Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import { Alert, CARD, FIELD, type MktList, friendlyError, people } from './shared';
@@ -19,6 +19,19 @@ const OP_LABELS: Record<string, string> = {
   is_empty: 'is empty',
   not_empty: 'is not empty',
 };
+// What each rule field means, in plain words (the API's field keys stay as they are).
+const FIELD_LABELS: Record<string, string> = {
+  email: 'Email address',
+  first_name: 'First name',
+  last_name: 'Last name',
+  company: 'Company',
+  job_title: 'Job title',
+  phone: 'Phone',
+  mobile: 'Mobile',
+  status: 'Contact status',
+};
+const fieldLabel = (f: string) => FIELD_LABELS[f] || f.replace(/[._]/g, ' ');
+
 const SELECT =
   'w-full rounded-lg border border-secondary-300 bg-surface px-2.5 py-2 text-base text-secondary-900 sm:w-auto';
 
@@ -69,7 +82,16 @@ function buildRule(match: 'and' | 'or', conditions: Condition[]) {
 }
 
 /** Rules for a smart list. Render with key={list.uuid}. */
-export function SmartListRules({ list, onSaved }: { list: MktList; onSaved: () => Promise<void> | void }) {
+export function SmartListRules({
+  list,
+  onSaved,
+  onMakeRegular,
+}: {
+  list: MktList;
+  onSaved: () => Promise<void> | void;
+  /** Turn it into a regular list people are added to by hand. */
+  onMakeRegular: () => void;
+}) {
   const initial = parseRule(list.segment_rule);
   const [match, setMatch] = useState<'and' | 'or'>(initial.match);
   const [conditions, setConditions] = useState<Condition[]>(initial.conditions);
@@ -88,7 +110,11 @@ export function SmartListRules({ list, onSaved }: { list: MktList; onSaved: () =
       .then((f) => {
         if (cancelled) return;
         const d = f.data?.data ?? f.data ?? {};
-        setFields((d.fields || []).map((x: { field: string }) => x.field));
+        setFields(
+          (d.fields || [])
+            .map((x: { field: string }) => x.field)
+            .sort((a: string, b: string) => fieldLabel(a).localeCompare(fieldLabel(b))),
+        );
         setOps(d.ops || []);
         setLoadError(null);
       })
@@ -150,6 +176,18 @@ export function SmartListRules({ list, onSaved }: { list: MktList; onSaved: () =
           Contacts that match these rules are put in the list for you, and it updates itself before every email.
         </p>
       </div>
+      <div className="flex flex-col gap-3 rounded-xl border border-primary-500/30 bg-primary-500/5 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+        <p className="flex items-start gap-2 text-base text-secondary-700 dark:text-secondary-200">
+          <Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary-600" aria-hidden="true" />
+          <span>
+            You can’t add people to a smart list yourself. Want to type them in, upload a file or pick from your
+            contacts instead?
+          </span>
+        </p>
+        <Button variant="outline" className="shrink-0" onClick={onMakeRegular}>
+          Make it a regular list
+        </Button>
+      </div>
       {loadError && <Alert onRetry={() => setLoadTry((n) => n + 1)}>{loadError}</Alert>}
       {error && <Alert onDismiss={() => setError(null)}>{error}</Alert>}
       <label className="flex flex-col gap-2 text-base text-secondary-900 sm:flex-row sm:items-center">
@@ -171,10 +209,10 @@ export function SmartListRules({ list, onSaved }: { list: MktList; onSaved: () =
             value={c.field}
             onChange={(e) => update(i, { field: e.target.value })}
           >
-            {!fields.includes(c.field) && <option value={c.field}>{c.field.replace(/[._]/g, ' ')}</option>}
+            {!fields.includes(c.field) && <option value={c.field}>{fieldLabel(c.field)}</option>}
             {fields.map((f) => (
               <option key={f} value={f}>
-                {f.replace(/[._]/g, ' ')}
+                {fieldLabel(f)}
               </option>
             ))}
           </select>
@@ -190,7 +228,7 @@ export function SmartListRules({ list, onSaved }: { list: MktList; onSaved: () =
             <input
               className={`${FIELD} py-2 sm:w-auto sm:min-w-40 sm:flex-1`}
               aria-label="Value"
-              placeholder="e.g. London"
+              placeholder="e.g. Acme Ltd"
               value={c.value}
               onChange={(e) => update(i, { value: e.target.value })}
             />

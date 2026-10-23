@@ -497,6 +497,10 @@ export default function MarketingGuidePage() {
                 <strong>My list says “Empty”.</strong> Click it and use <B>Add people to this list</B>.
               </li>
               <li>
+                <strong>My list has no “Add people” box.</strong> It’s a smart list (it has a sparkle icon): it fills
+                itself from your contacts using rules. Press <B>Make it a regular list</B> to add people yourself.
+              </li>
+              <li>
                 <strong>My emails land in spam.</strong> Send from your own connected email, avoid ALL CAPITALS and lots
                 of exclamation marks, and send to people who expect to hear from you.
               </li>
