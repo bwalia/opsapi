@@ -15,7 +15,7 @@ import {
   Loader2,
   ExternalLink,
 } from 'lucide-react';
-import { Card, Button, Badge, Input } from '@/components/ui';
+import { Card, Button, Badge, Input, confirmDialog } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { servicesService } from '@/services';
 import { formatDate, cn } from '@/lib/utils';
@@ -129,7 +129,14 @@ export default function ServiceSettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this GitHub integration? Services using it will no longer be able to deploy.')) {
+    if (
+      !(await confirmDialog({
+        title: 'Delete this GitHub integration?',
+        message: 'Services using it will no longer be able to deploy.',
+        confirmText: 'Delete',
+        danger: true,
+      }))
+    ) {
       return;
     }
 

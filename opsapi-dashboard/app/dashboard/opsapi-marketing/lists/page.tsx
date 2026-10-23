@@ -99,6 +99,8 @@ function ListsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [writing, setWriting] = useState(false);
+  const [confirmRegular, setConfirmRegular] = useState(false);
+  const [converting, setConverting] = useState(false);
 
   // The list in the address bar, else the first one: there is always a list open.
   const selected = useMemo(() => lists.find((l) => l.uuid === wanted) ?? lists[0] ?? null, [lists, wanted]);
@@ -258,6 +260,23 @@ function ListsPage() {
     }
   };
 
+  /** A smart list becomes a regular one: the people in it stay, and people are added by hand from now on. */
+  const makeRegular = async () => {
+    if (!selected) return;
+    setConverting(true);
+    try {
+      await marketingService.updateList(selected.uuid, { list_type: 'static' });
+      setLists((ls) => ls.map((l) => (l.uuid === selected.uuid ? { ...l, list_type: 'static' } : l)));
+      setConfirmRegular(false);
+      toast.success('It’s now a regular list — add people below');
+    } catch (err: unknown) {
+      setConfirmRegular(false);
+      setHeaderError(friendlyError(err, 'Could not change the list'));
+    } finally {
+      setConverting(false);
+    }
+  };
+
   const writeEmail = async () => {
     if (!selected || writing) return;
     setWriting(true);
@@ -350,7 +369,10 @@ function ListsPage() {
               checked={newType === 'dynamic'}
               onChange={(e) => setNewType(e.target.checked ? 'dynamic' : 'static')}
             />
-            <span>Smart list: fills itself with contacts that match rules you set (e.g. everyone in London)</span>
+            <span>
+              Smart list (advanced): fills itself with contacts that match rules you set, e.g. everyone at one company.
+              You can’t add people to it yourself.
+            </span>
           </label>
         </div>
       </details>
@@ -544,7 +566,7 @@ function ListsPage() {
                             <span className="text-secondary-500">—</span>
                           ) : n === 0 ? (
                             <span className="rounded-full bg-warning-500/15 px-2 py-0.5 font-medium text-warning-600">
-                              Empty — add people
+                              {l.list_type === 'dynamic' ? 'Empty — nobody matches' : 'Empty — add people'}
                             </span>
                           ) : (
                             <span className="text-secondary-600">{people(n)}</span>
@@ -648,14 +670,23 @@ function ListsPage() {
               </div>
               {headerError && <Alert onDismiss={() => setHeaderError(null)}>{headerError}</Alert>}
               {selectedCount === 0 && membersLoad === 'ready' && !isSms && (
-                <p className="text-sm text-secondary-600">Add people below, then you can write them an email.</p>
+                <p className="text-sm text-secondary-600">
+                  {isDynamic
+                    ? 'Nobody matches the rules yet — change the rules below, or make it a regular list and add people yourself.'
+                    : 'Add people below, then you can write them an email.'}
+                </p>
               )}
             </section>
 
             <div className="@container">
               <div className="grid items-start gap-6 @5xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
                 {isDynamic ? (
-                  <SmartListRules key={selected.uuid} list={selected} onSaved={refreshSelected} />
+                  <SmartListRules
+                    key={selected.uuid}
+                    list={selected}
+                    onSaved={refreshSelected}
+                    onMakeRegular={() => setConfirmRegular(true)}
+                  />
                 ) : isSms ? (
                   <AddSmsPeople key={selected.uuid} list={selected} onAdded={refreshSelected} />
                 ) : (
@@ -806,7 +837,7 @@ function ListsPage() {
                                       )}
                                     </td>
                                     <td className="px-5 py-3 text-right sm:px-6">
-                                      {m.source !== 'segment' && (
+                                      {!isDynamic && (
                                         <Button
                                           size="sm"
                                           variant="ghost"
@@ -843,6 +874,16 @@ function ListsPage() {
         </div>
       )}
 
+      <ConfirmDialog
+        isOpen={confirmRegular}
+        onClose={() => !converting && setConfirmRegular(false)}
+        onConfirm={() => void makeRegular()}
+        title="Make it a regular list?"
+        message="It stops filling itself from the rules. Anyone in it now stays, and from now on you add people yourself — by typing them, uploading a file or picking from your contacts."
+        confirmText="Make it a regular list"
+        variant="info"
+        isLoading={converting}
+      />
       <ConfirmDialog
         isOpen={confirmDelete}
         onClose={() => !deleting && setConfirmDelete(false)}

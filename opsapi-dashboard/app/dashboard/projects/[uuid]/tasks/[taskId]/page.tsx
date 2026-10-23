@@ -21,6 +21,7 @@ import {
 } from '@/services/kanban.service';
 import { TimerButton } from '@/components/time-tracking';
 import RichTextEditor from '@/components/academy/RichTextEditor';
+import { confirmDialog } from '@/components/ui';
 import { StartWithAIButton } from '@/components/ai-runner/StartWithAIDialog';
 import TaskRuns from '@/components/ai-runner/TaskRuns';
 import TaskWork from '@/components/ai-runner/TaskWork';
@@ -211,7 +212,7 @@ export default function TaskDetailPage() {
                 <button
                   onClick={async () => {
                     setMenuOpen(false);
-                    if (!window.confirm('Delete this task?')) return;
+                    if (!(await confirmDialog({ title: 'Delete this task?', confirmText: 'Delete', danger: true }))) return;
                     const ok = await deleteTask(task.uuid);
                     if (ok) { toast.success('Task deleted'); router.push(boardHref); }
                     else toast.error('Failed to delete');

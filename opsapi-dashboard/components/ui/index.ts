@@ -10,4 +10,5 @@ export { default as Badge } from './Badge';
 export { default as Switch } from './Switch';
 export { default as Table } from './Table';
 export { default as Modal, ConfirmDialog } from './Modal';
+export { DialogHost, confirmDialog, promptDialog, alertDialog } from './Dialogs';
 export { default as Pagination } from './Pagination';

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Percent, Banknote, RefreshCw } from 'lucide-react';
-import { Card, CardHeader, CardContent, Button, Badge } from '@/components/ui';
+import { Card, CardHeader, CardContent, Button, Badge, promptDialog } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { AccessDenied } from '@/components/permissions';
 import { academyService, type PayoutRow } from '@/services/academy.service';
@@ -69,16 +69,18 @@ function AdminPayouts(): React.ReactElement {
   };
 
   const setOverride = async (r: PayoutRow): Promise<void> => {
-    const input = window.prompt(
-      `Per-instructor cut % for ${r.instructor_name} (blank = use default):`,
-      '',
-    );
+    const input = await promptDialog({
+      title: `Per-instructor cut % for ${r.instructor_name}`,
+      label: 'Blank = use default',
+      defaultValue: '',
+      validate: (v) => {
+        if (v.trim() === '') return null;
+        const n = Number(v);
+        return Number.isNaN(n) || n < 0 || n > 100 ? 'Enter 0–100 or blank' : null;
+      },
+    });
     if (input === null) return;
     const pct = input.trim() === '' ? null : Number(input);
-    if (pct !== null && (Number.isNaN(pct) || pct < 0 || pct > 100)) {
-      toast.error('Enter 0–100 or blank');
-      return;
-    }
     try {
       await academyService.setInstructorFeeOverride(r.user_uuid, pct);
       toast.success('Cut override updated');
@@ -89,10 +91,12 @@ function AdminPayouts(): React.ReactElement {
   };
 
   const markPaid = async (r: PayoutRow): Promise<void> => {
-    const ref = window.prompt(
-      `Mark ${money(r.owed, r.currency)} as paid to ${r.instructor_name}? Optional bank reference:`,
-      '',
-    );
+    const ref = await promptDialog({
+      title: `Mark ${money(r.owed, r.currency)} as paid to ${r.instructor_name}?`,
+      label: 'Optional bank reference:',
+      defaultValue: '',
+      confirmText: 'Mark paid',
+    });
     if (ref === null) return;
     try {
       const res = await academyService.markPayoutPaid(r.user_uuid, ref);

@@ -9,7 +9,7 @@ import {
   Edit2,
   RefreshCw,
 } from 'lucide-react';
-import { Input, Table, Card, Modal } from '@/components/ui';
+import { Input, Table, Card, Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService, type TaxBankAccount } from '@/services/tax.service';
@@ -98,7 +98,7 @@ function BankAccountsContent() {
   };
 
   const handleDelete = async (account: TaxBankAccount) => {
-    if (!confirm(`Delete bank account "${account.bank_name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete bank account "${account.bank_name}"?`, message: 'This cannot be undone.', confirmText: 'Delete', danger: true }))) return;
     try {
       await taxService.deleteBankAccount(account.uuid ?? account.id);
       toast.success('Bank account deleted');

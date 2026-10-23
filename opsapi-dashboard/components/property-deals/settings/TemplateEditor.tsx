@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Download, Plus, Trash2, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Badge, Button, Card, Input, Modal, Select, Textarea } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, Select, Textarea, confirmDialog } from '@/components/ui';
 import { pdService, pdError, pdErrorText } from '@/services/property-deals.service';
 import { ErrorNote, Spinner, Tabs, dateText } from '../ui';
 import { usePdData } from '../usePd';
@@ -127,7 +127,7 @@ export default function TemplateEditor({ canEdit }: { canEdit: boolean }) {
                       <div className="ml-auto flex">
                         <Button size="sm" variant="ghost" aria-label="Move stage up" disabled={si === 0} onClick={() => update((d) => { [d.stages[si - 1], d.stages[si]] = [d.stages[si], d.stages[si - 1]]; })}><ArrowUp className="h-4 w-4" /></Button>
                         <Button size="sm" variant="ghost" aria-label="Move stage down" disabled={si === def.stages.length - 1} onClick={() => update((d) => { [d.stages[si + 1], d.stages[si]] = [d.stages[si], d.stages[si + 1]]; })}><ArrowDown className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="ghost" aria-label="Remove stage" onClick={() => window.confirm(`Remove stage ${st.name}?`) && update((d) => { d.stages.splice(si, 1); })}><Trash2 className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" aria-label="Remove stage" onClick={async () => { if (await confirmDialog({ title: `Remove stage ${st.name}?`, confirmText: 'Remove', danger: true })) update((d) => { d.stages.splice(si, 1); }); }}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     )}
                   </div>

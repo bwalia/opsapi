@@ -7,6 +7,7 @@ import { Shield, Cloud, Server, Lock, FileText, Plus, RefreshCw, Trash2, Setting
 import { vaultProvidersService, VaultProvider, ProviderType, SyncLog } from '@/services/vault-providers.service';
 import { getVaultKey } from '@/services/vault.service';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { confirmDialog } from '@/components/ui';
 
 const PROVIDER_ICONS: Record<string, typeof Shield> = {
   hashicorp_vault: Shield,
@@ -152,7 +153,7 @@ export default function VaultProvidersPage() {
   };
 
   const handleDelete = async (uuid: string) => {
-    if (!vaultKey || !confirm('Delete this provider?')) return;
+    if (!vaultKey || !(await confirmDialog({ title: 'Delete this provider?', confirmText: 'Delete', danger: true }))) return;
     try {
       await vaultProvidersService.deleteProvider(vaultKey, uuid);
       toast.success('Provider removed');

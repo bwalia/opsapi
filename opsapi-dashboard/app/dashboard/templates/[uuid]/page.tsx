@@ -21,7 +21,7 @@ import {
   Check,
   AlertCircle,
 } from 'lucide-react';
-import { Modal } from '@/components/ui';
+import { Modal, promptDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   templatesService,
@@ -490,7 +490,7 @@ function TemplateBuilderContent() {
 
   const handleClone = useCallback(async () => {
     if (!template) return;
-    const name = prompt('Enter name for the cloned template:', `${template.name} (Copy)`);
+    const name = await promptDialog({ title: 'Clone template', label: 'Enter name for the cloned template:', defaultValue: `${template.name} (Copy)`, confirmText: 'Clone' });
     if (!name) return;
 
     try {

@@ -406,18 +406,18 @@ export default function MarketingGuidePage() {
                 You’re on the <B>Content</B> tab. To use a design you saved, pick it in <B>Start from a template</B>.
               </li>
               <li>
-                Type the <B>Subject</B> — the line people see in their inbox.
+                Type the <B>Subject</B> — the line people see in their inbox. <B>+ First name</B> adds the person’s
+                name.
               </li>
               <li>
-                Change the words of the email in <B>HTML body</B>. Only change the words between the{' '}
-                <code>&lt; &gt;</code> marks; leave the marks themselves alone. (Prefer a normal editor? Design it in
-                the Studio and use <B>Start from a template</B>.)
+                Under <B>Your email</B>, click into the email and change the words, just like a normal document.
               </li>
               <li>
-                Pictures: put the cursor where it should go and press <B>Upload image</B>.
+                Pictures: put the cursor where it should go and press the picture button. To greet each person by name,
+                use <B>Personalise…</B>. <B>Button</B> adds a big button that links to your website.
               </li>
               <li>
-                The preview on the right shows exactly what people will see. Press <B>Save</B>.
+                The preview on the right shows exactly what people will see. Press <B>Save content</B>.
               </li>
             </ol>
             <Tip>
@@ -431,19 +431,19 @@ export default function MarketingGuidePage() {
                 Open your email in <Go href={CAMPAIGNS}>Marketing → Campaigns</Go> and go to the <B>Audience</B> tab.
               </li>
               <li>
-                Under <B>List</B>, choose who should get it (if you came from your list, it’s already chosen).
+                Under <B>Who gets this email</B>, choose your list (if you came from your list, it’s already chosen).
               </li>
               <li>
-                Send yourself a test: type your email under <B>Test recipient</B> and press <B>Send test</B>. (Test mode
-                must be off for it to really arrive.)
+                Under <B>Send yourself a test</B>, your own email is already filled in — press <B>Send test</B>. It
+                doesn’t add you to the list. (Test mode must be off for it to really arrive.)
               </li>
               <li>
-                Big list? Fill in <B>Per batch</B> and <B>Minutes between batches</B> — for example 400 and 60 sends 400
-                emails every hour. Leave them empty to send to everyone at once.
+                Big list? Open <B>More options</B> and fill in <B>Per batch</B> and <B>Minutes between batches</B> — for
+                example 400 and 60 sends 400 emails every hour. Leave them empty to send to everyone at once.
               </li>
               <li>
-                Press <B>Validate</B>. It checks everything and tells you how many people will get the email, and why
-                anyone is left out.
+                Press <B>Check it</B> (top right). It checks everything and tells you how many people will get the
+                email, and why anyone is left out.
               </li>
               <li>
                 Press <B>Send now</B> — or <B>Schedule…</B> to pick a date and time.
@@ -495,6 +495,10 @@ export default function MarketingGuidePage() {
               </li>
               <li>
                 <strong>My list says “Empty”.</strong> Click it and use <B>Add people to this list</B>.
+              </li>
+              <li>
+                <strong>My list has no “Add people” box.</strong> It’s a smart list (it has a sparkle icon): it fills
+                itself from your contacts using rules. Press <B>Make it a regular list</B> to add people yourself.
               </li>
               <li>
                 <strong>My emails land in spam.</strong> Send from your own connected email, avoid ALL CAPITALS and lots

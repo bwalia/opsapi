@@ -24,6 +24,7 @@ import {
   unwrapArray,
 } from './_components/shared';
 import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
+import { TestModeBanner, useTestMode } from '@/components/opsapi-marketing/TestMode';
 
 
 export default function MarketingCampaignsPage() {
@@ -32,6 +33,7 @@ export default function MarketingCampaignsPage() {
   const [metrics, setMetrics] = useState<Record<string, AttributionRow>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const testMode = useTestMode();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [status, setStatus] = useState('');
@@ -106,6 +108,8 @@ export default function MarketingCampaignsPage() {
           </>
         }
       />
+
+      <TestModeBanner on={testMode} />
 
       <form onSubmit={(e) => void createDraft(e)} className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 p-4">
         <label className="block min-w-64 flex-1 text-sm">

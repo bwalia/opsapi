@@ -22,7 +22,7 @@ import {
   PackageX,
   Undo2,
 } from 'lucide-react';
-import { Modal } from '@/components/ui';
+import { Modal, confirmDialog, promptDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PurchaseOrderStatusBadge } from '@/components/purchase-orders/PurchaseOrderStatusBadge';
 import { PurchaseOrderFormModal } from '@/components/purchase-orders/PurchaseOrderFormModal';
@@ -544,7 +544,7 @@ function PurchaseOrderDetailContent() {
       toast.error('Add at least one line before sending.');
       return;
     }
-    if (!window.confirm(`Email purchase order ${po.po_number} to ${to}?`)) return;
+    if (!(await confirmDialog({ title: `Email purchase order ${po.po_number} to ${to}?`, confirmText: 'Send' }))) return;
     const { base64, filename } = purchaseOrderPdfBase64(po, company);
     setBusy(true);
     try {
@@ -561,25 +561,29 @@ function PurchaseOrderDetailContent() {
 
   const handleClose = useCallback(async () => {
     if (!po) return;
-    const reason = window.prompt(
-      `Close ${po.po_number} short? No more goods will be received; what has arrived can still be billed. Reason:`,
-      ''
-    );
+    const reason = await promptDialog({
+      title: `Close ${po.po_number} short?`,
+      message: 'No more goods will be received; what has arrived can still be billed.',
+      label: 'Reason',
+      defaultValue: '',
+      validate: (v) => (v.trim() ? null : 'A reason is required to close the order short'),
+      confirmText: 'Close short',
+    });
     if (reason === null) return;
-    if (!reason.trim()) {
-      toast.error('A reason is required to close the order short');
-      return;
-    }
     await act(() => purchaseOrdersService.closeShort(po.uuid, reason.trim()), 'Purchase order closed short', 'Failed to close');
   }, [po, act]);
 
   const handleVoidBill = useCallback(
     async (bill: PurchaseOrderBill) => {
       if (!po) return;
-      const reason = window.prompt(
-        `Void the ${money(bill.gross, po.currency)} bill? Its pending ledger expense is removed and the goods can be billed again. Reason (optional):`,
-        ''
-      );
+      const reason = await promptDialog({
+        title: `Void the ${money(bill.gross, po.currency)} bill?`,
+        message: 'Its pending ledger expense is removed and the goods can be billed again.',
+        label: 'Reason (optional)',
+        defaultValue: '',
+        confirmText: 'Void bill',
+        danger: true,
+      });
       if (reason === null) return;
       await act(
         () => purchaseOrdersService.voidBill(po.uuid, bill.uuid, reason || undefined),
@@ -592,14 +596,21 @@ function PurchaseOrderDetailContent() {
 
   const handleCancel = useCallback(async () => {
     if (!po) return;
-    const reason = window.prompt(`Cancel ${po.po_number}? Optionally give a reason:`, '');
+    const reason = await promptDialog({
+      title: `Cancel ${po.po_number}?`,
+      label: 'Reason (optional)',
+      defaultValue: '',
+      confirmText: 'Cancel order',
+      cancelText: 'Keep order',
+      danger: true,
+    });
     if (reason === null) return;
     await act(() => purchaseOrdersService.cancel(po.uuid, reason || undefined), 'Purchase order cancelled', 'Failed to cancel');
   }, [po, act]);
 
   const handleDelete = useCallback(async () => {
     if (!po) return;
-    if (!window.confirm('Delete this draft purchase order? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete this draft purchase order?', message: 'This cannot be undone.', confirmText: 'Delete', danger: true }))) return;
     try {
       await purchaseOrdersService.deletePurchaseOrder(po.uuid);
       toast.success('Purchase order deleted');
@@ -611,7 +622,7 @@ function PurchaseOrderDetailContent() {
 
   const handleDeleteLine = useCallback(
     async (itemUuid: string) => {
-      if (!window.confirm('Remove this line?')) return;
+      if (!(await confirmDialog({ title: 'Remove this line?', confirmText: 'Remove', danger: true }))) return;
       await act(() => purchaseOrdersService.deleteItem(itemUuid), 'Line removed', 'Failed to remove line');
     },
     [act]

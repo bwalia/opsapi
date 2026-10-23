@@ -9,6 +9,7 @@ import BuildFooter from './BuildFooter';
 import GlobalSearch from './GlobalSearch';
 import ChatNotifier from '@/components/chat/ChatNotifier';
 import PageAssistant from '@/components/assistant/PageAssistant';
+import { DialogHost } from '@/components/ui/Dialogs';
 import { GlobalTimerWidget } from '@/components/time-tracking';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
@@ -179,6 +180,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
 
         {/* "Ask AI" — the page-aware assistant on every page (⌘J) */}
         <PageAssistant onChanged={reloadPageData} />
+        {/* Themed confirm / prompt / alert (instead of the browser's) */}
+        <DialogHost />
       </PermissionsProvider>
     </NamespaceProvider>
   );

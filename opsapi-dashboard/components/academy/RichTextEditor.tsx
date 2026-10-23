@@ -46,6 +46,7 @@ import {
   RemoveFormatting,
   Youtube as YoutubeIcon,
 } from 'lucide-react';
+import { promptDialog } from '@/components/ui';
 import styles from './RichTextEditor.module.css';
 
 // ------------------------------------------------------------
@@ -246,9 +247,9 @@ const Toolbar: React.FC<{
   sourceMode?: boolean;
   onToggleSource?: () => void;
 }> = ({ editor, sourceMode, onToggleSource }) => {
-  const setLink = useCallback(() => {
+  const setLink = useCallback(async () => {
     const previous = editor.getAttributes('link').href as string | undefined;
-    const url = window.prompt('Link URL', previous ?? 'https://');
+    const url = await promptDialog({ title: 'Link URL', defaultValue: previous ?? 'https://' });
     if (url === null) return; // cancelled
     if (url.trim() === '') {
       editor.chain().focus().extendMarkRange('link').unsetLink().run();
@@ -257,21 +258,21 @@ const Toolbar: React.FC<{
     editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   }, [editor]);
 
-  const addImage = useCallback(() => {
-    const url = window.prompt('Image URL (https://…)');
+  const addImage = useCallback(async () => {
+    const url = await promptDialog({ title: 'Image URL (https://…)' });
     if (url && url.trim()) {
       editor.chain().focus().setImage({ src: url.trim() }).run();
     }
   }, [editor]);
 
-  const addVideo = useCallback(() => {
-    const url = window.prompt('YouTube or Vimeo URL');
+  const addVideo = useCallback(async () => {
+    const url = await promptDialog({
+      title: 'YouTube or Vimeo URL',
+      validate: (v) => (!v || toEmbedUrl(v) ? null : 'Please paste a valid YouTube or Vimeo link.'),
+    });
     if (!url) return;
     const src = toEmbedUrl(url);
-    if (!src) {
-      window.alert('Please paste a valid YouTube or Vimeo link.');
-      return;
-    }
+    if (!src) return;
     editor
       .chain()
       .focus()

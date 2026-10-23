@@ -60,6 +60,25 @@ local function sdk_emit(ns, name, data)
     end)
 end
 
+--- The CRM contact a test email goes to: the one with this address, else a new one
+-- (named after the sender when it's their own address). @return contact uuid
+function C.test_contact(ns, email, user)
+    local row = U.one([[
+        SELECT uuid FROM crm_contacts WHERE namespace_id = ? AND lower(email) = ? AND deleted_at IS NULL
+        ORDER BY id LIMIT 1
+    ]], ns, email)
+    if row then return row.uuid end
+    local own = user and U.lower(user.email) == email
+    local uuid = require("helper.global").generateUUID()
+    db.query([[
+        INSERT INTO crm_contacts (uuid, namespace_id, first_name, last_name, email, owner_user_uuid, status,
+                                  created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
+    ]], uuid, ns, own and user.first_name or "", own and user.last_name or db.NULL, email,
+        user and user.uuid or db.NULL)
+    return uuid
+end
+
 function C.editable(status)
     return EDITABLE[status] == true
 end

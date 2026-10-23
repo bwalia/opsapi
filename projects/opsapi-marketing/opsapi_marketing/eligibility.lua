@@ -160,9 +160,12 @@ function E.can_send(contact, campaign, channel, message_type)
         return deny("suppressed" .. (sreason and (":" .. sreason) or ""))
     end
 
+    -- A test send goes to one address the sender chose (often their own): no consent or
+    -- frequency checks, but anyone who unsubscribed (above) still never gets it.
+    local test = campaign and campaign.test_send
     local list_id = campaign and campaign.list_id or nil
     local blocked, breason = subscription_blocks(ns, contact_uuid, channel, list_id, message_type)
-    if blocked then
+    if blocked and not test then
         return deny(breason)
     end
 
@@ -175,11 +178,11 @@ function E.can_send(contact, campaign, channel, message_type)
         end
     end
 
-    if frequency_cap_hit(ns, contact_uuid, channel, message_type, settings) then
+    if not test and frequency_cap_hit(ns, contact_uuid, channel, message_type, settings) then
         return deny("frequency_cap")
     end
 
-    if campaign and campaign.id then
+    if campaign and campaign.id and not test then
         local excl = U.one([[
             SELECT id FROM mkt_campaign_recipients
             WHERE campaign_id = ? AND contact_uuid = ? AND excluded = true

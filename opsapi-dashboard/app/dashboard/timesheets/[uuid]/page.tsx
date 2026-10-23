@@ -19,7 +19,7 @@ import {
   Loader2,
   Info,
 } from 'lucide-react';
-import { Card, Badge, Modal } from '@/components/ui';
+import { Card, Badge, Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   timesheetsService,
@@ -406,7 +406,7 @@ function TimesheetDetailContent() {
   }, [uuid, router]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm('Are you sure you want to delete this timesheet? This action cannot be undone.')) {
+    if (!(await confirmDialog({ title: 'Delete this timesheet?', message: 'This action cannot be undone.', confirmText: 'Delete', danger: true }))) {
       return;
     }
 
@@ -433,7 +433,7 @@ function TimesheetDetailContent() {
   }, []);
 
   const handleDeleteEntry = useCallback(async (entryUuid: string) => {
-    if (!confirm('Are you sure you want to delete this entry?')) {
+    if (!(await confirmDialog({ title: 'Delete this entry?', confirmText: 'Delete', danger: true }))) {
       return;
     }
 
