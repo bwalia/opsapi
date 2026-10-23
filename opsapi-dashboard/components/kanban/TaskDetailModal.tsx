@@ -41,6 +41,7 @@ import type {
 } from '@/types';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { confirmDialog } from '@/components/ui';
 import { TimerButton } from '@/components/time-tracking';
 import {
   kanbanService,
@@ -757,7 +758,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
   };
 
   const handleDelete = async () => {
-    if (task && window.confirm('Are you sure you want to delete this task?')) {
+    if (task && (await confirmDialog({ title: 'Delete this task?', confirmText: 'Delete', danger: true }))) {
       await onDelete(task.uuid);
       onClose();
     }

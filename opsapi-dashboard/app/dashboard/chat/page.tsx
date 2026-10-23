@@ -34,7 +34,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
-import { Modal, Button } from '@/components/ui';
+import { Modal, Button, confirmDialog } from '@/components/ui';
 import AgentPane from '@/components/chat/AgentPane';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
@@ -908,7 +908,7 @@ export default function ChatPage() {
   const removeMember = useCallback(
     async (m: ChatMember) => {
       if (!activeUuid) return;
-      if (!confirm(`Remove ${personName(m)} from this channel?`)) return;
+      if (!(await confirmDialog({ title: `Remove ${personName(m)} from this channel?`, confirmText: 'Remove', danger: true }))) return;
       try {
         await chatService.removeMember(activeUuid, m.user_uuid);
         setMembers((list) => list.filter((x) => x.user_uuid !== m.user_uuid));

@@ -19,6 +19,7 @@ import Card from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
 import Modal from '@/components/ui/Modal';
+import { confirmDialog } from '@/components/ui';
 import { useKanbanStore } from '@/store/kanban.store';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
@@ -422,10 +423,8 @@ export default function ProjectEpicsPage() {
 
   const handleDelete = async (epic: KanbanEpic) => {
     const message =
-      epic.task_count > 0
-        ? `Delete "${epic.name}"? Its ${epic.task_count} task(s) will be detached, not deleted.`
-        : `Delete "${epic.name}"?`;
-    if (!window.confirm(message)) return;
+      epic.task_count > 0 ? `Its ${epic.task_count} task(s) will be detached, not deleted.` : undefined;
+    if (!(await confirmDialog({ title: `Delete "${epic.name}"?`, message, confirmText: 'Delete', danger: true }))) return;
 
     try {
       await epicService.deleteEpic(epic.uuid);

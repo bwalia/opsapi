@@ -13,7 +13,7 @@ import { useSearchParams } from 'next/navigation';
 import { MapPin, Save, Bell, Play, Trash2, Search, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Card, Input, Badge } from '@/components/ui';
+import { Button, Card, Input, Badge, confirmDialog } from '@/components/ui';
 import { pdService, pdErrorText, type MapFeature, type MatchWithBreakdown } from '@/services/property-deals.service';
 import {
   PdPage, ErrorNote, Spinner, gbp, dateText, label, BASE, HealthBadge, ContactLinks, SupplierSourceBadge, kindText,
@@ -309,7 +309,7 @@ function Searches({ center, radius, layers, onOpen }: { center: { lat: number; l
               <Button size="sm" variant="ghost" aria-label={`Run ${s.name}`} onClick={async () => { try { const r = (await pdService.runSearch(s.uuid)).data; toast.success(`New ${r.new}, reduced ${r.reduced}, stale ${r.stale}, cash only ${r.cash_only}`); alerts.refresh(); } catch (e) { toast.error(pdErrorText(e)); } }}><Play className="h-4 w-4" /></Button>
               {can('properties', 'delete') && (
                 <Button size="sm" variant="ghost" aria-label={`Delete ${s.name}`} onClick={async () => {
-                  if (!window.confirm(`Delete the saved search “${s.name}”? The deal scout stops re-running it.`)) return;
+                  if (!(await confirmDialog({ title: `Delete the saved search “${s.name}”?`, message: 'The deal scout stops re-running it.', confirmText: 'Delete', danger: true }))) return;
                   try { await pdService.deleteSearch(s.uuid); searches.refresh(); } catch (e) { toast.error(pdErrorText(e)); }
                 }}><Trash2 className="h-4 w-4" /></Button>
               )}

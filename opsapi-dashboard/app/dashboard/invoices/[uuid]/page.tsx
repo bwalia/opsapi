@@ -15,7 +15,7 @@ import {
   Download,
   Eye,
 } from 'lucide-react';
-import { Modal } from '@/components/ui';
+import { Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   invoicesService,
@@ -577,7 +577,7 @@ function InvoiceDetailContent() {
       toast.error('Add a customer email to this invoice before sending.');
       return;
     }
-    if (!window.confirm(`Email invoice ${invoice.invoice_number} to ${to}?`)) return;
+    if (!(await confirmDialog({ title: `Email invoice ${invoice.invoice_number} to ${to}?`, confirmText: 'Send' }))) return;
     try {
       // Attach the same PDF the Download button produces, built in the browser.
       const { base64, filename } = invoicePdfBase64(invoice, {
@@ -595,7 +595,7 @@ function InvoiceDetailContent() {
 
   const handleVoidInvoice = useCallback(async () => {
     if (!invoice) return;
-    if (!window.confirm('Are you sure you want to void this invoice? This action cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Void this invoice?', message: 'This action cannot be undone.', confirmText: 'Void', danger: true }))) return;
     try {
       await invoicesService.voidInvoice(invoice.uuid);
       toast.success('Invoice voided successfully');
@@ -608,7 +608,7 @@ function InvoiceDetailContent() {
 
   const handleDeleteInvoice = useCallback(async () => {
     if (!invoice) return;
-    if (!window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete this invoice?', message: 'This action cannot be undone.', confirmText: 'Delete', danger: true }))) return;
     try {
       await invoicesService.deleteInvoice(invoice.uuid);
       toast.success('Invoice deleted successfully');
@@ -621,7 +621,7 @@ function InvoiceDetailContent() {
 
   const handleDeleteLineItem = useCallback(
     async (itemUuid: string) => {
-      if (!window.confirm('Are you sure you want to remove this line item?')) return;
+      if (!(await confirmDialog({ title: 'Remove this line item?', confirmText: 'Remove', danger: true }))) return;
       try {
         await invoicesService.deleteLineItem(itemUuid);
         toast.success('Line item removed');

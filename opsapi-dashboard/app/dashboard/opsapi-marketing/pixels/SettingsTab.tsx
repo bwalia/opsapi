@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { KeyRound, Save, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, confirmDialog } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import {
   apiErrorMessage,
@@ -90,9 +90,13 @@ export function SettingsTab({ pixel, onUpdated, onDeleted }: Props) {
   const rotate = () =>
     run(async () => {
       if (
-        !window.confirm(
-          `Rotate the key for "${pixel.name}"?\n\nThe current snippet stops working immediately. You must paste the new snippet on every site that uses this pixel.`,
-        )
+        !(await confirmDialog({
+          title: `Rotate the key for “${pixel.name}”?`,
+          message:
+            'The current snippet stops working immediately. You must paste the new snippet on every site that uses this pixel.',
+          confirmText: 'Rotate key',
+          danger: true,
+        }))
       ) {
         return;
       }
@@ -105,9 +109,12 @@ export function SettingsTab({ pixel, onUpdated, onDeleted }: Props) {
   const remove = () =>
     run(async () => {
       if (
-        !window.confirm(
-          `Delete pixel "${pixel.name}"?\n\nTracking stops on every site using it and its event history is removed. This cannot be undone.`,
-        )
+        !(await confirmDialog({
+          title: `Delete pixel “${pixel.name}”?`,
+          message: 'Tracking stops on every site using it and its event history is removed. This cannot be undone.',
+          confirmText: 'Delete pixel',
+          danger: true,
+        }))
       ) {
         return;
       }

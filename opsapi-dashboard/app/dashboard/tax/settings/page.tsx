@@ -15,7 +15,7 @@ import {
   KeyRound,
   Settings,
 } from 'lucide-react';
-import { Card } from '@/components/ui';
+import { Card, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService } from '@/services/tax.service';
@@ -87,7 +87,7 @@ function HmrcSettingsContent() {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('Disconnect from HMRC? You will need to reconnect before filing.')) return;
+    if (!(await confirmDialog({ title: 'Disconnect from HMRC?', message: 'You will need to reconnect before filing.', confirmText: 'Disconnect', danger: true }))) return;
     try {
       await taxService.disconnectHmrc();
       toast.success('Disconnected from HMRC');

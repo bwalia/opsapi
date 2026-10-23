@@ -24,6 +24,7 @@ import {
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
+import { confirmDialog } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { CreateProjectModal } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
@@ -509,7 +510,7 @@ export default function ProjectsPage() {
   }, [router]);
 
   const handleArchiveProject = useCallback(async (project: KanbanProject) => {
-    if (window.confirm(`Are you sure you want to archive "${project.name}"?`)) {
+    if (await confirmDialog({ title: `Archive "${project.name}"?`, confirmText: 'Archive' })) {
       const result = await updateProject(project.uuid, { status: 'archived' });
       if (result) {
         toast.success('Project archived');
@@ -520,7 +521,7 @@ export default function ProjectsPage() {
   }, [updateProject]);
 
   const handleDeleteProject = useCallback(async (project: KanbanProject) => {
-    if (window.confirm(`Are you sure you want to delete "${project.name}"? This action cannot be undone.`)) {
+    if (await confirmDialog({ title: `Delete "${project.name}"?`, message: 'This action cannot be undone.', confirmText: 'Delete', danger: true })) {
       const success = await deleteProject(project.uuid);
       if (success) {
         toast.success('Project deleted');

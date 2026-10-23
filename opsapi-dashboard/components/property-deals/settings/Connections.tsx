@@ -9,7 +9,7 @@
 import React, { useState } from 'react';
 import { Plus, Play, RefreshCw, Trash2, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Badge, Button, Card, Input, Modal, Select, Switch } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, Select, Switch, confirmDialog, promptDialog } from '@/components/ui';
 import { pdService, pdErrorText, type Connector, type MailConnector, type NotificationPreferences } from '@/services/property-deals.service';
 import { ErrorNote, Spinner, dateText } from '../ui';
 import { usePdData } from '../usePd';
@@ -69,14 +69,14 @@ export function DataConnectors({ canEdit }: { canEdit: boolean }) {
               <div className="flex gap-1">
                 {['epc', 'price_paid'].includes(c.kind) && (
                   <Button size="sm" variant="outline" leftIcon={<Play className="h-4 w-4" />} isLoading={running === c.uuid} onClick={async () => {
-                    const pc = window.prompt('Postcode to fetch for', 'YO1 7AA');
+                    const pc = await promptDialog({ title: 'Postcode to fetch for', defaultValue: 'YO1 7AA', confirmText: 'Fetch' });
                     if (!pc) return;
                     setRunning(c.uuid);
                     try { const r = (await pdService.runConnector(c.uuid, pc)).data; toast.success(`Fetched ${r.fetched}, ${r.stored} new`); } catch (e) { toast.error(pdErrorText(e)); } finally { setRunning(null); list.refresh(); }
                   }}>Run</Button>
                 )}
                 {canEdit && <Button size="sm" variant="ghost" onClick={() => setEdit(c)}>Edit</Button>}
-                {canEdit && <Button size="sm" variant="ghost" aria-label={`Delete ${c.name}`} onClick={async () => { if (window.confirm(`Delete ${c.name}?`)) { try { await pdService.deleteConnector(c.uuid); list.refresh(); } catch (e) { toast.error(pdErrorText(e)); } } }}><Trash2 className="h-4 w-4" /></Button>}
+                {canEdit && <Button size="sm" variant="ghost" aria-label={`Delete ${c.name}`} onClick={async () => { if (await confirmDialog({ title: `Delete ${c.name}?`, confirmText: 'Delete', danger: true })) { try { await pdService.deleteConnector(c.uuid); list.refresh(); } catch (e) { toast.error(pdErrorText(e)); } } }}><Trash2 className="h-4 w-4" /></Button>}
               </div>
             </li>
           ))}
@@ -157,7 +157,7 @@ export function Mailboxes({ canEdit }: { canEdit: boolean }) {
                 try { const r = (await pdService.syncMailConnector(m.uuid)).data; toast.success(`Fetched ${r.fetched}, ${r.matched} matched to deals`); } catch (e) { toast.error(pdErrorText(e)); } finally { setSyncing(null); list.refresh(); }
               }}>Sync now</Button>
               {canEdit && <Button size="sm" variant="ghost" onClick={() => setEdit(m)}>Edit</Button>}
-              {canEdit && <Button size="sm" variant="ghost" aria-label={`Delete ${m.name}`} onClick={async () => { if (window.confirm(`Delete ${m.name}?`)) { try { await pdService.deleteMailConnector(m.uuid); list.refresh(); } catch (e) { toast.error(pdErrorText(e)); } } }}><Trash2 className="h-4 w-4" /></Button>}
+              {canEdit && <Button size="sm" variant="ghost" aria-label={`Delete ${m.name}`} onClick={async () => { if (await confirmDialog({ title: `Delete ${m.name}?`, confirmText: 'Delete', danger: true })) { try { await pdService.deleteMailConnector(m.uuid); list.refresh(); } catch (e) { toast.error(pdErrorText(e)); } } }}><Trash2 className="h-4 w-4" /></Button>}
             </div>
           </li>
         ))}

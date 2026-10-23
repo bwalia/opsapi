@@ -40,7 +40,7 @@ import {
   X,
   Palette,
 } from "lucide-react";
-import { Card, Button, Badge, Input } from "@/components/ui";
+import { Card, Button, Badge, Input, confirmDialog } from "@/components/ui";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import {
   servicesService,
@@ -491,7 +491,7 @@ export default function ServiceDetailsPage() {
 
   const handleDeleteSecret = async (secretId: string) => {
     if (!service) return;
-    if (!confirm("Are you sure you want to delete this secret?")) return;
+    if (!(await confirmDialog({ title: "Delete this secret?", confirmText: "Delete", danger: true }))) return;
 
     try {
       await servicesService.deleteSecret(service.uuid, secretId);
@@ -527,7 +527,7 @@ export default function ServiceDetailsPage() {
 
   const handleDeleteVariable = async (variableId: string) => {
     if (!service) return;
-    if (!confirm("Are you sure you want to delete this variable?")) return;
+    if (!(await confirmDialog({ title: "Delete this variable?", confirmText: "Delete", danger: true }))) return;
 
     try {
       await servicesService.deleteVariable(service.uuid, variableId);

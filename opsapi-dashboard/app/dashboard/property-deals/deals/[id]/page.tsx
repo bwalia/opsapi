@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle, CircleDot, FileUp, Plus, AlertTriangle, Download, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Button, Card, Input, Modal, Select, Textarea, buttonClass } from '@/components/ui';
+import { Button, Card, Input, Modal, Select, Textarea, buttonClass, promptDialog } from '@/components/ui';
 import { pdService, pdError, pdErrorText, type Deal as DealRow, type DealOverview, type Gate } from '@/services/property-deals.service';
 import {
   PdPage, HealthBadge, Tabs, gbp, dateText, dueText, Spinner, ErrorNote, Empty, UrgencyScore, TaskStatusBadge, BASE, label,
@@ -341,7 +341,7 @@ function EnquiriesTab({ dealId, onChanged }: { dealId: string; onChanged: () => 
               </div>
               {e.status === 'open' && can('tasks', 'update') && (
                 <Button size="sm" variant="outline" onClick={async () => {
-                  const note = window.prompt('How was it resolved?');
+                  const note = await promptDialog({ title: 'How was it resolved?', confirmText: 'Resolve' });
                   if (!note) return;
                   try { await pdService.updateEnquiry(e.uuid, { status: 'resolved', resolution: note, resolved_at: new Date().toISOString() }); toast.success('Resolved'); refresh(); } catch (err) { toast.error(pdErrorText(err)); }
                 }}>Resolve</Button>

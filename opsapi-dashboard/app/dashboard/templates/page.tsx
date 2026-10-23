@@ -16,7 +16,7 @@ import {
   LayoutTemplate,
   Loader2,
 } from 'lucide-react';
-import { Input, Table, Pagination, Card, Modal } from '@/components/ui';
+import { Input, Table, Pagination, Card, Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import RenderTemplatesLibrary from '@/components/templates/RenderTemplatesLibrary';
@@ -385,7 +385,7 @@ function TemplatesPageContent({ embedded = false }: { embedded?: boolean }) {
   // Delete template
   const handleDelete = useCallback(
     async (template: DocumentTemplate) => {
-      if (!confirm(`Are you sure you want to delete "${template.name}"? This action cannot be undone.`)) {
+      if (!(await confirmDialog({ title: `Delete "${template.name}"?`, message: 'This action cannot be undone.', confirmText: 'Delete', danger: true }))) {
         return;
       }
 

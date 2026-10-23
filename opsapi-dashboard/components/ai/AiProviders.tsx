@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Plug, Trash2, KeyRound, Loader2, Bot } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Badge, Button, Card, Input, Modal, Select, Switch } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, Select, Switch, confirmDialog } from '@/components/ui';
 import { aiProvidersService, providerOptions, type AiProvider } from '@/services/ai-providers.service';
 import { pdErrorText } from '@/services/property-deals.service';
 import { formatDateTime } from '@/lib/utils';
@@ -115,7 +115,7 @@ export default function AiProviders({ canEdit, onLoaded }: { canEdit: boolean; o
                   <Button size="sm" variant="outline" leftIcon={<Plug className="h-4 w-4" />} isLoading={busy === p.uuid} onClick={() => test(p)}>Test connection</Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>Edit</Button>
                   <Button size="sm" variant="ghost" aria-label={`Delete ${p.name}`} onClick={async () => {
-                    if (!window.confirm(`Delete ${p.name}?`)) return;
+                    if (!(await confirmDialog({ title: `Delete ${p.name}?`, confirmText: 'Delete', danger: true }))) return;
                     try { await aiProvidersService.remove(p.uuid); void reload(); } catch (e) { toast.error(pdErrorText(e)); }
                   }}><Trash2 className="h-4 w-4" /></Button>
                 </div>

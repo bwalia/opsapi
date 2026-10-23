@@ -17,6 +17,7 @@ import {
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
+import { confirmDialog, promptDialog } from '@/components/ui';
 import {
   KanbanBoard,
   CreateTaskModal,
@@ -329,7 +330,7 @@ export default function ProjectDetailPage() {
 
   const handleEditColumn = useCallback(
     async (column: KanbanColumn) => {
-      const newName = window.prompt('Enter new column name:', column.name);
+      const newName = await promptDialog({ title: 'Rename column', label: 'Enter new column name:', defaultValue: column.name });
       if (newName && newName !== column.name) {
         const result = await updateColumn(column.uuid, { name: newName });
         if (result) {
@@ -345,9 +346,12 @@ export default function ProjectDetailPage() {
   const handleDeleteColumn = useCallback(
     async (column: KanbanColumn) => {
       if (
-        window.confirm(
-          `Are you sure you want to delete "${column.name}"? All tasks in this column will be deleted.`
-        )
+        await confirmDialog({
+          title: `Delete "${column.name}"?`,
+          message: 'All tasks in this column will be deleted.',
+          confirmText: 'Delete',
+          danger: true,
+        })
       ) {
         const success = await deleteColumn(column.uuid);
         if (success) {

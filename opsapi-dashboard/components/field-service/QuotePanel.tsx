@@ -10,7 +10,7 @@
 import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Download, Eye, Mail } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, confirmDialog } from '@/components/ui';
 import { fieldService, type FsJobDetail } from '@/services/field-service.service';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { generateQuotePdf, previewQuotePdfUrl, quotePdfBase64 } from '@/lib/quote-pdf';
@@ -61,8 +61,8 @@ export function QuotePanel({ job, canManage }: { job: FsJobDetail; canManage: bo
       toast.error('Add a customer email to this job before sending.');
       return;
     }
-    if (count === 0 && !window.confirm('This quote has no priced lines yet. Send it anyway?')) return;
-    if (!window.confirm(`Email quotation for ${job.job_number} to ${to}?`)) return;
+    if (count === 0 && !(await confirmDialog({ title: 'Send it anyway?', message: 'This quote has no priced lines yet.', confirmText: 'Send anyway' }))) return;
+    if (!(await confirmDialog({ title: `Email quotation for ${job.job_number} to ${to}?`, confirmText: 'Send' }))) return;
     setEmailing(true);
     try {
       const { base64, filename } = quotePdfBase64(job, company);

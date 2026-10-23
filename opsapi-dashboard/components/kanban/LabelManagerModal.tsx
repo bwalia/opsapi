@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import { confirmDialog } from '@/components/ui';
 import type { KanbanLabel } from '@/types';
 import { kanbanService, DEFAULT_LABEL_COLORS } from '@/services/kanban.service';
 
@@ -85,7 +86,7 @@ export const LabelManagerModal = memo(function LabelManagerModal({
   };
 
   const remove = async (uuid: string) => {
-    if (!window.confirm('Delete this label? It will be removed from all tasks.')) return;
+    if (!(await confirmDialog({ title: 'Delete this label?', message: 'It will be removed from all tasks.', confirmText: 'Delete', danger: true }))) return;
     setBusy(true);
     try {
       await kanbanService.deleteLabel(uuid);

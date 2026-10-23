@@ -30,6 +30,7 @@ import {
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
+import { confirmDialog } from '@/components/ui';
 import { useKanbanStore } from '@/store/kanban.store';
 import { sprintService, getSprintStatusColor, getSprintStatusLabel, calculateSprintProgress, calculateDaysRemaining, calculateSprintDuration, formatSprintDateRange } from '@/services/sprint.service';
 import { kanbanService, getPriorityColor } from '@/services/kanban.service';
@@ -1244,7 +1245,7 @@ export default function SprintBoardPage() {
 
   const handleCancelSprint = useCallback(async () => {
     if (!currentSprintUuid) return;
-    if (!window.confirm('Are you sure you want to cancel this sprint?')) return;
+    if (!(await confirmDialog({ title: 'Cancel this sprint?', confirmText: 'Cancel sprint', cancelText: 'Keep sprint', danger: true }))) return;
     try {
       const updated = await sprintService.cancelSprint(currentSprintUuid);
       setSprints((prev) => prev.map((s) => (s.uuid === updated.uuid ? updated : s)));

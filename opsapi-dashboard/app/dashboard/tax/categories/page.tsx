@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Lock,
 } from 'lucide-react';
-import { Input, Table, Card, Modal } from '@/components/ui';
+import { Input, Table, Card, Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService, type TaxCategory, type TaxCategoryInput } from '@/services/tax.service';
@@ -101,7 +101,7 @@ function CategoriesContent() {
   };
 
   const handleDelete = async (cat: TaxCategory) => {
-    if (!confirm(`Delete category "${cat.name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete category "${cat.name}"?`, message: 'This cannot be undone.', confirmText: 'Delete', danger: true }))) return;
     try {
       await taxService.deleteCategory(cat.uuid);
       toast.success('Category deleted');

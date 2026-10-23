@@ -15,7 +15,7 @@ import {
   Eye,
   Link2,
 } from 'lucide-react';
-import { Table, Modal, Pagination } from '@/components/ui';
+import { Table, Modal, Pagination, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
@@ -266,7 +266,15 @@ function StatementsContent() {
   // `reclassify` re-runs already-classified rows (AI-set only; user-confirmed rows are
   // preserved server-side) — used by the Re-classify action on classified statements.
   const handleClassify = async (statement: TaxStatement, reclassify = false) => {
-    if (reclassify && !confirm('Re-run AI classification for this statement? Transactions you have already confirmed are kept; everything else is re-classified.')) return;
+    if (
+      reclassify &&
+      !(await confirmDialog({
+        title: 'Re-run AI classification for this statement?',
+        message: 'Transactions you have already confirmed are kept; everything else is re-classified.',
+        confirmText: 'Re-classify',
+      }))
+    )
+      return;
     setProcessingId(statement.id);
     try {
       const result = await taxService.classifyTransactions(statement.id, selectedProfile || undefined, reclassify);
@@ -284,7 +292,7 @@ function StatementsContent() {
   };
 
   const handleDelete = async (statement: TaxStatement) => {
-    if (!confirm('Delete this statement and all its transactions? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete this statement and all its transactions?', message: 'This cannot be undone.', confirmText: 'Delete', danger: true }))) return;
     try {
       await taxService.deleteStatement(statement.id);
       toast.success('Statement deleted');
@@ -297,7 +305,7 @@ function StatementsContent() {
   // Delete every statement (and, via the backend cascade, their transactions) so the
   // user can start a fresh upload/test. Fetches across pages, then deletes each.
   const handleDeleteAll = async () => {
-    if (!confirm('Delete ALL statements and their transactions? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete ALL statements and their transactions?', message: 'This cannot be undone.', confirmText: 'Delete all', danger: true }))) return;
     setIsDeletingAll(true);
     try {
       const all = await taxService.getStatements({ page: 1, per_page: 1000 });

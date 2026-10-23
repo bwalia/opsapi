@@ -20,7 +20,7 @@ import {
   CheckCircle2,
   XCircle,
 } from 'lucide-react';
-import { Button, Card, Badge } from '@/components/ui';
+import { Button, Card, Badge, confirmDialog, promptDialog } from '@/components/ui';
 import { AddPatientModal } from '@/components/patients';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -143,7 +143,7 @@ function PatientDetailContent() {
   }, [activeTab, loadTabData]);
 
   const handleRevokeAccess = async (id: string) => {
-    if (!confirm('Revoke this access grant?')) return;
+    if (!(await confirmDialog({ title: 'Revoke this access grant?', confirmText: 'Revoke', danger: true }))) return;
     try {
       await accessControlsService.revoke(patientUuid, id);
       toast.success('Access revoked');
@@ -164,7 +164,8 @@ function PatientDetailContent() {
   };
 
   const handleResolveAlert = async (id: string) => {
-    const notes = prompt('Resolution notes (optional):') || '';
+    const notes = await promptDialog({ title: 'Resolve alert', label: 'Resolution notes (optional):', confirmText: 'Resolve' });
+    if (notes === null) return; // Cancel means don't resolve
     try {
       await alertsService.resolve(patientUuid, id, notes);
       toast.success('Alert resolved');
