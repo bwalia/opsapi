@@ -145,8 +145,7 @@ function useProgress(): Progress | null {
     ]).then(([sending, lists, counts, templates, campaigns]) => {
       if (cancelled) return;
       const s = (sending?.data?.data ?? sending?.data) as
-        | { via?: string; sender_address_set?: boolean; dry_run?: boolean }
-        | undefined;
+        { via?: string; sender_address_set?: boolean; dry_run?: boolean } | undefined;
       const c = counts?.data?.data ?? counts?.data;
       const people =
         c && typeof c === 'object' && !Array.isArray(c)
@@ -198,7 +197,10 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
           aria-valuemax={required.length}
           aria-label="Getting started progress"
         >
-          <div className="h-full rounded-full bg-primary-600" style={{ width: `${(doneCount / required.length) * 100}%` }} />
+          <div
+            className="h-full rounded-full bg-primary-600"
+            style={{ width: `${(doneCount / required.length) * 100}%` }}
+          />
         </div>
         <h2 className="mt-3 text-lg font-semibold">Next: {next.title}</h2>
         <p className="text-base text-secondary-700 dark:text-secondary-300">{next.why}</p>
@@ -215,7 +217,10 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <section aria-labelledby="checklist-title" className="rounded-2xl border border-secondary-200 bg-surface p-5 shadow-sm sm:p-6">
+    <section
+      aria-labelledby="checklist-title"
+      className="rounded-2xl border border-secondary-200 bg-surface p-5 shadow-sm sm:p-6"
+    >
       <h2 id="checklist-title" className="text-xl font-semibold">
         Your checklist
       </h2>

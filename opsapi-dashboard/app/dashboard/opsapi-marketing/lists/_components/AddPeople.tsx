@@ -1,24 +1,13 @@
-"use client";
+'use client';
 
-import React, { useEffect, useRef, useState } from "react";
-import { isAxiosError } from "axios";
-import toast from "react-hot-toast";
-import {
-  ArrowLeft,
-  Check,
-  ContactRound,
-  FileUp,
-  Keyboard,
-  Search,
-  UploadCloud,
-} from "lucide-react";
-import { Button } from "@/components/ui";
-import { marketingService } from "@/services/opsapi-marketing.service";
-import { crmService, type CrmContact } from "@/services/crm.service";
-import {
-  HelpLink,
-  downloadExampleCsv,
-} from "@/components/opsapi-marketing/GettingStarted";
+import React, { useEffect, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
+import toast from 'react-hot-toast';
+import { ArrowLeft, Check, ContactRound, FileUp, Keyboard, Search, UploadCloud } from 'lucide-react';
+import { Button } from '@/components/ui';
+import { marketingService } from '@/services/opsapi-marketing.service';
+import { crmService, type CrmContact } from '@/services/crm.service';
+import { HelpLink, downloadExampleCsv } from '@/components/opsapi-marketing/GettingStarted';
 import {
   Alert,
   CARD,
@@ -30,10 +19,10 @@ import {
   people,
   readBase64,
   textBase64,
-} from "./shared";
+} from './shared';
 
-type Mode = "type" | "file" | "contacts";
-type LegalBasis = "legitimate_interest" | "consent";
+type Mode = 'type' | 'file' | 'contacts';
+type LegalBasis = 'legitimate_interest' | 'consent';
 
 /** What a batch of people holds (the check step), or what was added from it. */
 type Scan = {
@@ -50,7 +39,7 @@ type Scan = {
 /** People waiting for the check step: typed, from a file, or picked from contacts. */
 type Pending = { name: string; base64: string; how: Mode; note: string };
 
-const ACCEPT = ".csv,.txt,.xlsx,.pdf";
+const ACCEPT = '.csv,.txt,.xlsx,.pdf';
 const ACCEPT_RE = /\.(csv|txt|xlsx|pdf)$/i;
 const MAX_FILE_BYTES = 7 * 1024 * 1024;
 
@@ -72,25 +61,25 @@ function Choice({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`group flex min-h-22 flex-col items-start gap-1 rounded-xl border-2 p-4 text-left transition ${
+      className={`group flex w-full items-center gap-3 rounded-xl border-2 p-3.5 text-left transition @xl:flex-col @xl:items-start @xl:gap-2 @xl:p-4 ${
         active
-          ? "border-primary-600 bg-primary-50 shadow-sm dark:bg-primary-900/30"
-          : "border-secondary-200 hover:-translate-y-0.5 hover:border-primary-400 hover:shadow-sm"
+          ? 'border-primary-600 bg-primary-50 shadow-sm dark:bg-primary-900/30'
+          : 'border-secondary-200 hover:border-primary-400 hover:shadow-sm'
       }`}
     >
-      <span className="flex items-center gap-2 text-base font-semibold text-secondary-900">
-        <span
-          className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-            active
-              ? "bg-primary-600 text-white"
-              : "bg-secondary-100 text-secondary-600 group-hover:text-primary-600 dark:bg-secondary-800"
-          }`}
-        >
-          {icon}
-        </span>
-        {title}
+      <span
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+          active
+            ? 'bg-primary-600 text-white'
+            : 'bg-secondary-100 text-secondary-600 group-hover:text-primary-600 dark:bg-secondary-800'
+        }`}
+      >
+        {icon}
       </span>
-      <span className="text-sm text-secondary-600">{hint}</span>
+      <span className="min-w-0">
+        <span className="block text-base font-semibold text-secondary-900">{title}</span>
+        <span className="block text-sm text-secondary-600">{hint}</span>
+      </span>
     </button>
   );
 }
@@ -109,29 +98,29 @@ export function AddPeople({
   const [mode, setMode] = useState<Mode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [typed, setTyped] = useState("");
+  const [typed, setTyped] = useState('');
   const [dragging, setDragging] = useState(false);
   const [reading, setReading] = useState(false);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<CrmContact[] | null>(null);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [contactsTry, setContactsTry] = useState(0);
   const [picked, setPicked] = useState<Record<string, string>>({}); // contact uuid -> email
 
   const [pending, setPending] = useState<Pending | null>(null);
-  const [basis, setBasis] = useState<LegalBasis>("legitimate_interest");
+  const [basis, setBasis] = useState<LegalBasis>('legitimate_interest');
   const [scan, setScan] = useState<Scan | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [lawful, setLawful] = useState(false);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState('');
   const [adding, setAdding] = useState(false);
   const checkSeq = useRef(0);
 
   // Contacts to pick from, searched as you type.
   useEffect(() => {
-    if (mode !== "contacts") return;
+    if (mode !== 'contacts') return;
     let cancelled = false;
     const handle = window.setTimeout(() => {
       crmService
@@ -146,8 +135,8 @@ export function AddPeople({
           setContacts([]);
           setContactsError(
             isAxiosError(e) && e.response?.status === 403
-              ? "Your access doesn’t include Contacts. Ask the workspace owner, or type the email addresses instead."
-              : friendlyError(e, "Could not load your contacts"),
+              ? 'Your access doesn’t include Contacts. Ask the workspace owner, or type the email addresses instead.'
+              : friendlyError(e, 'Could not load your contacts'),
           );
         });
     }, 300);
@@ -170,13 +159,9 @@ export function AddPeople({
         content_base64: p.base64,
         legal_basis: legalBasis,
       });
-      if (seq === checkSeq.current)
-        setScan((res.data?.data ?? res.data) as Scan);
+      if (seq === checkSeq.current) setScan((res.data?.data ?? res.data) as Scan);
     } catch (e: unknown) {
-      if (seq === checkSeq.current)
-        setCheckError(
-          friendlyError(e, "Could not check these email addresses"),
-        );
+      if (seq === checkSeq.current) setCheckError(friendlyError(e, 'Could not check these email addresses'));
     } finally {
       if (seq === checkSeq.current) setChecking(false);
     }
@@ -192,16 +177,14 @@ export function AddPeople({
 
   const checkTyped = () => {
     if (typedEmails.length === 0) {
-      setError(
-        "We couldn’t find any email addresses. Type them like jane@company.co.uk, one per line.",
-      );
+      setError('We couldn’t find any email addresses. Type them like jane@company.co.uk, one per line.');
       return;
     }
     startCheck({
-      name: "typed-in.csv",
-      base64: textBase64(["email", ...typedEmails].join("\n")),
-      how: "type",
-      note: "Typed in by hand",
+      name: 'typed-in.csv',
+      base64: textBase64(['email', ...typedEmails].join('\n')),
+      how: 'type',
+      note: 'Typed in by hand',
     });
   };
 
@@ -209,10 +192,10 @@ export function AddPeople({
     const emails = Object.values(picked);
     if (emails.length === 0) return;
     startCheck({
-      name: "from-contacts.csv",
-      base64: textBase64(["email", ...emails].join("\n")),
-      how: "contacts",
-      note: "Chosen from contacts",
+      name: 'from-contacts.csv',
+      base64: textBase64(['email', ...emails].join('\n')),
+      how: 'contacts',
+      note: 'Chosen from contacts',
     });
   };
 
@@ -222,19 +205,17 @@ export function AddPeople({
     if (!ACCEPT_RE.test(file.name)) {
       setError(
         /\.xls$/i.test(file.name)
-          ? "That’s an old Excel file (.xls). Open it in Excel and use Save As → Excel Workbook (.xlsx), then try again."
-          : "Please choose an Excel (.xlsx), CSV or PDF file.",
+          ? 'That’s an old Excel file (.xls). Open it in Excel and use Save As → Excel Workbook (.xlsx), then try again.'
+          : 'Please choose an Excel (.xlsx), CSV or PDF file.',
       );
       return;
     }
     if (file.size === 0) {
-      setError("That file is empty.");
+      setError('That file is empty.');
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      setError(
-        "That file is too big (over 7 MB). Save it as CSV, or split it into smaller files.",
-      );
+      setError('That file is too big (over 7 MB). Save it as CSV, or split it into smaller files.');
       return;
     }
     setReading(true);
@@ -242,11 +223,11 @@ export function AddPeople({
       startCheck({
         name: file.name,
         base64: await readBase64(file),
-        how: "file",
-        note: "",
+        how: 'file',
+        note: '',
       });
     } catch (e: unknown) {
-      setError(friendlyError(e, "Could not read that file"));
+      setError(friendlyError(e, 'Could not read that file'));
     } finally {
       setReading(false);
     }
@@ -268,14 +249,14 @@ export function AddPeople({
       const r = (res.data?.data ?? res.data) as Scan;
       toast.success(`${people(r.imported ?? 0)} added to “${list.name}”`);
       setMode(null);
-      setTyped("");
+      setTyped('');
       setPicked({});
       setPending(null);
       setScan(null);
-      setNote("");
+      setNote('');
       await onAdded();
     } catch (e: unknown) {
-      setCheckError(friendlyError(e, "Could not add these people"));
+      setCheckError(friendlyError(e, 'Could not add these people'));
     } finally {
       setAdding(false);
     }
@@ -290,28 +271,18 @@ export function AddPeople({
     setLawful(false);
   };
 
-  const pickable = (contacts || []).filter(
-    (c) => c.email && !memberUuids.has(c.uuid),
-  );
+  const pickable = (contacts || []).filter((c) => c.email && !memberUuids.has(c.uuid));
   const pickedCount = Object.keys(picked).length;
 
   return (
-    <section
-      className={`${CARD} @container space-y-5 p-5 sm:p-6`}
-      aria-labelledby="add-people-title"
-    >
+    <section className={`${CARD} @container space-y-5 p-5 sm:p-6`} aria-labelledby="add-people-title">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3
-            id="add-people-title"
-            className="text-lg font-semibold text-secondary-900"
-          >
+          <h3 id="add-people-title" className="text-lg font-semibold text-secondary-900">
             Add people to this list
           </h3>
           <p className="text-base text-secondary-600">
-            {pending
-              ? "Check who will be added, then confirm."
-              : "How would you like to add them?"}
+            {pending ? 'Check who will be added, then confirm.' : 'How would you like to add them?'}
           </p>
         </div>
         <HelpLink topic="add-people">Help</HelpLink>
@@ -321,43 +292,40 @@ export function AddPeople({
 
       {!pending && (
         <>
-          <div className="grid gap-3 @xl:grid-cols-3">
+          <div className="grid gap-2.5 @xl:grid-cols-3 @xl:gap-3">
             <Choice
-              icon={<Keyboard className="h-4 w-4" />}
+              icon={<Keyboard className="h-5 w-5" />}
               title="Type emails"
               hint="Type or paste them in."
-              active={mode === "type"}
-              onClick={() => setMode("type")}
+              active={mode === 'type'}
+              onClick={() => setMode('type')}
             />
             <Choice
-              icon={<FileUp className="h-4 w-4" />}
+              icon={<FileUp className="h-5 w-5" />}
               title="Upload a file"
               hint="Excel, CSV or PDF."
-              active={mode === "file"}
-              onClick={() => setMode("file")}
+              active={mode === 'file'}
+              onClick={() => setMode('file')}
             />
             <Choice
-              icon={<ContactRound className="h-4 w-4" />}
+              icon={<ContactRound className="h-5 w-5" />}
               title="From my contacts"
               hint="Tick people you already have."
-              active={mode === "contacts"}
-              onClick={() => setMode("contacts")}
+              active={mode === 'contacts'}
+              onClick={() => setMode('contacts')}
             />
           </div>
 
-          {mode === "type" && (
+          {mode === 'type' && (
             <div className="space-y-3">
               <label className="block">
-                <span className="text-base font-medium text-secondary-900">
-                  Email addresses
-                </span>
+                <span className="text-base font-medium text-secondary-900">Email addresses</span>
                 <span className="block text-sm text-secondary-600">
-                  One per line, or separated by commas. Have names too? Upload a
-                  file instead.
+                  One per line, or separated by commas. Have names too? Upload a file instead.
                 </span>
                 <textarea
                   className={`${FIELD} mt-2 h-44 font-mono text-sm`}
-                  placeholder={"jane@company.co.uk\njohn@business.com"}
+                  placeholder={'jane@company.co.uk\njohn@business.com'}
                   value={typed}
                   onChange={(e) => setTyped(e.target.value)}
                   autoFocus
@@ -366,23 +334,22 @@ export function AddPeople({
               <div className="flex flex-wrap items-center gap-3">
                 <Button
                   size="lg"
+                  className="w-full @md:w-auto"
                   onClick={checkTyped}
                   disabled={typedEmails.length === 0}
                 >
                   {typedEmails.length === 0
-                    ? "Next"
-                    : `Next: check ${typedEmails.length} address${typedEmails.length === 1 ? "" : "es"}`}
+                    ? 'Next'
+                    : `Next: check ${typedEmails.length} address${typedEmails.length === 1 ? '' : 'es'}`}
                 </Button>
-                {typed.trim() !== "" && typedEmails.length === 0 && (
-                  <span className="text-sm text-secondary-600">
-                    No email addresses found yet.
-                  </span>
+                {typed.trim() !== '' && typedEmails.length === 0 && (
+                  <span className="text-sm text-secondary-600">No email addresses found yet.</span>
                 )}
               </div>
             </div>
           )}
 
-          {mode === "file" && (
+          {mode === 'file' && (
             <div className="space-y-3">
               <label
                 onDragOver={(e) => {
@@ -395,27 +362,19 @@ export function AddPeople({
                   setDragging(false);
                   void chooseFile(e.dataTransfer.files?.[0]);
                 }}
-                className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 text-center transition ${
+                className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-5 text-center transition @md:p-8 ${
                   dragging
-                    ? "border-primary-500 bg-primary-50 dark:bg-primary-900/30"
-                    : "border-secondary-300 hover:border-primary-500"
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
+                    : 'border-secondary-300 hover:border-primary-500'
                 }`}
               >
-                <UploadCloud
-                  className="h-9 w-9 text-primary-500"
-                  aria-hidden="true"
-                />
+                <UploadCloud className="h-9 w-9 text-primary-500" aria-hidden="true" />
                 <span className="text-base font-semibold text-secondary-900">
-                  {reading
-                    ? "Reading your file…"
-                    : "Click to choose a file, or drag it here"}
+                  {reading ? 'Reading your file…' : 'Click to choose a file, or drag it here'}
                 </span>
+                <span className="text-sm text-secondary-600">Excel (.xlsx), CSV or PDF, up to 7 MB</span>
                 <span className="text-sm text-secondary-600">
-                  Excel (.xlsx), CSV or PDF, up to 7 MB
-                </span>
-                <span className="text-sm text-secondary-600">
-                  Only an email column is needed — names and companies are used
-                  if they’re there.
+                  Only an email column is needed — names and companies are used if they’re there.
                 </span>
                 <input
                   type="file"
@@ -424,7 +383,7 @@ export function AddPeople({
                   className="sr-only"
                   onChange={(e) => {
                     void chooseFile(e.target.files?.[0]);
-                    e.target.value = "";
+                    e.target.value = '';
                   }}
                 />
               </label>
@@ -432,14 +391,12 @@ export function AddPeople({
                 <Button variant="ghost" onClick={downloadExampleCsv}>
                   Download an example file
                 </Button>
-                <HelpLink topic="import-file">
-                  How to get your file ready
-                </HelpLink>
+                <HelpLink topic="import-file">How to get your file ready</HelpLink>
               </div>
             </div>
           )}
 
-          {mode === "contacts" && (
+          {mode === 'contacts' && (
             <div className="space-y-3">
               <label className="relative block">
                 <span className="sr-only">Search your contacts</span>
@@ -456,9 +413,7 @@ export function AddPeople({
                 />
               </label>
               {contactsError ? (
-                <Alert onRetry={() => setContactsTry((n) => n + 1)}>
-                  {contactsError}
-                </Alert>
+                <Alert onRetry={() => setContactsTry((n) => n + 1)}>{contactsError}</Alert>
               ) : contacts === null ? (
                 <div className="space-y-2">
                   {[0, 1, 2, 3].map((i) => (
@@ -475,8 +430,7 @@ export function AddPeople({
                         onClick={() =>
                           setPicked((p) => {
                             const next = { ...p };
-                            for (const c of pickable)
-                              next[c.uuid] = c.email as string;
+                            for (const c of pickable) next[c.uuid] = c.email as string;
                             return next;
                           })
                         }
@@ -498,24 +452,21 @@ export function AddPeople({
                     {contacts.length === 0 && (
                       <li className="p-4 text-base text-secondary-600">
                         {query
-                          ? "Nobody matches that search."
-                          : "You have no contacts yet. Type or upload email addresses instead."}
+                          ? 'Nobody matches that search.'
+                          : 'You have no contacts yet. Type or upload email addresses instead.'}
                       </li>
                     )}
                     {contacts.map((c) => {
                       const inList = memberUuids.has(c.uuid);
                       const disabled = !c.email || inList;
-                      const name =
-                        [c.first_name, c.last_name].filter(Boolean).join(" ") ||
-                        c.email ||
-                        "—";
+                      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '—';
                       return (
                         <li key={c.uuid}>
                           <label
                             className={`flex items-center gap-3 px-4 py-3 ${
                               disabled
-                                ? "opacity-60"
-                                : "cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-900/40"
+                                ? 'opacity-60'
+                                : 'cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-900/40'
                             }`}
                           >
                             <input
@@ -526,40 +477,27 @@ export function AddPeople({
                               onChange={(e) =>
                                 setPicked((p) => {
                                   const next = { ...p };
-                                  if (e.target.checked && c.email)
-                                    next[c.uuid] = c.email;
+                                  if (e.target.checked && c.email) next[c.uuid] = c.email;
                                   else delete next[c.uuid];
                                   return next;
                                 })
                               }
                             />
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-base text-secondary-900">
-                                {name}
-                              </span>
+                              <span className="block truncate text-base text-secondary-900">{name}</span>
                               <span className="block truncate text-sm text-secondary-600">
-                                {c.email || "No email address"}
-                                {c.account_name ? ` · ${c.account_name}` : ""}
+                                {c.email || 'No email address'}
+                                {c.account_name ? ` · ${c.account_name}` : ''}
                               </span>
                             </span>
-                            {inList && (
-                              <span className="shrink-0 text-sm text-secondary-600">
-                                Already in list
-                              </span>
-                            )}
+                            {inList && <span className="shrink-0 text-sm text-secondary-600">Already in list</span>}
                           </label>
                         </li>
                       );
                     })}
                   </ul>
-                  <Button
-                    size="lg"
-                    disabled={pickedCount === 0}
-                    onClick={checkPicked}
-                  >
-                    {pickedCount === 0
-                      ? "Tick the people to add"
-                      : `Next: add ${people(pickedCount)}`}
+                  <Button size="lg" className="w-full @md:w-auto" disabled={pickedCount === 0} onClick={checkPicked}>
+                    {pickedCount === 0 ? 'Tick the people to add' : `Next: add ${people(pickedCount)}`}
                   </Button>
                 </>
               )}
@@ -573,90 +511,75 @@ export function AddPeople({
           {checking && (
             <div className="space-y-2" role="status" aria-live="polite">
               <p className="text-base text-secondary-600">
-                {pending.how === "file"
+                {pending.how === 'file'
                   ? `Reading ${pending.name} and checking the addresses…`
-                  : "Checking the addresses…"}
+                  : 'Checking the addresses…'}
               </p>
               <Skeleton className="h-24" />
               <Skeleton className="h-32" />
             </div>
           )}
 
-          {checkError && (
-            <Alert
-              onRetry={scan ? undefined : () => void check(pending, basis)}
-            >
-              {checkError}
-            </Alert>
-          )}
+          {checkError && <Alert onRetry={scan ? undefined : () => void check(pending, basis)}>{checkError}</Alert>}
 
           {scan && !checking && (
             <>
               <div className="rounded-xl bg-secondary-50 p-4 text-base dark:bg-secondary-900/40">
                 <p className="text-xl font-semibold text-secondary-900">
-                  {scan.importable > 0
-                    ? `${people(scan.importable)} will be added`
-                    : "Nobody new to add"}
+                  {scan.importable > 0 ? `${people(scan.importable)} will be added` : 'Nobody new to add'}
                 </p>
                 <p className="text-secondary-600">
-                  We found {scan.found.toLocaleString("en-GB")} email address
-                  {scan.found === 1 ? "" : "es"}
-                  {pending.how === "file" ? ` in ${pending.name}` : ""}.
+                  We found {scan.found.toLocaleString('en-GB')} email address
+                  {scan.found === 1 ? '' : 'es'}
+                  {pending.how === 'file' ? ` in ${pending.name}` : ''}.
                   {scan.importable > 0 && scan.new_contacts > 0
-                    ? ` ${scan.new_contacts.toLocaleString("en-GB")} will also be saved to your contacts.`
-                    : ""}
+                    ? ` ${scan.new_contacts.toLocaleString('en-GB')} will also be saved to your contacts.`
+                    : ''}
                 </p>
                 {(scan.skipped.duplicates > 0 ||
                   scan.skipped.unsubscribed > 0 ||
                   (scan.personal_rule && scan.skipped.personal > 0)) && (
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-secondary-700 dark:text-secondary-300">
                     {scan.skipped.duplicates > 0 && (
-                      <li>
-                        {scan.skipped.duplicates.toLocaleString("en-GB")} were
-                        listed twice (added once).
-                      </li>
+                      <li>{scan.skipped.duplicates.toLocaleString('en-GB')} were listed twice (added once).</li>
                     )}
                     {scan.skipped.unsubscribed > 0 && (
                       <li>
-                        {scan.skipped.unsubscribed.toLocaleString("en-GB")}{" "}
-                        asked not to get emails, so they are left out.
+                        {scan.skipped.unsubscribed.toLocaleString('en-GB')} asked not to get emails, so they are left
+                        out.
                       </li>
                     )}
                     {scan.personal_rule && scan.skipped.personal > 0 && (
                       <li>
-                        {scan.skipped.personal.toLocaleString("en-GB")} personal
-                        address{scan.skipped.personal === 1 ? "" : "es"} (like
-                        Gmail or Hotmail) left out: the law only lets you email
-                        these people if they asked to hear from you. If they
-                        did, choose “People who asked to get my emails” below.
+                        {scan.skipped.personal.toLocaleString('en-GB')} personal address
+                        {scan.skipped.personal === 1 ? '' : 'es'} (like Gmail or Hotmail) left out: the law only lets
+                        you email these people if they asked to hear from you. If they did, choose “People who asked to
+                        get my emails” below.
                       </li>
                     )}
                   </ul>
                 )}
                 {scan.found === 0 && (
                   <p className="mt-2 text-secondary-700 dark:text-secondary-300">
-                    Check that the file has email addresses in it, then go back
-                    and try again.
+                    Check that the file has email addresses in it, then go back and try again.
                   </p>
                 )}
               </div>
 
               <fieldset className="space-y-2">
-                <legend className="mb-1 text-base font-medium text-secondary-900">
-                  Who are these people?
-                </legend>
+                <legend className="mb-1 text-base font-medium text-secondary-900">Who are these people?</legend>
                 <div className="grid gap-2 @3xl:grid-cols-2">
                   {(
                     [
                       [
-                        "legitimate_interest",
-                        "Businesses I want to tell about my products",
-                        "Company addresses, e.g. from a directory or a list you bought.",
+                        'legitimate_interest',
+                        'Businesses I want to tell about my products',
+                        'Company addresses, e.g. from a directory or a list you bought.',
                       ],
                       [
-                        "consent",
-                        "People who asked to get my emails",
-                        "They signed up on my website, in my shop, or told me yes.",
+                        'consent',
+                        'People who asked to get my emails',
+                        'They signed up on my website, in my shop, or told me yes.',
                       ],
                     ] as [LegalBasis, string, string][]
                   ).map(([value, title, hint]) => (
@@ -664,8 +587,8 @@ export function AddPeople({
                       key={value}
                       className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3 transition ${
                         basis === value
-                          ? "border-primary-600 bg-primary-50 dark:bg-primary-900/30"
-                          : "border-secondary-200 hover:border-primary-400"
+                          ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                          : 'border-secondary-200 hover:border-primary-400'
                       }`}
                     >
                       <input
@@ -679,12 +602,8 @@ export function AddPeople({
                         }}
                       />
                       <span>
-                        <span className="block text-base font-medium text-secondary-900">
-                          {title}
-                        </span>
-                        <span className="block text-sm text-secondary-600">
-                          {hint}
-                        </span>
+                        <span className="block text-base font-medium text-secondary-900">{title}</span>
+                        <span className="block text-sm text-secondary-600">{hint}</span>
                       </span>
                     </label>
                   ))}
@@ -693,7 +612,7 @@ export function AddPeople({
 
               {scan.importable > 0 && (
                 <>
-                  {pending.how === "file" && (
+                  {pending.how === 'file' && (
                     <label className="block">
                       <span className="text-base text-secondary-900">
                         Where did you get this list? (optional, saved as a note)
@@ -715,9 +634,8 @@ export function AddPeople({
                       onChange={(e) => setLawful(e.target.checked)}
                     />
                     <span>
-                      I’m allowed to email these people. Every email will show
-                      my business name and address, and anyone can unsubscribe
-                      with one click — they are never emailed again.
+                      I’m allowed to email these people. Every email will show my business name and address, and anyone
+                      can unsubscribe with one click — they are never emailed again.
                     </span>
                   </label>
                 </>
@@ -725,23 +643,23 @@ export function AddPeople({
             </>
           )}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 @md:flex-row @md:flex-wrap">
             {scan && !checking && scan.importable > 0 && (
               <Button
                 size="lg"
+                className="w-full @md:w-auto"
                 leftIcon={<Check className="h-5 w-5" />}
                 disabled={!lawful}
                 isLoading={adding}
                 onClick={() => void confirmAdd()}
               >
-                {lawful
-                  ? `Add ${people(scan.importable)}`
-                  : "Tick the box above to continue"}
+                {lawful ? `Add ${people(scan.importable)}` : 'Tick the box above to continue'}
               </Button>
             )}
             <Button
               size="lg"
               variant="outline"
+              className="w-full @md:w-auto"
               leftIcon={<ArrowLeft className="h-5 w-5" />}
               disabled={adding}
               onClick={back}
