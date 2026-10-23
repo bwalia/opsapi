@@ -244,6 +244,24 @@ export const cmsService = {
     await apiClient.delete(`/api/v2/cms/posts/${uuid}`);
   },
 
+  // ---------------- Public media (www S3) ----------------
+  async getMediaConfig(): Promise<{ configured: boolean; base_url?: string }> {
+    const response = await apiClient.get('/api/v2/cms/media/config');
+    return unwrapData<{ configured: boolean; base_url?: string }>(response);
+  },
+
+  async uploadMedia(
+    file: File,
+    opts: { slug?: string; kind?: string } = {},
+  ): Promise<{ url: string; key: string; bucket: string; size: number; content_type?: string }> {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (opts.slug) fd.append('slug', opts.slug);
+    if (opts.kind) fd.append('kind', opts.kind);
+    const response = await apiClient.post('/api/v2/cms/media', fd);
+    return unwrapData(response);
+  },
+
   // ---------------- Pages (static site pages) ----------------
   async getPages(params: { status?: PageStatus | ''; search?: string } = {}): Promise<CmsPage[]> {
     const qs = buildQueryString({ status: params.status, search: params.search });

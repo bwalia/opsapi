@@ -45,6 +45,7 @@ import {
   Palette,
   RemoveFormatting,
   Youtube as YoutubeIcon,
+  Loader2,
 } from 'lucide-react';
 import { promptDialog } from '@/components/ui';
 import styles from './RichTextEditor.module.css';
@@ -204,6 +205,13 @@ export interface RichTextEditorProps {
   editable?: boolean;
   /** When provided, typing "@" opens a mention picker over these items. */
   mentionItems?: MentionItem[];
+  /**
+   * When set, the image toolbar button (and paste/drop of image files) uploads
+   * via this callback and inserts the returned public URL. Used by CMS so
+   * blog images land on www.workstation.co.uk. Without it, the editor asks
+   * for an https URL (Academy / comments behaviour).
+   */
+  uploadImage?: (file: File) => Promise<string>;
 }
 
 // ------------------------------------------------------------
@@ -246,7 +254,11 @@ const Toolbar: React.FC<{
   editor: Editor;
   sourceMode?: boolean;
   onToggleSource?: () => void;
-}> = ({ editor, sourceMode, onToggleSource }) => {
+  uploadImage?: (file: File) => Promise<string>;
+}> = ({ editor, sourceMode, onToggleSource, uploadImage }) => {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
   const setLink = useCallback(async () => {
     const previous = editor.getAttributes('link').href as string | undefined;
     const url = await promptDialog({ title: 'Link URL', defaultValue: previous ?? 'https://' });
@@ -258,12 +270,35 @@ const Toolbar: React.FC<{
     editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   }, [editor]);
 
+  const insertFromFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file || !uploadImage) return;
+      if (!file.type.startsWith('image/')) return;
+      setUploading(true);
+      try {
+        const src = await uploadImage(file);
+        if (src) editor.chain().focus().setImage({ src }).run();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Image upload failed';
+        window.alert(msg);
+      } finally {
+        setUploading(false);
+        if (fileRef.current) fileRef.current.value = '';
+      }
+    },
+    [editor, uploadImage],
+  );
+
   const addImage = useCallback(async () => {
+    if (uploadImage) {
+      fileRef.current?.click();
+      return;
+    }
     const url = await promptDialog({ title: 'Image URL (https://…)' });
     if (url && url.trim()) {
       editor.chain().focus().setImage({ src: url.trim() }).run();
     }
-  }, [editor]);
+  }, [editor, uploadImage]);
 
   const addVideo = useCallback(async () => {
     const url = await promptDialog({
@@ -428,9 +463,30 @@ const Toolbar: React.FC<{
       <TbButton title="Remove link" disabled={!editor.isActive('link')} onClick={() => editor.chain().focus().unsetLink().run()}>
         <Link2Off size={16} />
       </TbButton>
-      <TbButton title="Insert image" onClick={addImage}>
-        <ImageIcon size={16} />
+      <TbButton
+        title={
+          uploading
+            ? 'Uploading image…'
+            : uploadImage
+              ? 'Upload image (publishes to the public site)'
+              : 'Insert image by URL'
+        }
+        onClick={addImage}
+        disabled={uploading}
+      >
+        {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
       </TbButton>
+      {uploadImage ? (
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+          className="sr-only"
+          aria-hidden
+          tabIndex={-1}
+          onChange={(e) => void insertFromFile(e.target.files?.[0])}
+        />
+      ) : null}
       <TbButton title="Insert video (YouTube / Vimeo)" onClick={addVideo}>
         <YoutubeIcon size={16} />
       </TbButton>
@@ -469,11 +525,15 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   placeholder = 'Start writing your lesson content…',
   editable = true,
   mentionItems,
+  uploadImage,
 }) => {
   // Read the latest items lazily so async-loaded members work without remounting.
   const mentionItemsRef = useRef<MentionItem[]>(mentionItems ?? []);
   useEffect(() => { mentionItemsRef.current = mentionItems ?? []; }, [mentionItems]);
   const withMentions = mentionItems !== undefined;
+
+  const uploadImageRef = useRef(uploadImage);
+  useEffect(() => { uploadImageRef.current = uploadImage; }, [uploadImage]);
 
   const editor = useEditor({
     immediatelyRender: false, // required for Next.js SSR (avoids hydration mismatch)
@@ -510,6 +570,53 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     onUpdate: ({ editor: ed }) => {
       onChange?.(ed.getHTML(), JSON.stringify(ed.getJSON()));
     },
+    editorProps: {
+      handlePaste(view, event) {
+        const upload = uploadImageRef.current;
+        if (!upload) return false;
+        const files = event.clipboardData?.files;
+        if (!files?.length) return false;
+        const file = Array.from(files).find((f) => f.type.startsWith('image/'));
+        if (!file) return false;
+        event.preventDefault();
+        void upload(file)
+          .then((src) => {
+            if (!src) return;
+            const image = view.state.schema.nodes.image;
+            if (!image) return;
+            const node = image.create({ src });
+            view.dispatch(view.state.tr.replaceSelectionWith(node));
+          })
+          .catch((err: unknown) => {
+            window.alert(err instanceof Error ? err.message : 'Image upload failed');
+          });
+        return true;
+      },
+      handleDrop(view, event, _slice, moved) {
+        if (moved) return false;
+        const upload = uploadImageRef.current;
+        if (!upload) return false;
+        const files = event.dataTransfer?.files;
+        if (!files?.length) return false;
+        const file = Array.from(files).find((f) => f.type.startsWith('image/'));
+        if (!file) return false;
+        event.preventDefault();
+        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        void upload(file)
+          .then((src) => {
+            if (!src) return;
+            const image = view.state.schema.nodes.image;
+            if (!image) return;
+            const node = image.create({ src });
+            const pos = coords?.pos ?? view.state.selection.from;
+            view.dispatch(view.state.tr.insert(pos, node));
+          })
+          .catch((err: unknown) => {
+            window.alert(err instanceof Error ? err.message : 'Image upload failed');
+          });
+        return true;
+      },
+    },
   });
 
   // HTML source ("code view") mode — lets you paste/edit raw HTML directly, the
@@ -542,7 +649,14 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   return (
     <div className={styles.editorShell}>
       {/* No toolbar in read-only mode — used to render stored HTML safely. */}
-      {editor && editable && <Toolbar editor={editor} sourceMode={sourceMode} onToggleSource={toggleSource} />}
+      {editor && editable && (
+        <Toolbar
+          editor={editor}
+          sourceMode={sourceMode}
+          onToggleSource={toggleSource}
+          uploadImage={uploadImage}
+        />
+      )}
       {sourceMode ? (
         <textarea
           className="block w-full min-h-80 resize-y bg-surface p-4 font-mono text-[13px] leading-relaxed text-secondary-900 focus:outline-none"
