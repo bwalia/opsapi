@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Save, X, Eye, Star, Loader2, Send } from 'lucide-react';
+import { ArrowLeft, Save, X, Star, Loader2, Send } from 'lucide-react';
 import { Button, Input, Textarea, Select, Card, Modal } from '@/components/ui';
 import { RichTextEditor } from '@/components/academy';
 import {
@@ -16,6 +16,7 @@ import {
 } from '@/services/cms.service';
 import toast from 'react-hot-toast';
 import { explainDelivery } from '@/components/cms/WebsiteUpdateGuide';
+import { FeaturedImageField } from '@/components/cms/FeaturedImageField';
 
 function slugify(text: string): string {
   return text
@@ -472,22 +473,11 @@ export default function PostEditor({ post }: PostEditorProps) {
           </Card>
 
           <Card>
-            <h3 className="mb-3 font-semibold text-secondary-900">Featured image</h3>
-            <Input
+            <FeaturedImageField
               value={featuredImage}
-              onChange={(e) => setFeaturedImage(e.target.value)}
-              placeholder="https://…/image.jpg"
-              leftIcon={<Eye className="h-4 w-4" />}
+              onChange={setFeaturedImage}
+              slug={slug}
             />
-            {featuredImage && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={featuredImage}
-                alt="Featured preview"
-                className="mt-3 h-32 w-full rounded-lg object-cover"
-                onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
-              />
-            )}
           </Card>
 
           <Card>

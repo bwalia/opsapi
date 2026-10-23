@@ -7,6 +7,7 @@ import { Button, Input, Textarea, Select, Card } from '@/components/ui';
 import { RichTextEditor } from '@/components/academy';
 import { cmsService, type CmsPage, type PageInput, type PageStatus } from '@/services/cms.service';
 import { renderTemplatesService, type RenderTemplate } from '@/services/render-templates.service';
+import { FeaturedImageField } from '@/components/cms/FeaturedImageField';
 import toast from 'react-hot-toast';
 
 function slugify(text: string): string {
@@ -258,21 +259,11 @@ export default function PageEditor({ page }: PageEditorProps) {
           </Card>
 
           <Card>
-            <h3 className="mb-3 font-semibold text-secondary-900">Featured image</h3>
-            <Input
+            <FeaturedImageField
               value={featuredImage}
-              onChange={(e) => setFeaturedImage(e.target.value)}
-              placeholder="https://…/image.jpg"
+              onChange={setFeaturedImage}
+              slug={slug}
             />
-            {featuredImage && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={featuredImage}
-                alt="Featured preview"
-                className="mt-3 h-32 w-full rounded-lg object-cover"
-                onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
-              />
-            )}
           </Card>
         </div>
       </div>
