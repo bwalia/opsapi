@@ -372,9 +372,12 @@ export default function MarketingStudioPage() {
                 )}
               </p>
               {preview.html ? (
-                <div
-                  className="prose prose-sm max-w-none rounded bg-white p-3 text-black shadow-sm"
-                  dangerouslySetInnerHTML={{ __html: preview.html }}
+                // Isolated like an inbox: inline-styled layouts break under the dashboard's prose/Tailwind CSS.
+                <iframe
+                  title="Rendered email preview"
+                  sandbox=""
+                  srcDoc={preview.html}
+                  className="h-[640px] w-full rounded border border-secondary-200 bg-white shadow-sm"
                 />
               ) : (
                 <pre className="whitespace-pre-wrap rounded bg-white p-3 text-sm text-black shadow-sm">

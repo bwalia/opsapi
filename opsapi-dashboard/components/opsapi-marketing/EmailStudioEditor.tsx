@@ -16,6 +16,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Code2,
   Globe,
   Highlighter,
   Image as ImageIcon,
@@ -325,8 +326,20 @@ function frameStyle(open: string): React.CSSProperties {
   return out as React.CSSProperties;
 }
 
+// Table layouts (most hand-coded and imported emails) don't fit TipTap's schema: loading them
+// flattens the design and the next keystroke saves it flattened, so they open as HTML source.
+const TABLE_LAYOUT = /<(table|tbody|tr|td|center|body|html)\b/i;
+
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
 export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false }: Props) {
+  const [mode, setMode] = useState<'visual' | 'html'>(() => (TABLE_LAYOUT.test(value || '') ? 'html' : 'visual'));
+  // A layout template picked later must not be flattened either; the editor's own output never
+  // contains tables, so typing doesn't flip the mode.
+  const [prevValue, setPrevValue] = useState(value);
+  if (value !== prevValue) {
+    setPrevValue(value);
+    if (mode === 'visual' && TABLE_LAYOUT.test(value || '')) setMode('html');
+  }
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [buttonDialog, setButtonDialog] = useState<(ButtonSpec & { editing: boolean }) | null>(null);
@@ -367,16 +380,49 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
   const sel = useSelectionInfo(editor);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || mode !== 'visual') return;
     if (frame.inner !== editor.getHTML()) {
       // cursor to the top: left at the end it sits in the footer's link and shows that link's bar
       editor.chain().setContent(frame.inner, { emitUpdate: false }).setTextSelection(0).run();
     }
-  }, [frame.inner, editor]);
+  }, [frame.inner, editor, mode]);
 
   useEffect(() => {
     editor?.setEditable(!readOnly);
   }, [editor, readOnly]);
+
+  const toggleMode = () => {
+    if (
+      mode === 'html' &&
+      TABLE_LAYOUT.test(value || '') &&
+      !window.confirm('The visual editor cannot keep this layout (tables). Switch anyway?')
+    )
+      return;
+    setMode(mode === 'html' ? 'visual' : 'html');
+  };
+
+  if (mode === 'html') {
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-background">
+        <div className="flex items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5">
+          {!readOnly && (
+            <Tb title="Visual editor" active onClick={toggleMode}>
+              <Code2 className="h-4 w-4" />
+            </Tb>
+          )}
+          <span className="px-2 text-xs text-muted-foreground">HTML source · check the preview to see the design</span>
+        </div>
+        <textarea
+          aria-label="Email HTML source"
+          className="block min-h-[280px] w-full resize-y bg-background px-4 py-3 font-mono text-xs text-foreground focus:outline-none"
+          spellCheck={false}
+          readOnly={readOnly}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    );
+  }
 
   if (!editor) return <div className="min-h-[280px] rounded border border-border bg-muted/20" />;
 
@@ -472,6 +518,10 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
           role="toolbar"
           aria-label="Formatting"
         >
+          <Tb title="Edit HTML source" onClick={toggleMode}>
+            <Code2 className="h-4 w-4" />
+          </Tb>
+          <Sep />
           <Tb title="Undo" onClick={() => chain().undo().run()}>
             <Undo2 className="h-4 w-4" />
           </Tb>
