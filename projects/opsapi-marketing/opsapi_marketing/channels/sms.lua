@@ -102,12 +102,13 @@ function C.send(payload, recipient, ctx)
         }),
         timeout_ms = 15000,
     })
+    -- No answer, a 5xx or 429 is temporary (retried); other 4xx are not.
     if not res then
-        return { state = "failed", reason = tostring(err):sub(1, 200) }
+        return { state = "failed", reason = tostring(err):sub(1, 200), retry = true }
     end
     local status = res.status or 0
     if status < 200 or status >= 300 then
-        return { state = "failed", reason = "sms_http_" .. tostring(status) }
+        return { state = "failed", reason = "sms_http_" .. tostring(status), retry = status >= 500 or status == 429 }
     end
     return { state = "accepted", provider_message_id = nil, reason = "sms_accepted" }
 end

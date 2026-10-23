@@ -42,13 +42,13 @@ return {
                 " sent=", out.sent, " skipped=", out.skipped, " failed=", out.failed)
         end
 
-        -- Mark campaigns complete when no queued left
+        -- Mark campaigns complete when nothing is queued or mid-send
         db.query([[
             UPDATE mkt_campaigns c SET status = 'completed', completed_at = NOW(), updated_at = NOW()
             WHERE c.namespace_id = ? AND c.status = 'sending'
               AND NOT EXISTS (
                 SELECT 1 FROM mkt_deliveries d
-                WHERE d.campaign_id = c.id AND d.state = 'queued'
+                WHERE d.campaign_id = c.id AND d.state IN ('queued', 'sending')
               )
               AND EXISTS (
                 SELECT 1 FROM mkt_deliveries d2 WHERE d2.campaign_id = c.id

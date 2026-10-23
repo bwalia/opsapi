@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Monitor, Smartphone, Save, Braces } from 'lucide-react';
+import { Monitor, Smartphone, Save, Braces, ImagePlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
+import { EMAIL_IMAGE_TYPES, uploadEmailImage } from '@/components/opsapi-marketing/EmailStudioEditor';
 import {
   type Campaign,
   INPUT_CLASS,
@@ -14,6 +15,17 @@ import {
 } from './shared';
 
 type MergeField = { key: string; label: string; field_type?: string };
+
+type Template = {
+  uuid: string;
+  name: string;
+  channel?: string;
+  status?: string;
+  subject?: string | null;
+  preview_text?: string | null;
+  body_html?: string | null;
+  body_text?: string | null;
+};
 
 type Rendered = { subject?: string; html?: string; text?: string; warnings?: string[] };
 
@@ -71,14 +83,17 @@ export default function ContentTab({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mergeFields, setMergeFields] = useState<MergeField[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [target, setTarget] = useState<InsertTarget>('body_html');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [rendered, setRendered] = useState<Rendered | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const subjectRef = useRef<HTMLInputElement>(null);
   const htmlRef = useRef<HTMLTextAreaElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const imageRef = useRef<HTMLInputElement>(null);
 
   const saved = useMemo(() => fromCampaign(campaign), [campaign]);
   const dirty = FIELDS.some((k) => form[k] !== saved[k]);
@@ -94,10 +109,18 @@ export default function ContentTab({
       .catch(() => {
         /* picker is optional — the backend still validates merge keys on Validate */
       });
+    marketingService
+      .listTemplates({ channel: campaign.channel, per_page: 100 })
+      .then((res) => {
+        if (!cancelled) setTemplates(unwrapArray<Template>(res));
+      })
+      .catch(() => {
+        /* no templates: the picker stays hidden */
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [campaign.channel]);
 
   // Debounced live render through the same pipeline the sender uses.
   useEffect(() => {
@@ -122,20 +145,53 @@ export default function ContentTab({
 
   const set = (k: keyof FormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const insertMerge = (key: string) => {
-    if (!key) return;
-    const token = `{{${key}}}`;
-    const el = target === 'subject' ? subjectRef.current : target === 'body_html' ? htmlRef.current : textRef.current;
-    const current = form[target];
+  /** Put text at the cursor of a field (or at its end). */
+  const insertInto = (field: InsertTarget, token: string) => {
+    const el = field === 'subject' ? subjectRef.current : field === 'body_html' ? htmlRef.current : textRef.current;
+    const current = form[field];
     const start = el?.selectionStart ?? current.length;
     const end = el?.selectionEnd ?? current.length;
-    set(target, current.slice(0, start) + token + current.slice(end));
+    set(field, current.slice(0, start) + token + current.slice(end));
     requestAnimationFrame(() => {
       if (!el) return;
       el.focus();
       const pos = start + token.length;
       el.setSelectionRange(pos, pos);
     });
+  };
+
+  const insertMerge = (key: string) => {
+    if (key) insertInto(target, `{{${key}}}`);
+  };
+
+  /** Copy a saved template's words and design into this email (it can then be edited freely). */
+  const applyTemplate = (uuid: string) => {
+    const t = templates.find((x) => x.uuid === uuid);
+    if (!t) return;
+    const hasContent = (form.body_html + form.body_text).trim() !== '';
+    if (hasContent && !window.confirm(`Replace this email’s subject and words with the template “${t.name}”?`)) return;
+    setForm((f) => ({
+      ...f,
+      subject: t.subject ?? f.subject,
+      preview_text: t.preview_text ?? f.preview_text,
+      body_html: t.body_html ?? '',
+      body_text: t.body_text ?? '',
+    }));
+  };
+
+  const uploadImage = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const src = await uploadEmailImage(file);
+      insertInto('body_html', `<img src="${src}" alt="" width="600" style="max-width:100%;height:auto;display:block;border:0" />`);
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, 'Image upload failed'));
+    } finally {
+      setUploading(false);
+      if (imageRef.current) imageRef.current.value = '';
+    }
   };
 
   const save = async () => {
@@ -183,6 +239,28 @@ export default function ContentTab({
       <div className="grid gap-6 xl:grid-cols-2">
         <fieldset disabled={!editable} className="min-w-0 space-y-4">
           <legend className="sr-only">Message content</legend>
+
+          {templates.length > 0 && (
+            <label className="block rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm dark:bg-primary-900/30">
+              <span className="font-medium">Start from a template</span>
+              <span className="block text-xs text-secondary-600">
+                Copies a design you saved in the Studio into this email. You can still change anything.
+              </span>
+              <select
+                className={`${INPUT_CLASS} mt-2 w-full`}
+                value=""
+                onChange={(e) => applyTemplate(e.target.value)}
+              >
+                <option value="">Choose a template…</option>
+                {templates.map((t) => (
+                  <option key={t.uuid} value={t.uuid}>
+                    {t.name}
+                    {t.status && t.status !== 'published' ? ' (draft)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 bg-secondary-50 p-3">
             <Braces className="mb-2 h-4 w-4 text-secondary-500" aria-hidden="true" />
@@ -306,9 +384,33 @@ export default function ContentTab({
               </div>
 
               <div>
-                <label htmlFor="c-html" className="text-sm font-medium">
-                  HTML body
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="c-html" className="text-sm font-medium">
+                    HTML body
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={uploading}
+                    onClick={() => imageRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <ImagePlus className="mr-1.5 h-4 w-4" aria-hidden />
+                    )}
+                    {uploading ? 'Uploading…' : 'Upload image'}
+                  </Button>
+                  <input
+                    ref={imageRef}
+                    type="file"
+                    accept={EMAIL_IMAGE_TYPES}
+                    className="hidden"
+                    aria-label="Upload image"
+                    onChange={(e) => void uploadImage(e.target.files?.[0])}
+                  />
+                </div>
                 <textarea
                   id="c-html"
                   ref={htmlRef}

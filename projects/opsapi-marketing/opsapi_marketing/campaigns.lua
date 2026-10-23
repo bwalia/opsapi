@@ -531,7 +531,7 @@ function C.budget_remaining(campaign)
     -- queued dropped the first recipient). Enqueueing already stops at the budget.
     local sent = U.one([[
         SELECT COUNT(*)::int AS n FROM mkt_deliveries
-        WHERE campaign_id = ? AND state IN ('accepted', 'delivered') AND attempt_key NOT LIKE 'test-%'
+        WHERE campaign_id = ? AND state IN ('accepted', 'delivered', 'sending') AND attempt_key NOT LIKE 'test-%'
     ]], campaign.id)
     return math.max(0, max - (sent and sent.n or 0))
 end

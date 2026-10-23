@@ -1,7 +1,7 @@
 --[[
     Delivery orchestration: eligibility → render → channel.send → delivery row.
     Idempotent on (campaign, contact, channel, attempt_key). Re-checks can_send
-    immediately before the provider call.
+    immediately before the provider call; see S.prepare / S.deliver / S.record.
 ]]
 local db = require("lapis.db")
 local RateLimit = require("middleware.rate-limit")
@@ -10,6 +10,7 @@ local E = require("opsapi_marketing.eligibility")
 local Channels = require("opsapi_marketing.channels")
 local Tokens = require("opsapi_marketing.tokens")
 local Links = require("opsapi_marketing.links")
+local NamespaceMail = require("helper.namespace-mail")
 
 local S = {}
 
@@ -129,9 +130,45 @@ function S.enqueue(ns, campaign, contact_uuid, opts)
     return row
 end
 
---- Claim and send one queued delivery by id. Re-checks can_send.
+-- A send happens in three steps so the provider call is never inside a database
+-- transaction (a slow SMTP server no longer holds row locks, and several emails
+-- can go out at once):
+--   prepare  short transaction: lock the queued row, re-check everything, render,
+--            mark it 'sending'
+--   deliver  the provider call, no database (safe to run in parallel threads)
+--   record   accepted / failed, or back to the queue to retry a temporary failure
+-- A worker that dies between prepare and record leaves the row 'sending';
+-- process_queue puts such rows back after SENDING_STALE (at worst a duplicate,
+-- never a lost message).
+
+S.MAX_ATTEMPTS = 3 -- tries in all for a temporary failure; then it counts as failed
+local BACKOFF_MINUTES = { 2, 10 } -- wait before try 2, try 3
+local SENDING_STALE = "15 minutes"
+
+--- A temporary failure goes back to the queue with a growing wait; after
+-- MAX_ATTEMPTS it is failed for good.
+local function retry_or_fail(id, attempts, reason)
+    attempts = (tonumber(attempts) or 0) + 1
+    reason = tostring(reason or "failed"):sub(1, 200)
+    if attempts >= S.MAX_ATTEMPTS then
+        db.query([[
+            UPDATE mkt_deliveries SET state = 'failed', attempts = ?, reason = ?, failed_at = NOW(), updated_at = NOW()
+            WHERE id = ?
+        ]], attempts, reason, id)
+        return "failed"
+    end
+    db.query([[
+        UPDATE mkt_deliveries SET state = 'queued', attempts = ?, reason = ?,
+            send_after = NOW() + make_interval(mins => ?), updated_at = NOW()
+        WHERE id = ?
+    ]], attempts, "retry " .. attempts .. ": " .. reason, BACKOFF_MINUTES[attempts] or 30, id)
+    return "queued"
+end
+
+--- Step 1. @return a job ({ ready = true, ... }) to deliver, or the delivery row and
+-- why it isn't being sent now (skipped, failed, or left queued for later).
 -- opts.skip_quiet_hours: test sends (the campaign row is reloaded, so it's passed here).
-function S.dispatch(delivery_id, opts)
+function S.prepare(delivery_id, opts)
     opts = opts or {}
     return U.tx(function()
         local d = U.one("SELECT * FROM mkt_deliveries WHERE id = ? AND state = 'queued' FOR UPDATE SKIP LOCKED", delivery_id)
@@ -250,45 +287,74 @@ function S.dispatch(delivery_id, opts)
             return nil, verr
         end
 
-        local result = adapter.send(payload, { address = d.address, email = contact.email, phone = contact.phone }, {
-            namespace_id = d.namespace_id,
-            settings = settings,
-            delivery_uuid = d.uuid,
-            from_email = campaign.from_email,
-            from_name = campaign.from_name,
-            reply_to = campaign.reply_to,
-            unsubscribe_url = unsub,
-        })
-
-        local state = result.state or "unknown"
-        if state == "accepted" then
-            db.query([[
-                UPDATE mkt_deliveries SET state = 'accepted', provider_message_id = ?, reason = ?,
-                    subject = ?, body_html = ?, body_text = ?, eligibility_reason = ?,
-                    variant_key = ?, accepted_at = NOW(), updated_at = NOW()
-                WHERE id = ?
-            ]], result.provider_message_id or db.NULL, result.reason or db.NULL, payload.subject or db.NULL,
-                payload.html and payload.html:sub(1, 200000) or db.NULL,
-                payload.text and payload.text:sub(1, 50000) or db.NULL,
-                gate.reason or db.NULL, variant_key or db.NULL, d.id)
-            pcall(function()
-                require("helper.plugin-sdk").emit(d.namespace_id, "opsapi_marketing.delivery.accepted", {
-                    delivery_uuid = d.uuid, campaign_uuid = campaign.uuid, channel = d.channel,
-                })
-            end)
-        elseif state == "failed" or state == "bounced" then
-            db.query([[
-                UPDATE mkt_deliveries SET state = ?, reason = ?, failed_at = NOW(), updated_at = NOW()
-                WHERE id = ?
-            ]], state, result.reason, d.id)
-        else
-            db.query([[
-                UPDATE mkt_deliveries SET state = ?, reason = ?, updated_at = NOW() WHERE id = ?
-            ]], state, result.reason, d.id)
-        end
-
-        return U.one("SELECT * FROM mkt_deliveries WHERE id = ?", d.id)
+        db.query("UPDATE mkt_deliveries SET state = 'sending', updated_at = NOW() WHERE id = ?", d.id)
+        return {
+            ready = true, d = d, campaign = campaign, adapter = adapter, payload = payload,
+            gate = gate, variant_key = variant_key,
+            recipient = { address = d.address, email = contact.email, phone = contact.phone },
+            ctx = {
+                namespace_id = d.namespace_id,
+                settings = settings,
+                delivery_uuid = d.uuid,
+                from_email = campaign.from_email,
+                from_name = campaign.from_name,
+                reply_to = campaign.reply_to,
+                unsubscribe_url = unsub,
+                -- Looked up here: deliver must not touch the database.
+                smtp = d.channel == "email" and (NamespaceMail.smtp(d.namespace_id) or false) or nil,
+            },
+        }
     end)
+end
+
+--- Step 2: the provider call. Never raises; an unexpected error is a temporary failure.
+function S.deliver(job)
+    local ok, result = pcall(job.adapter.send, job.payload, job.recipient, job.ctx)
+    if not ok then
+        ngx.log(ngx.ERR, "[opsapi_marketing] send ", job.d.uuid, ": ", tostring(result))
+        return { state = "failed", reason = "internal_error", retry = true }
+    end
+    return result or { state = "unknown" }
+end
+
+--- Step 3. @return the delivery row as stored.
+function S.record(job, result)
+    local d, payload = job.d, job.payload
+    local state = result.state or "unknown"
+    if state == "accepted" then
+        db.query([[
+            UPDATE mkt_deliveries SET state = 'accepted', provider_message_id = ?, reason = ?,
+                subject = ?, body_html = ?, body_text = ?, eligibility_reason = ?,
+                variant_key = ?, accepted_at = NOW(), updated_at = NOW()
+            WHERE id = ?
+        ]], result.provider_message_id or db.NULL, result.reason or db.NULL, payload.subject or db.NULL,
+            payload.html and payload.html:sub(1, 200000) or db.NULL,
+            payload.text and payload.text:sub(1, 50000) or db.NULL,
+            job.gate.reason or db.NULL, job.variant_key or db.NULL, d.id)
+        pcall(function()
+            require("helper.plugin-sdk").emit(d.namespace_id, "opsapi_marketing.delivery.accepted", {
+                delivery_uuid = d.uuid, campaign_uuid = job.campaign.uuid, channel = d.channel,
+            })
+        end)
+    elseif (state == "failed" or state == "bounced") and result.retry then
+        retry_or_fail(d.id, d.attempts, result.reason)
+    elseif state == "failed" or state == "bounced" then
+        db.query([[
+            UPDATE mkt_deliveries SET state = ?, reason = ?, failed_at = NOW(), updated_at = NOW()
+            WHERE id = ?
+        ]], state, tostring(result.reason or state):sub(1, 200), d.id)
+    else
+        db.query("UPDATE mkt_deliveries SET state = ?, reason = ?, updated_at = NOW() WHERE id = ?",
+            state, result.reason or db.NULL, d.id)
+    end
+    return U.one("SELECT * FROM mkt_deliveries WHERE id = ?", d.id)
+end
+
+--- Prepare, deliver and record one queued delivery (test sends, and one at a time).
+function S.dispatch(delivery_id, opts)
+    local job, err = S.prepare(delivery_id, opts)
+    if not (job and job.ready) then return job, err end
+    return S.record(job, S.deliver(job))
 end
 
 --- Process up to `limit` queued deliveries for a namespace (used by campaign_sender job).
@@ -297,37 +363,97 @@ function S.process_queue(ns, limit)
     -- Default: as many as the per-minute rate allows (the rate limiter still applies per message).
     limit = tonumber(limit) or math.min(500, math.max(tonumber(settings.email_rate_per_min) or 60,
         tonumber(settings.sms_rate_per_min) or 30))
-    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped in dispatch),
-    -- and only deliveries whose batch is due. In quiet hours marketing messages wait in the queue.
+    db.query("UPDATE mkt_deliveries SET state = 'queued', updated_at = NOW() WHERE namespace_id = ? AND state = 'sending'"
+        .. " AND updated_at < NOW() - interval '" .. SENDING_STALE .. "'", ns)
+
+    -- Daily email limit (e.g. 500 for Gmail, 2,000 for Google Workspace): what's left of the
+    -- last 24 hours. The rest wait in the queue for the next day.
+    local email_room = math.huge
+    local daily = tonumber(settings.email_daily_limit) or 0
+    if daily > 0 then
+        local used = U.one([[
+            SELECT COUNT(*)::int AS n FROM mkt_deliveries
+            WHERE namespace_id = ? AND channel = 'email' AND attempt_key NOT LIKE 'test-%'
+              AND ((state IN ('accepted', 'delivered') AND accepted_at > NOW() - interval '24 hours')
+                   OR state = 'sending')
+        ]], ns).n
+        email_room = math.max(0, daily - used)
+    end
+
+    -- Only campaigns currently sending (paused/cancelled deliveries stay queued or get skipped),
+    -- and only deliveries whose batch or retry time is due. In quiet hours marketing waits.
     local quiet = U.in_quiet_hours(ns, settings.quiet_hours_from or "21:00", settings.quiet_hours_to or "08:00")
     local rows = db.query([[
-        SELECT d.id FROM mkt_deliveries d
+        SELECT d.id, d.channel, d.attempts FROM mkt_deliveries d
         JOIN mkt_campaigns c ON c.id = d.campaign_id
         WHERE d.namespace_id = ? AND d.state = 'queued' AND c.status = 'sending'
           AND (d.send_after IS NULL OR d.send_after <= NOW())
           AND (? = false OR c.message_type <> 'marketing')
+          AND (? OR d.channel <> 'email')
         ORDER BY COALESCE(d.send_after, d.queued_at), d.id
         LIMIT ?
-    ]], ns, quiet, limit)
-    local sent, skipped, failed = 0, 0, 0
+    ]], ns, quiet, email_room > 0, limit)
+
+    local jobs, sent, skipped, failed = {}, 0, 0, 0
     for _, r in ipairs(rows) do
-        local d, err = S.dispatch(r.id)
-        if err == "not_found_or_locked" or err == "campaign_paused" or err == "quiet_hours" then
-            -- leave for later
-        elseif err == "rate_limited" then break
-        elseif err == "budget_exhausted" then
-            -- Cap reached: skip remaining queued for this campaign
-            if d and d.campaign_id then
-                local n = db.query([[
-                    UPDATE mkt_deliveries SET state = 'skipped', reason = 'budget_exhausted', updated_at = NOW()
-                    WHERE campaign_id = ? AND state = 'queued'
-                ]], d.campaign_id)
-                skipped = skipped + 1 + (n and n.affected_rows or 0)
+        if r.channel ~= "email" or email_room > 0 then
+            -- One bad delivery must not stop the queue: an error here is a temporary failure.
+            local ok, job, err = pcall(S.prepare, r.id)
+            if not ok then
+                ngx.log(ngx.ERR, "[opsapi_marketing] prepare delivery ", r.id, ": ", tostring(job))
+                if retry_or_fail(r.id, r.attempts, "internal_error") == "failed" then failed = failed + 1 end
+            elseif job and job.ready then
+                jobs[#jobs + 1] = job
+                if r.channel == "email" then email_room = email_room - 1 end
+            elseif err == "not_found_or_locked" or err == "campaign_paused" or err == "quiet_hours" then
+                -- leave for later
+            elseif err == "rate_limited" then break
+            elseif err == "budget_exhausted" then
+                -- Cap reached: skip remaining queued for this campaign
+                if job and job.campaign_id then
+                    local n = db.query([[
+                        UPDATE mkt_deliveries SET state = 'skipped', reason = 'budget_exhausted', updated_at = NOW()
+                        WHERE campaign_id = ? AND state = 'queued'
+                    ]], job.campaign_id)
+                    skipped = skipped + 1 + (n and n.affected_rows or 0)
+                end
+                break
+            elseif job and job.state == "skipped" then skipped = skipped + 1
+            else failed = failed + 1 end
+        end
+    end
+
+    -- Email goes out `email_parallel` at a time (separate SMTP connections); other
+    -- channels one by one (their HTTP helper uses the database).
+    local parallel = math.max(1, math.min(10, tonumber(settings.email_parallel) or 1))
+    local i = 1
+    while i <= #jobs do
+        local wave = { jobs[i] }
+        i = i + 1
+        while parallel > 1 and wave[1].d.channel == "email" and #wave < parallel and i <= #jobs
+            and jobs[i].d.channel == "email" do
+            wave[#wave + 1] = jobs[i]
+            i = i + 1
+        end
+        local results = {}
+        if #wave == 1 then
+            results[1] = S.deliver(wave[1])
+        else
+            local threads = {}
+            for k, job in ipairs(wave) do threads[k] = ngx.thread.spawn(S.deliver, job) end
+            for k, t in ipairs(threads) do
+                local ok, res = ngx.thread.wait(t)
+                results[k] = ok and res or { state = "failed", reason = "internal_error", retry = true }
             end
-            break
-        elseif d and d.state == "accepted" then sent = sent + 1
-        elseif d and d.state == "skipped" then skipped = skipped + 1
-        else failed = failed + 1 end
+        end
+        for k, job in ipairs(wave) do
+            local ok, row = pcall(S.record, job, results[k])
+            if not ok then
+                ngx.log(ngx.ERR, "[opsapi_marketing] record delivery ", job.d.uuid, ": ", tostring(row))
+                failed = failed + 1
+            elseif row and row.state == "accepted" then sent = sent + 1
+            elseif row and row.state == "failed" then failed = failed + 1 end
+        end
     end
     return { sent = sent, skipped = skipped, failed = failed, claimed = #rows }
 end

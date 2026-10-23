@@ -80,6 +80,12 @@ function Mail.isConfigured()
     return cfg.username ~= "" and cfg.password ~= ""
 end
 
+--- The deployment's default sender as a workspace may see it (never the credentials).
+function Mail.deploymentSender()
+    local cfg = get_config()
+    return { host = cfg.host, from_email = cfg.from_email, from_name = cfg.from_name, configured = Mail.isConfigured() }
+end
+
 -- ============================================================================
 -- Template Engine
 -- ============================================================================
@@ -433,6 +439,13 @@ end
 
 --- Mutates opts to add env prefix + debug banner. No-op when env is
 --- production. Always safe to call.
+--- The tag non-production emails get in their subject (e.g. "[INT]"), nil in production.
+function Mail.envTag()
+    local env = current_env()
+    if is_production_env(env) then return nil end
+    return "[" .. string.upper(env) .. "]"
+end
+
 local function enrich_for_non_prod(opts)
     local env = current_env()
     if is_production_env(env) then return end

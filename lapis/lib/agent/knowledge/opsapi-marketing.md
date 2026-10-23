@@ -15,7 +15,21 @@ Multi-channel marketing (email + SMS) on CRM contacts. Consent, suppression and 
 - **Campaigns** (/dashboard/opsapi-marketing/campaigns): draft → validate → approve → schedule → send. A/B and max_deliveries supported.
 - **Studio** (/dashboard/opsapi-marketing/studio): TipTap email + SMS composers with merge fields.
 - **Conversations** (/dashboard/opsapi-marketing/conversations): inbound replies and classifications.
-- **Lists / Suppressions**: plugin CRUD under /dashboard/plugins/opsapi_marketing/.
+- **Getting started** (/dashboard/opsapi-marketing/guide): live checklist + step-by-step help for beginners.
+- **Lists** (/dashboard/opsapi-marketing/lists): make a list, then "Add people to this list" three ways, each ending in one check screen.
+- **Suppressions**: everyone who unsubscribed (/dashboard/plugins/opsapi-marketing/suppressions).
+- **Settings** (/dashboard/opsapi-marketing/settings): "How your emails are sent" (SMTP, From, test mode, daily limit).
+
+## How to (answer beginners in these plain steps, and link the guide section)
+- **Connect email** (guide#connect-email): Workspace → Email → fill Server/Port/Security/Username/Password, From address + From name → "Use this server" on → Save → "Send test". Gmail: smtp.gmail.com 587 STARTTLS + an app password; ~500/day (Workspace ~2,000).
+- **Business address / test mode / limits** (guide#business-address, guide#test-mode): Workspace → Plugins → Marketing Cloud → "Business name and postal address", "Test mode: don't really send" (on = nothing leaves, test emails included), "Emails per day", "Emails sent at once" → Save settings.
+- **Make a list** (guide#make-list): Lists → "Make a new list" → name → "Create list".
+- **Add people** (guide#add-people): click the list → "Type email addresses" / "Upload a file" / "Choose from my contacts" → Next → answer "Who are these people?" (Businesses… = legitimate interest, personal Gmail/Hotmail left out in UK/EU; People who asked… = consent) → tick the confirm box → "Add N people".
+- **Import a CSV/Excel/PDF** (guide#import-file): one person per row, an Email column is enough; .xlsx, .csv or PDF up to 7 MB; old .xls must be re-saved as .xlsx; "Download an example file" on the Lists page.
+- **Templates** (guide#templates): Studio → "Add ready-made templates" → edit like a document, picture button uploads images, Merge fields → First name → Save draft → Publish.
+- **Write an email** (guide#write-email): list → "Write an email to them" (or Campaigns → name → Create draft) → Content: "Start from a template", Subject, words, "Upload image" → Save content. Unsubscribe link and business address are added automatically.
+- **Send** (guide#send): Audience tab → List → Test recipient → "Send test" (needs test mode off) → optional "Per batch" + "Minutes between batches" (e.g. 400 / 60) → Validate → "Send now" or "Schedule…". Quiet hours 21:00–08:00 hold marketing until morning.
+- **Nothing arrived** (guide#problems): test mode on? email connected? daily limit reached? quiet hours? spam folder?
 
 ## Answers
 - Workspace snapshot: `GET /api/v2/opsapi-marketing/analytics/overview`

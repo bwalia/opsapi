@@ -12,6 +12,7 @@ import {
   type Campaign,
   INPUT_CLASS,
   Notice,
+  STARTER,
   STATUS_LABELS,
   StatusBadge,
   apiErrorMessage,
@@ -22,25 +23,8 @@ import {
   unwrap,
   unwrapArray,
 } from './_components/shared';
+import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 
-const STARTER = {
-  channel: 'email',
-  message_type: 'marketing',
-  subject: 'Hello {{contact.first_name}}',
-  preview_text: 'A quick update we think you will find useful — take a look inside.',
-  body_html: [
-    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937">',
-    '  <h1 style="font-size:22px;margin:0 0 16px">Hi {{contact.first_name}},</h1>',
-    '  <p style="font-size:15px;line-height:1.6">We have something new to share with you.</p>',
-    '  <p style="margin:24px 0">',
-    '    <a href="https://www.example.com/" style="background:#111827;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block">Find out more</a>',
-    '  </p>',
-    '  <p style="font-size:12px;color:#6b7280">Don’t want these emails? <a href="{{unsubscribe_url}}" style="color:#6b7280">Unsubscribe</a>.</p>',
-    '</div>',
-  ].join('\n'),
-  body_text:
-    'Hi {{contact.first_name}},\n\nWe have something new to share with you.\n\nFind out more: https://www.example.com/\n\nUnsubscribe: {{unsubscribe_url}}',
-};
 
 export default function MarketingCampaignsPage() {
   const router = useRouter();
@@ -114,9 +98,12 @@ export default function MarketingCampaignsPage() {
         description="Consent-gated email and SMS sends with open, click and conversion tracking."
         icon={<Send className="h-6 w-6" />}
         actions={
-          <Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={refresh} isLoading={loading}>
-            Refresh
-          </Button>
+          <>
+            <HelpLink topic="write-email">How do I write and send an email?</HelpLink>
+            <Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" />} onClick={refresh} isLoading={loading}>
+              Refresh
+            </Button>
+          </>
         }
       />
 

@@ -48,6 +48,8 @@ export const marketingService = {
   addListMember: (id: string, contact_uuid: string) =>
     apiClient.post(`${BASE}/lists/${id}/members`, { contact_uuid }, JSON_BODY),
   listMembers: (id: string) => apiClient.get(`${BASE}/lists/${id}/members`),
+  // { [list uuid]: number of people }
+  listCounts: () => apiClient.get(`${BASE}/list-counts`),
   removeListMember: (id: string, contactUuid: string) =>
     apiClient.delete(`${BASE}/lists/${id}/members/${contactUuid}`),
   deleteList: (id: string) => apiClient.delete(`${BASE}/lists/${id}`),
@@ -97,6 +99,11 @@ export const marketingService = {
     apiClient.get(`${BASE}/consent/${contactUuid}`),
 
   listChannels: () => apiClient.get(`${BASE}/channels`),
+  // Which SMTP and From this workspace's email uses, test mode, and the daily limit used so far.
+  sendingInfo: () => apiClient.get(`${BASE}/sending`),
+  // An image for an email (base64, up to 2 MB) -> { uuid, url } served from a public address.
+  uploadImage: (body: { file_name: string; content_base64: string }) =>
+    apiClient.post(`${BASE}/images`, body, { ...ACTION, timeout: 60000 }),
 
   analyticsOverview: () => apiClient.get(`${BASE}/analytics/overview`),
   campaignAnalytics: (id: string) => apiClient.get(`${BASE}/analytics/campaigns/${id}`),

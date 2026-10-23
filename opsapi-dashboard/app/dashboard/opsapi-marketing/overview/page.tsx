@@ -15,6 +15,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { buttonClass } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
+import { GettingStarted, HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 import {
   type AttributionRow,
   KpiTile,
@@ -114,7 +115,10 @@ export default function MarketingOverviewPage() {
         title="Marketing Cloud"
         description="Multi-channel campaigns with consent-first delivery, website attribution and revenue tracking."
         icon={<Megaphone className="h-6 w-6" />}
+        actions={<HelpLink topic="top">Getting started guide</HelpLink>}
       />
+
+      <GettingStarted compact />
 
       {error && <Notice tone="error">{error}</Notice>}
 
