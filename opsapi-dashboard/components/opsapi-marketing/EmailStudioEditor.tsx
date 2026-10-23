@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
@@ -17,7 +18,32 @@ import {
   AlignCenter,
   Minus,
   Heading2,
+  Loader2,
 } from 'lucide-react';
+import { marketingService } from '@/services/opsapi-marketing.service';
+
+export const EMAIL_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+/** Upload an image for an email; resolves to its public URL (works in any mail client). */
+export async function uploadEmailImage(file: File): Promise<string> {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error('Images can be up to 2 MB');
+  const content_base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(new Error('Could not read the image'));
+    reader.readAsDataURL(file);
+  });
+  try {
+    const res = await marketingService.uploadImage({ file_name: file.name, content_base64 });
+    const url = res.data?.data?.url ?? res.data?.url;
+    if (!url) throw new Error('Upload failed');
+    return url as string;
+  } catch (e: unknown) {
+    const msg = isAxiosError(e) ? (e.response?.data as { error?: string } | undefined)?.error : undefined;
+    throw new Error(msg || (e instanceof Error ? e.message : 'Upload failed'));
+  }
+}
 
 type Props = {
   value: string;
@@ -52,6 +78,8 @@ function Tb({
 
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
 export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -99,7 +127,21 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
     editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
   };
 
-  const setImage = () => {
+  const uploadImage = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const src = await uploadEmailImage(file);
+      editor.chain().focus().setImage({ src, alt: '' }).run();
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const setImageUrl = () => {
     const url = window.prompt('Image URL (https://)');
     if (!url) return;
     if (!/^https:\/\//i.test(url)) {
@@ -143,9 +185,17 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
         <Tb title="Link" active={editor.isActive('link')} onClick={setLink}>
           <Link2 className="h-4 w-4" />
         </Tb>
-        <Tb title="Image" onClick={setImage}>
-          <ImageIcon className="h-4 w-4" />
+        <Tb title={uploading ? 'Uploading image…' : 'Upload image'} onClick={() => fileRef.current?.click()}>
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
         </Tb>
+        <input
+          ref={fileRef}
+          type="file"
+          accept={EMAIL_IMAGE_TYPES}
+          className="hidden"
+          aria-label="Upload image"
+          onChange={(e) => void uploadImage(e.target.files?.[0])}
+        />
         <Tb title="Divider" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
           <Minus className="h-4 w-4" />
         </Tb>
@@ -174,6 +224,13 @@ export function EmailStudioEditor({ value, onChange, placeholder }: Props) {
           }
         >
           CTA
+        </button>
+        <button
+          type="button"
+          className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+          onClick={setImageUrl}
+        >
+          Image URL
         </button>
         <button
           type="button"

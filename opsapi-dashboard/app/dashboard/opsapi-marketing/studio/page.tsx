@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui';
 import { EmailStudioEditor } from '@/components/opsapi-marketing/EmailStudioEditor';
 import { marketingService } from '@/services/opsapi-marketing.service';
+import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 
 type MergeField = { key: string; label: string; field_type?: string };
 type Template = {
@@ -196,7 +197,7 @@ export default function MarketingStudioPage() {
       await marketingService.seedTemplates();
       await load();
     } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Seed failed'));
+      setError(apiErrorMessage(e, 'Could not add the ready-made templates'));
     } finally {
       setBusy(false);
     }
@@ -217,12 +218,13 @@ export default function MarketingStudioPage() {
     <div className="space-y-4 p-6">
       <PageHeader
         title="Message studio"
-        description="Channel-aware templates with typed merge fields. Opens are labelled estimated."
+        description="Design email templates you can reuse. Change the words like a normal document, add pictures, then Publish."
         icon={<Palette className="h-6 w-6" />}
         actions={
           <>
+            <HelpLink topic="templates" />
             <Button variant="outline" leftIcon={<Sparkles className="h-4 w-4" />} onClick={() => void seed()} disabled={busy}>
-              Seed defaults
+              Add ready-made templates
             </Button>
             <Button variant="outline" leftIcon={<Eye className="h-4 w-4" />} onClick={() => void runPreview()} disabled={busy}>
               Preview
@@ -272,7 +274,7 @@ export default function MarketingStudioPage() {
               </li>
             ))}
             {templates.length === 0 && (
-              <li className="text-xs text-secondary-500">No templates yet. Seed defaults or create one.</li>
+              <li className="text-xs text-secondary-500">No templates yet. Press “Add ready-made templates” to get some.</li>
             )}
           </ul>
         </aside>

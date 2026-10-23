@@ -132,6 +132,25 @@ return function(app)
         return sdk.ok({ contact_uuid = claims.contact_uuid, subscriptions = sdk.array(subs) })
     end))
 
+    -- Images uploaded for emails. The address never changes, so mail clients may cache it for good.
+    app:get("/public/img/:file", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("img", 600) then return sdk.error(429, "Too many requests") end
+        local uuid = tostring(self.params.file or ""):match("^([%x%-]+)%.%a+$")
+        local bytes, content_type
+        if uuid and U.is_uuid(uuid) then bytes, content_type = require("opsapi_marketing.images").read(uuid) end
+        if not bytes then return { status = 404, layout = false, "Not found" } end
+        return {
+            status = 200,
+            headers = {
+                ["Content-Type"] = content_type,
+                ["Cache-Control"] = "public, max-age=31536000, immutable",
+                ["X-Content-Type-Options"] = "nosniff",
+            },
+            layout = false,
+            bytes,
+        }
+    end))
+
     -- Open tracking pixel (opens are estimated — scanners/proxies inflate counts; known
     -- scanners are recorded but never set opened_at)
     app:get("/public/o.gif", sdk.handler({ namespace = false }, function(self)

@@ -1,760 +1,872 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { isAxiosError } from 'axios';
-import { FileUp, Plus, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import toast from 'react-hot-toast';
+import { Check, Mail, MessageSquare, Pencil, Plus, Search, Sparkles, Trash2, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button } from '@/components/ui';
+import { Button, ConfirmDialog } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
+import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
+import { STARTER } from '../campaigns/_components/shared';
+import { AddPeople } from './_components/AddPeople';
+import { AddSmsPeople, SmartListRules } from './_components/OtherLists';
+import {
+  Alert,
+  CARD,
+  FIELD,
+  type Member,
+  type MktList,
+  SOURCE_LABELS,
+  Skeleton,
+  fmtDate,
+  friendlyError,
+  people,
+} from './_components/shared';
 
-type MktList = {
-  id: number;
-  uuid: string;
-  name: string;
-  list_type?: string;
-  channel?: string;
-  segment_rule?: unknown;
-};
+type Load = 'loading' | 'ready' | 'error';
 
-type Member = {
-  contact_uuid: string;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
-  phone?: string;
-  company?: string;
-  source?: string;
-};
-
-type LegalBasis = 'legitimate_interest' | 'consent';
-
-/** What a contacts file holds (preview), or what was imported from it. */
-type FileScan = {
-  file_type: string;
-  found: number;
-  importable: number;
-  new_contacts: number;
-  existing_contacts: number;
-  skipped: { duplicates: number; personal: number; unsubscribed: number };
-  personal_rule: boolean;
-  sample?: { email: string; first_name?: string; last_name?: string; company?: string }[];
-  imported?: number;
-  created_contacts?: number;
-};
-
-const ACCEPT_FILES = '.csv,.txt,.xlsx,.pdf';
-const MAX_FILE_BYTES = 7 * 1024 * 1024;
-
-/** File → base64 (without the data: prefix). */
-function readBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
-    reader.onerror = () => reject(new Error('Could not read the file'));
-    reader.readAsDataURL(file);
-  });
+/** The three steps, with the ones already done ticked. */
+function Steps({ done }: { done: [boolean, boolean, boolean] }) {
+  const labels = ['Make a list', 'Add people to it', 'Send them an email'];
+  const current = done.indexOf(false);
+  return (
+    <ol className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="How it works">
+      {labels.map((label, i) => (
+        <li
+          key={label}
+          aria-current={i === current ? 'step' : undefined}
+          className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-2.5 text-center text-sm leading-tight transition sm:flex-row sm:gap-3 sm:px-4 sm:py-3 sm:text-left sm:text-base ${
+            i === current
+              ? 'border-primary-500 bg-primary-50 font-semibold text-primary-900 shadow-sm dark:bg-primary-900/30 dark:text-primary-100'
+              : 'border-secondary-200 bg-surface text-secondary-600'
+          }`}
+        >
+          <span
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold sm:h-8 sm:w-8 ${
+              done[i]
+                ? 'bg-success-600 text-white'
+                : i === current
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-secondary-100 dark:bg-secondary-800'
+            }`}
+            aria-hidden="true"
+          >
+            {done[i] ? <Check className="h-4 w-4" /> : i + 1}
+          </span>
+          <span>
+            <span className="sr-only">Step {i + 1}: </span>
+            {label}
+            {done[i] && <span className="sr-only"> (done)</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
-type Condition = { field: string; op: string; value: string };
+function ListsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const wanted = searchParams.get('list');
 
-const NO_VALUE_OPS = ['is_empty', 'not_empty'];
-const OP_LABELS: Record<string, string> = {
-  eq: 'equals',
-  neq: 'does not equal',
-  contains: 'contains',
-  not_contains: 'does not contain',
-  starts_with: 'starts with',
-  is_empty: 'is empty',
-  not_empty: 'is not empty',
-};
-
-function apiErrorMessage(e: unknown, fallback: string): string {
-  if (isAxiosError(e)) {
-    const data = e.response?.data as { error?: string; message?: string } | undefined;
-    if (data?.error) return String(data.error);
-    if (data?.message) return String(data.message);
-    if (e.message) return e.message;
-  }
-  if (e instanceof Error) return e.message;
-  return fallback;
-}
-
-/** Split a stored rule into flat conditions + match mode; nested groups aren't editable here. */
-function parseRule(raw: unknown): { match: 'and' | 'or'; conditions: Condition[] } {
-  const rule = typeof raw === 'string' ? safeJson(raw) : raw;
-  const leaf = (n: unknown): Condition | null => {
-    const r = n as { field?: string; op?: string; value?: unknown };
-    return r && r.field && r.op ? { field: r.field, op: r.op, value: r.value == null ? '' : String(r.value) } : null;
-  };
-  if (rule && typeof rule === 'object' && !Array.isArray(rule)) {
-    const r = rule as { and?: unknown[]; or?: unknown[] };
-    const group = r.and ?? r.or;
-    if (Array.isArray(group)) {
-      return {
-        match: r.or ? 'or' : 'and',
-        conditions: group.map(leaf).filter((c): c is Condition => c !== null),
-      };
-    }
-    const single = leaf(rule);
-    if (single) return { match: 'and', conditions: [single] };
-  }
-  return { match: 'and', conditions: [] };
-}
-
-function safeJson(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-function buildRule(match: 'and' | 'or', conditions: Condition[]) {
-  return {
-    [match]: conditions.map((c) =>
-      NO_VALUE_OPS.includes(c.op) ? { field: c.field, op: c.op } : { field: c.field, op: c.op, value: c.value },
-    ),
-  };
-}
-
-/** Accept a CSV with a header row, or a bare list of emails (one per line / comma separated). */
-function toCsv(text: string): string {
-  const trimmed = text.trim();
-  const firstLine = trimmed.split(/\r?\n/)[0].toLowerCase();
-  if (firstLine.split(',').map((h) => h.trim()).includes('email')) return trimmed;
-  const emails = trimmed
-    .split(/[\s,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return ['email', ...emails].join('\n');
-}
-
-export default function MarketingListsPage() {
   const [lists, setLists] = useState<MktList[]>([]);
-  const [selected, setSelected] = useState<MktList | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [listsLoad, setListsLoad] = useState<Load>('loading');
+  const [listsError, setListsError] = useState<string | null>(null);
+  const [listFilter, setListFilter] = useState('');
 
+  const [members, setMembers] = useState<Member[]>([]);
+  const [memberTotal, setMemberTotal] = useState(0);
+  const [membersLoad, setMembersLoad] = useState<Load>('loading');
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [memberFilter, setMemberFilter] = useState('');
+  const [removing, setRemoving] = useState<string | null>(null);
+  const membersSeq = useRef(0);
+
+  const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'static' | 'dynamic'>('static');
   const [newChannel, setNewChannel] = useState('email');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  const [csvText, setCsvText] = useState('');
-  const [grantConsent, setGrantConsent] = useState(false);
-  const [memberTotal, setMemberTotal] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [rename, setRename] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [headerError, setHeaderError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [writing, setWriting] = useState(false);
 
-  const [upload, setUpload] = useState<{ name: string; base64: string } | null>(null);
-  const [basis, setBasis] = useState<LegalBasis>('legitimate_interest');
-  const [sourceNote, setSourceNote] = useState('');
-  const [scan, setScan] = useState<FileScan | null>(null);
-  const [lawful, setLawful] = useState(false);
+  // The list in the address bar, else the first one: there is always a list open.
+  const selected = useMemo(() => lists.find((l) => l.uuid === wanted) ?? lists[0] ?? null, [lists, wanted]);
 
-  const [fields, setFields] = useState<string[]>([]);
-  const [ops, setOps] = useState<string[]>([]);
-  const [match, setMatch] = useState<'and' | 'or'>('and');
-  const [conditions, setConditions] = useState<Condition[]>([]);
-  const [segmentCount, setSegmentCount] = useState<number | null>(null);
+  /** Open a list (kept in the address bar so refresh, back and sharing keep it). */
+  const open = useCallback(
+    (uuid: string | null) => {
+      const q = new URLSearchParams(searchParams.toString());
+      if (uuid) q.set('list', uuid);
+      else q.delete('list');
+      const qs = q.toString();
+      router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const loadLists = useCallback(async () => {
-    const res = await marketingService.listLists({ per_page: 100 });
-    const data = res.data?.data ?? res.data ?? [];
-    const rows: MktList[] = Array.isArray(data) ? data : data.items || [];
-    setLists(rows);
-    return rows;
+    setListsError(null);
+    try {
+      const [res, cRes] = await Promise.all([
+        marketingService.listLists({ per_page: 200 }),
+        marketingService.listCounts().catch(() => null), // counts are a nicety; the lists still show
+      ]);
+      const data = res.data?.data ?? res.data ?? [];
+      const rows: MktList[] = Array.isArray(data) ? data : data.items || [];
+      const c = cRes?.data?.data ?? cRes?.data;
+      setLists(rows);
+      setCounts(c && typeof c === 'object' && !Array.isArray(c) ? c : {});
+      setListsLoad('ready');
+      return rows;
+    } catch (e: unknown) {
+      setListsError(friendlyError(e, 'Could not load your lists'));
+      setListsLoad((s) => (s === 'ready' ? 'ready' : 'error'));
+      return null;
+    }
   }, []);
 
   const loadMembers = useCallback(async (list: MktList) => {
-    const res = await marketingService.listMembers(list.uuid);
-    const data = res.data?.data ?? res.data ?? [];
-    setMembers(Array.isArray(data) ? data : []);
-    setMemberTotal(typeof res.data?.meta?.total === 'number' ? res.data.meta.total : null);
+    const seq = ++membersSeq.current;
+    setMembersError(null);
+    try {
+      const res = await marketingService.listMembers(list.uuid);
+      if (seq !== membersSeq.current) return; // another list was opened meanwhile
+      const data = res.data?.data ?? res.data ?? [];
+      const rows: Member[] = Array.isArray(data) ? data : [];
+      const total = typeof res.data?.meta?.total === 'number' ? res.data.meta.total : rows.length;
+      setMembers(rows);
+      setMemberTotal(total);
+      setCounts((c) => ({ ...c, [list.uuid]: total }));
+      setMembersLoad('ready');
+    } catch (e: unknown) {
+      if (seq !== membersSeq.current) return;
+      setMembersError(friendlyError(e, 'Could not load the people in this list'));
+      setMembersLoad('error');
+    }
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        await loadLists();
-        const f = await marketingService.segmentFields();
-        const d = f.data?.data ?? f.data ?? {};
-        setFields((d.fields || []).map((x: { field: string }) => x.field));
-        setOps(d.ops || []);
-      } catch (e: unknown) {
-        setError(apiErrorMessage(e, 'Failed to load lists'));
-      }
-    })();
+    void loadLists();
   }, [loadLists]);
 
-  const select = async (list: MktList) => {
-    setSelected(list);
-    setError(null);
-    setNotice(null);
-    setSegmentCount(null);
-    setCsvText('');
-    setUpload(null);
-    setScan(null);
-    setLawful(false);
-    const parsed = parseRule(list.segment_rule);
-    setMatch(parsed.match);
-    setConditions(parsed.conditions);
-    try {
-      await loadMembers(list);
-    } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Failed to load members'));
-    }
-  };
+  // Another list opened: show its people.
+  const [shownFor, setShownFor] = useState<string | null>(null);
+  if (selected && shownFor !== selected.uuid) {
+    setShownFor(selected.uuid);
+    setMembers([]);
+    setMemberTotal(0);
+    setMemberFilter('');
+    setMembersLoad('loading');
+    setRenaming(false);
+    setHeaderError(null);
+  }
+  const selectedUuid = selected?.uuid;
+  useEffect(() => {
+    if (selected) void loadMembers(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when another list is opened
+  }, [selectedUuid, loadMembers]);
 
-  const act = async (fn: () => Promise<string | void>) => {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const msg = await fn();
-      if (msg) setNotice(msg);
-    } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Action failed'));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const refreshSelected = useCallback(async () => {
+    if (selected) await loadMembers(selected);
+  }, [selected, loadMembers]);
 
-  const createList = () =>
-    act(async () => {
-      if (!newName.trim()) throw new Error('List name is required');
-      const res = await marketingService.createList({ name: newName.trim(), list_type: newType, channel: newChannel });
-      const created = (res.data?.data ?? res.data) as MktList;
-      setNewName('');
-      await loadLists();
-      await select(created);
-      return newType === 'dynamic'
-        ? 'List created — add a segment rule below.'
-        : 'List created — add contacts below.';
-    });
-
-  const importContacts = () =>
-    act(async () => {
-      if (!selected) return;
-      if (!csvText.trim()) throw new Error('Paste emails or CSV first');
-      const res = await marketingService.importListCsv(selected.uuid, {
-        csv: toCsv(csvText),
-        grant_consent: grantConsent,
-      });
-      const r = (res.data?.data ?? res.data) as { added?: number; created?: number; skipped?: number };
-      setCsvText('');
-      await loadMembers(selected);
-      return `Added ${r.added ?? 0} (new contacts: ${r.created ?? 0}, skipped: ${r.skipped ?? 0}).`;
-    });
-
-  const previewFile = (file: { name: string; base64: string }, legalBasis: LegalBasis) =>
-    act(async () => {
-      if (!selected) return;
-      setScan(null);
-      setLawful(false);
-      const res = await marketingService.importContactsFile(selected.uuid, {
-        file_name: file.name,
-        content_base64: file.base64,
-        legal_basis: legalBasis,
-      });
-      setScan((res.data?.data ?? res.data) as FileScan);
-    });
-
-  const chooseFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (file.size > MAX_FILE_BYTES) {
-      setError('That file is over 7 MB. Split it, or save it as CSV (much smaller than Excel or PDF).');
+  const createList = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (creating) return;
+    const name = newName.trim();
+    if (!name) {
+      setCreateError('Type a name for your list first, e.g. “Customers”.');
       return;
     }
+    if (lists.some((l) => l.name.trim().toLowerCase() === name.toLowerCase())) {
+      setCreateError(`You already have a list called “${name}”. Pick another name.`);
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
     try {
-      const picked = { name: file.name, base64: await readBase64(file) };
-      setUpload(picked);
-      await previewFile(picked, basis);
-    } catch (e: unknown) {
-      setError(apiErrorMessage(e, 'Could not read the file'));
+      const res = await marketingService.createList({
+        name,
+        list_type: newType,
+        channel: newChannel,
+      });
+      const created = (res.data?.data ?? res.data) as MktList;
+      setNewName('');
+      setNewType('static');
+      setNewChannel('email');
+      setShowNew(false);
+      await loadLists();
+      open(created.uuid);
+      toast.success(`“${created.name}” is ready — now add people to it`);
+    } catch (err: unknown) {
+      setCreateError(friendlyError(err, 'Could not create the list'));
+    } finally {
+      setCreating(false);
     }
   };
 
-  const importFile = () =>
-    act(async () => {
-      if (!selected || !upload) return;
-      const res = await marketingService.importContactsFile(selected.uuid, {
-        file_name: upload.name,
-        content_base64: upload.base64,
-        legal_basis: basis,
-        source_note: sourceNote.trim() || undefined,
-        commit: true,
-        confirm: true,
-      });
-      const r = (res.data?.data ?? res.data) as FileScan;
-      setUpload(null);
-      setScan(null);
-      setLawful(false);
-      setSourceNote('');
-      await loadMembers(selected);
-      return `Imported ${r.imported ?? 0} contacts from ${upload.name} (${r.created_contacts ?? 0} new to the CRM).`;
-    });
+  const saveName = async () => {
+    if (!selected || savingName) return;
+    const name = rename.trim();
+    if (!name) {
+      setHeaderError('The list needs a name.');
+      return;
+    }
+    if (name === selected.name) {
+      setRenaming(false);
+      return;
+    }
+    setSavingName(true);
+    setHeaderError(null);
+    try {
+      await marketingService.updateList(selected.uuid, { name });
+      setLists((ls) => ls.map((l) => (l.uuid === selected.uuid ? { ...l, name } : l)));
+      setRenaming(false);
+      toast.success('List renamed');
+    } catch (err: unknown) {
+      setHeaderError(friendlyError(err, 'Could not rename the list'));
+    } finally {
+      setSavingName(false);
+    }
+  };
 
-  const removeMember = (contactUuid: string) =>
-    act(async () => {
-      if (!selected) return;
-      await marketingService.removeListMember(selected.uuid, contactUuid);
-      await loadMembers(selected);
-    });
-
-  const deleteList = () =>
-    act(async () => {
-      if (!selected || !window.confirm(`Delete list "${selected.name}"?`)) return;
+  const deleteList = async () => {
+    if (!selected) return;
+    setDeleting(true);
+    try {
       await marketingService.deleteList(selected.uuid);
-      setSelected(null);
-      setMembers([]);
-      await loadLists();
-      return 'List deleted.';
-    });
-
-  const previewSegment = () =>
-    act(async () => {
-      if (conditions.length === 0) throw new Error('Add at least one condition');
-      const res = await marketingService.previewSegment({ rule: buildRule(match, conditions), limit: 1 });
-      const d = res.data?.data ?? res.data;
-      setSegmentCount(d?.total ?? 0);
-    });
-
-  const saveSegment = () =>
-    act(async () => {
-      if (!selected) return;
-      if (conditions.length === 0) throw new Error('Add at least one condition');
-      const res = await marketingService.setListSegment(selected.uuid, {
-        rule: buildRule(match, conditions),
-        sync: true,
-      });
-      const d = res.data?.data ?? res.data;
+      toast.success(`“${selected.name}” deleted`);
+      setConfirmDelete(false);
       const rows = await loadLists();
-      const fresh = rows.find((l) => l.uuid === selected.uuid);
-      if (fresh) setSelected(fresh);
-      await loadMembers(selected);
-      return `Segment saved — ${d?.sync?.synced ?? 0} contact(s) now in the list.`;
-    });
+      open(rows?.[0]?.uuid ?? null);
+    } catch (err: unknown) {
+      setConfirmDelete(false);
+      setHeaderError(friendlyError(err, 'Could not delete the list'));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
-  const syncNow = () =>
-    act(async () => {
-      if (!selected) return;
-      const res = await marketingService.syncList(selected.uuid);
-      const d = res.data?.data ?? res.data;
-      await loadMembers(selected);
-      return `Synced ${d?.synced ?? 0} contact(s).`;
-    });
+  const writeEmail = async () => {
+    if (!selected || writing) return;
+    setWriting(true);
+    setHeaderError(null);
+    try {
+      const res = await marketingService.createCampaign({
+        name: `Email to ${selected.name}`,
+        ...STARTER,
+      });
+      const row = (res.data?.data ?? res.data) as { uuid?: string };
+      if (!row?.uuid) throw new Error('Could not start a new email');
+      router.push(`/dashboard/opsapi-marketing/campaigns/${row.uuid}?tab=content&list=${selected.uuid}`);
+    } catch (err: unknown) {
+      setHeaderError(friendlyError(err, 'Could not start a new email'));
+      setWriting(false);
+    }
+  };
 
-  const updateCondition = (i: number, patch: Partial<Condition>) =>
-    setConditions((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const removeMember = async (m: Member) => {
+    if (!selected || removing) return;
+    setRemoving(m.contact_uuid);
+    try {
+      await marketingService.removeListMember(selected.uuid, m.contact_uuid);
+      setMembers((ms) => ms.filter((x) => x.contact_uuid !== m.contact_uuid));
+      setMemberTotal((n) => Math.max(0, n - 1));
+      setCounts((c) => ({
+        ...c,
+        [selected.uuid]: Math.max(0, (c[selected.uuid] ?? 1) - 1),
+      }));
+      toast.success(`${m.email || m.phone || 'That person'} taken off this list (still in your contacts)`);
+    } catch (err: unknown) {
+      toast.error(friendlyError(err, 'Could not take them off the list'));
+    } finally {
+      setRemoving(null);
+    }
+  };
 
   const isDynamic = selected?.list_type === 'dynamic';
+  const isSms = selected?.channel === 'sms';
+  const memberUuids = useMemo(() => new Set(members.map((m) => m.contact_uuid)), [members]);
+  const shownMembers = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) =>
+      [m.first_name, m.last_name, m.email, m.phone, m.company].some((v) => v && v.toLowerCase().includes(q)),
+    );
+  }, [members, memberFilter]);
+  const shownLists = useMemo(() => {
+    const q = listFilter.trim().toLowerCase();
+    return q ? lists.filter((l) => l.name.toLowerCase().includes(q)) : lists;
+  }, [lists, listFilter]);
+  const selectedCount = selected ? (counts[selected.uuid] ?? memberTotal) : 0;
+
+  const newListForm = (
+    <form onSubmit={(e) => void createList(e)} className="space-y-3" noValidate>
+      <label className="block">
+        <span className="text-base font-medium text-secondary-900">What do you want to call this list?</span>
+        <input
+          className={`${FIELD} mt-1.5`}
+          placeholder="e.g. Customers, Local businesses"
+          value={newName}
+          onChange={(e) => {
+            setNewName(e.target.value);
+            setCreateError(null);
+          }}
+          maxLength={255}
+          autoFocus
+          aria-invalid={!!createError}
+        />
+      </label>
+      {createError && <Alert onDismiss={() => setCreateError(null)}>{createError}</Alert>}
+      <details className="text-sm text-secondary-600">
+        <summary className="cursor-pointer select-none py-1 hover:text-secondary-900">
+          More options (most people don’t need these)
+        </summary>
+        <div className="mt-2 space-y-2">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary-600"
+              checked={newChannel === 'sms'}
+              onChange={(e) => setNewChannel(e.target.checked ? 'sms' : 'email')}
+            />
+            <span>For text messages (SMS) instead of email</span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary-600"
+              checked={newType === 'dynamic'}
+              onChange={(e) => setNewType(e.target.checked ? 'dynamic' : 'static')}
+            />
+            <span>Smart list: fills itself with contacts that match rules you set (e.g. everyone in London)</span>
+          </label>
+        </div>
+      </details>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" size="lg" leftIcon={<Plus className="h-5 w-5" />} isLoading={creating}>
+          Create list
+        </Button>
+        {lists.length > 0 && (
+          <Button
+            type="button"
+            size="lg"
+            variant="ghost"
+            onClick={() => {
+              setShowNew(false);
+              setCreateError(null);
+            }}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
+    </form>
+  );
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
       <PageHeader
-        title="Lists & segments"
-        description="Build campaign audiences: add contacts to a static list, or define a dynamic segment over CRM contacts."
-        icon={<Users className="h-5 w-5" />}
+        title="Mailing lists"
+        description="A list is a group of people you send emails to. Make a list, add people, then write them an email."
+        icon={<Users className="h-6 w-6" />}
+        actions={<HelpLink topic="make-list">How do lists work?</HelpLink>}
       />
-      {error && <p className="text-sm text-error-600">{error}</p>}
-      {notice && <p className="text-sm text-green-700 dark:text-green-400">{notice}</p>}
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="space-y-4">
-          <div className="space-y-2 rounded-lg border border-secondary-200 p-4">
-            <h2 className="text-sm font-medium">New list</h2>
-            <input
-              className="w-full rounded border border-secondary-200 bg-surface px-2 py-1.5 text-sm"
-              placeholder="List name"
-              aria-label="List name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <select
-                className="flex-1 rounded border border-secondary-200 bg-surface px-2 py-1.5 text-sm"
-                aria-label="List type"
-                value={newType}
-                onChange={(e) => setNewType(e.target.value as 'static' | 'dynamic')}
-              >
-                <option value="static">Static (pick contacts)</option>
-                <option value="dynamic">Dynamic (segment rule)</option>
-              </select>
-              <select
-                className="rounded border border-secondary-200 bg-surface px-2 py-1.5 text-sm"
-                aria-label="Channel"
-                value={newChannel}
-                onChange={(e) => setNewChannel(e.target.value)}
-              >
-                <option value="email">email</option>
-                <option value="sms">sms</option>
-              </select>
-            </div>
-            <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} disabled={busy} onClick={() => void createList()}>
-              Create list
-            </Button>
-          </div>
+      <Steps done={[lists.length > 0, selectedCount > 0, false]} />
 
-          <ul className="divide-y divide-secondary-200 rounded-lg border border-secondary-200">
-            {lists.length === 0 && <li className="p-4 text-sm text-secondary-500">No lists yet.</li>}
-            {lists.map((l) => (
-              <li key={l.uuid}>
-                <button
-                  type="button"
-                  className={`w-full p-3 text-left text-sm hover:bg-secondary-50 ${
-                    selected?.uuid === l.uuid ? 'bg-secondary-100' : ''
-                  }`}
-                  onClick={() => void select(l)}
-                >
-                  <div className="font-medium">{l.name}</div>
-                  <div className="text-xs text-secondary-500">
-                    {l.list_type || 'static'} · {l.channel || 'email'}
-                  </div>
-                </button>
-              </li>
+      {listsLoad === 'loading' && (
+        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="space-y-3">
+            <Skeleton className="h-12" />
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-18" />
             ))}
-          </ul>
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-28" />
+            <Skeleton className="h-80" />
+          </div>
         </div>
+      )}
 
-        {!selected ? (
-          <p className="text-sm text-secondary-500">Select a list to manage its contacts.</p>
-        ) : (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">
-                {selected.name}{' '}
-                <span className="text-sm font-normal text-secondary-500">
-                  ({selected.list_type || 'static'}, {(memberTotal ?? members.length).toLocaleString('en-GB')} member
-                  {(memberTotal ?? members.length) === 1 ? '' : 's'})
-                </span>
-              </h2>
-              <Button
-                size="sm"
-                variant="danger"
-                leftIcon={<Trash2 className="h-4 w-4" />}
-                disabled={busy}
-                onClick={() => void deleteList()}
-              >
-                Delete list
-              </Button>
-            </div>
+      {listsLoad === 'error' && (
+        <Alert
+          onRetry={() => {
+            setListsLoad('loading');
+            void loadLists();
+          }}
+        >
+          {listsError}
+        </Alert>
+      )}
 
-            {isDynamic && (
-              <div className="space-y-3 rounded-lg border border-secondary-200 p-4">
-                <h3 className="text-sm font-medium">Segment rule</h3>
-                <p className="text-xs text-secondary-500">
-                  Members are CRM contacts matching this rule. Campaign Validate and Send re-sync automatically.
-                </p>
-                <label className="flex items-center gap-2 text-sm">
-                  Match
+      {listsLoad === 'ready' && lists.length === 0 && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className={`${CARD} p-6 sm:p-8`}>
+            <h2 className="text-2xl font-semibold text-secondary-900">Make your first list</h2>
+            <p className="mb-5 mt-1 text-base text-secondary-600">
+              Give it a name you’ll recognise. You’ll add people to it in the next step.
+            </p>
+            {newListForm}
+          </div>
+          <div
+            className={`${CARD} space-y-4 bg-linear-to-br from-primary-50 to-transparent p-6 sm:p-8 dark:from-primary-900/20`}
+          >
+            <h2 className="text-lg font-semibold text-secondary-900">What happens next</h2>
+            <ol className="space-y-4">
+              {[
+                ['Add people', 'Type their email addresses, upload a spreadsheet, or tick people in your contacts.'],
+                ['Write your email', 'Start from a ready-made design and change the words.'],
+                ['Send it', 'Send yourself a test first, then press Send — or pick a time.'],
+              ].map(([t, d], i) => (
+                <li key={t} className="flex gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white">
+                    {i + 2}
+                  </span>
+                  <span>
+                    <span className="block text-base font-semibold text-secondary-900">{t}</span>
+                    <span className="block text-base text-secondary-600">{d}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <HelpLink topic="top">Read the full getting-started guide</HelpLink>
+          </div>
+        </div>
+      )}
+
+      {listsLoad === 'ready' && selected && (
+        <div className="grid items-start gap-6 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="space-y-3 lg:sticky lg:top-6" aria-label="Your lists">
+            {listsError && <Alert onRetry={() => void loadLists()}>{listsError}</Alert>}
+            {showNew ? (
+              <div className={`${CARD} p-4`}>{newListForm}</div>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end lg:flex-col lg:items-stretch">
+                {/* Phones and tablets: a dropdown instead of a long stack of cards. */}
+                <label className="block min-w-0 flex-1 lg:hidden">
+                  <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">
+                    Your list ({lists.length})
+                  </span>
                   <select
-                    className="rounded border border-secondary-200 bg-surface px-2 py-1"
-                    value={match}
-                    onChange={(e) => setMatch(e.target.value as 'and' | 'or')}
+                    className={`${FIELD} mt-1`}
+                    value={selected.uuid}
+                    onChange={(e) => open(e.target.value)}
+                    aria-label="Choose a list"
                   >
-                    <option value="and">all conditions</option>
-                    <option value="or">any condition</option>
+                    {lists.map((l) => (
+                      <option key={l.uuid} value={l.uuid}>
+                        {l.name}
+                        {counts[l.uuid] === undefined
+                          ? ''
+                          : ` — ${counts[l.uuid] === 0 ? 'empty' : people(counts[l.uuid])}`}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                {conditions.map((c, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2">
-                    <select
-                      className="rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
-                      aria-label="Field"
-                      value={c.field}
-                      onChange={(e) => updateCondition(i, { field: e.target.value })}
-                    >
-                      {fields.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
-                      aria-label="Operator"
-                      value={c.op}
-                      onChange={(e) => updateCondition(i, { op: e.target.value })}
-                    >
-                      {ops.map((o) => (
-                        <option key={o} value={o}>
-                          {OP_LABELS[o] || o}
-                        </option>
-                      ))}
-                    </select>
-                    {!NO_VALUE_OPS.includes(c.op) && (
-                      <input
-                        className="flex-1 rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
-                        aria-label="Value"
-                        value={c.value}
-                        onChange={(e) => updateCondition(i, { value: e.target.value })}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className="p-1 text-secondary-500 hover:text-error-600"
-                      aria-label="Remove condition"
-                      onClick={() => setConditions((cs) => cs.filter((_, j) => j !== i))}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    leftIcon={<Plus className="h-4 w-4" />}
-                    onClick={() =>
-                      setConditions((cs) => [...cs, { field: fields[0] || 'email', op: 'contains', value: '' }])
-                    }
-                  >
-                    Add condition
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void previewSegment()}>
-                    Preview
-                  </Button>
-                  <Button size="sm" disabled={busy} onClick={() => void saveSegment()}>
-                    Save &amp; sync
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    leftIcon={<RefreshCw className="h-4 w-4" />}
-                    disabled={busy}
-                    onClick={() => void syncNow()}
-                  >
-                    Re-sync
-                  </Button>
-                  {segmentCount !== null && (
-                    <span className="text-sm text-secondary-500">{segmentCount} matching contact(s)</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {!isDynamic && (selected.channel || 'email') === 'email' && (
-              <div className="space-y-3 rounded-lg border border-secondary-200 p-4">
-                <h3 className="flex items-center gap-1.5 text-sm font-medium">
-                  <FileUp className="h-4 w-4 text-secondary-500" aria-hidden="true" /> Import from a file
-                </h3>
-                <p className="text-xs text-secondary-500">
-                  A CSV, Excel (.xlsx) or PDF of contacts, up to 7 MB. Every email in it is found, in any column, along
-                  with name, company, phone and website when the file has those columns. You see what will be imported
-                  before anything is added.
-                </p>
-                <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="Why you may email them">
-                  {(
-                    [
-                      ['legitimate_interest', 'Business contacts (B2B, legitimate interest)'],
-                      ['consent', 'They opted in to hear from us'],
-                    ] as [LegalBasis, string][]
-                  ).map(([value, label]) => (
-                    <label key={value} className="flex items-center gap-1.5">
-                      <input
-                        type="radio"
-                        name="legal-basis"
-                        checked={basis === value}
-                        onChange={() => {
-                          setBasis(value);
-                          if (upload) void previewFile(upload, value);
-                        }}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <label className="block text-sm">
-                  <span className="sr-only">Contacts file</span>
-                  <input
-                    type="file"
-                    accept={ACCEPT_FILES}
-                    disabled={busy}
-                    className="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-secondary-100 file:px-3 file:py-1.5 file:text-sm"
-                    onChange={(e) => {
-                      void chooseFile(e.target.files?.[0]);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-                {busy && upload && !scan && <p className="text-sm text-secondary-500">Reading {upload.name}…</p>}
-
-                {scan && upload && (
-                  <div className="space-y-3 rounded-md bg-secondary-50 p-3 text-sm dark:bg-secondary-900/40">
-                    <p>
-                      <strong>{upload.name}</strong> ({scan.file_type.toUpperCase()}): {scan.found.toLocaleString('en-GB')}{' '}
-                      email{scan.found === 1 ? '' : 's'} found.
-                    </p>
-                    <ul className="grid gap-1 sm:grid-cols-2">
-                      <li className="text-success-700 dark:text-success-400">
-                        Will import: <strong>{scan.importable.toLocaleString('en-GB')}</strong> (
-                        {scan.new_contacts.toLocaleString('en-GB')} new, {scan.existing_contacts.toLocaleString('en-GB')}{' '}
-                        already in your CRM)
-                      </li>
-                      <li>Duplicates in the file: {scan.skipped.duplicates.toLocaleString('en-GB')}</li>
-                      <li>
-                        Already unsubscribed (never emailed again):{' '}
-                        {scan.skipped.unsubscribed.toLocaleString('en-GB')}
-                      </li>
-                      {scan.personal_rule && (
-                        <li>
-                          Personal addresses skipped (gmail, hotmail…):{' '}
-                          {scan.skipped.personal.toLocaleString('en-GB')}
-                        </li>
-                      )}
-                    </ul>
-                    {scan.personal_rule && scan.skipped.personal > 0 && (
-                      <p className="text-xs text-secondary-500">
-                        UK and EU law (PECR) treats personal mailboxes as private individuals: they must opt in before you
-                        send them marketing, so business-contact imports leave them out.
-                      </p>
-                    )}
-                    {scan.sample && scan.sample.length > 0 && (
-                      <table className="w-full text-xs">
-                        <thead className="text-left text-secondary-500">
-                          <tr>
-                            <th className="py-1 pr-2">Email</th>
-                            <th className="py-1 pr-2">Name</th>
-                            <th className="py-1">Company</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {scan.sample.slice(0, 8).map((r) => (
-                            <tr key={r.email} className="border-t border-secondary-200">
-                              <td className="py-1 pr-2">{r.email}</td>
-                              <td className="py-1 pr-2">{[r.first_name, r.last_name].filter(Boolean).join(' ') || '—'}</td>
-                              <td className="py-1">{r.company || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {scan.importable > 0 && (
-                      <>
-                        <label className="block text-sm">
-                          <span className="text-xs text-secondary-500">
-                            Where did this data come from? (optional, kept as a record)
-                          </span>
-                          <input
-                            className="mt-1 w-full rounded border border-secondary-200 bg-surface px-2 py-1 text-sm"
-                            value={sourceNote}
-                            onChange={(e) => setSourceNote(e.target.value)}
-                            placeholder="e.g. Bought from ExampleData Ltd, October 2026"
-                            maxLength={1000}
-                          />
-                        </label>
-                        <label className="flex items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            className="mt-1"
-                            checked={lawful}
-                            onChange={(e) => setLawful(e.target.checked)}
-                          />
-                          <span>
-                            {basis === 'consent'
-                              ? 'These people opted in to marketing from us.'
-                              : 'These are business contacts I have a legitimate reason to email about our products.'}{' '}
-                            Every email will say who we are and include an unsubscribe link, and anyone who unsubscribes
-                            is never emailed again.
-                          </span>
-                        </label>
-                        <Button
-                          size="sm"
-                          leftIcon={<Upload className="h-4 w-4" />}
-                          disabled={busy || !lawful}
-                          onClick={() => void importFile()}
-                        >
-                          Import {scan.importable.toLocaleString('en-GB')} contacts
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!isDynamic && (
-              <div className="space-y-3 rounded-lg border border-secondary-200 p-4">
-                <h3 className="text-sm font-medium">Add contacts</h3>
-                <p className="text-xs text-secondary-500">
-                  Paste emails (one per line) or a CSV with a header row: email,first_name,last_name,phone. Existing
-                  CRM contacts are matched by email; others are created.
-                </p>
-                <textarea
-                  className="h-32 w-full rounded border border-secondary-200 bg-surface px-2 py-1.5 font-mono text-sm"
-                  aria-label="Emails or CSV"
-                  value={csvText}
-                  onChange={(e) => setCsvText(e.target.value)}
-                />
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={grantConsent}
-                    onChange={(e) => setGrantConsent(e.target.checked)}
-                  />
-                  <span>
-                    These contacts have given consent to receive marketing on this channel. Without recorded consent,
-                    contacts are counted as ineligible for marketing sends. Earlier opt-outs are never overridden.
-                  </span>
-                </label>
                 <Button
-                  size="sm"
-                  leftIcon={<Upload className="h-4 w-4" />}
-                  disabled={busy}
-                  onClick={() => void importContacts()}
+                  size="lg"
+                  className="w-full sm:w-auto lg:w-full"
+                  leftIcon={<Plus className="h-5 w-5" />}
+                  onClick={() => setShowNew(true)}
                 >
-                  Add to list
+                  Make a new list
                 </Button>
               </div>
             )}
+            <div className="hidden space-y-3 lg:block">
+              <h2 className="pt-2 text-xs font-semibold uppercase tracking-wider text-secondary-500">
+                Your lists ({lists.length})
+              </h2>
+              {lists.length > 6 && (
+                <label className="relative block">
+                  <span className="sr-only">Find a list</span>
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary-400"
+                    aria-hidden="true"
+                  />
+                  <input
+                    className={`${FIELD} py-2 pl-9 text-sm`}
+                    placeholder="Find a list"
+                    value={listFilter}
+                    onChange={(e) => setListFilter(e.target.value)}
+                  />
+                </label>
+              )}
+              <ul className="space-y-2 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
+                {shownLists.length === 0 && (
+                  <li className="p-2 text-sm text-secondary-600">No list matches “{listFilter}”.</li>
+                )}
+                {shownLists.map((l) => {
+                  const n = counts[l.uuid];
+                  const active = selected.uuid === l.uuid;
+                  return (
+                    <li key={l.uuid}>
+                      <button
+                        type="button"
+                        aria-current={active ? 'true' : undefined}
+                        className={`relative w-full rounded-xl border p-3.5 text-left transition ${
+                          active
+                            ? 'border-primary-500 bg-primary-50 shadow-sm dark:bg-primary-900/30'
+                            : 'border-secondary-200 bg-surface hover:border-primary-300 hover:shadow-sm'
+                        }`}
+                        onClick={() => open(l.uuid)}
+                      >
+                        {active && (
+                          <span className="absolute inset-y-3 left-0 w-1 rounded-r bg-primary-600" aria-hidden="true" />
+                        )}
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="min-w-0 truncate text-base font-semibold text-secondary-900">{l.name}</span>
+                          {l.channel === 'sms' && (
+                            <MessageSquare
+                              className="mt-1 h-4 w-4 shrink-0 text-secondary-400"
+                              aria-label="Text messages"
+                            />
+                          )}
+                          {l.list_type === 'dynamic' && (
+                            <Sparkles className="mt-1 h-4 w-4 shrink-0 text-secondary-400" aria-label="Smart list" />
+                          )}
+                        </span>
+                        <span className="mt-1 block text-sm">
+                          {n === undefined ? (
+                            <span className="text-secondary-500">—</span>
+                          ) : n === 0 ? (
+                            <span className="rounded-full bg-warning-500/15 px-2 py-0.5 font-medium text-warning-600">
+                              Empty — add people
+                            </span>
+                          ) : (
+                            <span className="text-secondary-600">{people(n)}</span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </aside>
 
-            <div className="rounded-lg border border-secondary-200">
-              <table className="w-full text-sm">
-                <thead className="text-left text-secondary-500">
-                  <tr>
-                    <th className="p-2">Name</th>
-                    <th className="p-2">Email</th>
-                    <th className="p-2">Company</th>
-                    <th className="p-2">Source</th>
-                    <th className="p-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-secondary-500">
-                        No members yet — campaigns using this list will fail Validate until it has contacts.
-                      </td>
-                    </tr>
+          <div className="min-w-0 space-y-6">
+            <section className={`${CARD} @container space-y-3 p-5 sm:p-6`} aria-label="This list">
+              <div className="flex flex-col gap-4 @2xl:flex-row @2xl:items-start @2xl:justify-between">
+                <div className="min-w-0 flex-1">
+                  {renaming ? (
+                    <form
+                      className="flex flex-wrap items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveName();
+                      }}
+                    >
+                      <input
+                        className={`${FIELD} min-w-0 max-w-md flex-1 basis-48 text-lg font-semibold sm:text-xl`}
+                        aria-label="List name"
+                        value={rename}
+                        onChange={(e) => setRename(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Escape' && setRenaming(false)}
+                        maxLength={255}
+                        autoFocus
+                      />
+                      <Button type="submit" isLoading={savingName}>
+                        Save
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => setRenaming(false)}>
+                        Cancel
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="flex min-w-0 items-start gap-2">
+                      <h2 className="line-clamp-2 wrap-break-word text-xl font-bold tracking-tight text-secondary-900 sm:text-2xl">
+                        {selected.name}
+                      </h2>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-lg p-1.5 text-secondary-500 hover:bg-secondary-100 hover:text-secondary-900 dark:hover:bg-secondary-800"
+                        aria-label="Rename this list"
+                        title="Rename"
+                        onClick={() => {
+                          setRename(selected.name);
+                          setRenaming(true);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    </div>
                   )}
-                  {members.map((m) => (
-                    <tr key={m.contact_uuid} className="border-t border-secondary-200">
-                      <td className="p-2">{[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}</td>
-                      <td className="p-2">{m.email || m.phone || '—'}</td>
-                      <td className="p-2 text-secondary-500">{m.company || '—'}</td>
-                      <td className="p-2 text-secondary-500">{m.source}</td>
-                      <td className="p-2 text-right">
-                        {m.source !== 'segment' && (
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-base text-secondary-600">
+                    <span className="font-semibold text-secondary-900">
+                      {membersLoad === 'loading' && counts[selected.uuid] === undefined ? '…' : people(selectedCount)}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{isSms ? 'Text messages' : 'Email'}</span>
+                    {isDynamic && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>Smart list — fills itself</span>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 @2xl:w-auto @2xl:shrink-0">
+                  {!isSms && (
+                    <Button
+                      size="lg"
+                      className="flex-1 @md:flex-none"
+                      leftIcon={<Mail className="h-5 w-5" />}
+                      isLoading={writing}
+                      disabled={selectedCount === 0}
+                      title={selectedCount === 0 ? 'Add people to the list first' : undefined}
+                      onClick={() => void writeEmail()}
+                    >
+                      <span className="whitespace-nowrap">
+                        Write an email<span className="hidden @sm:inline"> to them</span>
+                      </span>
+                    </Button>
+                  )}
+                  <Button
+                    size="lg"
+                    variant="ghost"
+                    leftIcon={<Trash2 className="h-4 w-4" />}
+                    onClick={() => setConfirmDelete(true)}
+                    className="text-secondary-600 hover:text-error-600"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+              {headerError && <Alert onDismiss={() => setHeaderError(null)}>{headerError}</Alert>}
+              {selectedCount === 0 && membersLoad === 'ready' && !isSms && (
+                <p className="text-sm text-secondary-600">Add people below, then you can write them an email.</p>
+              )}
+            </section>
+
+            <div className="@container">
+              <div className="grid items-start gap-6 @5xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+                {isDynamic ? (
+                  <SmartListRules key={selected.uuid} list={selected} onSaved={refreshSelected} />
+                ) : isSms ? (
+                  <AddSmsPeople key={selected.uuid} list={selected} onAdded={refreshSelected} />
+                ) : (
+                  <AddPeople key={selected.uuid} list={selected} memberUuids={memberUuids} onAdded={refreshSelected} />
+                )}
+
+                <section className={`${CARD} @container min-w-0 space-y-4 p-5 sm:p-6`} aria-labelledby="people-title">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 id="people-title" className="flex items-center gap-2 text-lg font-semibold text-secondary-900">
+                      People in this list
+                      <span className="rounded-full bg-secondary-100 px-2.5 py-0.5 text-sm font-semibold text-secondary-700 dark:bg-secondary-800 dark:text-secondary-200">
+                        {selectedCount.toLocaleString('en-GB')}
+                      </span>
+                    </h3>
+                    {members.length > 8 && (
+                      <label className="relative block w-full @md:w-64">
+                        <span className="sr-only">Find someone in this list</span>
+                        <Search
+                          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary-400"
+                          aria-hidden="true"
+                        />
+                        <input
+                          className={`${FIELD} py-2 pl-9 pr-8 text-sm`}
+                          placeholder="Find someone"
+                          value={memberFilter}
+                          onChange={(e) => setMemberFilter(e.target.value)}
+                        />
+                        {memberFilter && (
                           <button
                             type="button"
-                            className="p-1 text-secondary-500 hover:text-error-600"
-                            aria-label="Remove from list"
-                            disabled={busy}
-                            onClick={() => void removeMember(m.contact_uuid)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-secondary-400 hover:text-secondary-700"
+                            aria-label="Clear search"
+                            onClick={() => setMemberFilter('')}
                           >
                             <X className="h-4 w-4" />
                           </button>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </label>
+                    )}
+                  </div>
+
+                  {membersLoad === 'loading' && (
+                    <div className="space-y-2" aria-label="Loading">
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <Skeleton key={i} className="h-11" />
+                      ))}
+                    </div>
+                  )}
+
+                  {membersLoad === 'error' && (
+                    <Alert
+                      onRetry={() => {
+                        setMembersLoad('loading');
+                        void refreshSelected();
+                      }}
+                    >
+                      {membersError}
+                    </Alert>
+                  )}
+
+                  {membersLoad === 'ready' && members.length === 0 && (
+                    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-secondary-200 px-6 py-12 text-center">
+                      <Users className="h-10 w-10 text-secondary-300" aria-hidden="true" />
+                      <p className="text-lg font-semibold text-secondary-900">Nobody here yet</p>
+                      <p className="max-w-sm text-base text-secondary-600">
+                        {isDynamic
+                          ? 'Nobody matches the rules yet. Change the rules, then press Save rules.'
+                          : 'Use “Add people to this list” to type email addresses, upload a file, or pick from your contacts.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {membersLoad === 'ready' && members.length > 0 && (
+                    <>
+                      {shownMembers.length === 0 ? (
+                        <p className="py-6 text-center text-base text-secondary-600">
+                          Nobody matches “{memberFilter}”.
+                        </p>
+                      ) : (
+                        <div className="-mx-5 sm:-mx-6">
+                          <table className="w-full text-left text-base">
+                            <thead className="border-y border-secondary-200 bg-secondary-50 text-sm text-secondary-600 dark:bg-secondary-900/40">
+                              <tr>
+                                <th scope="col" className="px-5 py-2.5 font-medium sm:px-6">
+                                  Person
+                                </th>
+                                <th scope="col" className="hidden px-3 py-2.5 font-medium @xl:table-cell">
+                                  Company
+                                </th>
+                                <th scope="col" className="hidden px-3 py-2.5 font-medium @3xl:table-cell">
+                                  Added
+                                </th>
+                                <th scope="col" className="w-px px-5 py-2.5 sm:px-6">
+                                  <span className="sr-only">Remove</span>
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-secondary-200">
+                              {shownMembers.map((m) => {
+                                const name = [m.first_name, m.last_name].filter(Boolean).join(' ');
+                                const address = (isSms ? m.phone : m.email) || m.email || m.phone || '';
+                                const initials =
+                                  (name || address)
+                                    .split(/[\s@.]+/)
+                                    .filter(Boolean)
+                                    .slice(0, 2)
+                                    .map((w) => w[0]?.toUpperCase())
+                                    .join('') || '?';
+                                return (
+                                  <tr
+                                    key={m.contact_uuid}
+                                    className="hover:bg-secondary-50 dark:hover:bg-secondary-900/30"
+                                  >
+                                    <td className="w-full max-w-0 px-5 py-3 sm:px-6">
+                                      <div className="flex min-w-0 items-center gap-3">
+                                        <span
+                                          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-500/10 text-sm font-semibold text-primary-700 @md:flex dark:text-primary-300"
+                                          aria-hidden="true"
+                                        >
+                                          {initials}
+                                        </span>
+                                        <div className="min-w-0">
+                                          <p className="truncate font-medium text-secondary-900">
+                                            {name || address || '—'}
+                                          </p>
+                                          {name && address && (
+                                            <p className="text-sm text-secondary-600 [overflow-wrap:anywhere]">
+                                              {address}
+                                            </p>
+                                          )}
+                                          {m.company && (
+                                            <p className="truncate text-sm text-secondary-500 @xl:hidden">
+                                              {m.company}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="hidden max-w-56 truncate px-3 py-3 text-secondary-600 @xl:table-cell">
+                                      {m.company || '—'}
+                                    </td>
+                                    <td className="hidden whitespace-nowrap px-3 py-3 text-secondary-600 @3xl:table-cell">
+                                      <span className="block">{fmtDate(m.added_at)}</span>
+                                      {m.source && SOURCE_LABELS[m.source] && (
+                                        <span className="block text-xs text-secondary-500">
+                                          {SOURCE_LABELS[m.source]}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="px-5 py-3 text-right sm:px-6">
+                                      {m.source !== 'segment' && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          isLoading={removing === m.contact_uuid}
+                                          disabled={!!removing && removing !== m.contact_uuid}
+                                          className="text-secondary-600 hover:text-error-600"
+                                          aria-label={`Remove ${address || name || 'this person'} from the list`}
+                                          onClick={() => void removeMember(m)}
+                                        >
+                                          <X className="h-4 w-4 @md:hidden" aria-hidden="true" />
+                                          <span className="hidden @md:inline">Remove</span>
+                                        </Button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {memberTotal > members.length && (
+                        <p className="text-sm text-secondary-600">
+                          Showing the newest {members.length.toLocaleString('en-GB')} of{' '}
+                          {memberTotal.toLocaleString('en-GB')}.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </section>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={confirmDelete}
+        onClose={() => !deleting && setConfirmDelete(false)}
+        onConfirm={() => void deleteList()}
+        title={`Delete “${selected?.name ?? ''}”?`}
+        message="The people stay in your contacts — only this list is removed. Emails already sent are not affected."
+        confirmText="Delete list"
+        isLoading={deleting}
+      />
     </div>
+  );
+}
+
+export default function MarketingListsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <Skeleton className="h-16" />
+          <Skeleton className="h-96" />
+        </div>
+      }
+    >
+      <ListsPage />
+    </Suspense>
   );
 }

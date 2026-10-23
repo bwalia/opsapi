@@ -110,7 +110,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
       <header className="sticky top-0 z-30 h-16 bg-surface border-b border-secondary-200">
         <div className="flex items-center justify-between h-full px-4 sm:px-6">
           {/* Left Section */}
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             {/* Mobile Menu Button */}
             <button
               onClick={onMenuClick}
@@ -141,7 +141,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
                   placeholder="Search anything..."
                   onClick={openCommandPalette}
                   onFocus={openCommandPalette}
-                  className="w-48 md:w-64 lg:w-80 cursor-pointer pl-10 pr-14 py-2 bg-secondary-50 border border-secondary-200 rounded-lg text-sm placeholder:text-secondary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
+                  className="w-40 md:w-48 lg:w-56 xl:w-80 cursor-pointer pl-10 pr-14 py-2 bg-secondary-50 border border-secondary-200 rounded-lg text-sm placeholder:text-secondary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                 />
                 <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-secondary-200 bg-surface px-1.5 py-0.5 font-sans text-[10px] text-secondary-400">
                   ⌘K
@@ -151,7 +151,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
           </div>
 
           {/* Right Section */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {/* Namespace Switcher */}
             <div className="hidden sm:block">
               <NamespaceSwitcher variant="header" />
@@ -177,7 +177,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
                 <div className="w-8 h-8 sm:w-9 sm:h-9 gradient-primary rounded-lg flex items-center justify-center text-white font-semibold text-sm shadow-md shadow-primary-500/25">
                   {getInitials(user?.first_name, user?.last_name)}
                 </div>
-                <div className="hidden md:block text-left">
+                <div className="hidden xl:block text-left">
                   <p className="text-sm font-medium text-secondary-900 truncate max-w-[120px]">
                     {user?.first_name} {user?.last_name}
                   </p>
@@ -185,7 +185,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
                 </div>
                 <ChevronDown
                   className={cn(
-                    'w-4 h-4 text-secondary-400 transition-transform hidden md:block',
+                    'w-4 h-4 text-secondary-400 transition-transform hidden xl:block',
                     isProfileOpen && 'rotate-180'
                   )}
                 />

@@ -206,6 +206,26 @@ const STATUS_STYLES: Record<CampaignStatus, string> = {
   failed: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300',
 };
 
+/** A new campaign's sample email (campaigns page "Create draft", lists page "Write an email"). */
+export const STARTER = {
+  channel: 'email',
+  message_type: 'marketing',
+  subject: 'Hello {{contact.first_name}}',
+  preview_text: 'A quick update we think you will find useful — take a look inside.',
+  body_html: [
+    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937">',
+    '  <h1 style="font-size:22px;margin:0 0 16px">Hi {{contact.first_name}},</h1>',
+    '  <p style="font-size:15px;line-height:1.6">We have something new to share with you.</p>',
+    '  <p style="margin:24px 0">',
+    '    <a href="https://www.example.com/" style="background:#111827;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block">Find out more</a>',
+    '  </p>',
+    '  <p style="font-size:12px;color:#6b7280">Don’t want these emails? <a href="{{unsubscribe_url}}" style="color:#6b7280">Unsubscribe</a>.</p>',
+    '</div>',
+  ].join('\n'),
+  body_text:
+    'Hi {{contact.first_name}},\n\nWe have something new to share with you.\n\nFind out more: https://www.example.com/\n\nUnsubscribe: {{unsubscribe_url}}',
+};
+
 export const INPUT_CLASS = 'rounded border border-secondary-200 bg-surface px-2 py-1.5 text-sm text-secondary-900';
 
 // ---------------------------------------------------------------------------

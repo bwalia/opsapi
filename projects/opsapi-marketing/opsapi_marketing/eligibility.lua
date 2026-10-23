@@ -102,15 +102,15 @@ local function frequency_cap_hit(ns, contact_uuid, channel, message_type, settin
     if message_type ~= "marketing" then return false end
     local days = tonumber(settings.marketing_frequency_cap_days) or 7
     local cap = tonumber(settings.marketing_frequency_cap_count) or 3
-    -- Messages already sent, not queued ones: the delivery being checked is itself
-    -- queued, so counting queued made a cap of N allow only N-1 (and 1 allow none).
-    -- Test sends don't count.
+    -- Messages already sent or mid-send (parallel sends), not queued ones: the delivery
+    -- being checked is itself queued, so counting queued made a cap of N allow only N-1
+    -- (and 1 allow none). Test sends don't count.
     local row = U.one([[
         SELECT COUNT(*)::int AS n FROM mkt_deliveries
         WHERE namespace_id = ? AND contact_uuid = ? AND channel = ?
-          AND state IN ('accepted', 'delivered')
           AND attempt_key NOT LIKE 'test-%'
-          AND accepted_at > NOW() - make_interval(days => ?)
+          AND ((state IN ('accepted', 'delivered') AND accepted_at > NOW() - make_interval(days => ?))
+               OR state = 'sending')
     ]], ns, contact_uuid, channel, days)
     return row and row.n >= cap
 end

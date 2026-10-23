@@ -51,6 +51,7 @@ import ContentTab from '../_components/ContentTab';
 import AudienceTab from '../_components/AudienceTab';
 import TrackingTab from '../_components/TrackingTab';
 import AbTestTab from '../_components/AbTestTab';
+import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 
 type TabKey = 'performance' | 'content' | 'audience' | 'tracking' | 'ab';
 
@@ -90,7 +91,8 @@ function CampaignWorkspace({ id }: { id: string }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lists, setLists] = useState<MktList[]>([]);
-  const [listUuid, setListUuid] = useState('');
+  // ?list= comes from the lists page ("Write an email to these people").
+  const [listUuid, setListUuid] = useState(searchParams.get('list') || '');
   const [tab, setTab] = useState<TabKey | null>(isTabKey(queryTab) ? queryTab : null);
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -324,6 +326,10 @@ function CampaignWorkspace({ id }: { id: string }) {
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All campaigns
       </Link>
+      <div className="flex flex-wrap gap-2">
+        <HelpLink topic="write-email">How do I write this email?</HelpLink>
+        <HelpLink topic="send">How do I send it?</HelpLink>
+      </div>
 
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

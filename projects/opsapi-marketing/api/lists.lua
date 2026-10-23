@@ -123,7 +123,8 @@ return function(app)
                     if type(s) ~= "string" then return s end
                     return (s:gsub("^[%s%=%+%-%@]+", ""))
                 end
-                local first = clean(col.first_name and cols[col.first_name] or "") or "Contact"
+                -- No name stays empty, so {{contact.first_name}} falls back to "there" (not "Contact").
+                local first = clean(col.first_name and cols[col.first_name] or "") or ""
                 local last = clean(col.last_name and cols[col.last_name] or "") or ""
                 -- Stored as E.164 when it parses: clean() would strip the leading "+".
                 local raw_phone = col.phone and cols[col.phone] or ""
@@ -140,7 +141,7 @@ return function(app)
                         INSERT INTO crm_contacts
                             (uuid, namespace_id, first_name, last_name, email, phone, owner_user_uuid, status, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
-                    ]], uuid, ns, first ~= "" and first or "Contact", last ~= "" and last or db.NULL,
+                    ]], uuid, ns, first, last ~= "" and last or db.NULL,
                         email, phone ~= "" and phone or db.NULL, owner)
                     contact = { uuid = uuid }
                     created = created + 1
@@ -241,6 +242,17 @@ return function(app)
             WHERE namespace_id = ? AND list_id = ? AND contact_uuid = ? AND removed_at IS NULL
         ]], ns, list.id, self.params.contact_uuid)
         return sdk.ok({ removed = true })
+    end))
+
+    -- How many people are in each list ({ [list uuid] = n }), for the lists page.
+    app:get("/list-counts", sdk.handler({ permission = "opsapi_marketing_lists.read" }, function(self)
+        local counts = {}
+        for _, r in ipairs(db.query([[
+            SELECT l.uuid, COUNT(m.id)::int AS n FROM mkt_lists l
+            LEFT JOIN mkt_list_members m ON m.list_id = l.id AND m.namespace_id = l.namespace_id AND m.removed_at IS NULL
+            WHERE l.namespace_id = ? GROUP BY l.uuid
+        ]], sdk.namespace_id(self))) do counts[r.uuid] = r.n end
+        return sdk.ok(counts)
     end))
 
     app:get("/lists/:id/members", sdk.handler({ permission = "opsapi_marketing_lists.read" }, function(self)

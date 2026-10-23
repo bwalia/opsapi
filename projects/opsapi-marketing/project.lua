@@ -80,6 +80,8 @@ return {
     },
 
     menu = {
+        { label = "Getting started", route = "/dashboard/opsapi-marketing/guide",
+          module = "opsapi_marketing_campaigns", icon = "BookOpen" },
         { label = "Overview", route = "/dashboard/opsapi-marketing/overview",
           module = "opsapi_marketing_analytics", icon = "LayoutDashboard" },
         { label = "Campaigns", route = "/dashboard/opsapi-marketing/campaigns",
@@ -115,8 +117,9 @@ return {
             description = "Someone with Campaigns manage access, other than the campaign's author, must approve it.",
         },
         dry_run = {
-            type = "boolean", label = "Dry-run sends (no provider calls)", default = false,
-            description = "Accept deliveries without calling SMTP/SMS. Use in non-prod.",
+            type = "boolean", label = "Test mode: don't really send (dry run)", default = false,
+            description = "Everything works but no email or SMS leaves, test emails to yourself included. "
+                .. "Switch off when you are ready to send.",
         },
         default_from_email = {
             type = "string", label = "Default from email", default = "",
@@ -131,6 +134,15 @@ return {
         },
         email_rate_per_min = {
             type = "integer", label = "Email sends per minute", default = 60, min = 1, max = 10000,
+        },
+        email_daily_limit = {
+            type = "integer", label = "Emails per day (0 = no limit)", default = 0, min = 0, max = 1000000,
+            description = "Your SMTP provider's daily cap, e.g. 500 for Gmail, 2,000 for Google Workspace. "
+                .. "Emails over it wait in the queue for the next day.",
+        },
+        email_parallel = {
+            type = "integer", label = "Emails sent at once", default = 1, min = 1, max = 10,
+            description = "Separate SMTP connections used together. Raise it if your provider allows.",
         },
         sms_rate_per_min = {
             type = "integer", label = "SMS sends per minute", default = 30, min = 1, max = 1000,
