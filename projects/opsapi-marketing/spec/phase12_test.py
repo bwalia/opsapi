@@ -126,7 +126,7 @@ check("…it's gone", sql(f"SELECT count(*) FROM mkt_suppressions WHERE namespac
 # --- the ready-made templates: all added, each renders cleanly with the person's name ---
 seeded = data(expect("add ready-made templates", call("POST", P + "/templates/seed", "owner_a", W, {}), 200))
 rows = sql(f"SELECT name || '|' || channel FROM mkt_templates WHERE namespace_id = {ns_id} ORDER BY id")
-check("11 email + 3 text templates", len([r for r in rows if r.endswith("|email")]) == 11
+check("14 email + 3 text templates", len([r for r in rows if r.endswith("|email")]) == 14
       and len([r for r in rows if r.endswith("|sms")]) == 3, rows)
 for r in rows:
     name, channel = r.rsplit("|", 1)
