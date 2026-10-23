@@ -178,6 +178,25 @@ export default function PageEditor({ page }: PageEditorProps) {
                 setContentHtml(html);
                 setContentJson(json);
               }}
+              uploadImage={async (file) => {
+                try {
+                  const kind = `inline-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+                  const res = await cmsService.uploadMedia(file, {
+                    slug: slug || undefined,
+                    kind,
+                  });
+                  toast.success('Image live on www — save the page when ready.');
+                  return res.url;
+                } catch (e) {
+                  const msg =
+                    (e as { response?: { data?: { error?: string; message?: string } } })?.response
+                      ?.data?.error ||
+                    (e as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+                    (e instanceof Error ? e.message : 'Upload failed');
+                  toast.error(String(msg));
+                  throw new Error(String(msg));
+                }
+              }}
             />
           </Card>
 

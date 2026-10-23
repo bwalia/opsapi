@@ -76,13 +76,22 @@ local function ext_of(filename, content_type)
     return nil
 end
 
+local function sanitize_kind(raw)
+    if not raw or raw == "" then return "cover" end
+    local s = tostring(raw):lower()
+    s = s:gsub("%s+", "-"):gsub("[^a-z0-9%-]", ""):gsub("%-+", "-"):gsub("^%-", ""):gsub("%-$", "")
+    if s == "" or #s > 80 then return "cover" end
+    return s
+end
+
 local function object_key(opts)
     local ns = sanitize_slug(opts.namespace_slug) or "cms"
     local slug = sanitize_slug(opts.slug)
     local ext = opts.ext
-    local kind = opts.kind or "cover"
+    local kind = sanitize_kind(opts.kind)
     if slug then
         -- Same layout as workstation-website/public/img/blog/<slug>/cover.*
+        -- kind=cover for featured; kind=inline-<id> for in-body images.
         return string.format("img/blog/%s/%s.%s", slug, kind, ext)
     end
     local id = (Global.generateUUID() or tostring(ngx.now())):gsub("%-", "")

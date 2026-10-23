@@ -1,20 +1,23 @@
-# CMS public media (featured images on www)
+# CMS public media (images on www)
 
-Upload a featured image from OpsAPI UI and have it live on
+Upload images from OpsAPI Content (featured + in-body) and have them live on
 `https://www.workstation.co.uk/…` without a workstation-website git PR.
 
 ## Flow
 
-1. Editor opens a CMS post → **Featured image → Upload image**.
-2. `POST /api/v2/cms/media` (cms:update) puts the file in the public website S3 bucket.
-3. Response `url` is stored on the post as `featured_image_url`.
-4. Save the post; trigger **Website updates** webhook (or wait for ISR) so the listing refreshes.
+1. Open a CMS post or page in OpsAPI.
+2. **Featured image → Upload image**, or in the content editor use the image
+   button / paste / drop a file.
+3. `POST /api/v2/cms/media` (cms:update) puts the file in the public website S3 bucket.
+4. Featured: response `url` → `featured_image_url`. Body: TipTap inserts `<img src="…">`.
+5. Save the post; trigger **Website updates** webhook (or wait for ISR) so listings refresh.
 
-Object key when a slug is set:
+Object keys when a slug is set:
 
 ```text
-img/blog/<slug>/cover.<ext>
-→ https://www.workstation.co.uk/img/blog/<slug>/cover.<ext>
+img/blog/<slug>/cover.<ext>              # featured
+img/blog/<slug>/inline-<id>.<ext>        # in-body (unique per upload)
+→ https://www.workstation.co.uk/img/blog/<slug>/…
 ```
 
 Without a slug: `img/cms/<namespace>/<uuid>.<ext>`.
@@ -56,6 +59,7 @@ kind: cover                                 # optional
 ## Checklist after deploy
 
 - [ ] Vault keys present; pod env shows `CMS_PUBLIC_S3_BUCKET` / access key SET (not values)
-- [ ] Post editor shows **Upload image**
+- [ ] Post editor shows **Upload image** under Featured image
+- [ ] Content toolbar image button uploads (not URL-only) and inserts a www URL
 - [ ] Upload returns 201 with a www URL that GETs 200
-- [ ] Save post + website webhook → listing card uses the image
+- [ ] Save post + website webhook → listing card / article body uses the image
