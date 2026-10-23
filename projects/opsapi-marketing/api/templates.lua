@@ -67,6 +67,27 @@ return function(app)
         return sdk.ok(out)
     end))
 
+    -- "Create a design with AI": { brief, tone?, save? } -> { name, subject, preview_text, body_html,
+    -- body_text } (+ uuid when saved as a template). Built from the same blocks as the ready-made designs.
+    app:post("/templates/ai", sdk.handler({ permission = "opsapi_marketing_templates.create" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local body, berr = sdk.body(self)
+        if not body then return sdk.error(400, berr) end
+        local ws = U.one("SELECT name FROM namespaces WHERE id = ?", ns)
+        local user = sdk.user(self)
+        local design, err, status = require("opsapi_marketing.ai_design").generate(ns, user and user.uuid,
+            body.brief, body.tone, ws and ws.name or "[Your business name]")
+        if not design then return sdk.error(status or 502, err) end
+        if body.save == true then
+            local row = db.query([[
+                INSERT INTO mkt_templates (namespace_id, name, channel, subject, preview_text, body_html, body_text, status)
+                VALUES (?, ?, 'email', ?, ?, ?, ?, 'draft') RETURNING uuid
+            ]], ns, design.name, design.subject, design.preview_text, design.body_html, design.body_text)[1]
+            design.uuid = row and row.uuid
+        end
+        return sdk.ok(design)
+    end))
+
     app:post("/templates/seed", sdk.handler({ permission = "opsapi_marketing_templates.create" }, function(self)
         local ns = sdk.namespace_id(self)
         local created = T.seed_defaults(ns)

@@ -80,7 +80,10 @@ function T.verify(token, expected_purpose)
     local raw = b64url_decode(payload)
     local claims = raw and cjson.decode(raw)
     if type(claims) ~= "table" then return nil, "bad claims" end
-    if type(claims.exp) == "number" and claims.exp < ngx.time() then
+    -- Unsubscribe and preferences links never expire: people may opt out of an old email
+    -- at any time (and US law wants the link working for 30 days at least).
+    local lasting = claims.purpose == "unsubscribe" or claims.purpose == "preferences"
+    if not lasting and type(claims.exp) == "number" and claims.exp < ngx.time() then
         return nil, "expired"
     end
     if expected_purpose and claims.purpose ~= expected_purpose then

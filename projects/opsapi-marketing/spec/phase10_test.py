@@ -175,11 +175,17 @@ check("footer: working unsubscribe link (absolute)", bool(tok) and "http" in htm
       html[-400:])
 check("plain text: unsubscribe link", "Unsubscribe: http" in text, text[-200:])
 
-# --- unsubscribe → never emailed again ---
+# --- unsubscribe → never emailed again (the link opens a page; the button unsubscribes) ---
 try:
     with urllib.request.urlopen(API + "/api/v2/opsapi-marketing/public/unsubscribe?token=" + tok.group(1),
                                 timeout=10) as u:
         unsub_status = u.status
+    req = urllib.request.Request(
+        API + "/api/v2/opsapi-marketing/public/unsubscribe", method="POST",
+        data=("token=" + tok.group(1) + "&action=unsubscribe").encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=10) as u:
+        unsub_status = max(unsub_status, u.status)
 except urllib.error.HTTPError as e:
     unsub_status = e.code
 check("unsubscribe link works", unsub_status == 200, unsub_status)

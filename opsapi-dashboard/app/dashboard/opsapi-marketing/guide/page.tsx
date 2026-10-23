@@ -403,7 +403,9 @@ export default function MarketingGuidePage() {
                 <Go href={CAMPAIGNS}>Marketing → Campaigns</Go>, type a name and press <B>Create draft</B>.
               </li>
               <li>
-                You’re on the <B>Content</B> tab. To use a design you saved, pick it in <B>Start from a template</B>.
+                You’re on the <B>Content</B> tab. Press <B>Choose a design</B> and pick a ready-made one — or press{' '}
+                <B>Create one with AI</B>, say what the email is about, and the AI writes it for you. Anything in
+                [square brackets] is for you to fill in.
               </li>
               <li>
                 Type the <B>Subject</B> — the line people see in their inbox. <B>+ First name</B> adds the person’s

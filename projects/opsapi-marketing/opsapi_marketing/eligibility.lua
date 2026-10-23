@@ -281,6 +281,49 @@ function E.opt_out(ns, contact_uuid, channel, opts)
     return true
 end
 
+--- The person changed their mind ("Subscribe again" on the unsubscribe or preferences page):
+-- what they unsubscribed from on this channel is undone, recorded as their own consent.
+-- Bounces, complaints and blocks someone added by hand stay.
+function E.resubscribe(ns, contact_uuid, channel, list_id, address, source)
+    channel = channel or "email"
+    local opts = {
+        source = source or "resubscribe_link",
+        legal_basis = "consent",
+        evidence = "Pressed \"Subscribe again\" on the page from their email",
+    }
+    local rows = db.query([[
+        SELECT list_id FROM mkt_subscriptions
+        WHERE namespace_id = ? AND contact_uuid = ? AND channel = ? AND status = 'unsubscribed'
+    ]], ns, contact_uuid, channel)
+    local done_list, done_global = false, false
+    for _, r in ipairs(rows) do
+        local lid = r.list_id ~= db.NULL and r.list_id or nil
+        E.opt_in(ns, contact_uuid, channel, { list_id = lid, source = opts.source, legal_basis = opts.legal_basis,
+            evidence = opts.evidence })
+        if lid == nil then done_global = true elseif tonumber(lid) == tonumber(list_id) then done_list = true end
+    end
+    if list_id and not done_list then
+        E.opt_in(ns, contact_uuid, channel, { list_id = list_id, source = opts.source,
+            legal_basis = opts.legal_basis, evidence = opts.evidence })
+    elseif not list_id and not done_global then
+        E.opt_in(ns, contact_uuid, channel, opts)
+    end
+    if address then
+        db.query([[
+            DELETE FROM mkt_suppressions
+            WHERE namespace_id = ? AND (channel IS NULL OR channel = ?) AND lower(address) = lower(?)
+              AND reason = 'unsubscribe'
+              AND source IN ('one_click_unsubscribe', 'list_unsubscribe_post', 'unsubscribe_page', 'preferences_page')
+        ]], ns, channel, address)
+    end
+    pcall(function()
+        require("helper.plugin-sdk").emit(ns, "opsapi_marketing.subscription.opted_in", {
+            contact_uuid = contact_uuid, channel = channel, list_id = list_id, source = opts.source,
+        })
+    end)
+    return true
+end
+
 --- Authorised consent grant. AI tools must never call this.
 function E.opt_in(ns, contact_uuid, channel, opts)
     opts = opts or {}

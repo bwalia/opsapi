@@ -65,6 +65,9 @@ export const marketingService = {
   analyseTemplate: (body: Record<string, unknown>) =>
     apiClient.post(`${BASE}/templates/analyse`, body, JSON_BODY),
   seedTemplates: () => apiClient.post(`${BASE}/templates/seed`, {}, JSON_BODY),
+  // "Create a design with AI": the local model can take a minute or two.
+  aiDesign: (body: { brief: string; tone?: string; save?: boolean }) =>
+    apiClient.post(`${BASE}/templates/ai`, body, { ...ACTION, timeout: 180000 }),
   publishTemplate: (id: string) =>
     apiClient.post(`${BASE}/templates/${id}/publish`, {}, JSON_BODY),
   cloneTemplate: (id: string, body?: Record<string, unknown>) =>
