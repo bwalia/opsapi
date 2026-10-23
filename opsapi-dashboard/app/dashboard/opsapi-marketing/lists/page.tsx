@@ -387,7 +387,7 @@ function ListsPage() {
       <Steps done={[lists.length > 0, selectedCount > 0, false]} />
 
       {listsLoad === 'loading' && (
-        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
           <div className="space-y-3">
             <Skeleton className="h-12" />
             {[0, 1, 2, 3].map((i) => (
@@ -448,7 +448,7 @@ function ListsPage() {
       )}
 
       {listsLoad === 'ready' && selected && (
-        <div className="grid items-start gap-6 lg:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="grid items-start gap-6 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-3 lg:sticky lg:top-6" aria-label="Your lists">
             {listsError && <Alert onRetry={() => void loadLists()}>{listsError}</Alert>}
             {showNew ? (
@@ -559,8 +559,8 @@ function ListsPage() {
           </aside>
 
           <div className="min-w-0 space-y-6">
-            <section className={`${CARD} space-y-3 p-5 sm:p-6`} aria-label="This list">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+            <section className={`${CARD} @container space-y-3 p-5 sm:p-6`} aria-label="This list">
+              <div className="flex flex-col gap-4 @2xl:flex-row @2xl:items-start @2xl:justify-between">
                 <div className="min-w-0 flex-1">
                   {renaming ? (
                     <form
@@ -619,18 +619,20 @@ function ListsPage() {
                     )}
                   </p>
                 </div>
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <div className="flex w-full flex-wrap items-center gap-2 @2xl:w-auto @2xl:shrink-0">
                   {!isSms && (
                     <Button
                       size="lg"
-                      className="flex-1 sm:flex-none"
+                      className="flex-1 @md:flex-none"
                       leftIcon={<Mail className="h-5 w-5" />}
                       isLoading={writing}
                       disabled={selectedCount === 0}
                       title={selectedCount === 0 ? 'Add people to the list first' : undefined}
                       onClick={() => void writeEmail()}
                     >
-                      Write an email to them
+                      <span className="whitespace-nowrap">
+                        Write an email<span className="hidden @sm:inline"> to them</span>
+                      </span>
                     </Button>
                   )}
                   <Button

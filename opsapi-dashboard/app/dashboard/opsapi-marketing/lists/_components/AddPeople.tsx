@@ -61,7 +61,7 @@ function Choice({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-xl border-2 p-3.5 text-left transition @xl:flex-col @xl:items-start @xl:gap-2 @xl:p-4 ${
+      className={`group flex w-full items-center gap-3 rounded-xl border-2 p-3.5 text-left transition @2xl:flex-col @2xl:items-start @2xl:gap-2 @2xl:p-4 ${
         active
           ? 'border-primary-600 bg-primary-50 shadow-sm dark:bg-primary-900/30'
           : 'border-secondary-200 hover:border-primary-400 hover:shadow-sm'
@@ -292,7 +292,7 @@ export function AddPeople({
 
       {!pending && (
         <>
-          <div className="grid gap-2.5 @xl:grid-cols-3 @xl:gap-3">
+          <div className="grid gap-2.5 @2xl:grid-cols-3 @2xl:gap-3">
             <Choice
               icon={<Keyboard className="h-5 w-5" />}
               title="Type emails"

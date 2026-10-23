@@ -229,14 +229,14 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
           ? `${doneCount} of ${required.length} steps done. Steps tick themselves when you finish them.`
           : 'All done — you’re ready to send emails whenever you like.'}
       </p>
-      <ol className="mt-4 space-y-3">
+      <ol className="@container mt-4 space-y-3">
         {STEPS.map((s, i) => {
           const done = s.done(p);
           const isNext = s === next;
           return (
             <li
               key={s.title}
-              className={`flex flex-wrap items-start gap-3 rounded-xl border p-4 ${
+              className={`grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-xl @xl:grid-cols-[auto_minmax(0,1fr)_auto] border p-4 ${
                 isNext ? 'border-2 border-primary-500 bg-primary-50 dark:bg-primary-900/30' : 'border-secondary-200'
               }`}
             >
@@ -248,7 +248,7 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
               >
                 {done ? <Check className="h-5 w-5" /> : i + 1}
               </span>
-              <div className="min-w-0 flex-1 basis-56">
+              <div className="min-w-0">
                 <p className="text-base font-semibold">
                   {s.title}
                   {s.optional && <span className="font-normal text-secondary-500"> (optional)</span>}
@@ -256,7 +256,7 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
                 </p>
                 <p className="text-base text-secondary-600">{s.why}</p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="col-start-2 -ml-3 flex flex-wrap items-center gap-2 @xl:col-start-3 @xl:row-start-1 @xl:ml-0">
                 <a href={`#${s.guide}`} className={buttonClass('ghost', 'md')}>
                   Show me how
                 </a>

@@ -30,7 +30,11 @@ export function PageHeader({
           {description && <p className="mt-1 text-secondary-500">{description}</p>}
         </div>
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end [&_a]:whitespace-nowrap [&_button]:whitespace-nowrap">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

@@ -169,15 +169,15 @@ export default function MarketingCampaignsPage() {
               <tr>
                 <th className="p-3 font-medium">Name</th>
                 <th className="p-3 font-medium">Status</th>
-                <th className="p-3 font-medium">Channel</th>
-                <th className="p-3 text-right font-medium">Sent</th>
-                <th className="p-3 text-right font-medium" title="Estimated, bots excluded">
+                <th className="hidden p-3 font-medium md:table-cell">Channel</th>
+                <th className="hidden p-3 text-right font-medium sm:table-cell">Sent</th>
+                <th className="hidden p-3 text-right font-medium lg:table-cell" title="Estimated, bots excluded">
                   Open rate
                 </th>
-                <th className="p-3 text-right font-medium">Click rate</th>
-                <th className="p-3 text-right font-medium">Conversions</th>
-                <th className="p-3 text-right font-medium">Revenue</th>
-                <th className="p-3 font-medium">Scheduled / started</th>
+                <th className="hidden p-3 text-right font-medium lg:table-cell">Click rate</th>
+                <th className="hidden p-3 text-right font-medium xl:table-cell">Conversions</th>
+                <th className="hidden p-3 text-right font-medium xl:table-cell">Revenue</th>
+                <th className="hidden p-3 font-medium xl:table-cell">Scheduled / started</th>
               </tr>
             </thead>
             <tbody>
@@ -193,18 +193,23 @@ export default function MarketingCampaignsPage() {
                       >
                         {c.name}
                       </Link>
-                      {c.subject && <div className="max-w-xs truncate text-xs text-secondary-500">{c.subject}</div>}
+                      {c.subject && <div className="max-w-44 truncate text-xs text-secondary-500 sm:max-w-xs">{c.subject}</div>}
+                      {m && (
+                        <div className="text-xs text-secondary-500 sm:hidden">
+                          {fmtInt(m.sent)} sent
+                        </div>
+                      )}
                     </td>
                     <td className="p-3">
                       <StatusBadge status={c.status} />
                     </td>
-                    <td className="p-3 uppercase">{c.channel}</td>
-                    <td className="p-3 text-right tabular-nums">{m ? fmtInt(m.sent) : '—'}</td>
-                    <td className="p-3 text-right tabular-nums">{m && m.sent ? fmtPct(m.open_rate) : '—'}</td>
-                    <td className="p-3 text-right tabular-nums">{m && m.sent ? fmtPct(m.click_rate) : '—'}</td>
-                    <td className="p-3 text-right tabular-nums">{m ? fmtInt(m.conversions ?? m.converted) : '—'}</td>
-                    <td className="p-3 text-right tabular-nums">{m ? fmtMoney(m.revenue) : '—'}</td>
-                    <td className="whitespace-nowrap p-3 text-secondary-500">
+                    <td className="hidden p-3 uppercase md:table-cell">{c.channel}</td>
+                    <td className="hidden p-3 text-right tabular-nums sm:table-cell">{m ? fmtInt(m.sent) : '—'}</td>
+                    <td className="hidden p-3 text-right tabular-nums lg:table-cell">{m && m.sent ? fmtPct(m.open_rate) : '—'}</td>
+                    <td className="hidden p-3 text-right tabular-nums lg:table-cell">{m && m.sent ? fmtPct(m.click_rate) : '—'}</td>
+                    <td className="hidden p-3 text-right tabular-nums xl:table-cell">{m ? fmtInt(m.conversions ?? m.converted) : '—'}</td>
+                    <td className="hidden p-3 text-right tabular-nums xl:table-cell">{m ? fmtMoney(m.revenue) : '—'}</td>
+                    <td className="hidden whitespace-nowrap p-3 text-secondary-500 xl:table-cell">
                       {when ? `${c.started_at ? 'Started' : 'Scheduled'} ${fmtDateTime(when)}` : '—'}
                     </td>
                   </tr>
