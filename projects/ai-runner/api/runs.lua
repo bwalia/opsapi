@@ -26,6 +26,7 @@ local sdk = require("helper.plugin-sdk")
 local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
 local B = require("ai_runner.builtin")
+local Term = require("ai_runner.terminal")
 
 -- Run fields in the API (all real columns; the list leaves out the prompt, the detail adds it).
 local FIELDS = { "uuid", "task_uuid", "project_uuid", "requested_by", "assignee_uuid", "runner_uuid", "profile",
@@ -207,6 +208,7 @@ return function(app)
         local default_executor = (type(ps.default_executor) == "string" and ps.default_executor ~= ""
             and ps.default_executor ~= cjson.null and ps.default_executor)
             or (builtin and "builtin") or "machine"
+        local terminals = Term.offer(ns, task, ps)
         return sdk.ok({
             prompt = R.render(tpl.body, task, render_opts(builtin, repo_path, defaults, defaults.output_mode, snap)),
             template_version = tpl.version, template_uuid = U.null(tpl.uuid), can_edit_prompt = privileged,
@@ -222,6 +224,9 @@ return function(app)
             allowed_executors = U.array(ps.allowed_executors or {}),
             executor_locked = ps.executor_locked == true,
             can_change_executor = not ps.executor_locked or R.is_manager(self, task.project_uuid),
+            -- Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md): where the person can work on it themselves.
+            terminals = terminals,
+            terminal_prompt = #terminals > 0 and Term.prompt(ns, task) or cjson.null,
         })
     end)))
 
@@ -241,6 +246,8 @@ return function(app)
             })
             if not d then U.invalid(errors) end
             for k, v in pairs(d) do if v == db.NULL or v == "" then d[k] = nil end end
+            -- A locked or disallowed executor is the real reason a start fails: say so before checking folders.
+            R.resolve_executor(self, ns, task, d, nil)
             -- JobShout runs inside JobShout: prefer the built-in runner as the OpsAPI host row when the client
             -- didn't pick a machine (or picked one by habit).
             if d.executor_kind == "jobshout" then
@@ -496,7 +503,6 @@ return function(app)
         local task = task_or_404(ns, self.params.task_uuid)
         local W = require("ai_runner.task_work")
         local V = require("ai_runner.vault_pr")
-        local Term = require("ai_runner.terminal")
         pcall(function() require("ai_runner.pr_poll").refresh_task(ns, task.uuid) end)
         Term.ensure_poll_timer()
         local latest = W.latest(ns, task.uuid)
@@ -505,13 +511,12 @@ return function(app)
         local prs = {}
         for i, p in ipairs(V.list_for_task(ns, task.uuid)) do prs[i] = V.view(p) end
         local sessions = {}
-        for i, s in ipairs(Term.list_for_task(ns, task.uuid)) do sessions[i] = Term.view(s) end
+        for i, s in ipairs(Term.list_for_task(ns, task.uuid)) do sessions[i] = Term.session_view(s) end
         return sdk.ok({
             work = latest and W.view(latest) or cjson.null,
             history = U.array(history),
             pull_requests = U.array(prs),
             terminal_sessions = U.array(sessions),
-            terminal_base_url = Term.base_url(),
             project = R.project_settings_view(R.project_settings(ns, task.project_uuid)),
             manager_links = latest and {
                 task_url = R.task_url(task.project_uuid, task.uuid),
@@ -523,24 +528,6 @@ return function(app)
                 end)(),
             } or cjson.null,
         })
-    end)))
-
-    app:get("/tasks/:task_uuid/terminal-sessions", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
-        local ns = sdk.namespace_id(self)
-        task_or_404(ns, self.params.task_uuid)
-        local Term = require("ai_runner.terminal")
-        local out = {}
-        for i, s in ipairs(Term.list_for_task(ns, self.params.task_uuid)) do out[i] = Term.view(s) end
-        return sdk.ok(U.array(out))
-    end)))
-
-    app:post("/tasks/:task_uuid/terminal-sessions", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
-        local ns = sdk.namespace_id(self)
-        local task = task_or_404(ns, self.params.task_uuid)
-        local Term = require("ai_runner.terminal")
-        local ns_slug = self.namespace and (self.namespace.slug or self.namespace.name) or ""
-        local row = Term.launch(ns, task, sdk.user(self).uuid, ns_slug)
-        return sdk.created(Term.view(row))
     end)))
 
     app:get("/tasks/:task_uuid/prs", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)

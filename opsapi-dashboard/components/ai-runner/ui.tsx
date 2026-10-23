@@ -6,8 +6,10 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Lock, Power } from 'lucide-react';
-import { Badge, Card } from '@/components/ui';
+import { Copy, Lock, Power } from 'lucide-react';
+import toast from 'react-hot-toast';
+import apiClient from '@/lib/api-client';
+import { Badge, Button, Card } from '@/components/ui';
 import { Spinner } from '@/components/property-deals/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useNamespaceStore } from '@/store/namespace.store';
@@ -315,4 +317,27 @@ export function RunResult({ run }: { run: Pick<Run, 'pr_url' | 'commit_sha'> }) 
   }
   if (run.commit_sha) return <span className="font-mono text-xs">{run.commit_sha.slice(0, 10)}</span>;
   return <span className="text-secondary-400">—</span>;
+}
+
+/** This API's public address, as the browser reaches it (for config a machine needs). */
+export function opsapiUrl(): string {
+  const base = apiClient.defaults.baseURL || '';
+  return /^https?:\/\//.test(base) ? base.replace(/\/$/, '') : `${window.location.origin}${base}`.replace(/\/$/, '');
+}
+
+function copy(text: string, what: string) {
+  navigator.clipboard.writeText(text).then(() => toast.success(`${what} copied`), () => toast.error('Could not copy'));
+}
+
+/** A block of text to paste somewhere else (a token, a config file, a command), with a Copy button. */
+export function CopyBlock({ text, what, testId }: { text: string; what: string; testId?: string }) {
+  return (
+    <div className="relative">
+      <pre data-testid={testId} className="overflow-x-auto whitespace-pre rounded-lg bg-secondary-900 p-3 pr-24 font-mono text-xs text-secondary-100">{text}</pre>
+      <Button size="sm" variant="ghost" className="absolute right-1.5 top-1.5 bg-surface/90" onClick={() => copy(text, what)}
+        leftIcon={<Copy className="h-3.5 w-3.5" aria-hidden />} aria-label={`Copy ${what.toLowerCase()}`}>
+        Copy
+      </Button>
+    </div>
+  );
 }
