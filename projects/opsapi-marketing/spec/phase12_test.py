@@ -104,6 +104,25 @@ check("preferences: turn emails off", "won’t get" in html and suppressed() == 
 check("preferences: a click-tracking token is refused",
       http("GET", PREFS + "?token=" + urllib.parse.quote(tok))[0] == 400)
 
+# --- the Unsubscribed page: the business can't undo someone's unsubscribe, only its own blocks ---
+sam = sql(f"SELECT uuid FROM mkt_suppressions WHERE namespace_id = {ns_id} AND address = 'sam@p12.invalid'")[0]
+st, body = call("DELETE", P + f"/suppressions/{sam}", "owner_a", W)
+check("can't remove someone who unsubscribed", st == 409 and suppressed() == "preferences_page", (st, body))
+check("no generic edit", call("PUT", P + f"/suppressions/{sam}", "owner_a", W, {"source": "manual"})[0] in (404, 405))
+blk = data(expect("block an address", call("POST", P + "/suppressions", "owner_a", W,
+                                           {"address": " Spam@P12.invalid ", "notes": "asked us by phone"}), 201))
+check("blocked, tidied", blk.get("address") == "spam@p12.invalid" and blk.get("reason") == "blocked"
+      and blk.get("source") == "manual", blk)
+again = data(expect("block it again", call("POST", P + "/suppressions", "owner_a", W, {"address": "spam@p12.invalid"}), 200))
+check("…is the same block", again.get("uuid") == blk.get("uuid"))
+expect("block a mobile", call("POST", P + "/suppressions", "owner_a", W, {"address": "07700 900123", "channel": "sms"}), 201)
+check("mobile stored as +44", sql(f"SELECT count(*) FROM mkt_suppressions WHERE namespace_id = {ns_id} "
+                                  f"AND address = '+447700900123' AND channel = 'sms'") == ["1"])
+expect("a bad address is refused", call("POST", P + "/suppressions", "owner_a", W, {"address": "not an email"}), 422)
+expect("remove your own block", call("DELETE", P + f"/suppressions/{blk['uuid']}", "owner_a", W), 200)
+check("…it's gone", sql(f"SELECT count(*) FROM mkt_suppressions WHERE namespace_id = {ns_id} "
+                        f"AND address = 'spam@p12.invalid'") == ["0"])
+
 # --- the ready-made templates: all added, each renders cleanly with the person's name ---
 seeded = data(expect("add ready-made templates", call("POST", P + "/templates/seed", "owner_a", W, {}), 200))
 rows = sql(f"SELECT name || '|' || channel FROM mkt_templates WHERE namespace_id = {ns_id} ORDER BY id")

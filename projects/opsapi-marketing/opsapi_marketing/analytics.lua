@@ -31,6 +31,10 @@ function A.overview(ns)
         SELECT COUNT(*)::int AS n FROM mkt_replies WHERE namespace_id = ?
           AND created_at > NOW() - interval '30 days'
     ]], ns)
+    local unsubscribed = U.one([[
+        SELECT COUNT(*)::int AS n FROM mkt_suppressions WHERE namespace_id = ?
+          AND reason IN ('unsubscribe', 'stop_keyword') AND created_at > NOW() - interval '30 days'
+    ]], ns)
 
     local conv = U.one([[
         SELECT COUNT(*)::int AS conversions, COALESCE(SUM(value), 0)::float AS revenue,
@@ -52,6 +56,7 @@ function A.overview(ns)
                 pixels = pixels and pixels.n or 0 },
         top_campaigns = A.attribution(ns, 90, 5),
         replies_30d = replies and replies.n or 0,
+        unsubscribed_30d = unsubscribed and unsubscribed.n or 0,
         notes = {
             opens_are_estimated = true,
             accepted_is_not_delivered = true,

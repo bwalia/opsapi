@@ -14,11 +14,10 @@ Multi-channel marketing (email + SMS) on CRM contacts. Consent, suppression and 
 - **Overview** (/dashboard/opsapi-marketing/overview): campaign + delivery snapshot.
 - **Campaigns** (/dashboard/opsapi-marketing/campaigns): draft → validate → approve → schedule → send. A/B and max_deliveries supported.
 - **Studio** (/dashboard/opsapi-marketing/studio): TipTap email + SMS composers with merge fields.
-- **Conversations** (/dashboard/opsapi-marketing/conversations): inbound replies and classifications.
 - **Getting started** (/dashboard/opsapi-marketing/guide): live checklist + step-by-step help for beginners.
 - **Lists** (/dashboard/opsapi-marketing/lists): make a list, then "Add people to this list" three ways, each ending in one check screen.
-- **Suppressions**: everyone who unsubscribed (/dashboard/plugins/opsapi-marketing/suppressions). The unsubscribe link in each email opens a page; only pressing its button unsubscribes (link-checking robots can't), and the page offers "Subscribe again". Mail apps' own unsubscribe button works too. Links never expire.
-- **Settings** (/dashboard/opsapi-marketing/settings): "How your emails are sent" (SMTP, From, test mode, daily limit).
+- **Unsubscribed** (/dashboard/opsapi-marketing/unsubscribed): everyone who unsubscribed, bounced or was blocked; "Block an address" adds one. Only the person can undo an unsubscribe ("Subscribe again" on the unsubscribe page); only addresses the business blocked can be unblocked. The unsubscribe link in each email opens a page; only pressing its button unsubscribes (link-checking robots can't), and the page offers "Subscribe again". Mail apps' own unsubscribe button works too. Links never expire.
+- **Settings** (/dashboard/opsapi-marketing/settings): "How your emails are sent" (SMTP, From, test mode, daily limit). Advanced: "Track sales on your website" → /dashboard/opsapi-marketing/pixels (a code snippet for the website; needs a web developer for sales/sign-ups).
 
 ## How to (answer beginners in these plain steps, and link the guide section)
 - **Connect email** (guide#connect-email): Workspace → Email → fill Server/Port/Security/Username/Password, From address + From name → "Use this server" on → Save → "Send test". Gmail: smtp.gmail.com 587 STARTTLS + an app password; ~500/day (Workspace ~2,000).

@@ -12,7 +12,7 @@ const CAMPAIGNS = '/dashboard/opsapi-marketing/campaigns';
 const STUDIO = '/dashboard/opsapi-marketing/studio';
 const SETTINGS = '/dashboard/namespace/plugins#plugin-opsapi_marketing';
 const EMAIL = '/dashboard/namespace/email';
-const SUPPRESSIONS = '/dashboard/plugins/opsapi_marketing/suppressions';
+const UNSUBSCRIBED = '/dashboard/opsapi-marketing/unsubscribed';
 
 const TOPICS: [string, string][] = [
   ['connect-email', 'Connect your email account'],
@@ -472,10 +472,15 @@ export default function MarketingGuidePage() {
             <ul>
               <li>Every email has an unsubscribe link at the bottom. You never need to add it.</li>
               <li>
-                Anyone who clicks it is never emailed by this workspace again — even if you upload them again later.
+                The link opens a page with an <B>Unsubscribe</B> button. Once they press it, this workspace never emails
+                them again — even if you upload them again later.
               </li>
               <li>
-                You can see everyone who unsubscribed under <Go href={SUPPRESSIONS}>Marketing → Suppressions</Go>.
+                Only they can undo it: the same page has a <B>Subscribe again</B> button.
+              </li>
+              <li>
+                See everyone who unsubscribed under <Go href={UNSUBSCRIBED}>Marketing → Unsubscribed</Go>. You can also
+                block an address there yourself.
               </li>
             </ul>
           </Topic>

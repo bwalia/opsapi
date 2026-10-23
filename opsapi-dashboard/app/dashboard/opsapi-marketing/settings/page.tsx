@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, Mail, Settings } from 'lucide-react';
+import { ExternalLink, Mail, Radar, Settings } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import Link from 'next/link';
 import { buttonClass } from '@/components/ui';
@@ -177,13 +177,21 @@ export default function MarketingSettingsPage() {
           </div>
         ))}
       </div>
-      <p className="text-xs text-secondary-500">
-        Pixels themselves (install snippet, allowed domains, attribution window) are managed on{' '}
-        <Link href="/dashboard/opsapi-marketing/pixels" className="underline underline-offset-2">
-          Pixels &amp; attribution
-        </Link>
-        .
-      </p>
+      <section className="rounded-lg border border-secondary-200 p-4">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-secondary-900">
+          <Radar className="h-4 w-4" aria-hidden />
+          Track sales on your website <span className="font-normal text-secondary-500">(advanced)</span>
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm text-secondary-500">
+          See which emails lead to visits, sign-ups and sales on your website. You add a small piece of code to your
+          site, and your web developer adds one line where a sale or sign-up happens. You don’t need it to send emails.
+        </p>
+        <div className="mt-3">
+          <Link href="/dashboard/opsapi-marketing/pixels" className={buttonClass('outline', 'sm')}>
+            Set up website tracking
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

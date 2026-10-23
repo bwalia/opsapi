@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Activity, BarChart3, Code2, Crosshair, Loader2, Plus, RefreshCw, Settings, X } from 'lucide-react';
+import Link from 'next/link';
+import { Activity, ArrowLeft, BarChart3, Code2, Crosshair, Loader2, Plus, RefreshCw, Settings, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
@@ -193,6 +194,12 @@ export default function MarketingPixelsPage() {
 
   return (
     <div className="space-y-6 p-6">
+      <Link
+        href="/dashboard/opsapi-marketing/settings"
+        className="inline-flex items-center gap-1 text-sm text-secondary-500 hover:text-secondary-900"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden /> Marketing settings
+      </Link>
       <PageHeader
         title="Pixels & attribution"
         description="Track site visits and conversions from your campaigns, and see the revenue each campaign drives."
