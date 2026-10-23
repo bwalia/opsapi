@@ -32,7 +32,9 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 2
-  activeDeadlineSeconds: 600
+  # Counts from Job start, so it includes pulling a new image (minutes on the
+  # home nodes). Keep it under deploy-k3s.yml's helm --timeout (20m).
+  activeDeadlineSeconds: 900
   template:
     metadata:
       labels:

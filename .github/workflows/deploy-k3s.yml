@@ -617,7 +617,8 @@ jobs:
     name: Deploy workstation-opsapi to K3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
     needs: [build, smoke-test, dns, wslproxy]
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
+    # helm (up to 20m for the migrate hook) + rollout (up to 10m) + checks.
+    timeout-minutes: 35
     if: >-
       ${{ always()
           && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build'
@@ -705,9 +706,16 @@ jobs:
           # config-only change does not alter the Deployment and helm --wait
           # would just block on the EXISTING pods. We drive the rollout
           # explicitly in the next step instead.
+          #
+          # --timeout covers the pre-upgrade migrate hook. Its pod is the first
+          # on its node to need a new image, and the home nodes pull the
+          # ~220 MB image from Docker Hub one image at a time (minutes when
+          # other pulls are queued), so helm's default 5m failed the deploy
+          # while the migration was still waiting for its image.
           helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
             -f "$VALUES" \
             --namespace "${TARGET_ENV}" --create-namespace \
+            --timeout 20m \
             --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
             --set image.tag="${TAG}" \
             $PROJECT_CODE_ARG
