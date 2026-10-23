@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Smartphone, Save, Braces, ImagePlus, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, confirmDialog } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import {
   EMAIL_IMAGE_TYPES,
@@ -107,11 +107,15 @@ export default function ContentTab({
   const isEmail = campaign.channel === 'email';
   const frame = useMemo(() => splitFrame(form.body_html), [form.body_html]);
 
-  const switchEditor = (toEasy: boolean) => {
+  const switchEditor = async (toEasy: boolean) => {
     if (
       toEasy &&
       madeWithCode(form.body_html) &&
-      !window.confirm('This email was designed with code. The easy editor may change its layout. Continue?')
+      !(await confirmDialog({
+        title: 'Open in the easy editor?',
+        message: 'This email was designed with code. The easy editor may change its layout.',
+        confirmText: 'Open easy editor',
+      }))
     )
       return;
     setEasy(toEasy);
@@ -183,11 +187,19 @@ export default function ContentTab({
   };
 
   /** Copy a saved template's words and design into this email (it can then be edited freely). */
-  const applyTemplate = (uuid: string) => {
+  const applyTemplate = async (uuid: string) => {
     const t = templates.find((x) => x.uuid === uuid);
     if (!t) return;
     const hasContent = (form.body_html + form.body_text).trim() !== '';
-    if (hasContent && !window.confirm(`Replace this email’s subject and words with the template “${t.name}”?`)) return;
+    if (
+      hasContent &&
+      !(await confirmDialog({
+        title: `Use the template “${t.name}”?`,
+        message: 'It replaces this email’s subject and words. You can still change anything afterwards.',
+        confirmText: 'Use template',
+      }))
+    )
+      return;
     setForm((f) => ({
       ...f,
       subject: t.subject ?? f.subject,
@@ -246,108 +258,119 @@ export default function ContentTab({
     <div className="space-y-4">
       {!editable && (
         <Notice tone="warn">
-          Content is locked while the campaign is {campaign.status.replace(/_/g, ' ')}. Pause it to make changes (it
-          then goes back to draft and needs validating, and approving, again), or duplicate it to start a new draft.
+          {campaign.status === 'completed' || campaign.status === 'cancelled'
+            ? 'This email has been sent, so it can’t be changed. To send something similar, use More → Make a copy.'
+            : 'This email is being sent, so it can’t be changed right now. Press “Pause” to edit it (then press “Check it” again), or use More → Make a copy.'}
         </Notice>
       )}
       {editable && campaign.status !== 'draft' && (
-        <Notice tone="info">
-          Saving content changes sends this campaign back to draft: validate it (and get it approved) again.
-        </Notice>
+        <Notice tone="info">If you change and save the email, press “Check it” again before sending.</Notice>
       )}
       {error && <Notice tone="error">{error}</Notice>}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <fieldset disabled={!editable} className="min-w-0 space-y-4">
-          <legend className="sr-only">Message content</legend>
+        <div className="min-w-0 space-y-4">
+          {/* Locked when sent: inputs are disabled, but the email can still be viewed both ways. */}
+          <fieldset disabled={!editable} className="min-w-0 space-y-4">
+            <legend className="sr-only">Message content</legend>
 
-          {templates.length > 0 && (
-            <label className="block rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm dark:bg-primary-900/30">
-              <span className="font-medium">Start from a template</span>
-              <span className="block text-xs text-secondary-600">
-                Copies a design you saved in the Studio into this email. You can still change anything.
-              </span>
-              <select className={`${INPUT_CLASS} mt-2 w-full`} value="" onChange={(e) => applyTemplate(e.target.value)}>
-                <option value="">Choose a template…</option>
-                {templates.map((t) => (
-                  <option key={t.uuid} value={t.uuid}>
-                    {t.name}
-                    {t.status && t.status !== 'published' ? ' (draft)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {!isEmail && (
-            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 bg-secondary-50 p-3">
-              <Braces className="mb-2 h-4 w-4 text-secondary-500" aria-hidden="true" />
-              <label className="text-xs">
-                <span className="block text-secondary-500">Insert merge field into</span>
+            {templates.length > 0 && (
+              <label className="block rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm dark:bg-primary-900/30">
+                <span className="font-medium">Start from a template</span>
+                <span className="block text-xs text-secondary-600">
+                  Copies a design you saved in the Studio into this email. You can still change anything.
+                </span>
                 <select
-                  className={`${INPUT_CLASS} mt-1`}
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value as InsertTarget)}
-                >
-                  <option value="subject">Subject</option>
-                  <option value="body_html">HTML body</option>
-                  <option value="body_text">Plain-text body</option>
-                </select>
-              </label>
-              <label className="text-xs">
-                <span className="block text-secondary-500">Field</span>
-                <select
-                  className={`${INPUT_CLASS} mt-1`}
+                  className={`${INPUT_CLASS} mt-2 w-full`}
                   value=""
-                  onChange={(e) => insertMerge(e.target.value)}
-                  aria-label="Merge field to insert at the cursor"
+                  onChange={(e) => void applyTemplate(e.target.value)}
                 >
-                  <option value="">Choose…</option>
-                  {mergeFields.map((m) => (
-                    <option key={m.key} value={m.key}>
-                      {m.label} — {`{{${m.key}}}`}
+                  <option value="">Choose a template…</option>
+                  {templates.map((t) => (
+                    <option key={t.uuid} value={t.uuid}>
+                      {t.name}
+                      {t.status && t.status !== 'published' ? ' (draft)' : ''}
                     </option>
                   ))}
                 </select>
               </label>
-              <p className="basis-full text-xs text-secondary-500">
-                Inserts at the cursor. <code>{'{{unsubscribe_url}}'}</code> is supported; if your email has no
-                unsubscribe link, one is added automatically.
-              </p>
-            </div>
-          )}
+            )}
+
+            {!isEmail && (
+              <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 bg-secondary-50 p-3">
+                <Braces className="mb-2 h-4 w-4 text-secondary-500" aria-hidden="true" />
+                <label className="text-xs">
+                  <span className="block text-secondary-500">Insert merge field into</span>
+                  <select
+                    className={`${INPUT_CLASS} mt-1`}
+                    value={target}
+                    onChange={(e) => setTarget(e.target.value as InsertTarget)}
+                  >
+                    <option value="subject">Subject</option>
+                    <option value="body_html">HTML body</option>
+                    <option value="body_text">Plain-text body</option>
+                  </select>
+                </label>
+                <label className="text-xs">
+                  <span className="block text-secondary-500">Field</span>
+                  <select
+                    className={`${INPUT_CLASS} mt-1`}
+                    value=""
+                    onChange={(e) => insertMerge(e.target.value)}
+                    aria-label="Merge field to insert at the cursor"
+                  >
+                    <option value="">Choose…</option>
+                    {mergeFields.map((m) => (
+                      <option key={m.key} value={m.key}>
+                        {m.label} — {`{{${m.key}}}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="basis-full text-xs text-secondary-500">
+                  Inserts at the cursor. <code>{'{{unsubscribe_url}}'}</code> is supported; if your email has no
+                  unsubscribe link, one is added automatically.
+                </p>
+              </div>
+            )}
+
+            {isEmail && (
+              <>
+                <div>
+                  <div className="flex items-baseline justify-between">
+                    <label htmlFor="c-subject" className="text-sm font-medium">
+                      Subject{' '}
+                      <span className="font-normal text-secondary-500">(the line people see in their inbox)</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs font-medium text-primary-700 underline underline-offset-2 dark:text-primary-300"
+                      onClick={() => insertInto('subject', '{{contact.first_name}}')}
+                    >
+                      + First name
+                    </button>
+                  </div>
+                  <input
+                    id="c-subject"
+                    ref={subjectRef}
+                    className={`${INPUT_CLASS} mt-1 w-full`}
+                    value={form.subject}
+                    onFocus={() => setTarget('subject')}
+                    onChange={(e) => set('subject', e.target.value)}
+                    maxLength={998}
+                  />
+                  {form.subject.length > 60 && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      Subjects over ~60 characters are often cut off on mobile.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </fieldset>
 
           {isEmail && (
             <>
-              <div>
-                <div className="flex items-baseline justify-between">
-                  <label htmlFor="c-subject" className="text-sm font-medium">
-                    Subject <span className="font-normal text-secondary-500">(the line people see in their inbox)</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="shrink-0 text-xs font-medium text-primary-700 underline underline-offset-2 dark:text-primary-300"
-                    onClick={() => insertInto('subject', '{{contact.first_name}}')}
-                  >
-                    + First name
-                  </button>
-                </div>
-                <input
-                  id="c-subject"
-                  ref={subjectRef}
-                  className={`${INPUT_CLASS} mt-1 w-full`}
-                  value={form.subject}
-                  onFocus={() => setTarget('subject')}
-                  onChange={(e) => set('subject', e.target.value)}
-                  maxLength={998}
-                />
-                {form.subject.length > 60 && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                    Subjects over ~60 characters are often cut off on mobile.
-                  </p>
-                )}
-              </div>
-
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Your email</span>
@@ -367,7 +390,7 @@ export default function ContentTab({
                         type="button"
                         aria-pressed={easy === value}
                         className={`rounded-md px-2.5 py-1 ${easy === value ? 'bg-primary-600 text-white' : 'text-secondary-600 hover:bg-secondary-100'}`}
-                        onClick={() => switchEditor(value)}
+                        onClick={() => void switchEditor(value)}
                       >
                         {label}
                       </button>
@@ -395,7 +418,7 @@ export default function ContentTab({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={uploading}
+                        disabled={uploading || !editable}
                         onClick={() => imageRef.current?.click()}
                       >
                         {uploading ? (
@@ -421,173 +444,183 @@ export default function ContentTab({
                       value={form.body_html}
                       onFocus={() => setTarget('body_html')}
                       onChange={(e) => set('body_html', e.target.value)}
+                      readOnly={!editable}
                       spellCheck={false}
                     />
                   </>
                 )}
               </div>
-              <details className="group rounded-lg border border-secondary-200 p-3">
-                <summary className="cursor-pointer select-none text-sm font-medium">
-                  More options{' '}
-                  <span className="font-normal text-secondary-500">
-                    (optional — inbox preview line, sender, plain-text version)
-                  </span>
-                </summary>
-                <div className="mt-3 space-y-4">
-                  <div>
-                    <div className="flex items-baseline justify-between">
-                      <label htmlFor="c-preview" className="text-sm font-medium">
-                        Preview text <span className="font-normal text-secondary-500">(inbox preheader)</span>
-                      </label>
-                      <span className="text-xs tabular-nums text-secondary-500">{form.preview_text.length} chars</span>
-                    </div>
-                    <input
-                      id="c-preview"
-                      className={`${INPUT_CLASS} mt-1 w-full`}
-                      value={form.preview_text}
-                      onChange={(e) => set('preview_text', e.target.value)}
-                      maxLength={255}
-                      aria-describedby="c-preview-hint"
-                    />
-                    <p
-                      id="c-preview-hint"
-                      className={`mt-1 text-xs ${
-                        preheader.tone === 'ok'
-                          ? 'text-green-700 dark:text-green-400'
-                          : 'text-amber-700 dark:text-amber-300'
-                      }`}
-                    >
-                      {preheader.text}
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <label className="block text-sm">
-                      <span className="font-medium">From name</span>
-                      <input
-                        className={`${INPUT_CLASS} mt-1 w-full`}
-                        value={form.from_name}
-                        onChange={(e) => set('from_name', e.target.value)}
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="block text-sm">
-                      <span className="font-medium">From email</span>
-                      <input
-                        type="email"
-                        className={`${INPUT_CLASS} mt-1 w-full`}
-                        value={form.from_email}
-                        onChange={(e) => set('from_email', e.target.value)}
-                        placeholder="Default sender"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="block text-sm">
-                      <span className="font-medium">Reply-to</span>
-                      <input
-                        type="email"
-                        className={`${INPUT_CLASS} mt-1 w-full`}
-                        value={form.reply_to}
-                        onChange={(e) => set('reply_to', e.target.value)}
-                        autoComplete="off"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 bg-secondary-50 p-3">
-                    <Braces className="mb-2 h-4 w-4 text-secondary-500" aria-hidden="true" />
-                    <label className="text-xs">
-                      <span className="block text-secondary-500">Insert merge field into</span>
-                      <select
-                        className={`${INPUT_CLASS} mt-1`}
-                        value={target}
-                        onChange={(e) => setTarget(e.target.value as InsertTarget)}
-                      >
-                        <option value="subject">Subject</option>
-                        <option value="body_html">HTML body</option>
-                        <option value="body_text">Plain-text body</option>
-                      </select>
-                    </label>
-                    <label className="text-xs">
-                      <span className="block text-secondary-500">Field</span>
-                      <select
-                        className={`${INPUT_CLASS} mt-1`}
-                        value=""
-                        onChange={(e) => insertMerge(e.target.value)}
-                        aria-label="Merge field to insert at the cursor"
-                      >
-                        <option value="">Choose…</option>
-                        {mergeFields.map((m) => (
-                          <option key={m.key} value={m.key}>
-                            {m.label} — {`{{${m.key}}}`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <p className="basis-full text-xs text-secondary-500">
-                      Inserts at the cursor. <code>{'{{unsubscribe_url}}'}</code> is supported; if your email has no
-                      unsubscribe link, one is added automatically.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label htmlFor="c-text" className="text-sm font-medium">
-                      {isEmail ? 'Plain-text body' : 'Message'}
-                    </label>
-                    <textarea
-                      id="c-text"
-                      ref={textRef}
-                      className={`${INPUT_CLASS} mt-1 h-32 w-full font-mono text-xs`}
-                      value={form.body_text}
-                      onFocus={() => setTarget('body_text')}
-                      onChange={(e) => set('body_text', e.target.value)}
-                    />
-                    {isEmail && (
-                      <p className="mt-1 text-xs text-secondary-500">
-                        Shown by clients that block HTML; also improves deliverability.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </details>
             </>
           )}
 
-          {!isEmail && (
-            <div>
-              <label htmlFor="c-text" className="text-sm font-medium">
-                {isEmail ? 'Plain-text body' : 'Message'}
-              </label>
-              <textarea
-                id="c-text"
-                ref={textRef}
-                className={`${INPUT_CLASS} mt-1 h-32 w-full font-mono text-xs`}
-                value={form.body_text}
-                onFocus={() => setTarget('body_text')}
-                onChange={(e) => set('body_text', e.target.value)}
-              />
-              {isEmail && (
-                <p className="mt-1 text-xs text-secondary-500">
-                  Shown by clients that block HTML; also improves deliverability.
-                </p>
-              )}
-            </div>
-          )}
+          <fieldset disabled={!editable} className="min-w-0 space-y-4">
+            {isEmail && (
+              <>
+                <details className="group rounded-lg border border-secondary-200 p-3">
+                  <summary className="cursor-pointer select-none text-sm font-medium">
+                    More options{' '}
+                    <span className="font-normal text-secondary-500">
+                      (optional — inbox preview line, sender, plain-text version)
+                    </span>
+                  </summary>
+                  <div className="mt-3 space-y-4">
+                    <div>
+                      <div className="flex items-baseline justify-between">
+                        <label htmlFor="c-preview" className="text-sm font-medium">
+                          Preview text <span className="font-normal text-secondary-500">(inbox preheader)</span>
+                        </label>
+                        <span className="text-xs tabular-nums text-secondary-500">
+                          {form.preview_text.length} chars
+                        </span>
+                      </div>
+                      <input
+                        id="c-preview"
+                        className={`${INPUT_CLASS} mt-1 w-full`}
+                        value={form.preview_text}
+                        onChange={(e) => set('preview_text', e.target.value)}
+                        maxLength={255}
+                        aria-describedby="c-preview-hint"
+                      />
+                      <p
+                        id="c-preview-hint"
+                        className={`mt-1 text-xs ${
+                          preheader.tone === 'ok'
+                            ? 'text-green-700 dark:text-green-400'
+                            : 'text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {preheader.text}
+                      </p>
+                    </div>
 
-          <div className="flex items-center gap-3">
-            <Button
-              leftIcon={<Save className="h-4 w-4" />}
-              onClick={() => void save()}
-              isLoading={saving}
-              disabled={!editable || !dirty}
-            >
-              Save content
-            </Button>
-            <span className="text-xs text-secondary-500" aria-live="polite">
-              {dirty ? 'Unsaved changes' : 'All changes saved'}
-            </span>
-          </div>
-        </fieldset>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <label className="block text-sm">
+                        <span className="font-medium">From name</span>
+                        <input
+                          className={`${INPUT_CLASS} mt-1 w-full`}
+                          value={form.from_name}
+                          onChange={(e) => set('from_name', e.target.value)}
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="block text-sm">
+                        <span className="font-medium">From email</span>
+                        <input
+                          type="email"
+                          className={`${INPUT_CLASS} mt-1 w-full`}
+                          value={form.from_email}
+                          onChange={(e) => set('from_email', e.target.value)}
+                          placeholder="Default sender"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="block text-sm">
+                        <span className="font-medium">Reply-to</span>
+                        <input
+                          type="email"
+                          className={`${INPUT_CLASS} mt-1 w-full`}
+                          value={form.reply_to}
+                          onChange={(e) => set('reply_to', e.target.value)}
+                          autoComplete="off"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 bg-secondary-50 p-3">
+                      <Braces className="mb-2 h-4 w-4 text-secondary-500" aria-hidden="true" />
+                      <label className="text-xs">
+                        <span className="block text-secondary-500">Insert merge field into</span>
+                        <select
+                          className={`${INPUT_CLASS} mt-1`}
+                          value={target}
+                          onChange={(e) => setTarget(e.target.value as InsertTarget)}
+                        >
+                          <option value="subject">Subject</option>
+                          <option value="body_html">HTML body</option>
+                          <option value="body_text">Plain-text body</option>
+                        </select>
+                      </label>
+                      <label className="text-xs">
+                        <span className="block text-secondary-500">Field</span>
+                        <select
+                          className={`${INPUT_CLASS} mt-1`}
+                          value=""
+                          onChange={(e) => insertMerge(e.target.value)}
+                          aria-label="Merge field to insert at the cursor"
+                        >
+                          <option value="">Choose…</option>
+                          {mergeFields.map((m) => (
+                            <option key={m.key} value={m.key}>
+                              {m.label} — {`{{${m.key}}}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="basis-full text-xs text-secondary-500">
+                        Inserts at the cursor. <code>{'{{unsubscribe_url}}'}</code> is supported; if your email has no
+                        unsubscribe link, one is added automatically.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label htmlFor="c-text" className="text-sm font-medium">
+                        {isEmail ? 'Plain-text body' : 'Message'}
+                      </label>
+                      <textarea
+                        id="c-text"
+                        ref={textRef}
+                        className={`${INPUT_CLASS} mt-1 h-32 w-full font-mono text-xs`}
+                        value={form.body_text}
+                        onFocus={() => setTarget('body_text')}
+                        onChange={(e) => set('body_text', e.target.value)}
+                      />
+                      {isEmail && (
+                        <p className="mt-1 text-xs text-secondary-500">
+                          Shown by clients that block HTML; also improves deliverability.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              </>
+            )}
+
+            {!isEmail && (
+              <div>
+                <label htmlFor="c-text" className="text-sm font-medium">
+                  {isEmail ? 'Plain-text body' : 'Message'}
+                </label>
+                <textarea
+                  id="c-text"
+                  ref={textRef}
+                  className={`${INPUT_CLASS} mt-1 h-32 w-full font-mono text-xs`}
+                  value={form.body_text}
+                  onFocus={() => setTarget('body_text')}
+                  onChange={(e) => set('body_text', e.target.value)}
+                />
+                {isEmail && (
+                  <p className="mt-1 text-xs text-secondary-500">
+                    Shown by clients that block HTML; also improves deliverability.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <Button
+                leftIcon={<Save className="h-4 w-4" />}
+                onClick={() => void save()}
+                isLoading={saving}
+                disabled={!editable || !dirty}
+              >
+                Save content
+              </Button>
+              <span className="text-xs text-secondary-500" aria-live="polite">
+                {dirty ? 'Unsaved changes' : 'All changes saved'}
+              </span>
+            </div>
+          </fieldset>
+        </div>
 
         <section aria-labelledby="c-preview-title" className="min-w-0 space-y-3">
           <div className="flex items-center justify-between">

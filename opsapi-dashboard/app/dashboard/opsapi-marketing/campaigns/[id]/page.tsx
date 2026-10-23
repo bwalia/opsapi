@@ -53,6 +53,7 @@ import AudienceTab from '../_components/AudienceTab';
 import TrackingTab from '../_components/TrackingTab';
 import AbTestTab from '../_components/AbTestTab';
 import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
+import { TestModeBanner, useTestMode } from '@/components/opsapi-marketing/TestMode';
 
 type TabKey = 'performance' | 'content' | 'audience' | 'tracking' | 'ab';
 
@@ -102,6 +103,7 @@ function CampaignWorkspace({ id }: { id: string }) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [scheduleAt, setScheduleAt] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
+  const testMode = useTestMode();
   const moreRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!moreOpen) return;
@@ -597,6 +599,7 @@ function CampaignWorkspace({ id }: { id: string }) {
         </Notice>
       )}
       {s === 'failed' && <Notice tone="error">This campaign failed. Duplicate it to fix and resend.</Notice>}
+      <TestModeBanner on={testMode} />
       {flash && (
         <div className="flex items-start gap-2">
           <div className="flex-1">
@@ -851,9 +854,10 @@ function CampaignWorkspace({ id }: { id: string }) {
         onConfirm={() => void doSendNow()}
         title="Send now?"
         message={
-          validation?.preview
+          (testMode ? 'Test mode is on, so nobody will really receive it — switch test mode off to send for real. ' : '') +
+          (validation?.preview
             ? `This sends to about ${fmtInt(validation.preview.eligible)} eligible contacts immediately. Consent and suppressions are re-checked per contact.`
-            : 'This validates the campaign (if needed) and starts sending to every eligible contact immediately.'
+            : 'This validates the campaign (if needed) and starts sending to every eligible contact immediately.')
         }
         confirmText="Send now"
         variant="warning"
