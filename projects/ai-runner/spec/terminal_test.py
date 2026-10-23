@@ -185,9 +185,9 @@ offer = pv.get("terminals") or []
 check("preview offers the terminal with its agents and no folder yet",
       len(offer) == 1 and offer[0]["uuid"] == TERM["uuid"] and [a["id"] for a in offer[0]["agents"]]
       == ["claude", "shell"] and offer[0]["default_path"] is None and offer[0]["recent_paths"] == [], offer)
-check("the terminal prompt names the task and the terminal's folder",
+check("the terminal prompt names the task and leaves the folder to fill in",
       "Fix the header " + TAG in (pv.get("terminal_prompt") or "")
-      and "this terminal's current folder" in pv["terminal_prompt"], pv.get("terminal_prompt"))
+      and "Work in the folder {{repo_path}} on the branch" in pv["terminal_prompt"], pv.get("terminal_prompt"))
 
 # --- Launching ------------------------------------------------------------------------------------------------
 L = P + f"/tasks/{T1['uuid']}/terminal-sessions"
@@ -214,6 +214,8 @@ check("claims: v, id, task, number, title, folder, agent", claims.get("v") == 1 
       and claims.get("agent") == "claude", claims)
 check("15-minute link", claims.get("exp", 0) - claims.get("iat", 0) == 900 and claims.get("exp", 0) > now, claims)
 check("prompt filled from the template", "Fix the header " + TAG in claims.get("prompt", ""), claims.get("prompt"))
+check("…with the folder chosen", "Work in the folder /Users/agents/projects/site on the branch" in claims.get("prompt", "")
+      and "{{repo_path}}" not in claims.get("prompt", ""), claims.get("prompt"))
 check("by, workspace and a https return link", claims.get("by") == "AR Test"
       and claims.get("ws") == "AR Terminal " + TAG
       and claims.get("return", "").startswith("https://dash.example.invalid/dashboard/projects/"), claims)
