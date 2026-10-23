@@ -4,8 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { Palette, Save, Eye, Sparkles, Send } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button } from '@/components/ui';
-import { EmailStudioEditor } from '@/components/opsapi-marketing/EmailStudioEditor';
+import { Button, confirmDialog } from '@/components/ui';
+import { EmailStudioEditor, madeWithCode } from '@/components/opsapi-marketing/EmailStudioEditor';
+import { EditorModeSwitch, acceptPastedHtml } from '@/components/opsapi-marketing/EditorModeSwitch';
 import { marketingService } from '@/services/opsapi-marketing.service';
 import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 
@@ -57,6 +58,8 @@ export default function MarketingStudioPage() {
   const [subject, setSubject] = useState('');
   const [previewText, setPreviewText] = useState('');
   const [html, setHtml] = useState('<p>Hi {{contact.first_name}},</p>');
+  // Easy editor, or the HTML code itself (designs made with code: tables, styles…).
+  const [easy, setEasy] = useState(true);
   const [text, setText] = useState('Hi {{contact.first_name}},');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -91,6 +94,7 @@ export default function MarketingStudioPage() {
     setSubject(t.subject || '');
     setPreviewText(t.preview_text || '');
     setHtml(t.body_html || '<p></p>');
+    setEasy(!madeWithCode(t.body_html || ''));
     setText(t.body_text || '');
     setPreview(null);
     setWarnings([]);
@@ -203,12 +207,34 @@ export default function MarketingStudioPage() {
     }
   };
 
+  const switchEditor = async (toEasy: boolean) => {
+    if (
+      toEasy &&
+      madeWithCode(html) &&
+      !(await confirmDialog({
+        title: 'Open in the easy editor?',
+        message: 'This email was designed with code. The easy editor may change its layout.',
+        confirmText: 'Open easy editor',
+      }))
+    )
+      return;
+    setEasy(toEasy);
+  };
+
+  // A whole HTML email pasted into the easy editor: keep it as HTML.
+  const pasteHtml = async (pasted: string) => {
+    if (!(await acceptPastedHtml(html))) return;
+    setHtml(pasted);
+    setEasy(false);
+  };
+
   const newDraft = () => {
     setSelected(null);
     setName('Untitled');
     setSubject('');
     setPreviewText('');
     setHtml('<p>Hi {{contact.first_name}},</p><p></p>');
+    setEasy(true);
     setText('Hi {{contact.first_name}},');
     setPreview(null);
     setWarnings([]);
@@ -321,7 +347,25 @@ export default function MarketingStudioPage() {
                   onChange={(e) => setPreviewText(e.target.value)}
                 />
               </label>
-              <EmailStudioEditor value={html} onChange={setHtml} />
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Email</span>
+                  <EditorModeSwitch easy={easy} onChange={(v) => void switchEditor(v)} />
+                </div>
+                {easy ? (
+                  <div className="mt-1">
+                    <EmailStudioEditor value={html} onChange={setHtml} onPasteHtml={(h) => void pasteHtml(h)} />
+                  </div>
+                ) : (
+                  <textarea
+                    aria-label="Email HTML"
+                    className="mt-1 h-80 w-full rounded border border-secondary-200 bg-surface px-3 py-2 font-mono text-xs"
+                    value={html}
+                    onChange={(e) => setHtml(e.target.value)}
+                    spellCheck={false}
+                  />
+                )}
+              </div>
               <label className="block text-sm">
                 Plain-text alternative
                 <textarea
@@ -372,9 +416,12 @@ export default function MarketingStudioPage() {
                 )}
               </p>
               {preview.html ? (
-                <div
-                  className="prose prose-sm max-w-none rounded bg-white p-3 text-black shadow-sm"
-                  dangerouslySetInnerHTML={{ __html: preview.html }}
+                // Sandboxed: an email is shown as it would arrive, and nothing in it can run in the dashboard.
+                <iframe
+                  title="Email preview"
+                  sandbox=""
+                  className="h-[32rem] w-full rounded bg-white shadow-sm"
+                  srcDoc={preview.html}
                 />
               ) : (
                 <pre className="whitespace-pre-wrap rounded bg-white p-3 text-sm text-black shadow-sm">

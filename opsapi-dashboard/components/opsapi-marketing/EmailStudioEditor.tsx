@@ -68,7 +68,17 @@ type Props = {
   mergeFields?: { key: string; label: string }[];
   /** Show the content without editing (e.g. a campaign that was already sent). */
   readOnly?: boolean;
+  /** Someone pasted a whole HTML email (tables, styles…) as code: the parent shows it in its HTML code view,
+   * where nothing is lost. Without this, the paste is inserted as formatted content. */
+  onPasteHtml?: (html: string) => void;
 };
+
+/** Designed with code: the easy editor would lose parts of it. */
+export const madeWithCode = (html: string) => /<table|<style|<!doctype|<html/i.test(html);
+
+/** Pasted text that is HTML source (starts with a tag and has a closing or void tag), not prose. */
+export const looksLikeHtml = (text: string) =>
+  /^\s*<(!doctype|[a-z][a-z0-9]*)[\s>/]/i.test(text) && /<\/[a-z][a-z0-9]*\s*>|<(br|img|hr|meta)\b/i.test(text);
 
 /** Keep inline styles (button colours, spacing, image sizes): emails rely on them. */
 const KeepStyles = Extension.create({
@@ -326,7 +336,7 @@ function frameStyle(open: string): React.CSSProperties {
 }
 
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
-export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false }: Props) {
+export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false, onPasteHtml }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [buttonDialog, setButtonDialog] = useState<(ButtonSpec & { editing: boolean }) | null>(null);
@@ -335,6 +345,11 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
   useEffect(() => {
     openRef.current = frame.open;
   }, [frame.open]);
+  // The editor keeps the options it was created with: read the latest callback through a ref.
+  const pasteHtmlRef = useRef(onPasteHtml);
+  useEffect(() => {
+    pasteHtmlRef.current = onPasteHtml;
+  }, [onPasteHtml]);
   const editor = useEditor({
     immediatelyRender: false,
     editable: !readOnly,
@@ -362,9 +377,25 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
       attributes: {
         class: 'prose prose-sm max-w-none min-h-[280px] px-4 py-3 focus:outline-none text-foreground',
       },
+      // HTML source pasted as text would otherwise appear as code in the email: keep it as HTML.
+      handlePaste: (_view, event) => {
+        const text = event.clipboardData?.getData('text/plain') ?? '';
+        if (!looksLikeHtml(text)) return false;
+        const whole = pasteHtmlRef.current;
+        if (whole && madeWithCode(text)) {
+          whole(text.trim());
+          return true;
+        }
+        // A snippet (e.g. <b>Sale</b> or a <p> with a link): insert it formatted, not as code.
+        return editorRef.current?.chain().focus().insertContent(text.trim()).run() ?? false;
+      },
     },
   });
   const sel = useSelectionInfo(editor);
+  const editorRef = useRef<Editor | null>(null);
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
 
   useEffect(() => {
     if (!editor) return;
