@@ -482,7 +482,7 @@ export default function TaskDetailPage() {
             </Field>
           </div>
 
-          <TaskWork taskUuid={task.uuid} />
+          <TaskWork taskUuid={task.uuid} taskLabel={`#${task.task_number} ${task.title}`} />
           <TaskRuns taskUuid={task.uuid} />
 
           {/* Meta */}

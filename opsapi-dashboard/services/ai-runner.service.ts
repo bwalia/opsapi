@@ -336,6 +336,9 @@ export interface Preview {
   allowed_executors?: string[];
   executor_locked?: boolean;
   can_change_executor?: boolean;
+  /** Web terminals the person can work in themselves, and the prompt their agent starts with. */
+  terminals?: TerminalOffer[];
+  terminal_prompt?: string | null;
 }
 export interface StartInput {
   runner_uuid: string;
@@ -382,25 +385,64 @@ export interface TaskPr {
   review_note?: string | null;
   created_at: string;
 }
+/** An agent people may pick for a web terminal; the terminal's own config says what it runs. */
+export interface TerminalAgent {
+  id: string;
+  label: string;
+}
+/** A web terminal connected to this workspace (docs/AI_RUNNER_WEB_TERMINAL.md). The secret is never listed. */
+export interface WebTerminal {
+  uuid: string;
+  name: string;
+  url: string;
+  agents: TerminalAgent[];
+  is_active: boolean;
+  secret_hint?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+/** What Start with AI offers for a terminal: its agents and the folders used before for this project. */
+export interface TerminalOffer {
+  uuid: string;
+  name: string;
+  url: string;
+  agents: TerminalAgent[];
+  default_path?: string | null;
+  recent_paths: string[];
+}
 export interface TerminalSession {
   uuid: string;
   task_uuid: string;
   project_uuid: string;
   opened_by?: string | null;
+  opened_by_name?: string | null;
+  terminal_uuid?: string | null;
+  terminal_name?: string | null;
   terminal_url: string;
+  path?: string | null;
+  agent?: string | null;
+  agent_label?: string | null;
+  terminal_user?: string | null;
   session_id?: string | null;
   repo_url?: string | null;
-  status: 'launched' | 'active' | 'ended' | string;
+  /** launched (link not used yet) → active → ended; expired = the link was never used in time. */
+  status: 'launched' | 'active' | 'ended' | 'expired' | string;
   started_at?: string | null;
   ended_at?: string | null;
+  exit_code?: number | null;
   created_at: string;
+}
+export interface TerminalLaunch {
+  terminal_uuid: string;
+  path: string;
+  agent: string;
+  prompt?: string;
 }
 export interface TaskWorkBundle {
   work: TaskWork | null;
   history: TaskWork[];
   pull_requests: TaskPr[];
   terminal_sessions?: TerminalSession[];
-  terminal_base_url?: string | null;
   project?: ProjectSettings | null;
   manager_links?: {
     task_url?: string | null;
@@ -768,7 +810,6 @@ export const aiRunner = {
       history: list<TaskWork>(d.history),
       pull_requests: list<TaskPr>(d.pull_requests),
       terminal_sessions: list<TerminalSession>(d.terminal_sessions),
-      terminal_base_url: (d.terminal_base_url as string) || null,
       project: d.project ?? null,
       manager_links: d.manager_links ?? null,
     };
@@ -776,10 +817,21 @@ export const aiRunner = {
   taskPrs: async (taskUuid: string) => list<TaskPr>((await get<TaskPr[]>(`/tasks/${id(taskUuid)}/prs`)).data),
   reviewPr: (taskUuid: string, prUuid: string, decision: 'approved' | 'changes_requested', note?: string) =>
     send<TaskPr>('post', `/tasks/${id(taskUuid)}/prs/${id(prUuid)}/review`, { decision, note }),
-  openTerminalSession: (taskUuid: string) =>
-    send<TerminalSession>('post', `/tasks/${id(taskUuid)}/terminal-sessions`, {}),
+  /** Records the launch and returns the link that opens the terminal in the folder (valid 15 minutes). */
+  launchTerminal: (taskUuid: string, input: TerminalLaunch) =>
+    send<{ session: TerminalSession; launch_url: string }>('post', `/tasks/${id(taskUuid)}/terminal-sessions`, input),
   listTerminalSessions: async (taskUuid: string) =>
     list<TerminalSession>((await get<TerminalSession[]>(`/tasks/${id(taskUuid)}/terminal-sessions`)).data),
+
+  // Web terminals (ai_runners.manage); the secret comes back only when added or rotated.
+  listTerminals: async () => list<WebTerminal>((await get<WebTerminal[]>('/terminals')).data),
+  addTerminal: (body: { name: string; url: string; agents?: TerminalAgent[] }) =>
+    send<{ terminal: WebTerminal; secret: string }>('post', '/terminals', body),
+  updateTerminal: (uuid: string, body: Partial<Pick<WebTerminal, 'name' | 'url' | 'agents' | 'is_active'>>) =>
+    send<WebTerminal>('put', `/terminals/${id(uuid)}`, body),
+  rotateTerminalSecret: (uuid: string) =>
+    send<{ terminal: WebTerminal; secret: string }>('post', `/terminals/${id(uuid)}/rotate-secret`),
+  deleteTerminal: (uuid: string) => send<unknown>('delete', `/terminals/${id(uuid)}`),
 
   // Runs
   listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>

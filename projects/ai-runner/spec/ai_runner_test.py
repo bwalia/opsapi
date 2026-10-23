@@ -2853,42 +2853,7 @@ n_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
     AND c.content LIKE '%Manager approved PR%'""") or 0)
 check("manager approve posts task comment", n_comments >= 1, n_comments)
 
-# --- Web terminal + webhook + PR poll bookkeeping --------------------------------------------------------------
-print("--- Web terminal ---")
-term = expect("open web terminal session", call(
-    "POST", P + f"/tasks/{TC['uuid']}/terminal-sessions", "dev", A, {}), 201)
-turl = term.get("terminal_url") or ""
-check("terminal deep link has opsapi_task and repo",
-      "opsapi_task=" in turl and ("acme" in turl and "app" in turl)
-      and turl.startswith("https://dev.workstation.co.uk"),
-      term)
-work_t = expect("GET work lists terminal sessions", call("GET", P + f"/tasks/{TC['uuid']}/work", "mgr", A), 200)
-sessions = work_t.get("terminal_sessions") or []
-check("terminal_sessions on work bundle",
-      isinstance(sessions, list) and len(sessions) >= 1 and sessions[0].get("status") == "launched", work_t)
-n_term_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
-    JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{TC["uuid"]}'
-    AND c.content LIKE '%Web terminal opened%'""") or 0)
-check("terminal launch posts comment", n_term_comments >= 1, n_term_comments)
-
-# Simulate sshweb webhook (HMAC over the same JSON bytes call() sends).
-WH_SECRET = "ar-e2e-terminal-webhook"
-sid = "abcdef0123456789abcdef0123456789"
-payload = {"event": "session_start", "session_id": sid, "user": "dev",
-           "opsapi_task": TC["uuid"], "ts": int(time.time())}
-sig = "sha256=" + hmac.new(WH_SECRET.encode(), json.dumps(payload).encode(), hashlib.sha256).hexdigest()
-bad = call("POST", P + "/public/terminal/webhook", body=payload,
-           headers={"X-Opsapi-Signature": "sha256=" + ("0" * 64)})
-check("terminal webhook rejects bad signature", bad[0] == 401, bad[:2])
-wh = expect("terminal webhook session_start", call(
-    "POST", P + "/public/terminal/webhook", body=payload, headers={"X-Opsapi-Signature": sig}), 200)
-check("webhook marks session active", wh.get("status") == "active" and wh.get("session_id") == sid, wh)
-payload_end = dict(payload, event="session_end")
-raw_end = json.dumps(payload_end).encode()
-sig_end = "sha256=" + hmac.new(WH_SECRET.encode(), raw_end, hashlib.sha256).hexdigest()
-wh2 = expect("terminal webhook session_end", call(
-    "POST", P + "/public/terminal/webhook", body=payload_end, headers={"X-Opsapi-Signature": sig_end}), 200)
-check("webhook marks session ended", wh2.get("status") == "ended", wh2)
+# --- PR poll bookkeeping (web terminals: terminal_test.py) ------------------------------------------------
 
 # PR poll: without Vault token, state stays open; github_state_checked_at may still be null.
 sql(f"""UPDATE ar_task_prs SET state = 'open', github_state_checked_at = NULL

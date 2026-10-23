@@ -11,17 +11,21 @@
  * since) answers 403 "You can't use this runner", shown as such. Only ai_runs.manage may edit the prompt.
  * §28: the built-in runner runs inside OpsAPI (no machine): it is listed last, so it is picked when no machine is
  * online; its profiles are models and its "folders" are the connected GitHub repositories, or none.
+ * Web terminal (docs/AI_RUNNER_WEB_TERMINAL.md): when the workspace has one, the dialog first offers "Work in the web
+ * terminal" — a folder on that machine and an agent; OpsAPI signs a short-lived link and the terminal opens the folder
+ * in a new tab and starts the agent with the task. The person drives the agent there, so anyone who may start AI work
+ * may edit that prompt.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, CopyCheck, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Bot, CopyCheck, ExternalLink, ShieldCheck, Terminal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
-  aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun,
+  aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun, type TerminalOffer,
 } from '@/services/ai-runner.service';
 import { BASE, ago, compact, outputModeLabel, runStatusLabel, useAiRunnerOn, when } from './ui';
 
@@ -111,7 +115,13 @@ function startConflictText(conflict: unknown): string | null {
   }
 }
 
-export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRef & { open: boolean; onClose: () => void }) {
+type Mode = 'terminal' | 'run';
+/** The first agent that runs something (not "just a terminal"), else the first one. */
+const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id !== 'shell')?.id || t?.agents[0]?.id || '';
+
+export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialMode }: TaskRef & {
+  open: boolean; onClose: () => void; initialMode?: Mode;
+}) {
   const router = useRouter();
   const { hasPermission } = usePermissions();
   const isManager = hasPermission('ai_runs', 'manage');
@@ -133,7 +143,15 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
   const [executorKind, setExecutorKind] = useState('machine');
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedMd, setSelectedMd] = useState<string[]>([]);
+  const [mode, setMode] = useState<Mode>(initialMode || 'run');
+  const [terminals, setTerminals] = useState<TerminalOffer[]>([]);
+  const [termUuid, setTermUuid] = useState('');
+  const [folder, setFolder] = useState('');
+  const [agent, setAgent] = useState('');
+  const [termPrompt, setTermPrompt] = useState('');
+  const [launchUrl, setLaunchUrl] = useState<string | null>(null);
   const live = useRef(0);
+  const terminal = terminals.find((t) => t.uuid === termUuid);
 
   const runner = runners.find((r) => r.uuid === runnerUuid);
   const profiles = runner?.capabilities?.profiles || [];
@@ -186,6 +204,14 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
         const first = await aiRunner.preview(taskUuid);
         const list = [...(first.runners ?? (await aiRunner.listRunners()))].sort(byOnline);
         if (id !== live.current) return;
+        const offers = first.terminals || [];
+        setTerminals(offers);
+        setTermUuid(offers[0]?.uuid || '');
+        setFolder(offers[0]?.default_path || '');
+        setAgent(firstAgent(offers[0]));
+        setTermPrompt(first.terminal_prompt || '');
+        setLaunchUrl(null);
+        setMode(initialMode || (offers.length ? 'terminal' : 'run'));
         const r = list.find(usable);
         const p = firstProfile(r);
         setRunners(list);
@@ -261,6 +287,39 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
     }
   }
 
+  const folderOk = folder.trim().startsWith('/');
+  const launchBlocked = !terminal || !folderOk || !agent;
+
+  async function doLaunch() {
+    if (launchBlocked || !terminal) return;
+    // Open the tab inside the click, or a popup blocker eats it; point it at the terminal once the link exists.
+    const win = window.open('', '_blank');
+    if (win) {
+      win.opener = null;
+      win.document.title = 'Opening the terminal…';
+    }
+    setBusy('start');
+    setError(null);
+    setLaunchUrl(null);
+    try {
+      const res = await aiRunner.launchTerminal(taskUuid, {
+        terminal_uuid: terminal.uuid, path: folder.trim(), agent, prompt: termPrompt.trim() || undefined,
+      });
+      if (win && !win.closed) {
+        win.location.href = res.launch_url;
+        toast.success(`Opening ${terminal.name} in a new tab`);
+        onClose();
+      } else {
+        setLaunchUrl(res.launch_url);
+      }
+    } catch (e) {
+      win?.close();
+      setError(aiError(e).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const reason = (r: Runner) =>
     r.status === 'paused' ? 'paused' : r.status === 'online' ? 'online' : `${r.status}, last seen ${ago(r.last_heartbeat_at)}`;
 
@@ -271,7 +330,15 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
       size="2xl"
       title="Start with AI"
       description={taskLabel}
-      footer={
+      footer={mode === 'terminal' ? (
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={doLaunch} isLoading={busy === 'start'} disabled={loading || launchBlocked || busy !== null}
+            leftIcon={<Terminal className="h-4 w-4" aria-hidden />}>
+            Open terminal
+          </Button>
+        </>
+      ) : (
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="outline" onClick={doPreview} isLoading={busy === 'preview'} disabled={loading || !runnerUuid || busy !== null}>
@@ -281,12 +348,82 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
             Start
           </Button>
         </>
-      }
+      )}
     >
       {loading ? (
         <p className="py-8 text-center text-sm text-secondary-500" role="status">Loading runners and the prompt…</p>
       ) : (
         <div className="space-y-4">
+          {(terminals.length > 0 || initialMode === 'terminal') && (
+            <div role="radiogroup" aria-label="How to work on this task" className="grid gap-2 sm:grid-cols-2">
+              {([
+                ['terminal', 'Work in the web terminal', 'You drive an agent (Claude Code, Codex…) in a folder on the machine.'],
+                ['run', 'Let AI run it here', 'A runner or the built-in AI does the work and reports back.'],
+              ] as [Mode, string, string][]).map(([m, title, hint]) => (
+                <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
+                  className={`rounded-lg border p-3 text-left transition ${mode === m
+                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-secondary-200 hover:bg-secondary-50'}`}>
+                  <span className="flex items-center gap-1.5 text-sm font-semibold text-secondary-900">
+                    {m === 'terminal' ? <Terminal className="h-4 w-4" aria-hidden /> : <Bot className="h-4 w-4" aria-hidden />} {title}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-secondary-500">{hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {mode === 'terminal' ? (
+            terminals.length === 0 ? (
+              <p className="rounded-lg bg-info-500/10 p-3 text-sm text-info-700" role="status">
+                No web terminal is connected to this workspace yet. Someone who manages AI runners can add one under{' '}
+                <Link href={`${BASE}/machines`} className="underline" onClick={onClose}>AI Runs → Machines</Link>.
+              </p>
+            ) : (
+              <div className="space-y-4" data-testid="air-terminal">
+                {terminals.length > 1 && (
+                  <Select id="air-terminal-pick" label="Terminal" value={termUuid}
+                    onChange={(e) => {
+                      const t = terminals.find((x) => x.uuid === e.target.value);
+                      setTermUuid(e.target.value); setFolder(t?.default_path || ''); setAgent(firstAgent(t));
+                    }}>
+                    {terminals.map((t) => <option key={t.uuid} value={t.uuid}>{t.name}</option>)}
+                  </Select>
+                )}
+                <div>
+                  <Input id="air-terminal-folder" label={`Folder on ${terminal?.name || 'the machine'}`} value={folder}
+                    onChange={(e) => setFolder(e.target.value)} list="air-terminal-folders" placeholder="/Users/you/projects/my-repo"
+                    spellCheck={false} autoComplete="off" className="font-mono"
+                    error={folder.trim() !== '' && !folderOk ? 'Use the full path, starting with /.' : undefined}
+                    helperText="The terminal opens in this folder. It must be inside a folder the terminal allows." />
+                  <datalist id="air-terminal-folders">
+                    {(terminal?.recent_paths || []).map((p) => <option key={p} value={p} />)}
+                  </datalist>
+                </div>
+                <Select id="air-terminal-agent" label="Start" value={agent} onChange={(e) => setAgent(e.target.value)}>
+                  {(terminal?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                </Select>
+                {agent !== 'shell' && (
+                  <Textarea id="air-terminal-prompt" label="First message to the agent" rows={10} value={termPrompt}
+                    onChange={(e) => setTermPrompt(e.target.value)} className="font-mono text-xs" spellCheck={false}
+                    helperText="The task, ready for the agent. Change it if you like; you can keep talking to the agent in the terminal." />
+                )}
+                <p className="text-xs text-secondary-500">
+                  Opens {terminal?.url} in a new tab. If it asks, sign in with your SSH key; the terminal then opens the folder and
+                  starts the agent. The link works once, for 15 minutes.
+                </p>
+                {launchUrl && (
+                  <p className="rounded-lg bg-warning-500/10 p-3 text-sm text-warning-800" role="status">
+                    Your browser didn&apos;t open a new tab.{' '}
+                    <a href={launchUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline"
+                      onClick={() => setTimeout(onClose, 0)}>
+                      Open the terminal <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                    </a>
+                  </p>
+                )}
+              </div>
+            )
+          ) : (
+          <>
           {preview?.context && (
             <div className="rounded-lg border border-secondary-200 p-3 space-y-2" data-testid="air-context">
               <p className="text-sm font-medium text-secondary-800">Context before launch</p>
@@ -480,6 +617,9 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel }: TaskRe
                 </div>
               )}
             </>
+          )}
+
+          </>
           )}
 
           {error && (
