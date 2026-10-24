@@ -159,7 +159,7 @@ end
 
 
 --- One-step "add team member": provision a login + workspace membership + role
---- (+ an engineer profile) so a non-technical admin never touches the
+--- + an employee profile, so a non-technical admin never touches the
 --- user/member/role internals. Returns the temp password for the admin to hand
 --- over (it is NOT emailed). Requires the caller to hold users.create.
 -- @param data { first_name, last_name?, email, role_name, phone?, job_title?,
@@ -197,19 +197,16 @@ function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
         return nil, "Could not create the login: " .. tostring(user)
     end
 
-    -- Engineer profile is optional detail; failing it must not undo the login.
-    -- is_engineer is an explicit opt-in (a field-service concept), not inferred
-    -- from the role name.
-    local is_engineer = to_bool(data.is_engineer, false)
-    local employee
-    if is_engineer or nilify(data.job_title) or nilify(data.skills) or nilify(data.hourly_cost_rate) then
-        employee = EmployeeQueries.createEmployee(namespace_id, actor_uuid, {
-            user_uuid = user.uuid, is_engineer = is_engineer, is_active = true,
-            job_title = data.job_title, phone = data.phone, region = data.region,
-            skills = data.skills, fgas_certificate_no = data.fgas_certificate_no,
-            hourly_cost_rate = data.hourly_cost_rate,
-        })
-    end
+    -- Everyone added here gets an employee profile, so they show on the Employees
+    -- page straight away (with no job title it used to be skipped, and the page
+    -- said "No employees yet"). Failing it must not undo the login. is_engineer
+    -- is an explicit opt-in (a field-service concept), not inferred from the role.
+    local employee = EmployeeQueries.createEmployee(namespace_id, actor_uuid, {
+        user_uuid = user.uuid, is_engineer = to_bool(data.is_engineer, false), is_active = true,
+        job_title = data.job_title, phone = data.phone, region = data.region,
+        skills = data.skills, fgas_certificate_no = data.fgas_certificate_no,
+        hourly_cost_rate = data.hourly_cost_rate,
+    })
 
     local name = ((first or "") .. " " .. (last or "")):gsub("^%s+", ""):gsub("%s+$", "")
     return {

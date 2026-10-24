@@ -36,6 +36,11 @@ function MyTasksContent() {
   const { data, isLoading, error, refetch } = useDataFetch(fetcher);
   const meta = data?.meta;
   const tasks = data?.data;
+  // How many open tasks there are in all, so an empty "Today" doesn't look like "nothing to do"
+  // (tasks with no due date, or due later, only show under "All open").
+  const countFetcher = useCallback(() => kanbanService.getMyTasks({ date: today, page: 1, perPage: 1 }), [today]);
+  const { data: allOpen } = useDataFetch(countFetcher);
+  const openTotal = allOpen?.meta?.total ?? 0;
 
   // Already sorted by priority, then due date: group consecutive rows.
   const groups = useMemo(() => {
@@ -115,9 +120,21 @@ function MyTasksContent() {
             <Loader2 className="h-6 w-6 animate-spin" aria-label="Loading" />
           </div>
         ) : groups.length === 0 ? (
-          <p className="p-10 text-center text-sm text-secondary-500">
-            {priority ? `No ${formatPriority(priority).toLowerCase()}-priority tasks here.` : tab.empty}
-          </p>
+          <div className="flex flex-col items-center gap-3 p-10 text-center">
+            <p className="text-sm text-secondary-500">
+              {priority ? `No ${formatPriority(priority).toLowerCase()}-priority tasks here.` : tab.empty}
+            </p>
+            {tab.due && !priority && openTotal > 0 && (
+              <>
+                <p className="text-sm text-secondary-700">
+                  You have {openTotal} other open {openTotal === 1 ? 'task' : 'tasks'}.
+                </p>
+                <Button variant="outline" size="sm" onClick={() => choose(TABS[2])}>
+                  Show all open tasks
+                </Button>
+              </>
+            )}
+          </div>
         ) : (
           groups.map((g) => (
             <section key={g.priority} aria-label={`${formatPriority(g.priority)} priority`}>
