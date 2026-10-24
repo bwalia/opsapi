@@ -1,4 +1,4 @@
--- Signed public tokens for unsubscribe, preference centre, open pixel, click redirect.
+-- Signed public tokens for unsubscribe, preference centre, view in browser, open pixel, click redirect.
 -- Payload is base64url(json).sig where sig = HMAC-SHA256 hex of the payload with JWT_SECRET_KEY.
 local cjson = require("cjson.safe")
 local U = require("opsapi_marketing.util")
@@ -115,6 +115,19 @@ function T.preferences_url(ns, contact_uuid, base)
     if not tok then return nil, err end
     local root = (base and base ~= "" and base:gsub("/+$", "")) or ""
     return root .. "/api/v2/opsapi-marketing/public/preferences?token=" .. ngx.escape_uri(tok)
+end
+
+--- "View this email in your browser": the delivery as the recipient got it. A year, so an
+-- old email's link still opens; it shows no more than the email itself already did.
+function T.view_online_url(ns, delivery_uuid, base)
+    local tok, err = T.mint({
+        purpose = "view_online",
+        namespace_id = tonumber(ns),
+        delivery_uuid = delivery_uuid,
+    }, 31536000)
+    if not tok then return nil, err end
+    local root = (base and base ~= "" and base:gsub("/+$", "")) or ""
+    return root .. "/api/v2/opsapi-marketing/public/view?token=" .. ngx.escape_uri(tok)
 end
 
 function T.open_pixel_url(ns, delivery_uuid, base)

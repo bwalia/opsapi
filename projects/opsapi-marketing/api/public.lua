@@ -1,4 +1,5 @@
--- Public endpoints (signed token auth, no login): unsubscribe, preferences, open pixel, click.
+-- Public endpoints (signed token auth, no login): unsubscribe, preferences, view in browser,
+-- open pixel, click.
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then
     package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -76,10 +77,10 @@ return function(app)
         return channel == "sms" and "text messages" or "emails"
     end
 
-    local function bad_link(sender)
+    local function bad_link(sender, body)
         return Pages.page({ status = 400, sender = sender, title = "This link isn’t working",
-            body = "<p>It may have been cut short when it was copied. To stop getting messages, open the "
-                .. "unsubscribe link in the latest one again, or reply to it and ask to be removed.</p>" })
+            body = body or ("<p>It may have been cut short when it was copied. To stop getting messages, open the "
+                .. "unsubscribe link in the latest one again, or reply to it and ask to be removed.</p>") })
     end
 
     local function too_many()
@@ -238,6 +239,72 @@ return function(app)
             notice = "Saved — you’ll get marketing " .. word(channel) .. " again."
         end
         return preferences_page(ns, token, claims.contact_uuid, notice)
+    end))
+
+    -- "View this email in your browser": the delivery re-rendered exactly as the recipient got it
+    -- (their name, working unsubscribe / preferences links, click tracking) but with no open pixel —
+    -- a view is not an open. Only emails that were actually sent; nothing is recorded here.
+    local function gone(sender)
+        return Pages.page({ status = 404, sender = sender, title = "This email is no longer available",
+            body = "<p>It may have been removed by the sender. The copy in your inbox is unchanged.</p>" })
+    end
+
+    local function email_page(subject, html)
+        -- Belt and braces: never show the open pixel even if a stored copy carried one.
+        html = html:gsub("<[Ii][Mm][Gg][^>]-/public/o%.gif[^>]*>", "")
+        if not html:find("<[Hh][Tt][Mm][Ll][%s>]") then
+            html = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                .. '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                .. '<meta name="robots" content="noindex"><title>' .. Pages.esc(subject) .. "</title>"
+                .. "<style>body{margin:0;padding:24px 12px;background:#f4f5f7}</style></head><body>"
+                .. html .. "</body></html>"
+        end
+        return {
+            status = 200,
+            layout = false,
+            headers = {
+                ["Content-Type"] = "text/html; charset=utf-8",
+                ["Cache-Control"] = "private, no-store",
+                ["X-Robots-Tag"] = "noindex, nofollow",
+                ["Referrer-Policy"] = "no-referrer",
+                ["X-Content-Type-Options"] = "nosniff",
+                ["Content-Security-Policy"] = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; "
+                    .. "font-src https: data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+            },
+            html,
+        }
+    end
+
+    app:get("/public/view", sdk.handler({ namespace = false }, function(self)
+        if not rate_public("view", 120) then return too_many() end
+        local claims = T.verify(self.params.token, "view_online")
+        if not claims or not U.is_uuid(claims.delivery_uuid) then
+            return bad_link(nil, "<p>It may have been cut short when it was copied. "
+                .. "Open the link in the email again, or read the email in your inbox.</p>")
+        end
+        local ns = claims.namespace_id
+        local sender = Pages.sender(ns)
+        if not require_plugin(ns) then return stopped(sender) end
+
+        local Send = require("opsapi_marketing.send")
+        local d = U.one([[
+            SELECT * FROM mkt_deliveries
+            WHERE uuid = ? AND namespace_id = ? AND channel = 'email' AND accepted_at IS NOT NULL
+        ]], claims.delivery_uuid, ns)
+        local campaign = d and U.one("SELECT * FROM mkt_campaigns WHERE id = ? AND namespace_id = ?",
+            d.campaign_id, ns)
+        local contact = campaign and Send.load_contact(ns, d.contact_uuid)
+        if not contact then return gone(sender) end
+        contact.namespace_id = ns
+        contact.address = d.address
+        local settings = U.settings(ns)
+        local base = Send.public_base(settings)
+        local self_url = base ~= "" and (base .. "/api/v2/opsapi-marketing/public/view?token="
+            .. ngx.escape_uri(self.params.token)) or nil
+        local ok, payload = pcall(Send.render_delivery, d, campaign, contact, settings,
+            { browser = true, view_online_url = self_url })
+        if not ok or not payload or not payload.html or payload.html == "" then return gone(sender) end
+        return email_page(payload.subject, payload.html)
     end))
 
     -- Images uploaded for emails. The address never changes, so mail clients may cache it for good.

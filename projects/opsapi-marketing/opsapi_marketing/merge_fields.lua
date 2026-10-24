@@ -14,6 +14,7 @@ local BUILTIN = {
     { key = "custom.industry", label = "Industry (custom)", field_type = "string", source_path = "custom.industry", allow_html = false },
     { key = "unsubscribe_url", label = "Unsubscribe URL", field_type = "string", source_path = "unsubscribe_url", allow_html = false },
     { key = "preferences_url", label = "Preferences URL", field_type = "string", source_path = "preferences_url", allow_html = false },
+    { key = "view_online_url", label = "View in browser URL", field_type = "string", source_path = "view_online_url", allow_html = false },
 }
 
 local M = {}

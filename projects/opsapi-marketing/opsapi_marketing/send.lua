@@ -35,6 +35,7 @@ local function load_contact(ns, contact_uuid)
         WHERE c.namespace_id = ? AND c.uuid = ? AND c.deleted_at IS NULL
     ]], ns, contact_uuid)
 end
+S.load_contact = load_contact
 
 -- The same registry context the preview uses (defaults such as "there" for a missing first
 -- name). Company: the CRM account, else the company an import recorded on the contact.
@@ -52,6 +53,7 @@ local function merge_context(ns, contact, campaign, links)
         campaign = { name = campaign.name },
         unsubscribe_url = links.unsubscribe_url,
         preferences_url = links.preferences_url,
+        view_online_url = links.view_online_url,
     })
 end
 
@@ -165,6 +167,68 @@ local function retry_or_fail(id, attempts, reason)
     return "queued"
 end
 
+--- Render one delivery's message exactly as the recipient gets it: their merge fields,
+-- variant, unsubscribe / preferences / view-in-browser links and click tracking.
+-- opts.browser: the "view in your browser" copy — no open pixel (a view is not an open).
+-- opts.view_online_url: the link being viewed, so the page links to itself.
+-- @return payload, err, { adapter, unsubscribe_url, variant_key }
+function S.render_delivery(d, campaign, contact, settings, opts)
+    opts = opts or {}
+    local adapter = Channels.get(d.channel)
+    if not adapter then return nil, "unknown_channel" end
+    local Camp = require("opsapi_marketing.campaigns")
+
+    local base = S.public_base(settings)
+    local unsub = Tokens.unsubscribe_url(d.namespace_id, d.contact_uuid, d.channel, campaign.list_id, base)
+    local variant_key, content = Camp.pick_variant(campaign, d.contact_uuid)
+
+    -- Tracking: open pixel, UTM tagging and click-through rewrite (email only). Without a
+    -- public base URL the links would be relative and broken, so only UTM is applied.
+    local tracking = U.json(campaign.tracking)
+    if type(tracking) ~= "table" then tracking = {} end
+    local pixel = not opts.browser and d.channel == "email" and base ~= "" and tracking.track_opens ~= false
+        and Tokens.open_pixel_url(d.namespace_id, d.uuid, base) or nil
+    local link_rewriter
+    if d.channel == "email" then
+        local utm = Links.utm_params(campaign, tracking, variant_key)
+        link_rewriter = function(url)
+            local tagged = Links.add_params(url, utm)
+            if base == "" or tracking.track_clicks == false then return tagged end
+            return Tokens.click_url(d.namespace_id, d.uuid, tagged, base)
+        end
+    end
+    local template = {
+        subject = content.subject,
+        body_html = content.body_html,
+        body_text = content.body_text,
+    }
+    if campaign.template_id and not content.body_html then
+        local t = U.one("SELECT * FROM mkt_templates WHERE id = ? AND namespace_id = ?", campaign.template_id, d.namespace_id)
+        if t then
+            template.subject = content.subject or t.subject
+            template.body_html = content.body_html or t.body_html
+            template.body_text = content.body_text or t.body_text
+        end
+    end
+
+    local prefs = base ~= "" and Tokens.preferences_url(d.namespace_id, d.contact_uuid, base) or nil
+    local view = opts.view_online_url
+        or (d.channel == "email" and base ~= "" and Tokens.view_online_url(d.namespace_id, d.uuid, base) or nil)
+    local merge = merge_context(d.namespace_id, contact, campaign,
+        { unsubscribe_url = unsub, preferences_url = prefs, view_online_url = view })
+    local payload, rerr = adapter.render(template, merge, {
+        unsubscribe_url = unsub,
+        open_pixel_url = pixel,
+        link_rewriter = link_rewriter,
+        link_skip = { "/public/unsubscribe", "/public/preferences", "/public/view?", "/public/c?" },
+        preheader = campaign.preview_text,
+        sender_address = settings.sender_address,
+    })
+    if not payload then return nil, rerr end
+    return payload, nil, { adapter = adapter, unsubscribe_url = unsub, variant_key = variant_key,
+        view_online_url = view }
+end
+
 --- Step 1. @return a job ({ ready = true, ... }) to deliver, or the delivery row and
 -- why it isn't being sent now (skipped, failed, or left queued for later).
 -- opts.skip_quiet_hours / opts.test_send: test sends (the campaign row is reloaded, so they're passed here).
@@ -224,60 +288,13 @@ function S.prepare(delivery_id, opts)
             return U.one("SELECT * FROM mkt_deliveries WHERE id = ?", d.id), gate.reason
         end
 
-        local adapter = Channels.get(d.channel)
-        if not adapter then
-            db.query("UPDATE mkt_deliveries SET state = 'failed', reason = 'unknown_channel', failed_at = NOW(), updated_at = NOW() WHERE id = ?", d.id)
-            return nil, "unknown_channel"
-        end
-
-        local base = S.public_base(settings)
-        local unsub = Tokens.unsubscribe_url(d.namespace_id, d.contact_uuid, d.channel, campaign.list_id, base)
-        local variant_key, content = Camp.pick_variant(campaign, d.contact_uuid)
-
-        -- Tracking: open pixel, UTM tagging and click-through rewrite (email only). Without a
-        -- public base URL the links would be relative and broken, so only UTM is applied.
-        local tracking = U.json(campaign.tracking)
-        if type(tracking) ~= "table" then tracking = {} end
-        local pixel = d.channel == "email" and base ~= "" and tracking.track_opens ~= false
-            and Tokens.open_pixel_url(d.namespace_id, d.uuid, base) or nil
-        local link_rewriter
-        if d.channel == "email" then
-            local utm = Links.utm_params(campaign, tracking, variant_key)
-            link_rewriter = function(url)
-                local tagged = Links.add_params(url, utm)
-                if base == "" or tracking.track_clicks == false then return tagged end
-                return Tokens.click_url(d.namespace_id, d.uuid, tagged, base)
-            end
-        end
-        local template = {
-            subject = content.subject,
-            body_html = content.body_html,
-            body_text = content.body_text,
-        }
-        if campaign.template_id and not content.body_html then
-            local t = U.one("SELECT * FROM mkt_templates WHERE id = ? AND namespace_id = ?", campaign.template_id, d.namespace_id)
-            if t then
-                template.subject = content.subject or t.subject
-                template.body_html = content.body_html or t.body_html
-                template.body_text = content.body_text or t.body_text
-            end
-        end
-
-        local prefs = base ~= "" and Tokens.preferences_url(d.namespace_id, d.contact_uuid, base) or nil
-        local merge = merge_context(d.namespace_id, contact, campaign, { unsubscribe_url = unsub, preferences_url = prefs })
-        local payload, rerr = adapter.render(template, merge, {
-            unsubscribe_url = unsub,
-            open_pixel_url = pixel,
-            link_rewriter = link_rewriter,
-            link_skip = { "/public/unsubscribe", "/public/preferences", "/public/c?" },
-            preheader = campaign.preview_text,
-            sender_address = settings.sender_address,
-        })
+        local payload, rerr, info = S.render_delivery(d, campaign, contact, settings)
         if not payload then
             db.query("UPDATE mkt_deliveries SET state = 'failed', reason = ?, failed_at = NOW(), updated_at = NOW() WHERE id = ?",
                 tostring(rerr):sub(1, 200), d.id)
             return nil, rerr
         end
+        local adapter, unsub, variant_key = info.adapter, info.unsubscribe_url, info.variant_key
 
         local vok, verr = adapter.validate_message({
             subject = payload.subject, html = payload.html, text = payload.text, to = d.address,

@@ -79,5 +79,10 @@ function B.footer(why)
         .. '<a href="{{preferences_url}}" style="color:#6b7280">Email preferences</a></p>'
 end
 
+--- A small top line for the start of an email: a link to the browser copy.
+function B.view_online()
+    return '<p style="margin:0 0 16px;font-size:12px;color:#6b7280;text-align:center">Trouble viewing? '
+        .. '<a href="{{view_online_url}}" style="color:#6b7280">View this email in your browser</a></p>'
+end
 
 return B
