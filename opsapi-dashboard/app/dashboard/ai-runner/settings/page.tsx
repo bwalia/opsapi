@@ -51,6 +51,8 @@ const DEFAULTS: Settings = {
   task_automation: {
     on_start: { enabled: false, status: 'in_progress', column: 'In Progress' },
     on_success: { enabled: false, status: 'review', column: 'Review' },
+    on_pr_open: { enabled: true, status: 'review', column: 'Review' },
+    on_pr_merged: { enabled: true, status: 'completed', column: 'Done' },
   },
   approval_policy: {
     deciders: 'managers', project_admins_decide: false, require_start_approval: false, permission_timeout_minutes: 30, input_timeout_minutes: 60,
@@ -87,6 +89,8 @@ function normalize(d: Partial<Settings>, base: Settings = DEFAULTS): Settings {
     task_automation: {
       on_start: { ...base.task_automation.on_start, ...(ta.on_start ?? (ta.in_progress_on_start != null && { enabled: ta.in_progress_on_start })) },
       on_success: { ...base.task_automation.on_success, ...(ta.on_success ?? (ta.review_on_success != null && { enabled: ta.review_on_success })) },
+      on_pr_open: { ...base.task_automation.on_pr_open, ...ta.on_pr_open },
+      on_pr_merged: { ...base.task_automation.on_pr_merged, ...ta.on_pr_merged },
     },
     approval_policy: { ...base.approval_policy, ...d.approval_policy },
     guards: { ...base.guards, ...d.guards },
@@ -120,7 +124,7 @@ function RunSettings() {
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
   const g = s.guards;
   const guard = (patch: Partial<Settings['guards']>) => set({ guards: { ...g, ...patch } });
-  const move = (k: 'on_start' | 'on_success', patch: Partial<TaskMove>) =>
+  const move = (k: 'on_start' | 'on_success' | 'on_pr_open' | 'on_pr_merged', patch: Partial<TaskMove>) =>
     set({ task_automation: { ...s.task_automation, [k]: { ...s.task_automation[k], ...patch } } });
   const safety = (patch: Partial<Settings['safety']>) => set({ safety: { ...s.safety, ...patch } });
 
@@ -133,7 +137,10 @@ function RunSettings() {
     setBusy(true);
     try {
       // Only the new task automation shape: the old booleans would say something else.
-      const saved = await aiRunner.saveSettings({ ...s, task_automation: { on_start: s.task_automation.on_start, on_success: s.task_automation.on_success } });
+      const saved = await aiRunner.saveSettings({ ...s, task_automation: {
+        on_start: s.task_automation.on_start, on_success: s.task_automation.on_success,
+        on_pr_open: s.task_automation.on_pr_open, on_pr_merged: s.task_automation.on_pr_merged,
+      } });
       if (saved) setS(normalize(saved, s));
       toast.success('Settings saved');
     } catch (err) {
@@ -162,6 +169,8 @@ function RunSettings() {
           <h3 className="text-sm font-semibold text-secondary-800">Task automation</h3>
           <TaskMoveFields id="air-s-on-start" label="When a run starts, move its task" move={s.task_automation.on_start} onChange={(p) => move('on_start', p)} />
           <TaskMoveFields id="air-s-on-success" label="When a run succeeds, move its task" move={s.task_automation.on_success} onChange={(p) => move('on_success', p)} />
+          <TaskMoveFields id="air-s-on-pr-open" label="When an agent in a web terminal reports its pull request, move the task" move={s.task_automation.on_pr_open} onChange={(p) => move('on_pr_open', p)} />
+          <TaskMoveFields id="air-s-on-pr-merged" label="When a task's pull request merges on GitHub, move the task" move={s.task_automation.on_pr_merged} onChange={(p) => move('on_pr_merged', p)} />
         </div>
 
         <div className="space-y-3 border-t border-secondary-200 pt-4">

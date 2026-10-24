@@ -397,6 +397,8 @@ export interface WebTerminal {
   url: string;
   agents: TerminalAgent[];
   is_active: boolean;
+  /** §8: power users may be signed in to it by Start with AI (the terminal's own config must allow them too). */
+  autologin: boolean;
   secret_hint?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -407,6 +409,7 @@ export interface TerminalOffer {
   name: string;
   url: string;
   agents: TerminalAgent[];
+  autologin?: boolean;
   default_path?: string | null;
   recent_paths: string[];
 }
@@ -425,6 +428,10 @@ export interface TerminalSession {
   terminal_user?: string | null;
   session_id?: string | null;
   repo_url?: string | null;
+  /** §8: the person was signed in to the terminal by OpsAPI. */
+  autologin?: boolean;
+  /** §9: when the agent last reported (a pull request or a note). */
+  reported_at?: string | null;
   /** launched (link not used yet) → active → ended; expired = the link was never used in time. */
   status: 'launched' | 'active' | 'ended' | 'expired' | string;
   started_at?: string | null;
@@ -437,6 +444,13 @@ export interface TerminalLaunch {
   path: string;
   agent: string;
   prompt?: string;
+  /** §8: sign me in to the terminal (needs ai_terminal_autologin and a live step-up). */
+  autologin?: boolean;
+}
+/** §8: may this person be signed in to web terminals automatically, and their emailed-code step-up (unix seconds). */
+export interface TerminalAutologin {
+  allowed: boolean;
+  stepup: { verified_at: number; expires_at: number } | null;
 }
 export interface TaskWorkBundle {
   work: TaskWork | null;
@@ -511,7 +525,12 @@ export interface Settings {
   pr_base: string;
   max_run_minutes: number;
   /** on_start / on_success (§27.4); the old booleans are still read when they are missing. */
-  task_automation: { on_start: TaskMove; on_success: TaskMove; in_progress_on_start?: boolean; review_on_success?: boolean };
+  task_automation: {
+    on_start: TaskMove; on_success: TaskMove;
+    /** Web terminal §9: when a pull request is reported for the task, and when GitHub says it merged. */
+    on_pr_open: TaskMove; on_pr_merged: TaskMove;
+    in_progress_on_start?: boolean; review_on_success?: boolean;
+  };
   approval_policy: ApprovalPolicy;
   guards: Guards;
   session_tracking: SessionTracking;
@@ -817,17 +836,23 @@ export const aiRunner = {
   taskPrs: async (taskUuid: string) => list<TaskPr>((await get<TaskPr[]>(`/tasks/${id(taskUuid)}/prs`)).data),
   reviewPr: (taskUuid: string, prUuid: string, decision: 'approved' | 'changes_requested', note?: string) =>
     send<TaskPr>('post', `/tasks/${id(taskUuid)}/prs/${id(prUuid)}/review`, { decision, note }),
-  /** Records the launch and returns the link that opens the terminal in the folder (valid 15 minutes). */
+  /** Records the launch and returns the link that opens the terminal in the folder (valid 15 minutes; 2 with autologin). */
   launchTerminal: (taskUuid: string, input: TerminalLaunch) =>
     send<{ session: TerminalSession; launch_url: string }>('post', `/tasks/${id(taskUuid)}/terminal-sessions`, input),
   listTerminalSessions: async (taskUuid: string) =>
     list<TerminalSession>((await get<TerminalSession[]>(`/tasks/${id(taskUuid)}/terminal-sessions`)).data),
 
+  // Auto sign-in step-up (§8): email a code, confirm it, remembered for 12 hours.
+  terminalAutologin: async () => (await get<TerminalAutologin>('/terminal-autologin')).data,
+  sendAutologinCode: () => send<{ sent: boolean }>('post', '/terminal-autologin/code'),
+  verifyAutologinCode: (code: string) => send<TerminalAutologin>('post', '/terminal-autologin/verify', { code }),
+  forgetAutologin: () => send<TerminalAutologin>('delete', '/terminal-autologin'),
+
   // Web terminals (ai_runners.manage); the secret comes back only when added or rotated.
   listTerminals: async () => list<WebTerminal>((await get<WebTerminal[]>('/terminals')).data),
-  addTerminal: (body: { name: string; url: string; agents?: TerminalAgent[] }) =>
+  addTerminal: (body: { name: string; url: string; agents?: TerminalAgent[]; autologin?: boolean }) =>
     send<{ terminal: WebTerminal; secret: string }>('post', '/terminals', body),
-  updateTerminal: (uuid: string, body: Partial<Pick<WebTerminal, 'name' | 'url' | 'agents' | 'is_active'>>) =>
+  updateTerminal: (uuid: string, body: Partial<Pick<WebTerminal, 'name' | 'url' | 'agents' | 'is_active' | 'autologin'>>) =>
     send<WebTerminal>('put', `/terminals/${id(uuid)}`, body),
   rotateTerminalSecret: (uuid: string) =>
     send<{ terminal: WebTerminal; secret: string }>('post', `/terminals/${id(uuid)}/rotate-secret`),

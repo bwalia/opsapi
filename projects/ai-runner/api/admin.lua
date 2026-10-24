@@ -15,7 +15,7 @@
 --                                           the task of one started by hand (?runner_uuid&busy=1&page&per_page)
 --   GET    /overview                        ai_runs.manage, ai_runners.manage or ai_runs_approvals.manage
 --   GET|PUT /settings                       ai_runs_settings.manage (+ guards §24.1, session_tracking §26.2 + §27.4,
---                                           task_automation on_start / on_success and safety §27.4)
+--                                           task_automation on_start / on_success / on_pr_open / on_pr_merged, safety)
 --   GET|PUT /projects/:project_uuid/settings  owner/admin of the kanban project or ai_runs_settings.manage
 --   GET|PUT /template                       ai_runs_settings.manage: the workspace template, versioned on save
 --   GET|PUT /platform/settings              platform admins only, no workspace (§27.5): timings, timeouts, limits
@@ -523,7 +523,8 @@ return function(app)
             local flags = validate("task_automation", given, { in_progress_on_start = { type = "boolean" },
                 review_on_success = { type = "boolean" } })
             local ta, td = s.task_automation, R.SETTINGS_DEFAULTS.task_automation
-            for which, flag in pairs({ on_start = "in_progress_on_start", on_success = "review_on_success" }) do
+            for which, flag in pairs({ on_start = "in_progress_on_start", on_success = "review_on_success",
+                on_pr_open = false, on_pr_merged = false }) do
                 local name = "task_automation." .. which
                 if given[which] == cjson.null then
                     ta[which] = R.copy(td[which])
@@ -537,7 +538,7 @@ return function(app)
                         end
                     end
                     if ta[which].column == "" then ta[which].column = cjson.null end
-                elseif type(flags[flag]) == "boolean" then
+                elseif flag and type(flags[flag]) == "boolean" then
                     ta[which].enabled = flags[flag]
                 end
             end

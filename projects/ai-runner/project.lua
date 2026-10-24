@@ -26,6 +26,8 @@ return {
         module("ai_runs_approvals", "AI run approvals", "Decide the permission requests of AI runs"),
         module("ai_runners", "AI runners", "Register, pause and revoke the machines that run AI runs"),
         module("ai_runs_settings", "AI run settings", "Workspace AI run settings and the prompt template"),
+        module("ai_terminal_autologin", "Web terminal auto sign-in",
+            "Be signed in to a web terminal by Start with AI (after an emailed code; the terminal must also allow you)"),
     },
 
     -- Native pages in opsapi-dashboard/app/dashboard/ai-runner.
