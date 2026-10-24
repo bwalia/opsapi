@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { Button, Modal } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
-import { promptDialog } from '@/components/ui/Dialogs';
+import { confirmDialog, promptDialog } from '@/components/ui/Dialogs';
 
 export const EMAIL_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -330,6 +330,12 @@ function frameStyle(open: string): React.CSSProperties {
 // flattens the design and the next keystroke saves it flattened, so they open as HTML source.
 const TABLE_LAYOUT = /<(table|tbody|tr|td|center|body|html)\b/i;
 
+/** Pasted text that is HTML source (starts with a tag and has a closing or void tag), not prose. */
+const looksLikeHtml = (text: string) =>
+  /^\s*<(!doctype|[a-z][a-z0-9]*)[\s>/]/i.test(text) && /<\/[a-z][a-z0-9]*\s*>|<(br|img|hr|meta)\b/i.test(text);
+/** A whole email rather than a snippet: it goes to the HTML source so nothing in it is lost. */
+const WHOLE_EMAIL = /<(table|tbody|tr|td|center|body|html|style)\b|<!doctype/i;
+
 /** Email-safe TipTap editor (no iframes). Link mark comes from StarterKit v3. */
 export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, readOnly = false }: Props) {
   const [mode, setMode] = useState<'visual' | 'html'>(() => (TABLE_LAYOUT.test(value || '') ? 'html' : 'visual'));
@@ -348,6 +354,34 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
   useEffect(() => {
     openRef.current = frame.open;
   }, [frame.open]);
+  // The editor keeps the options it was created with: its paste handler reads the latest props here.
+  const latest = useRef({ value, onChange });
+  useEffect(() => {
+    latest.current = { value, onChange };
+  }, [value, onChange]);
+  const editorRef = useRef<Editor | null>(null);
+  /** A whole HTML email pasted as code: keep it as HTML (asking first if it replaces an email). */
+  const pasteWholeEmail = async (html: string) => {
+    const { value: current, onChange: change } = latest.current;
+    const hasContent =
+      (current || '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim() !== '';
+    if (
+      hasContent &&
+      !(await confirmDialog({
+        title: 'Use the HTML you pasted?',
+        message:
+          'It replaces what is in this email now and opens the HTML source, so your design stays exactly as pasted.',
+        confirmText: 'Use my HTML',
+      }))
+    )
+      return;
+    change(html);
+    setMode('html');
+    toast.success('Your HTML is in. Check the preview to see how it looks.');
+  };
   const editor = useEditor({
     immediatelyRender: false,
     editable: !readOnly,
@@ -375,9 +409,23 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
       attributes: {
         class: 'prose prose-sm max-w-none min-h-[280px] px-4 py-3 focus:outline-none text-foreground',
       },
+      // HTML source pasted as text would otherwise show up as code in the email.
+      handlePaste: (_view, event) => {
+        const text = (event.clipboardData?.getData('text/plain') ?? '').trim();
+        if (!looksLikeHtml(text)) return false;
+        if (WHOLE_EMAIL.test(text)) {
+          void pasteWholeEmail(text);
+          return true;
+        }
+        // A snippet (e.g. <b>Sale</b> or a paragraph with a link): insert it formatted.
+        return editorRef.current?.chain().focus().insertContent(text).run() ?? false;
+      },
     },
   });
   const sel = useSelectionInfo(editor);
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || mode !== 'visual') return;
@@ -391,11 +439,15 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
     editor?.setEditable(!readOnly);
   }, [editor, readOnly]);
 
-  const toggleMode = () => {
+  const toggleMode = async () => {
     if (
       mode === 'html' &&
       TABLE_LAYOUT.test(value || '') &&
-      !window.confirm('The visual editor cannot keep this layout (tables). Switch anyway?')
+      !(await confirmDialog({
+        title: 'Open in the visual editor?',
+        message: 'The visual editor can’t keep this layout (tables), so the design may change.',
+        confirmText: 'Open visual editor',
+      }))
     )
       return;
     setMode(mode === 'html' ? 'visual' : 'html');
@@ -406,7 +458,7 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
       <div className="overflow-hidden rounded-lg border border-border bg-background">
         <div className="flex items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5">
           {!readOnly && (
-            <Tb title="Visual editor" active onClick={toggleMode}>
+            <Tb title="Visual editor" active onClick={() => void toggleMode()}>
               <Code2 className="h-4 w-4" />
             </Tb>
           )}
@@ -518,7 +570,7 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
           role="toolbar"
           aria-label="Formatting"
         >
-          <Tb title="Edit HTML source" onClick={toggleMode}>
+          <Tb title="Edit HTML source" onClick={() => void toggleMode()}>
             <Code2 className="h-4 w-4" />
           </Tb>
           <Sep />
