@@ -12,6 +12,9 @@ end
 
 function S.strip_html(html)
     if type(html) ~= "string" then return "" end
+    -- A rich-text editor can auto-link a typed merge tag ("contact.company" looks like a domain),
+    -- storing {{<a href="http://contact.company">contact.company</a>}}: unwrap it back to {{contact.company}}.
+    html = html:gsub("{{%s*<[Aa]%s[^>]*>%s*([%w_%.]+)%s*</[Aa]%s*>%s*}}", "{{%1}}")
     html = html:gsub("<%s*[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>.-<%s*/%s*[Ss][Cc][Rr][Ii][Pp][Tt]%s*>", "")
     html = html:gsub("<%s*[Ss][Tt][Yy][Ll][Ee][^>]*>.-<%s*/%s*[Ss][Tt][Yy][Ll][Ee]%s*>", "")
     html = html:gsub("<%s*[Ii][Ff][Rr][Aa][Mm][Ee][^>]*>.-<%s*/%s*[Ii][Ff][Rr][Aa][Mm][Ee]%s*>", "")
