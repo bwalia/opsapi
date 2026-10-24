@@ -390,7 +390,8 @@ export function EmailStudioEditor({ value, onChange, placeholder, mergeFields, r
         heading: { levels: [1, 2, 3] },
         codeBlock: false,
         code: false,
-        link: { openOnClick: false, isAllowedUri: allowedHref },
+        // No autolink: typing {{contact.company}} would turn the tag into a link to http://contact.company.
+        link: { openOnClick: false, autolink: false, isAllowedUri: allowedHref },
       }),
       KeepStyles,
       TextStyle,
