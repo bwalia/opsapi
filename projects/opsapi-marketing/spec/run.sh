@@ -67,7 +67,7 @@ PORT=$(docker port mkt-api-$ID 80/tcp | head -1 | sed 's/.*://')
 export MKT_API="http://127.0.0.1:$PORT" MKT_JWT_SECRET="$JWT_SECRET"
 export MKT_PSQL="docker exec -i mkt-pg-$ID psql -U postgres -d e2e -tA -c"
 
-SUITES=${ONLY:-phase0_test phase2_test phase3_test phase4_test phase5_test phase6_test phase7_test phase8_test phase9_test phase10_test phase11_test phase12_test}
+SUITES=${ONLY:-phase0_test phase2_test phase3_test phase4_test phase5_test phase6_test phase7_test phase8_test phase9_test phase10_test phase11_test phase12_test phase13_test}
 ( cd "$HERE" && for s in $SUITES; do python3 -I "$s.py" || exit 1; done ) || {
   echo "--- errors ---"
   docker exec mkt-api-$ID sh -c 'cat /app/logs/error.log /var/log/nginx/error.log 2>/dev/null' | tail -40

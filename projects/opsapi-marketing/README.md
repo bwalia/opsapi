@@ -24,6 +24,7 @@ plugin jobs** (`helper/plugin-jobs.lua`) — not Kafka.
 | 6 SMS E2E + §9 hardening | Done — SMS dry-run, STOP webhook, cross-tenant (`spec/phase6_test.py`) |
 | 9 Production fixes (step 1) | Quiet hours defer, budgets, caps, template errors, four-eyes approval, admin-only transactional; runs with quiet hours on (`spec/phase9_test.py`) |
 | 10 Contact files + batches | CSV/XLSX/PDF import of business contacts (preview → confirm), batched sending, unsubscribe = never again (`spec/phase10_test.py`) |
+| 13 View in browser | `{{view_online_url}}` → `GET /public/view?token=…` re-renders the recipient's own email; no open pixel, not counted as an open (`spec/phase13_test.py`) |
 
 ## Promoting to bought / business contact lists
 
@@ -43,6 +44,15 @@ plugin jobs** (`helper/plugin-jobs.lua`) — not Kafka.
 
 Channels: email and SMS. Push and webhook adapters were removed — CRM contacts have no
 device token or endpoint URL, so those campaigns could never deliver.
+
+## View this email in your browser
+
+Put `{{view_online_url}}` in a template (the `blocks.view_online()` line does it for you). Every
+email sent with a public base URL gets a signed link (purpose `view_online`, valid a year) to
+`/api/v2/opsapi-marketing/public/view?token=…`, which shows that recipient's email as a web page:
+their merge fields, working unsubscribe / preferences links, click tracking — but no open pixel,
+and a view is not counted as an open. `noindex`, `no-store`, and a CSP that blocks scripts. If
+the campaign or contact is gone, a "no longer available" page (404).
 
 ## Tests
 

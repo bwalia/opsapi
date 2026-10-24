@@ -66,6 +66,7 @@ function T.preview(ns, template_or_payload, sample)
         custom = { industry = "Technology" },
         unsubscribe_url = "https://example.com/unsub",
         preferences_url = "https://example.com/prefs",
+        view_online_url = "https://example.com/view",
     }
     local ctx = Merge.build_context(ns, raw_ctx)
     -- TemplateRenderer uses {{contact.first_name}} with nested tables — build_context nests them.
