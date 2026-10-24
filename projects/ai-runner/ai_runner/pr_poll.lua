@@ -58,6 +58,7 @@ function P.refresh_one(pr)
     local task = U.one("SELECT id FROM kanban_tasks WHERE uuid = ?", pr.task_uuid)
     if task then
         comment_state(task.id, pr.reviewed_by or nil, row or pr, new_state)
+        if new_state == "merged" then R.automate_task(pr.namespace_id, pr.task_uuid, "on_pr_merged") end
     end
     return row or pr
 end

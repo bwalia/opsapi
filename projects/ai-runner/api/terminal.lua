@@ -1,14 +1,19 @@
 -- Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md).
 --   GET    /terminals                       ai_runners.manage: this workspace's terminals (never their secrets)
---   POST   /terminals { name, url, agents? }   ai_runners.manage -> 201 { terminal, secret } (the secret, once)
---   PUT    /terminals/:uuid { name?, url?, agents?, is_active? }   ai_runners.manage
+--   POST   /terminals { name, url, agents?, autologin? }   ai_runners.manage -> 201 { terminal, secret } (once)
+--   PUT    /terminals/:uuid { name?, url?, agents?, is_active?, autologin? }   ai_runners.manage
 --   POST   /terminals/:uuid/rotate-secret   ai_runners.manage -> { terminal, secret }; old links and webhooks stop
 --   DELETE /terminals/:uuid                 ai_runners.manage (its sessions stay on their tasks)
---   POST   /tasks/:task_uuid/terminal-sessions { terminal_uuid, path, agent, prompt? }
+--   POST   /tasks/:task_uuid/terminal-sessions { terminal_uuid, path, agent, prompt?, autologin? }
 --                                           ai_runs.create + who may start AI work on the task -> 201
 --                                           { session, launch_url }
 --   GET    /tasks/:task_uuid/terminal-sessions   ai_runs.read
 --   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>)
+--   GET    /terminal-autologin              ai_runs.read: may I be signed in automatically, and my step-up (§8)
+--   POST   /terminal-autologin/code         ai_terminal_autologin.create: email me a code
+--   POST   /terminal-autologin/verify { code }   ai_terminal_autologin.create -> the step-up (12 h)
+--   DELETE /terminal-autologin              forget my step-up
+--   POST   /public/terminal/report { pr_url?, note? }   Authorization: Bearer <the launch's report token> (§9)
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -31,6 +36,15 @@ local function terminal_or_404(ns, uuid)
     return t
 end
 
+local function may_autologin(self)
+    return sdk.can(self, T.AUTOLOGIN_PERMISSION[1], T.AUTOLOGIN_PERMISSION[2])
+end
+
+local function stepup_view(st)
+    if not st then return cjson.null end
+    return { verified_at = tonumber(st.verified_at), expires_at = tonumber(st.expires_at) }
+end
+
 local function url_of(v)
     local u = R.base_url(v)
     if not u then U.invalid({ url = "must be the terminal's address, like https://dev.example.com" }) end
@@ -49,12 +63,14 @@ return function(app)
         local b = body(self)
         local d, errors = sdk.validate(b, {
             name = { required = true, max = 100 }, url = { required = true, max = 255 },
+            autologin = { type = "boolean" },
         })
         if not d then U.invalid(errors) end
         local plain, sealed, hint = T.new_secret()
         local row = db.insert("ar_terminals", {
             namespace_id = ns, name = U.clean(d.name), url = url_of(d.url), secret_sealed = sealed, secret_hint = hint,
-            agents = cjson.encode(T.agents_of(b.agents) or T.DEFAULT_AGENTS), created_by = sdk.user(self).uuid,
+            agents = cjson.encode(T.agents_of(b.agents) or T.DEFAULT_AGENTS), autologin = d.autologin == true,
+            created_by = sdk.user(self).uuid,
         }, { returning = "*" })[1]
         return sdk.created({ terminal = T.view(row), secret = plain })
     end)))
@@ -65,15 +81,18 @@ return function(app)
         local b = body(self)
         local d, errors = sdk.validate(b, {
             name = { max = 100 }, url = { max = 255 }, is_active = { type = "boolean" },
+            autologin = { type = "boolean" },
         }, true)
         if not d or d.name == db.NULL or d.name == "" then U.invalid(errors or { name = "is required" }) end
         local agents = T.agents_of(b.agents)
         local active = t.is_active
         if type(d.is_active) == "boolean" then active = d.is_active end
+        local autologin = t.autologin == true
+        if type(d.autologin) == "boolean" then autologin = d.autologin end
         db.query([[UPDATE ar_terminals SET name = ?, url = ?, agents = COALESCE(?::jsonb, agents), is_active = ?,
-            updated_at = NOW() WHERE id = ?]],
+            autologin = ?, updated_at = NOW() WHERE id = ?]],
             d.name and U.clean(d.name) or t.name, d.url and url_of(d.url) or t.url,
-            agents and cjson.encode(agents) or db.NULL, active, t.id)
+            agents and cjson.encode(agents) or db.NULL, active, autologin, t.id)
         return sdk.ok(T.view(T.find(ns, t.uuid)))
     end)))
 
@@ -104,6 +123,7 @@ return function(app)
         local d, errors = sdk.validate(b, {
             terminal_uuid = { required = true, type = "uuid" }, path = { required = true, max = 1024 },
             agent = { required = true, max = 32 }, prompt = { type = "text", max = T.MAX_PROMPT },
+            autologin = { type = "boolean" },
         })
         if not d then U.invalid(errors) end
         local term = T.find(ns, d.terminal_uuid)
@@ -118,10 +138,27 @@ return function(app)
         local prompt = type(d.prompt) == "string" and d.prompt ~= "" and U.clean(d.prompt) or T.prompt(ns, task)
         prompt = T.with_folder(prompt, path)
         if #prompt > T.MAX_PROMPT then U.invalid({ prompt = "is too long (at most " .. T.MAX_PROMPT .. " bytes)" }) end
-        local me = U.one("SELECT " .. R.name_sql("u") .. " AS name FROM users u WHERE u.uuid = ?", sdk.user(self).uuid)
+        local me = U.one("SELECT " .. R.name_sql("u") .. " AS name, u.email FROM users u WHERE u.uuid = ?",
+            sdk.user(self).uuid)
+        -- §8: signed in by the link only for power users, on a terminal that allows it, after a recent step-up.
+        local login
+        if d.autologin == true then
+            if not may_autologin(self) then
+                return sdk.error(403, "You can't be signed in to web terminals automatically in this workspace")
+            end
+            if not term.autologin then U.fail(409, "This terminal doesn't allow automatic sign-in") end
+            local st = T.stepup(ns, sdk.user(self).uuid)
+            if not st then
+                U.fail(403, "Confirm the code we email you first", { code = "stepup_required" })
+            end
+            if not me or type(me.email) ~= "string" or me.email == "" then
+                U.fail(422, "Your account has no email address")
+            end
+            login = { email = me.email:lower(), stepup = tonumber(st.verified_at) }
+        end
         local row, launch_url = T.launch(ns, task, sdk.user(self).uuid, {
             terminal = term, path = path, agent = agent, prompt = prompt, by = me and me.name or nil,
-            ws = self.namespace and self.namespace.name or nil,
+            ws = self.namespace and self.namespace.name or nil, login = login, report_url = T.report_url(),
         })
         return sdk.created({ session = T.session_view(T.session(ns, row.uuid)), launch_url = launch_url })
     end))
@@ -133,6 +170,43 @@ return function(app)
         local out = {}
         for i, s in ipairs(T.list_for_task(ns, self.params.task_uuid)) do out[i] = T.session_view(s) end
         return sdk.ok(U.array(out))
+    end)))
+
+    app:get("/terminal-autologin", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        local allowed = may_autologin(self)
+        return sdk.ok({ allowed = allowed,
+            stepup = allowed and stepup_view(T.stepup(sdk.namespace_id(self), sdk.user(self).uuid)) or cjson.null })
+    end)))
+
+    app:post("/terminal-autologin/code", sdk.handler({ permission = "ai_terminal_autologin.create" },
+        U.guard(function(self)
+            local ok, status, message = T.send_stepup_code(sdk.user(self).uuid)
+            if not ok then return sdk.error(status, message) end
+            return sdk.ok({ sent = true })
+        end)))
+
+    app:post("/terminal-autologin/verify", sdk.handler({ permission = "ai_terminal_autologin.create" },
+        U.guard(function(self)
+            local d, errors = sdk.validate(body(self), { code = { required = true, max = 12 } })
+            if not d then U.invalid(errors) end
+            local st, status, message = T.verify_stepup(sdk.namespace_id(self), sdk.user(self).uuid, d.code)
+            if not st then return sdk.error(status, message) end
+            return sdk.ok({ allowed = true, stepup = stepup_view(st) })
+        end)))
+
+    app:delete("/terminal-autologin", sdk.handler({ permission = "ai_runs.read" }, U.guard(function(self)
+        T.forget_stepup(sdk.namespace_id(self), sdk.user(self).uuid)
+        return sdk.ok({ allowed = may_autologin(self), stepup = cjson.null })
+    end)))
+
+    app:post("/public/terminal/report", sdk.handler({ namespace = false }, U.guard(function()
+        local auth = ngx.req.get_headers()["authorization"]
+        if type(auth) == "table" then auth = auth[1] end
+        local token = type(auth) == "string" and auth:match("^[Bb]earer%s+(%S+)%s*$") or nil
+        ngx.req.read_body()
+        local out, status, message = T.report(token, require("cjson.safe").decode(ngx.req.get_body_data() or ""))
+        if not out then return sdk.error(status, message) end
+        return sdk.ok(out)
     end)))
 
     app:post("/public/terminal/webhook", sdk.handler({ namespace = false }, U.guard(function()

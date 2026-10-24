@@ -18,6 +18,8 @@ link as plain query parameters and had no folder.
 | W4 | Task terminals **stay alive while the agent works**: output counts as activity, and they keep running for hours after the browser closes. Ordinary terminals keep their limits. | Long agent work was being killed after 1 h without typing. |
 | W5 | Terminals are **configured per workspace** in the dashboard (address + shared secret), not with environment variables. | SaaS: each workspace connects its own machine. |
 | W6 | Commands come only from the terminal's own config (agent allowlist). The link carries an agent **id**, the folder and the prompt — never a command. | A crafted link must not run anything. |
+| W7 (2026-10-24, narrows W2) | **Power users may be signed in by the link** (§8), when all of these hold: the terminal has auto sign-in on, the OpsAPI user holds `ai_terminal_autologin`, they confirmed an emailed code in the last 12 h (step-up), **and the terminal's own config maps their email to a terminal user**. Everyone else still signs in with an SSH key. | One click from task to working agent for trusted people; a stolen OpsAPI password alone still isn't a shell (step-up code + terminal-side allowlist). |
+| W8 (2026-10-24) | The agent **reports its pull request** to OpsAPI with a per-launch token (§9); the task moves to Review when it opens and to Done when it merges. | Task to finished work with no hand-offs. |
 
 ## 1. Connecting a terminal (per workspace)
 
@@ -61,6 +63,10 @@ Claims (all required unless marked optional):
 | `by` | string | display name of the OpsAPI user, ≤ 120 chars |
 | `return` | string | task page URL; `https://` (or `http://localhost…` / `http://127.0.0.1…`). Optional: left out when the deployment has no absolute dashboard address |
 | `ws` | string | workspace name, ≤ 120 chars (optional, display only) |
+| `login` | object | optional, §8: `{ "email": ≤ 254 chars, "user": OpsAPI user UUID, "stepup": unix seconds of the step-up }`. When present OpsAPI keeps `exp - iat` at **120** |
+| `report` | object | optional, §9: `{ "url": https URL ≤ 512 chars, "token": [A-Za-z0-9_-]{32,128} }` |
+
+Terminals ignore claims they don't know, so a newer OpsAPI works with an older terminal (it just never signs anyone in).
 
 ## 3. What the terminal does
 
@@ -116,10 +122,21 @@ bad signature → 401. The task id is never taken from the webhook.
 | `GET /tasks/:task_uuid/terminal-sessions` | `ai_runs.read` | → `[session]` (also in `GET /tasks/:task_uuid/work`) |
 | `POST /tasks/:task_uuid/runs/preview` | (as before) | adds `terminals: [{uuid, name, url, agents, default_path, recent_paths}]`, `terminal_prompt` |
 | `POST /public/terminal/webhook` | the terminal's signature | §4 → `session` |
+| `GET /terminal-autologin` | `ai_runs.read` | → `{allowed, stepup: {verified_at, expires_at} \| null}` (§8) |
+| `POST /terminal-autologin/code` | `ai_terminal_autologin.create` | emails a code → `{sent: true}` (429 when too many) |
+| `POST /terminal-autologin/verify` | `ai_terminal_autologin.create` | `{code}` → `{allowed, stepup}`; 401 wrong code |
+| `DELETE /terminal-autologin` | `ai_runs.read` | forgets the step-up |
+| `POST /public/terminal/report` | `Authorization: Bearer <report token>` | `{pr_url?, note?}` → `{task_uuid, pr?}` (§9) |
 
-`terminal = {uuid, name, url, agents: [{id, label}], is_active, secret_hint, created_by, created_at, updated_at}`.
+`POST /terminals`, `PUT /terminals/:uuid` also take `autologin` (boolean); `POST /tasks/:task_uuid/terminal-sessions`
+takes `autologin: true` → 403 without the permission, 409 if the terminal doesn't allow it, 403 `code: stepup_required`
+without a live step-up. The report address is `OPSAPI_PUBLIC_URL` + `/api/v2/ai-runner/public/terminal/report` when
+set, else the launch request's `Host` (scheme from `X-Forwarded-Proto`); it must be https
+(or localhost), otherwise the launch has no `report` claim.
+
+`terminal = {uuid, name, url, agents: [{id, label}], is_active, autologin, secret_hint, created_by, created_at, updated_at}`.
 `session = {uuid, task_uuid, project_uuid, opened_by, opened_by_name, terminal_uuid, terminal_name, terminal_url, path,
-agent, agent_label, terminal_user, session_id, status, started_at, ended_at, exit_code, ended_reason, expires_at,
+agent, agent_label, terminal_user, session_id, autologin, reported_at, status, started_at, ended_at, exit_code, ended_reason, expires_at,
 created_at, updated_at}`. Tables: `ar_terminals`, `ar_terminal_sessions` (migration
 `20261023120000_ai_runner_web_terminals`).
 
@@ -138,3 +155,54 @@ mode.
   review what an agent does before merging its work.
 - The shared secret signs both directions. Rotate it in the dashboard and paste the new block into the
   terminal's config; old links then stop working.
+
+## 8. Auto sign-in for power users (W7)
+
+**OpsAPI.** A terminal row has `autologin` (off by default; `ai_runners.manage` turns it on). In Start with AI a
+person who holds `ai_terminal_autologin` (owners and admins have it through RBAC) sees **Sign me in automatically**.
+The first time, OpsAPI emails a 6-digit code (`POST /terminal-autologin/code`), they type it
+(`POST /terminal-autologin/verify {code}`) and OpsAPI remembers the step-up for **12 hours**
+(`ar_terminal_stepups`), bound to the email the code went to (if the account's email changes, it lapses). While it holds, a launch with `autologin: true` adds the `login` claim and the link
+lives 120 s. The session row records `autologin = true`; the task comment says the person was signed in by OpsAPI.
+
+**Terminal** (`config.yaml`):
+
+```yaml
+opsapi:
+  autologin:
+    enabled: true
+    max_stepup_age_secs: 43200      # the step-up may be at most this old
+    users:                          # OpsAPI email -> terminal user (must have an authorized key with local access)
+      "alice@example.com": alice
+```
+
+`POST /api/launch/login {ticket}` (no login cookie needed; Origin checked; rate-limited and lock-out tracked like
+SSH sign-in) verifies the ticket exactly like `/api/launch`, then also: `login` is present; `exp - iat ≤ 120`;
+auto sign-in is on; the email (any case) is mapped; that terminal user has an authorized key allowing `local`;
+`stepup ≤ iat` and `now - stepup ≤ max_stepup_age_secs`. It signs the person in as that user **through that
+key** (its fingerprint), so revoking the key still ends the login. Each launch id can sign someone in **once**
+(a second try → 409 `already_used`). Audit `auth_success` with `via=opsapi_launch`, the OpsAPI email and user.
+Then the page calls `/api/launch` with the same ticket as usual. Errors: `autologin_off`, `autologin_not_allowed`,
+`stepup_stale`, plus the §3 ones; the page then shows the normal SSH sign-in screen with the task waiting.
+
+## 9. Reporting back and finishing (W8)
+
+Every launch gets a random report token (only its SHA-256 is stored, on `ar_terminal_sessions.report_token_hash`;
+good for 7 days). The terminal puts `report.url` / `report.token` into the shell as `OPSAPI_REPORT_URL` /
+`OPSAPI_REPORT_TOKEN`; the prompt tells the agent to call it once the pull request is open:
+
+```
+POST /api/v2/ai-runner/public/terminal/report
+Authorization: Bearer $OPSAPI_REPORT_TOKEN
+{ "pr_url": "https://github.com/o/r/pull/12", "note": "optional summary" }
+```
+
+OpsAPI attaches the PR to the task (`ar_task_prs`, once per URL), comments, and applies
+`task_automation.on_pr_open` (default: status `review`, column "Review"). The PR poll (§29.7 of `AI_RUNNER.md`)
+then applies `task_automation.on_pr_merged` (default: status `completed`, column "Done") when GitHub says it
+merged. Both are workspace AI run settings and can be switched off. The token can only attach PRs and notes to
+its own task.
+
+**Unattended agents.** The default agents include `claude_auto` ("Claude Code, unattended"):
+`claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"`. It never stops to ask; this is only acceptable
+because the terminal runs under its own macOS account (W1). Leave it out of a terminal's config to forbid it.

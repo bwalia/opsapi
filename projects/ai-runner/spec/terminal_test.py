@@ -5,7 +5,9 @@ Run by run.sh (AR_API, AR_JWT_SECRET, AR_PSQL, AR_MIGRATE). Standard library onl
 Start dialog's offer (terminals, remembered folders, the prompt); launching (who may, folder / agent / prompt checks,
 the signed ticket and its claims, the folder remembered, no comment); the webhook (unknown launch, bad signature,
 stale time, start and end once each, another workspace's secret, a rotated secret); expired links; isolation between
-workspaces; the migration run again.
+workspaces; auto sign-in (§8: the permission, the terminal switch, the emailed-code step-up, the login claim and the
+2-minute link); agents reporting their pull request (§9: the token, the task moved to Review, once per URL); the
+migrations run again.
 """
 import base64
 import hashlib
@@ -160,8 +162,9 @@ created = expect("manager adds a terminal", call("POST", P + "/terminals", "mgr"
 TERM, SEC = created["terminal"], created["secret"]
 check("secret: 64 hex characters, shown once", len(SEC) == 64 and all(c in "0123456789abcdef" for c in SEC), SEC[:6])
 check("address stored without the trailing slash", TERM["url"] == "https://term.example.invalid", TERM)
-check("default agents: Claude Code, Codex, Cursor, Just a terminal",
-      [a["id"] for a in TERM["agents"]] == ["claude", "codex", "cursor", "shell"], TERM["agents"])
+check("default agents: Claude Code, unattended, Codex, Cursor, Just a terminal",
+      [a["id"] for a in TERM["agents"]] == ["claude", "claude_auto", "codex", "cursor", "shell"], TERM["agents"])
+check("auto sign-in is off for a new terminal", TERM["autologin"] is False, TERM)
 check("hint is the secret's last 4", TERM["secret_hint"] == "…" + SEC[-4:], TERM)
 listed = expect("manager lists terminals", call("GET", P + "/terminals", "mgr", W), 200)
 check("the secret is never listed", SEC not in json.dumps(listed) and len(listed) == 1, listed)
@@ -270,7 +273,7 @@ expect("other workspace's secret is refused", webhook(ev2, TX["secret"]), 401)
 
 # Rotating the secret: the old one stops working at once.
 rot = expect("rotate the secret", call("POST", P + f"/terminals/{TERM['uuid']}/rotate-secret", "mgr", W), 200)
-NEW = rot["secret"]
+NEW = SEC2 = rot["secret"]
 check("a new secret", NEW != SEC and len(NEW) == 64)
 expect("old secret refused", webhook(ev2, SEC), 401)
 expect("new secret accepted", webhook(ev2, NEW), 200)
@@ -287,6 +290,113 @@ listed = expect("task's terminal sessions", call("GET", L, "dev2", W), 200)
 check("same list on its own endpoint", {s["uuid"] for s in listed} == set(by_id))
 expect("other workspace can't read them", call("GET", L, "owner_b", X), 404)
 
+# --- Auto sign-in (§8) ----------------------------------------------------------------------------------------
+A = P + "/terminal-autologin"
+check("dev may not be signed in automatically",
+      expect("dev asks", call("GET", A, "dev", W), 200) == {"allowed": False, "stepup": None})
+expect("dev can't ask for a code", call("POST", A + "/code", "dev", W), 403)
+expect("dev can't launch with auto sign-in", call("POST", L, "dev", W, dict(good, autologin=True)), 403)
+check("the owner may", expect("owner asks", call("GET", A, "owner_a", W), 200) == {"allowed": True, "stepup": None})
+expect("auto sign-in refused on a terminal that doesn't allow it",
+       call("POST", L, "owner_a", W, dict(good, autologin=True)), 409)
+on = expect("manager allows auto sign-in", call("PUT", P + f"/terminals/{TERM['uuid']}", "mgr", W,
+                                                 {"autologin": True}), 200)
+check("…saved", on["autologin"] is True, on)
+pv5 = expect("preview shows it", call("POST", P + f"/tasks/{T1['uuid']}/runs/preview", "owner_a", W, {}), 200)
+check("offer says the terminal allows auto sign-in", pv5["terminals"][0]["autologin"] is True, pv5["terminals"])
+nostep = call("POST", L, "owner_a", W, dict(good, autologin=True))
+check("no step-up yet: 403 stepup_required", nostep[0] == 403 and (nostep[1] or {}).get("code") == "stepup_required",
+      nostep)
+expect("owner asks for a code", call("POST", A + "/code", "owner_a", W), 200)
+code = one(f"""SELECT o.peek_code FROM admin_otp_codes o JOIN users u ON u.id = o.user_id
+    WHERE u.uuid = '{USERS['owner_a'][0]}' ORDER BY o.id DESC LIMIT 1""")
+check("a code was made for the owner", code is not None and len(code) == 6, code)
+wrong = "000000" if code != "000000" else "111111"
+expect("a wrong code", call("POST", A + "/verify", "owner_a", W, {"code": wrong}), 401)
+vs = expect("the right code", call("POST", A + "/verify", "owner_a", W, {"code": code}), 200)
+st = vs.get("stepup") or {}
+check("step-up remembered for 12 hours", st.get("expires_at", 0) - st.get("verified_at", 0) == 43200, vs)
+expect("the same code doesn't work twice", call("POST", A + "/verify", "owner_a", W, {"code": code}), 401)
+check("…and is still remembered", (expect("owner asks again", call("GET", A, "owner_a", W), 200).get("stepup")
+                                   or {}).get("verified_at") == st.get("verified_at"))
+check("the step-up is per workspace", expect("other workspace", call("GET", A, "owner_b", X), 200)["stepup"] is None)
+sql(f"UPDATE users SET email = 'renamed.a@ar.invalid' WHERE uuid = '{USERS['owner_a'][0]}'")
+check("a step-up is void once the account's email changes",
+      expect("owner asks after an email change", call("GET", A, "owner_a", W), 200)["stepup"] is None)
+sql(f"UPDATE users SET email = '{USERS['owner_a'][1]}' WHERE uuid = '{USERS['owner_a'][0]}'")
+auto = expect("owner launches with auto sign-in", call("POST", L, "owner_a", W, dict(good, autologin=True)), 201)
+ac = verify_ticket(auto["launch_url"].split("#launch=", 1)[1], SEC2) or {}
+check("login claim: email, user, step-up time", ac.get("login") == {"email": USERS["owner_a"][1],
+      "user": USERS["owner_a"][0], "stepup": st.get("verified_at")}, ac.get("login"))
+check("2-minute link", ac.get("exp", 0) - ac.get("iat", 0) == 120, ac)
+check("session marked as auto sign-in", auto["session"]["autologin"] is True, auto["session"])
+rep_ = ac.get("report") or {}
+check("report claim: the report address and a token",
+      rep_.get("url", "").endswith("/api/v2/ai-runner/public/terminal/report")
+      and len(rep_.get("token", "")) == 43, rep_)
+stored = one(f"SELECT report_token_hash FROM ar_terminal_sessions WHERE uuid = '{auto['session']['uuid']}'")
+check("only the token's SHA-256 is stored", stored == hashlib.sha256(rep_.get("token", "").encode()).hexdigest()
+      and rep_.get("token", "-") not in json.dumps(auto), stored)
+plain = expect("dev launches normally", call("POST", L, "dev", W, good), 201)
+pc = verify_ticket(plain["launch_url"].split("#launch=", 1)[1], SEC2) or {}
+check("no login claim, 15-minute link, still a report token", "login" not in pc
+      and pc.get("exp", 0) - pc.get("iat", 0) == 900 and len((pc.get("report") or {}).get("token", "")) == 43, pc)
+check("the prompt tells the agent how to report", "OPSAPI_REPORT_URL" in pc.get("prompt", "")
+      and "OPSAPI_REPORT_TOKEN" in pc.get("prompt", "") and pc.get("report", {}).get("token", "-")
+      not in pc.get("prompt", ""), pc.get("prompt"))
+expect("forget the step-up", call("DELETE", A, "owner_a", W), 200)
+expect("…then auto sign-in needs a code again", call("POST", L, "owner_a", W, dict(good, autologin=True)), 403)
+sql(f"""INSERT INTO ar_terminal_stepups (namespace_id, user_uuid, email, verified_at, expires_at)
+    SELECT id, '{USERS['owner_a'][0]}', '{USERS['owner_a'][1]}', NOW() - interval '13 hours', NOW() - interval '1 hour'
+    FROM namespaces
+    WHERE uuid::text = '{W}' OR id::text = '{W}'""")
+expect("an expired step-up doesn't count", call("POST", L, "owner_a", W, dict(good, autologin=True)), 403)
+
+# --- Agents report their pull request (§9) --------------------------------------------------------------------
+R_ = P + "/public/terminal/report"
+TOK = rep_.get("token", "")
+
+
+def report(body, token=TOK):
+    return call("POST", R_, raw=json.dumps(body).encode(),
+                headers={"Authorization": "Bearer " + token} if token is not None else {})
+
+
+expect("no token", report({"pr_url": "https://github.com/acme/web/pull/7"}, token=None), 401)
+expect("unknown token", report({"pr_url": "https://github.com/acme/web/pull/7"}, token="x" * 43), 401)
+expect("not a pull request URL", report({"pr_url": "https://evil.invalid/acme/web/pull/7"}), 422)
+expect("nothing to report", report({}), 422)
+TS = lambda: one(f"SELECT status FROM kanban_tasks WHERE uuid = '{T1['uuid']}'")
+check("task not in review yet", TS() != "review", TS())
+r1 = expect("agent reports its PR", report({"pr_url": "https://github.com/acme/web/pull/7/", "note": "Sticky header."}),
+            200)
+check("PR attached to the task: repo, number, open", (r1.get("pr") or {}).get("repo") == "acme/web"
+      and r1["pr"].get("pr_number") == 7 and r1["pr"].get("state") == "open"
+      and r1["pr"].get("pr_url") == "https://github.com/acme/web/pull/7" and r1.get("task_uuid") == T1["uuid"], r1)
+check("task moved to review (on_pr_open default)", TS() == "review", TS())
+check("one comment with the PR and the note",
+      comments(T1["uuid"], "%opened a pull request from the web terminal: https://github.com/acme/web/pull/7%"
+               "Sticky header.%") == 1)
+expect("the same PR again", report({"pr_url": "https://github.com/acme/web/pull/7"}), 200)
+check("…attached once, no second comment", int(one(f"""SELECT COUNT(*) FROM ar_task_prs
+    WHERE task_uuid = '{T1['uuid']}' AND pr_url = 'https://github.com/acme/web/pull/7'""")) == 1
+      and comments(T1["uuid"], "%opened a pull request from the web terminal%") == 1)
+expect("a note on its own", report({"note": "Tests pass."}), 200)
+check("…posted as a comment", comments(T1["uuid"], "%: Tests pass.") == 1)
+prs = expect("the task's PRs", call("GET", P + f"/tasks/{T1['uuid']}/prs", "dev2", W), 200)
+check("listed with the task's PRs, ready for sign-off", any(p["pr_url"] == "https://github.com/acme/web/pull/7"
+      and p["review_status"] == "pending" for p in prs), prs)
+sql(f"UPDATE ar_terminal_sessions SET created_at = NOW() - interval '8 days' WHERE uuid = '{auto['session']['uuid']}'")
+expect("a week-old token stops working", report({"note": "late"}), 401)
+s_ = expect("settings", call("GET", P + "/settings", "owner_a", W), 200)["task_automation"]
+check("defaults: Review when a PR opens, Done when it merges",
+      s_.get("on_pr_open") == {"enabled": True, "status": "review", "column": "Review"}
+      and s_.get("on_pr_merged") == {"enabled": True, "status": "completed", "column": "Done"}, s_)
+saved = expect("switch off the merge move", call("PUT", P + "/settings", "owner_a", W,
+                                                 {"task_automation": {"on_pr_merged": {"enabled": False}}}), 200)
+check("…saved, the rest kept", saved["task_automation"]["on_pr_merged"]["enabled"] is False
+      and saved["task_automation"]["on_pr_open"]["enabled"] is True, saved["task_automation"])
+
 # --- Switch off, delete -------------------------------------------------------------------------------------
 expect("switch the terminal off", call("PUT", P + f"/terminals/{TERM['uuid']}", "mgr", W, {"is_active": False}), 200)
 pv4 = expect("preview with it off", call("POST", P + f"/tasks/{T1['uuid']}/runs/preview", "dev", W, {}), 200)
@@ -294,16 +404,18 @@ check("not offered, no terminal prompt", pv4.get("terminals") == [] and pv4.get(
 expect("can't launch on it", call("POST", L, "dev", W, good), 404)
 expect("delete it", call("DELETE", P + f"/terminals/{TERM['uuid']}", "mgr", W), 200)
 listed = expect("sessions after delete", call("GET", L, "dev", W), 200)
-check("its sessions stay on the task", len(listed) == 3 and all(s["terminal_name"] is None for s in listed), listed)
+check("its sessions stay on the task", len(listed) == 5 and all(s["terminal_name"] is None for s in listed), listed)
 expect("webhook for a deleted terminal's launch", webhook(dict(ev2, ts=int(time.time())), NEW), 404)
 
-MIG = "20261023120000_ai_runner_web_terminals"
-if MIGRATE:
+for MIG, table in (("20261023120000_ai_runner_web_terminals", "ar_terminals"),
+                   ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups")):
+    if not MIGRATE:
+        break
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG}'")
     out = subprocess.run(shlex.split(MIGRATE), capture_output=True, text=True)
-    check("web terminals migration re-runs idempotently", out.returncode == 0
+    check(f"{MIG} re-runs idempotently", out.returncode == 0
           and f"{MIG}: running" in (out.stdout + out.stderr)
-          and one("SELECT to_regclass('ar_terminals')") == "ar_terminals", (out.stdout + out.stderr)[-400:])
+          and one(f"SELECT to_regclass('{table}')") == table, (out.stdout + out.stderr)[-400:])
 
 print()
 print("FAILED: %d" % failures if failures else "ALL PASSED")

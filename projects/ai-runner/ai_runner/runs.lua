@@ -285,7 +285,10 @@ R.SETTINGS_DEFAULTS = {
     -- booleans mirror `enabled`, and rows saved before these objects are read through them.
     task_automation = { in_progress_on_start = false, review_on_success = false,
         on_start = { enabled = false, status = "in_progress", column = "In Progress" },
-        on_success = { enabled = false, status = "review", column = "Review" } },
+        on_success = { enabled = false, status = "review", column = "Review" },
+        -- Web terminal docs §9: when a pull request is reported for the task, and when GitHub says one merged.
+        on_pr_open = { enabled = true, status = "review", column = "Review" },
+        on_pr_merged = { enabled = true, status = "completed", column = "Done" } },
     approval_policy = { deciders = "managers", require_start_approval = false, permission_timeout_minutes = 30,
         input_timeout_minutes = 60, project_admins_decide = false },
     -- §24.1. Caps and the token limit: 0 = none.
@@ -308,7 +311,8 @@ end
 -- §27.4: the on_start / on_success objects, whole, from what is stored (old rows: the two booleans).
 local function automation(stored, d)
     stored = type(stored) == "table" and stored or {}
-    local out = { on_start = merged(stored.on_start, d.on_start), on_success = merged(stored.on_success, d.on_success) }
+    local out = { on_start = merged(stored.on_start, d.on_start), on_success = merged(stored.on_success, d.on_success),
+        on_pr_open = merged(stored.on_pr_open, d.on_pr_open), on_pr_merged = merged(stored.on_pr_merged, d.on_pr_merged) }
     if type(stored.on_start) ~= "table" then out.on_start.enabled = stored.in_progress_on_start == true end
     if type(stored.on_success) ~= "table" then out.on_success.enabled = stored.review_on_success == true end
     out.in_progress_on_start, out.review_on_success = out.on_start.enabled == true, out.on_success.enabled == true
@@ -897,12 +901,16 @@ function R.create(self, ns, task, inp)
     return res
 end
 
---- Task automation (§27.4 on_start, or on_success) for a run's task. Never fails the caller.
-function R.automate(run, which)
-    local a = R.settings(run.namespace_id).task_automation[which]
-    if type(a) == "table" and a.enabled == true and type(a.status) == "string" then
-        R.move_task(run.task_uuid, a.status, a.column)
+--- Task automation (§27.4 on_start / on_success; on_pr_open / on_pr_merged) for a task. Never fails the caller.
+function R.automate_task(ns, task_uuid, which)
+    local ok, a = pcall(function() return R.settings(ns).task_automation[which] end)
+    if ok and type(a) == "table" and a.enabled == true and type(a.status) == "string" then
+        R.move_task(task_uuid, a.status, a.column)
     end
+end
+
+function R.automate(run, which)
+    R.automate_task(run.namespace_id, run.task_uuid, which)
 end
 
 --- Task automation when a run enters the queue (at start, or when a manager approves it); a built-in run (§28)

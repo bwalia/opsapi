@@ -16,12 +16,14 @@ import { CopyBlock, PRODUCT, opsapiUrl, useAiData } from './ui';
 // What the terminal runs for the default agents; the terminal's own config decides (shown in the config block).
 const RUN_LINES: Record<string, string> = {
   claude: 'claude "$OPSAPI_TASK_PROMPT"',
+  // Never stops to ask: only acceptable because the terminal runs under its own macOS account.
+  claude_auto: 'claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"',
   codex: 'codex "$OPSAPI_TASK_PROMPT"',
   cursor: 'cursor-agent "$OPSAPI_TASK_PROMPT"',
 };
 
 /** The block to paste into the terminal's config.yaml. */
-function configBlock(secret: string, agents: TerminalAgent[]): string {
+function configBlock(secret: string, agents: TerminalAgent[], autologin: boolean): string {
   const lines = [
     "# Paste into the terminal's config.yaml (sshweb), then restart it.",
     'opsapi:',
@@ -34,6 +36,17 @@ function configBlock(secret: string, agents: TerminalAgent[]): string {
       `    - id: ${a.id}`,
       `      name: ${JSON.stringify(a.label)}`,
       `      run: ${JSON.stringify(RUN_LINES[a.id] || `${a.id} "$OPSAPI_TASK_PROMPT"`)}`,
+    );
+  }
+  if (autologin) {
+    lines.push(
+      '  # Auto sign-in from Start with AI (docs §8): only these OpsAPI emails, as these terminal users',
+      '  # (each needs an authorized key with local access).',
+      '  autologin:',
+      '    enabled: true',
+      '    max_stepup_age_secs: 43200',
+      '    users:',
+      '      "you@example.com": you',
     );
   }
   lines.push(
@@ -65,7 +78,7 @@ function SecretModal({ shown, onClose }: { shown: Shown | null; onClose: () => v
           On the machine that runs the terminal, add this to its <code className="font-mono">config.yaml</code> and
           restart it:
         </p>
-        <CopyBlock what="Config" text={configBlock(shown.secret, shown.terminal.agents)} testId="air-terminal-config" />
+        <CopyBlock what="Config" text={configBlock(shown.secret, shown.terminal.agents, shown.terminal.autologin)} testId="air-terminal-config" />
         <p className="text-xs text-secondary-500">
           Change <code className="font-mono">allowed_roots</code> to the folders people may open, and the
           <code className="font-mono"> run</code> lines to how each agent starts on that machine. The task text reaches
@@ -89,6 +102,7 @@ function EditModal({
   const [name, setName] = useState(isNew ? '' : terminal.name);
   const [url, setUrl] = useState(isNew ? 'https://' : terminal.url);
   const [agents, setAgents] = useState<TerminalAgent[]>(isNew ? [] : terminal.agents);
+  const [autologin, setAutologin] = useState(isNew ? false : terminal.autologin);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,7 +110,7 @@ function EditModal({
     setBusy(true);
     setError(null);
     try {
-      const body = { name: name.trim(), url: url.trim(), ...(isNew ? {} : { agents }) };
+      const body = { name: name.trim(), url: url.trim(), autologin, ...(isNew ? {} : { agents }) };
       if (isNew) {
         const res = await aiRunner.addTerminal(body);
         onSaved(res.terminal, res.secret);
@@ -149,6 +163,16 @@ function EditModal({
           className="font-mono"
           helperText="Where people open the terminal in their browser."
         />
+        <label className="flex items-start gap-2 text-sm text-secondary-800">
+          <input type="checkbox" className="mt-0.5" checked={autologin} onChange={(e) => setAutologin(e.target.checked)} />
+          <span>
+            Let power users be signed in automatically
+            <span className="block text-xs text-secondary-500">
+              People with &quot;Web terminal auto sign-in&quot; skip the SSH key after confirming an emailed code (every 12
+              hours). The terminal&apos;s own <code className="font-mono">autologin.users</code> list must also name them.
+            </span>
+          </span>
+        </label>
         {!isNew && (
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-secondary-700">Agents people can start</legend>
@@ -279,6 +303,11 @@ export function WebTerminals() {
                 <Badge size="sm" variant={t.is_active ? 'success' : 'secondary'}>
                   {t.is_active ? 'On' : 'Off'}
                 </Badge>
+                {t.autologin && (
+                  <Badge size="sm" variant="info">
+                    Auto sign-in
+                  </Badge>
+                )}
               </p>
               <p className="truncate font-mono text-xs text-secondary-500">{t.url}</p>
               <p className="text-xs text-secondary-500">

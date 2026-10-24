@@ -20,12 +20,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, CopyCheck, ExternalLink, ShieldCheck, Terminal } from 'lucide-react';
+import { AlertTriangle, Bot, CopyCheck, ExternalLink, KeyRound, ShieldCheck, Terminal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
-  aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun, type TerminalOffer,
+  aiRunner, aiError, type Conflicts, type Limits, type Preview, type Runner, type SimilarRun, type TerminalAutologin,
+  type TerminalOffer,
 } from '@/services/ai-runner.service';
 import { BASE, ago, compact, outputModeLabel, runStatusLabel, useAiRunnerOn, when } from './ui';
 
@@ -116,8 +117,11 @@ function startConflictText(conflict: unknown): string | null {
 }
 
 type Mode = 'terminal' | 'run';
-/** The first agent that runs something (not "just a terminal"), else the first one. */
-const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id !== 'shell')?.id || t?.agents[0]?.id || '';
+/** Unattended Claude Code when offered (it finishes without stopping to ask), else the first agent that runs
+ * something (not "just a terminal"), else the first one. */
+const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id === 'claude_auto')?.id
+  || t?.agents.find((a) => a.id !== 'shell')?.id || t?.agents[0]?.id || '';
+const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialMode }: TaskRef & {
   open: boolean; onClose: () => void; initialMode?: Mode;
@@ -154,8 +158,17 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   const termPrompt =
     termPromptEdited ?? termPromptTpl.replace(/\{\{\s*repo_path\s*\}\}/g, folder.trim() || 'the folder you choose');
   const [launchUrl, setLaunchUrl] = useState<string | null>(null);
+  // Auto sign-in (docs/AI_RUNNER_WEB_TERMINAL.md §8): power users, on a terminal that allows it, after an emailed code.
+  const [auto, setAuto] = useState<TerminalAutologin>({ allowed: false, stepup: null });
+  const [signMeIn, setSignMeIn] = useState(true);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
   const live = useRef(0);
   const terminal = terminals.find((t) => t.uuid === termUuid);
+  const stepupLive = !!auto.stepup && auto.stepup.expires_at * 1000 > Date.now();
+  const autoOffered = !!terminal?.autologin && auto.allowed;
+  const autologin = autoOffered && signMeIn;
 
   const runner = runners.find((r) => r.uuid === runnerUuid);
   const profiles = runner?.capabilities?.profiles || [];
@@ -216,7 +229,12 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
         setTermPromptTpl(first.terminal_prompt || '');
         setTermPromptEdited(null);
         setLaunchUrl(null);
+        setCodeSent(false);
+        setCode('');
         setMode(initialMode || (offers.length ? 'terminal' : 'run'));
+        if (offers.some((t) => t.autologin)) {
+          aiRunner.terminalAutologin().then((a) => { if (id === live.current && a) setAuto(a); }).catch(() => {});
+        }
         const r = list.find(usable);
         const p = firstProfile(r);
         setRunners(list);
@@ -293,7 +311,43 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   }
 
   const folderOk = folder.trim().startsWith('/');
-  const launchBlocked = !terminal || !folderOk || !agent;
+  const launchBlocked = !terminal || !folderOk || !agent || (autologin && !stepupLive);
+
+  async function sendCode() {
+    setCodeBusy(true);
+    setError(null);
+    try {
+      await aiRunner.sendAutologinCode();
+      setCodeSent(true);
+      toast.success('We emailed you a code');
+    } catch (e) {
+      setError(aiError(e).message);
+    } finally {
+      setCodeBusy(false);
+    }
+  }
+
+  async function confirmCode() {
+    setCodeBusy(true);
+    setError(null);
+    try {
+      setAuto(await aiRunner.verifyAutologinCode(code.trim()));
+      setCodeSent(false);
+      setCode('');
+    } catch (e) {
+      setError(aiError(e).message);
+    } finally {
+      setCodeBusy(false);
+    }
+  }
+
+  async function forgetCode() {
+    try {
+      setAuto(await aiRunner.forgetAutologin());
+    } catch (e) {
+      setError(aiError(e).message);
+    }
+  }
 
   async function doLaunch() {
     if (launchBlocked || !terminal) return;
@@ -309,6 +363,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
     try {
       const res = await aiRunner.launchTerminal(taskUuid, {
         terminal_uuid: terminal.uuid, path: folder.trim(), agent, prompt: termPrompt.trim() || undefined,
+        autologin: autologin || undefined,
       });
       if (win && !win.closed) {
         win.location.href = res.launch_url;
@@ -412,9 +467,46 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
                     onChange={(e) => setTermPromptEdited(e.target.value)} className="font-mono text-xs" spellCheck={false}
                     helperText="The task, ready for the agent. Change it if you like; you can keep talking to the agent in the terminal." />
                 )}
+                {autoOffered && (
+                  <div className="space-y-2 rounded-lg border border-secondary-200 p-3" data-testid="air-terminal-autologin">
+                    <label className="flex items-start gap-2 text-sm text-secondary-800">
+                      <input type="checkbox" className="mt-0.5" checked={signMeIn} onChange={(e) => setSignMeIn(e.target.checked)} />
+                      <span>
+                        Sign me in to {terminal?.name} automatically
+                        <span className="block text-xs text-secondary-500">
+                          No SSH key needed. The terminal must also list your email in its own settings.
+                        </span>
+                      </span>
+                    </label>
+                    {signMeIn && (stepupLive ? (
+                      <p className="flex flex-wrap items-center gap-2 text-xs text-success-700">
+                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Confirmed until {clock(auto.stepup!.expires_at)}.
+                        <button type="button" className="text-secondary-500 underline" onClick={forgetCode}>Sign out of this</button>
+                      </p>
+                    ) : codeSent ? (
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Input id="air-terminal-code" label="Code from the email" value={code} inputMode="numeric"
+                          autoComplete="one-time-code" maxLength={12} onChange={(e) => setCode(e.target.value)} className="w-40 font-mono" />
+                        <Button size="sm" onClick={confirmCode} isLoading={codeBusy} disabled={code.trim().length < 6}>Confirm</Button>
+                        <button type="button" className="pb-2 text-xs text-secondary-500 underline" onClick={sendCode}
+                          disabled={codeBusy}>Send another</button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={sendCode} isLoading={codeBusy}
+                          leftIcon={<KeyRound className="h-4 w-4" aria-hidden />}>Email me a code</Button>
+                        <span className="text-xs text-secondary-500">Once every 12 hours, so a stolen password alone can&apos;t open a shell.</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <p className="text-xs text-secondary-500">
-                  Opens {terminal?.url} in a new tab. If it asks, sign in with your SSH key; the terminal then opens the folder and
-                  starts the agent. The link works once, for 15 minutes.
+                  {autologin
+                    ? <>Opens {terminal?.url} in a new tab and signs you in; the terminal then opens the folder and starts the agent.
+                      When the agent opens a pull request, the task moves to Review, and to Done when it merges. The link works
+                      once, for 2 minutes.</>
+                    : <>Opens {terminal?.url} in a new tab. If it asks, sign in with your SSH key; the terminal then opens the folder
+                      and starts the agent. The link works once, for 15 minutes.</>}
                 </p>
                 {launchUrl && (
                   <p className="rounded-lg bg-warning-500/10 p-3 text-sm text-warning-800" role="status">

@@ -562,6 +562,9 @@ check("can't start on a paused runner (409)", res[0] == 409 and res[1]["conflict
 expect("resume", call("POST", P + f"/runners/{RUNNER}/resume", "mgr", A), 200)
 
 # --- Task automation, then pause -> 204 with a queued run ------------------------------------------------------------
+# Web terminal §9 defaults, kept whatever on_start / on_success do.
+PR_MOVES = {"on_pr_open": {"enabled": True, "status": "review", "column": "Review"},
+            "on_pr_merged": {"enabled": True, "status": "completed", "column": "Done"}}
 expect("developer can't change settings", call("PUT", P + "/settings", "dev", A, {"pr_draft": False}), 403)
 s = expect("turn on task automation", call("PUT", P + "/settings", "mgr", A,
                                            {"task_automation": {"in_progress_on_start": True,
@@ -569,7 +572,8 @@ s = expect("turn on task automation", call("PUT", P + "/settings", "mgr", A,
 check("settings saved with defaults kept (the booleans switch on_start / on_success on, §27.4)",
       s.get("task_automation") == {"in_progress_on_start": True, "review_on_success": True,
                                    "on_start": {"enabled": True, "status": "in_progress", "column": "In Progress"},
-                                   "on_success": {"enabled": True, "status": "review", "column": "Review"}}
+                                   "on_success": {"enabled": True, "status": "review", "column": "Review"},
+                                   **PR_MOVES}
       and s["output_mode"] == "pull_request" and s["approval_policy"]["deciders"] == "managers", s)
 expect("bad setting (422)", call("PUT", P + "/settings", "mgr", A, {"max_run_minutes": 0}), 422)
 R5 = expect("assignee starts T5", start("dev", T5, "/repos/eps"), 201)
@@ -2589,7 +2593,7 @@ ta = expect("on start: blocked, in Review; on success: completed, column unchang
 check("saved; the old booleans mirror them", ta == {
     "in_progress_on_start": True, "review_on_success": True,
     "on_start": {"enabled": True, "status": "blocked", "column": "review"},
-    "on_success": {"enabled": True, "status": "completed", "column": None}}, ta)
+    "on_success": {"enabled": True, "status": "completed", "column": None}, **PR_MOVES}, ta)
 hb_c()
 TA = task("Automate with columns " + TAG, "low")
 RA = expect("start a run on it", call("POST", P + f"/tasks/{TA['uuid']}/runs", "mgr", A, {
@@ -2608,7 +2612,7 @@ ta = expect("settings", call("GET", P + "/settings", "mgr", A), 200)["task_autom
 check("a row saved before §27 reads as before: in progress in the In Progress column; nothing on success",
       ta == {"in_progress_on_start": True, "review_on_success": False,
              "on_start": {"enabled": True, "status": "in_progress", "column": "In Progress"},
-             "on_success": {"enabled": False, "status": "review", "column": "Review"}}, ta)
+             "on_success": {"enabled": False, "status": "review", "column": "Review"}, **PR_MOVES}, ta)
 expect("automation off again", put_s({"task_automation": {"on_start": None, "on_success": None}}), 200)
 
 # Safety additions: extra redactions (server) and extra denied commands (runners, and the server's backstop).

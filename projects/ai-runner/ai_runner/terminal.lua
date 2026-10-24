@@ -14,8 +14,13 @@ T.PURPOSE = "ai_runner_terminal"   -- secret-box purpose of the shared secret
 T.LINK_TTL = 900                   -- a launch link works for 15 minutes (the contract allows up to 3600)
 T.MAX_PROMPT = 8000                -- bytes, so the ticket stays well inside the terminal's 32 KiB body limit
 T.CLOCK_SKEW = 300                 -- webhook `ts` may be this far from now
+T.AUTOLOGIN_TTL = 120              -- a link that signs someone in works for 2 minutes (§8)
+T.STEPUP_TTL = 43200               -- an emailed-code step-up is remembered for 12 hours (§8)
+T.REPORT_TTL = 7 * 86400           -- an agent may report its pull request for a week after the launch (§9)
+T.AUTOLOGIN_PERMISSION = { "ai_terminal_autologin", "create" }
 T.DEFAULT_AGENTS = {
     { id = "claude", label = "Claude Code" },
+    { id = "claude_auto", label = "Claude Code (unattended)" },
     { id = "codex", label = "Codex" },
     { id = "cursor", label = "Cursor" },
     { id = "shell", label = "Just a terminal" },
@@ -23,6 +28,8 @@ T.DEFAULT_AGENTS = {
 -- What the terminal's config runs for each default agent (shown in the config block; the terminal decides).
 T.RUN_LINES = {
     claude = 'claude "$OPSAPI_TASK_PROMPT"',
+    -- Never stops to ask: acceptable only because the terminal runs under its own macOS account (W1).
+    claude_auto = 'claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"',
     codex = 'codex "$OPSAPI_TASK_PROMPT"',
     cursor = 'cursor-agent "$OPSAPI_TASK_PROMPT"',
 }
@@ -88,7 +95,7 @@ T.agents = agents
 function T.view(row)
     return {
         uuid = row.uuid, name = row.name, url = row.url, agents = U.array(agents(row)),
-        is_active = row.is_active == true, secret_hint = U.null(row.secret_hint),
+        is_active = row.is_active == true, autologin = row.autologin == true, secret_hint = U.null(row.secret_hint),
         created_by = U.null(row.created_by), created_at = row.created_at, updated_at = row.updated_at,
     }
 end
@@ -140,13 +147,16 @@ function T.offer(ns, task, ps)
     for i, t in ipairs(T.list(ns, true)) do
         local paths = T.paths(ns, task.project_uuid, t.uuid, ps)
         out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = U.array(agents(t)),
-            default_path = U.null(paths[1]), recent_paths = U.array(paths) }
+            autologin = t.autologin == true, default_path = U.null(paths[1]), recent_paths = U.array(paths) }
     end
     return U.array(out)
 end
 
 local TERMINAL_OUTPUT = "commit your work on that branch, push it and open a pull request to the base branch "
-    .. "(never merge). The person who opened this terminal is watching: tell them when you are done."
+    .. "(never merge). Then report the pull request to OpsAPI so the task moves on (only if OPSAPI_REPORT_URL is "
+    .. "set): curl -fsS -X POST \"$OPSAPI_REPORT_URL\" -H \"Authorization: Bearer $OPSAPI_REPORT_TOKEN\" "
+    .. "-H 'Content-Type: application/json' -d '{\"pr_url\":\"<the pull request URL>\",\"note\":\"<one line on "
+    .. "what you did>\"}'. The person who opened this terminal may be watching: tell them when you are done."
 
 --- The task prompt for an agent in a terminal: the workspace template. `{{repo_path}}` is left in: the dialog shows
 -- the folder being typed there, and the launch fills in the folder actually chosen (T.with_folder).
@@ -180,28 +190,118 @@ local function return_url(task)
     if u:match("^https://") or u:match("^http://localhost[:/]") or u:match("^http://127%.0%.0%.1[:/]") then return u end
 end
 
+-- ---------------------------------------------------------------------------
+-- Auto sign-in step-up (§8)
+-- ---------------------------------------------------------------------------
+
+--- The person's live step-up in this workspace: { verified_at (unix), expires_at (unix) } or nil. It holds only for
+-- the email the code went to: if the account's email changes, the person confirms a code again.
+function T.stepup(ns, user_uuid)
+    return U.one([[SELECT EXTRACT(EPOCH FROM s.verified_at)::bigint AS verified_at,
+        EXTRACT(EPOCH FROM s.expires_at)::bigint AS expires_at FROM ar_terminal_stepups s
+        JOIN users u ON u.uuid = s.user_uuid AND lower(u.email) = s.email
+        WHERE s.namespace_id = ? AND s.user_uuid = ? AND s.expires_at > NOW()]], ns, user_uuid)
+end
+
+local function account(user_uuid)
+    return U.one("SELECT id, uuid, email, first_name FROM users WHERE uuid = ?", user_uuid)
+end
+
+--- Email the person a sign-in code for the step-up. @return true | nil, http status, message
+function T.send_stepup_code(user_uuid)
+    local u = account(user_uuid)
+    if not u or not u.email or u.email == "" then return nil, 422, "Your account has no email address" end
+    local ok, err = require("helper.otp").sendToEmail({ id = u.id, email = u.email, first_name = u.first_name },
+        { app_name = "OpsAPI web terminal" })
+    if err == "rate_limited" then return nil, 429, "Too many codes requested. Try again in a few minutes." end
+    if not ok then return nil, 502, "The code could not be sent. Try again." end
+    return true
+end
+
+--- Check the emailed code and remember the step-up. @return stepup | nil, http status, message
+function T.verify_stepup(ns, user_uuid, code)
+    local u = account(user_uuid)
+    if not u then return nil, 404, "User not found" end
+    local ok, err = require("helper.otp").verify(u.id, tostring(code or ""))
+    if not ok then return nil, 401, err or "Invalid code" end
+    db.query([[INSERT INTO ar_terminal_stepups (namespace_id, user_uuid, email, verified_at, expires_at)
+        VALUES (?, ?, lower(?), NOW(), NOW() + interval ']] .. T.STEPUP_TTL .. [[ seconds')
+        ON CONFLICT (namespace_id, user_uuid) DO UPDATE
+        SET email = EXCLUDED.email, verified_at = EXCLUDED.verified_at, expires_at = EXCLUDED.expires_at]],
+        ns, user_uuid, u.email)
+    return T.stepup(ns, user_uuid)
+end
+
+function T.forget_stepup(ns, user_uuid)
+    db.query("DELETE FROM ar_terminal_stepups WHERE namespace_id = ? AND user_uuid = ?", ns, user_uuid)
+end
+
+-- ---------------------------------------------------------------------------
+-- Launch
+-- ---------------------------------------------------------------------------
+
+local function sha256_hex(s)
+    local h = require("resty.sha256"):new()
+    h:update(s)
+    return require("resty.string").to_hex(h:final())
+end
+T.sha256_hex = sha256_hex
+
+--- A report token: 32 random bytes as base64url (43 characters). @return plain, sha256 hex
+local function report_token()
+    local bytes = require("resty.random").bytes(32, true)
+    if not bytes then error("ai_runner: no secure random bytes available") end
+    local plain = b64url(bytes)
+    return plain, sha256_hex(plain)
+end
+
 --- Record a launch and mint its link. inp = { terminal, path, agent (an entry of the terminal's agents), prompt,
--- by (display name), ws (workspace name) }. @return session row, launch_url
+-- by (display name), ws (workspace name), login ({ email, stepup } to sign the person in, §8),
+-- report_url (§9; nil: the agent can't report) }. @return session row, launch_url
 function T.launch(ns, task, user_uuid, inp)
     local secret = secret_of(inp.terminal)
     if not secret then
         U.fail(503, "This terminal's secret can't be read. Make a new one under Machines → Web terminals.")
     end
     local now = ngx.time()
+    local ttl = inp.login and T.AUTOLOGIN_TTL or T.LINK_TTL
+    local token, token_hash
+    if inp.report_url then token, token_hash = report_token() end
     local row = db.insert("ar_terminal_sessions", {
         namespace_id = ns, task_uuid = task.uuid, project_uuid = task.project_uuid, opened_by = user_uuid,
         terminal_url = inp.terminal.url, terminal_uuid = inp.terminal.uuid, path = inp.path,
         agent = inp.agent.id, agent_label = inp.agent.label, status = "launched",
-        expires_at = db.raw("NOW() + interval '" .. T.LINK_TTL .. " seconds'"),
+        autologin = inp.login ~= nil, report_token_hash = token_hash or db.NULL,
+        expires_at = db.raw("NOW() + interval '" .. ttl .. " seconds'"),
     }, { returning = "*" })[1]
     remember_path(ns, task.project_uuid, inp.terminal.uuid, inp.path)
     local claims = {
-        v = 1, id = row.uuid, iat = now, exp = now + T.LINK_TTL, task = task.uuid,
+        v = 1, id = row.uuid, iat = now, exp = now + ttl, task = task.uuid,
         num = tonumber(task.task_number), title = U.cut(U.clean(tostring(task.title or "")):gsub("[%c]+", " "), 200),
         path = inp.path, agent = inp.agent.id, prompt = inp.prompt, by = U.cut(inp.by or "", 120),
         ws = U.cut(inp.ws or "", 120), ["return"] = return_url(task),
+        login = inp.login and { email = inp.login.email, user = user_uuid, stepup = inp.login.stepup } or nil,
+        report = token and { url = inp.report_url, token = token } or nil,
     }
     return row, inp.terminal.url .. "/#launch=" .. T.ticket(secret, claims)
+end
+
+--- Where agents report (§9): OPSAPI_PUBLIC_URL, else the address this request came in on (its Host; the scheme may
+-- come from X-Forwarded-Proto). https only (or http on this machine, for development). @return url | nil
+function T.report_url()
+    local base = (os.getenv("OPSAPI_PUBLIC_URL") or ""):gsub("/+$", "")
+    if base == "" then
+        local h = ngx.req.get_headers()
+        local proto = h["x-forwarded-proto"]
+        if type(proto) == "table" then proto = proto[1] end
+        proto = type(proto) == "string" and proto:match("^%s*(https?)") or ngx.var.scheme
+        local host = ngx.var.http_host or ngx.var.host
+        if type(host) ~= "string" or not host:match("^[%w%.%-]+:?%d*$") then return nil end
+        base = proto .. "://" .. host
+    end
+    if not (base:match("^https://") or base:match("^http://localhost[:/]?") or base:match("^http://127%.0%.0%.1[:/]?"))
+    then return nil end
+    return base .. "/api/v2/ai-runner/public/terminal/report"
 end
 
 local SESSION_SQL = [[SELECT s.*, ]] .. R.name_sql("u") .. [[ AS opened_by_name, t.name AS terminal_name,
@@ -227,7 +327,8 @@ function T.session_view(s)
         terminal_uuid = U.null(s.terminal_uuid), terminal_name = U.null(s.terminal_name),
         terminal_url = s.terminal_url, path = U.null(s.path), agent = U.null(s.agent),
         agent_label = U.null(s.agent_label), terminal_user = U.null(s.terminal_user),
-        session_id = U.null(s.session_id), repo_url = U.null(s.repo_url),
+        session_id = U.null(s.session_id), repo_url = U.null(s.repo_url), autologin = s.autologin == true,
+        reported_at = U.null(s.reported_at),
         status = s.link_expired == true and "expired" or s.status,
         started_at = U.null(s.started_at), ended_at = U.null(s.ended_at), exit_code = U.null(s.exit_code),
         ended_reason = U.null(s.ended_reason), expires_at = U.null(s.expires_at),
@@ -286,7 +387,8 @@ function T.webhook(raw, signature)
             local where = s.terminal_name and (" (" .. s.terminal_name .. ")") or ""
             comment(s.task_uuid, s.namespace_id, s.opened_by, (s.opened_by_name or "Someone")
                 .. " started working on this in the web terminal" .. where .. ": " .. agent .. " in "
-                .. tostring(s.path or "their folder") .. ".")
+                .. tostring(s.path or "their folder")
+                .. (s.autologin == true and " (signed in to the terminal by OpsAPI)." or "."))
         end
     else
         local code = tonumber(payload.exit_code)
@@ -302,6 +404,65 @@ function T.webhook(raw, signature)
         end
     end
     return T.session_view(T.session(s.namespace_id, s.uuid))
+end
+
+-- ---------------------------------------------------------------------------
+-- Agent reports (§9)
+-- ---------------------------------------------------------------------------
+
+--- owner/repo and the number of a GitHub pull request URL (or GitLab merge request: no repo, no number polled).
+local function pr_parts(url)
+    local owner, repo, num = url:match("^https://github%.com/([%w%.%-_]+)/([%w%.%-_]+)/pull/(%d+)/?$")
+    if owner then return owner .. "/" .. repo, tonumber(num) end
+    if url:match("^https://[%w%.%-]+/.+/%-/merge_requests/%d+/?$") then return "", nil end
+end
+
+--- Apply an agent's report: body = { pr_url?, note? }. @return { task_uuid, pr? } | nil, http status, message
+function T.report(token, body)
+    if type(token) ~= "string" or not token:match("^[%w_%-]+$") or #token < 32 or #token > 128 then
+        return nil, 401, "Unauthorized"
+    end
+    local s = U.one([[SELECT * FROM ar_terminal_sessions WHERE report_token_hash = ?
+        AND created_at > NOW() - interval ']] .. T.REPORT_TTL .. [[ seconds']], sha256_hex(token))
+    if not s then return nil, 401, "Unauthorized" end
+    if type(body) ~= "table" then return nil, 400, "Invalid JSON" end
+    local pr_url = body.pr_url
+    if pr_url ~= nil and pr_url ~= cjson.null then
+        if type(pr_url) ~= "string" or #pr_url > 500 or not pr_parts(pr_url) then
+            return nil, 422, "pr_url must be a GitHub pull request (or GitLab merge request) URL"
+        end
+        pr_url = pr_url:gsub("/$", "")
+    else
+        pr_url = nil
+    end
+    local note = type(body.note) == "string" and U.clean(body.note, 1000) or nil
+    if note == "" then note = nil end
+    if not pr_url and not note then return nil, 422, "Send pr_url, note or both" end
+
+    local who = s.agent_label or s.agent or "The agent"
+    local out = { task_uuid = s.task_uuid }
+    if pr_url then
+        local repo, num = pr_parts(pr_url)
+        local row = U.one([[INSERT INTO ar_task_prs (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
+            VALUES (?, ?, ?, ?, ?, ?, 'open')
+            ON CONFLICT (namespace_id, task_uuid, pr_url) WHERE run_uuid IS NULL DO NOTHING RETURNING *]],
+            s.namespace_id, s.task_uuid, s.project_uuid, repo, pr_url, num or db.NULL)
+        if row then
+            comment(s.task_uuid, s.namespace_id, s.opened_by, who .. " opened a pull request from the web terminal: "
+                .. pr_url .. (note and ("\n" .. note) or "")
+                .. "\nManagers: approve or request changes on the task's AI work panel.")
+            R.automate_task(s.namespace_id, s.task_uuid, "on_pr_open")
+        else
+            row = U.one([[SELECT * FROM ar_task_prs WHERE namespace_id = ? AND task_uuid = ? AND pr_url = ?
+                AND run_uuid IS NULL]], s.namespace_id, s.task_uuid, pr_url)
+            if note then comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note) end
+        end
+        out.pr = row and require("ai_runner.vault_pr").view(row) or nil
+    else
+        comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note)
+    end
+    db.query("UPDATE ar_terminal_sessions SET reported_at = NOW(), updated_at = NOW() WHERE id = ?", s.id)
+    return out
 end
 
 local poll_started = false

@@ -35,7 +35,9 @@ function SessionLine({ s }: { s: TerminalSession }) {
       <p className="text-secondary-500">
         {s.opened_by_name || 'Someone'}
         {s.terminal_name ? ` · ${s.terminal_name}` : ''}
+        {s.autologin ? ' · signed in by OpsAPI' : ''}
         {s.started_at ? ` · started ${when(s.started_at)}` : ` · ${when(s.created_at)}`}
+        {s.reported_at ? ` · agent reported ${when(s.reported_at)}` : ''}
         {s.started_at && (s.status === 'ended' || s.status === 'active')
           ? ` · ${duration({ started_at: s.started_at, finished_at: s.ended_at })}` : ''}
         {s.status === 'active' && (
