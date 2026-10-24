@@ -329,9 +329,10 @@ check("the run's GitHub token was scoped to acme/web alone", repo_calls
       and all(c["scope"] == ["acme/web"] for c in repo_calls), repo_calls[:3])
 check("the repo tools were offered", "write_file" in next(c for c in log["chats"] if c["scenario"] == "code")["tools"])
 comments = sql(f"SELECT replace(c.content, chr(10), ' ') FROM kanban_task_comments c "
-               f"JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{T_CODE['uuid']}' ORDER BY c.id DESC LIMIT 1")
-check("the summary and the pull request are on the task", comments and "Pull request: https://github.example/acme/web/pull/1"
-      in comments[0], comments)
+               f"JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{T_CODE['uuid']}' ORDER BY c.id DESC LIMIT 3")
+# (since §29.3 the pull request also gets its own comment, which may come after the summary)
+check("the summary and the pull request are on the task",
+      any("Pull request: https://github.example/acme/web/pull/1" in c for c in comments), comments)
 r2 = expect("retry the code run", call("POST", P + f"/runs/{r['uuid']}/retry", "dev", W, {}), 201)
 done2 = wait_status("the retry finishes", r2["uuid"], ("succeeded", "failed"))
 check("a retry carries on with the same branch and finds the open pull request", done2

@@ -102,10 +102,22 @@ end
 
 -- Per-worker subscription state, in shared memory so /ready (served by any
 -- worker) sees every worker's subscriber (nginx.conf: lua_shared_dict chat_ws).
+-- The slot holds the owning worker's pid: the dict survives a reload (HUP), and
+-- the old worker with the same id shuts down after the new one has subscribed,
+-- so it may only clear a slot that is still its own.
 local function set_subscribed(up)
     subscribed = up
     local dict = ngx.shared.chat_ws
-    if dict and ngx.worker.id() then dict:set("sub:" .. ngx.worker.id(), up) end
+    local id = ngx.worker.id()
+    if not dict or not id then return end
+    local key, pid = "sub:" .. id, ngx.worker.pid()
+    if up then
+        dict:set(key, pid)
+    elseif ngx.worker.exiting() then
+        if dict:get(key) == pid then dict:delete(key) end
+    else
+        dict:delete(key)
+    end
 end
 
 local function origin()
@@ -257,7 +269,9 @@ function _M.start()
     -- Keeps the link provably alive: the subscriber hears this within
     -- HEARTBEAT_S, or read_reply times out at STALE_MS and it reconnects.
     ngx.timer.every(HEARTBEAT_S, function(premature)
-        if not premature and subscribed then publish("hb:" .. origin(), {}, "") end
+        if premature or not subscribed then return end
+        set_subscribed(true)
+        publish("hb:" .. origin(), {}, "")
     end)
 end
 

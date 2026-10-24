@@ -1291,11 +1291,10 @@ Added: `project.context`, `target_repo` (plus existing task/repo/branch/output v
 
 ### 29.6 Web terminal (workstation-terminal)
 
-One-click **Open web terminal** on the task AI work panel opens `WORKSTATION_TERMINAL_URL` (default `https://dev.workstation.co.uk`) in a new tab with `opsapi_task`, `opsapi_ns`, `repo`, and `return` query params. OpsAPI records `ar_terminal_sessions` and posts a kanban comment with the terminal URL, target repo, and any linked PR URLs.
-
-- `POST /tasks/:task_uuid/terminal-sessions` → create + comment + deep link  
-- `GET /tasks/:task_uuid/terminal-sessions` and `GET .../work` → `terminal_sessions`  
-- `POST /public/terminal/webhook` — HMAC (`X-Opsapi-Signature: sha256=<hex>`, secret `WORKSTATION_TERMINAL_WEBHOOK_SECRET`) from sshweb when a session starts/ends with `opsapi_task`; updates status and comments a resume link. sshweb config: `opsapi.webhook_url` / `opsapi.webhook_secret` (or `SSHWEB_OPSAPI_WEBHOOK_*`).
+Replaced by **[AI_RUNNER_WEB_TERMINAL.md](AI_RUNNER_WEB_TERMINAL.md)** (2026-10-23): terminals are connected per
+workspace (address + sealed shared secret + agents), Start with AI opens the task's folder there with a signed launch
+link, and the webhook is verified with that terminal's secret against the launch it names. The first version's
+environment variables (`WORKSTATION_TERMINAL_URL`, `WORKSTATION_TERMINAL_WEBHOOK_SECRET`) are no longer read.
 
 ### 29.7 PR status polling
 

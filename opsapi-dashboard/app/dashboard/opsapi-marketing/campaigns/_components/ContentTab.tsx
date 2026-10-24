@@ -8,9 +8,7 @@ import {
   EMAIL_IMAGE_TYPES,
   EmailStudioEditor,
   uploadEmailImage,
-  madeWithCode,
 } from '@/components/opsapi-marketing/EmailStudioEditor';
-import { EditorModeSwitch, acceptPastedHtml } from '@/components/opsapi-marketing/EditorModeSwitch';
 import { DesignGallery, type Design } from '@/components/opsapi-marketing/DesignGallery';
 import { type Campaign, INPUT_CLASS, Notice, apiErrorMessage, unwrap, unwrapArray } from './shared';
 
@@ -53,6 +51,7 @@ function fromCampaign(c: Campaign): FormState {
 }
 
 /** Designs made with tables or full HTML pages lose their layout in the easy editor. */
+const madeWithCode = (html: string) => /<table|<style|<!doctype|<html/i.test(html);
 
 function preheaderHint(len: number): { text: string; tone: 'ok' | 'warn' } {
   if (len === 0) return { text: 'Empty — inboxes will show the first line of the body instead.', tone: 'warn' };
@@ -103,13 +102,6 @@ export default function ContentTab({
     )
       return;
     setEasy(toEasy);
-  };
-
-  // A whole HTML email pasted into the easy editor: keep it as HTML (the easy editor would lose parts of it).
-  const pasteHtml = async (html: string) => {
-    if (!(await acceptPastedHtml(form.body_html))) return;
-    set('body_html', html);
-    setEasy(false);
   };
 
   useEffect(() => {
@@ -353,7 +345,28 @@ export default function ContentTab({
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Your email</span>
-                  <EditorModeSwitch easy={easy} onChange={(v) => void switchEditor(v)} />
+                  <div
+                    className="inline-flex rounded-lg border border-secondary-200 p-0.5 text-xs"
+                    role="group"
+                    aria-label="How to edit"
+                  >
+                    {(
+                      [
+                        [true, 'Easy editor'],
+                        [false, 'HTML code'],
+                      ] as [boolean, string][]
+                    ).map(([value, label]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={easy === value}
+                        className={`rounded-md px-2.5 py-1 ${easy === value ? 'bg-primary-600 text-white' : 'text-secondary-600 hover:bg-secondary-100'}`}
+                        onClick={() => void switchEditor(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 {easy ? (
                   <div className="mt-1">
@@ -363,7 +376,6 @@ export default function ContentTab({
                       placeholder="Write your email here…"
                       mergeFields={mergeFields}
                       readOnly={!editable}
-                      onPasteHtml={(h) => void pasteHtml(h)}
                     />
                     <p className="mt-1 text-xs text-secondary-500">
                       Type like a normal document. Use the picture button for photos and “Personalise” to greet each

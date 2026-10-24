@@ -4,7 +4,7 @@
  * Machines (docs/AI_RUNNER.md §24.4, ai_runners.manage): every runner with its status and each agent profile's
  * health and plan usage, then every session it last reported — runs it manages (linked to the run) and sessions
  * started by hand (linked to their task once tracking created one, §26.4). Refreshes every 15 seconds while the tab
- * is visible.
+ * is visible. Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md) are connected here too.
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
@@ -15,6 +15,7 @@ import { ErrorNote } from '@/components/property-deals/ui';
 import {
   AiRunnerPage, BASE, PRODUCT, ProfileList, RunnerStatusBadge, ago, useAiData, when,
 } from '@/components/ai-runner/ui';
+import { WebTerminals } from '@/components/ai-runner/WebTerminals';
 import { aiRunner, type MachineSession, type Runner } from '@/services/ai-runner.service';
 
 const PER_PAGE = 50;
@@ -113,6 +114,7 @@ function Machines() {
         icon={<Monitor className="h-6 w-6" />}
         actions={<Button variant="outline" leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />} onClick={refresh}>Refresh</Button>}
       />
+      <WebTerminals />
       <div className="flex flex-wrap items-end gap-4">
         <div className="w-56 max-w-full">
           <Select id="air-m-runner" label="Runner" value={runnerUuid} onChange={(e) => { setRunnerUuid(e.target.value); setPage(1); }}>

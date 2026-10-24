@@ -2,9 +2,10 @@
 
 /**
  * AI work panel on a task: latest prompt/context, conversation summary, PRs with manager sign-off,
- * and one-click web terminal (workstation-terminal) with session links in comments.
+ * and "Work in the web terminal" (Start with AI in terminal mode, docs/AI_RUNNER_WEB_TERMINAL.md) with its sessions.
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { Bot, Check, ExternalLink, GitPullRequest, MessageSquare, Terminal, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -12,16 +13,52 @@ import { usePermissions } from '@/contexts/PermissionsContext';
 import {
   aiRunner, aiError, type TaskPr, type TaskWorkBundle, type TerminalSession,
 } from '@/services/ai-runner.service';
-import { BASE, RunStatusBadge, useAiRunnerOn } from './ui';
+import { StartWithAIDialog } from './StartWithAIDialog';
+import { BASE, RunStatusBadge, duration, useAiRunnerOn, when } from './ui';
 
-export default function TaskWork({ taskUuid }: { taskUuid: string }) {
+const SESSION_STATUS: Record<string, { label: string; className: string }> = {
+  launched: { label: 'Waiting to start', className: 'bg-info-500/10 text-info-700' },
+  active: { label: 'Working now', className: 'bg-success-500/10 text-success-700' },
+  ended: { label: 'Ended', className: 'bg-secondary-100 text-secondary-600' },
+  expired: { label: 'Link not used', className: 'bg-secondary-100 text-secondary-500' },
+};
+
+function SessionLine({ s }: { s: TerminalSession }) {
+  const st = SESSION_STATUS[s.status] || { label: s.status, className: 'bg-secondary-100 text-secondary-600' };
+  const what = [s.agent_label || s.agent, s.path && `in ${s.path}`].filter(Boolean).join(' ');
+  return (
+    <li className="space-y-0.5 text-xs text-secondary-600">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 font-medium ${st.className}`}>{st.label}</span>
+        <span className="min-w-0 truncate font-mono" title={what || undefined}>{what || 'Web terminal'}</span>
+      </div>
+      <p className="text-secondary-500">
+        {s.opened_by_name || 'Someone'}
+        {s.terminal_name ? ` · ${s.terminal_name}` : ''}
+        {s.started_at ? ` · started ${when(s.started_at)}` : ` · ${when(s.created_at)}`}
+        {s.started_at && (s.status === 'ended' || s.status === 'active')
+          ? ` · ${duration({ started_at: s.started_at, finished_at: s.ended_at })}` : ''}
+        {s.status === 'active' && (
+          <>
+            {' · '}
+            <a href={s.terminal_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-primary-600 hover:underline">
+              Open the terminal <ExternalLink size={11} aria-hidden />
+            </a>
+          </>
+        )}
+      </p>
+    </li>
+  );
+}
+
+export default function TaskWork({ taskUuid, taskLabel }: { taskUuid: string; taskLabel?: string }) {
   const on = useAiRunnerOn();
   const { hasPermission } = usePermissions();
   const canReview = hasPermission('ai_runs', 'manage') || hasPermission('ai_runs_approvals', 'manage');
-  const canTerminal = hasPermission('ai_runs', 'read') || hasPermission('ai_runs', 'manage')
-    || hasPermission('ai_runs', 'create');
+  const canTerminal = hasPermission('ai_runs', 'create') || hasPermission('ai_runs', 'manage');
   const [bundle, setBundle] = useState<TaskWorkBundle | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
 
   const load = useCallback(() => {
     if (!on) return;
@@ -35,21 +72,6 @@ export default function TaskWork({ taskUuid }: { taskUuid: string }) {
     try {
       await aiRunner.reviewPr(taskUuid, pr.uuid, decision);
       toast.success(decision === 'approved' ? 'PR approved (not merged)' : 'Changes requested');
-      load();
-    } catch (e) {
-      toast.error(aiError(e).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function openTerminal() {
-    setBusy('terminal');
-    try {
-      const session = await aiRunner.openTerminalSession(taskUuid);
-      const url = session.terminal_url || bundle?.terminal_base_url || 'https://dev.workstation.co.uk/';
-      window.open(url, '_blank', 'noopener,noreferrer');
-      toast.success('Terminal link posted to task comments');
       load();
     } catch (e) {
       toast.error(aiError(e).message);
@@ -72,17 +94,21 @@ export default function TaskWork({ taskUuid }: { taskUuid: string }) {
           <Bot size={14} aria-hidden /> AI work
         </h2>
         {canTerminal && (
-          <button type="button" disabled={busy === 'terminal'} onClick={openTerminal}
-            className="ml-auto inline-flex items-center gap-1 rounded-md bg-secondary-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-secondary-800 disabled:opacity-50">
-            <Terminal size={12} aria-hidden />
-            {busy === 'terminal' ? 'Opening…' : 'Open web terminal'}
+          <button type="button" onClick={() => setTerminalOpen(true)}
+            className="ml-auto inline-flex items-center gap-1 rounded-md bg-secondary-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-secondary-800">
+            <Terminal size={12} aria-hidden /> Work in the web terminal
           </button>
         )}
       </div>
+      {terminalOpen && createPortal(
+        <StartWithAIDialog open initialMode="terminal" taskUuid={taskUuid} taskLabel={taskLabel || 'This task'}
+          onClose={() => { setTerminalOpen(false); load(); }} />,
+        document.body,
+      )}
 
       {empty && (
         <p className="text-sm text-secondary-400">
-          No AI work recorded yet. Use Start with AI, or open a web terminal to work on this task.
+          No AI work recorded yet. Use Start with AI, or work on it yourself in the web terminal.
         </p>
       )}
 
@@ -143,23 +169,10 @@ export default function TaskWork({ taskUuid }: { taskUuid: string }) {
       {sessions.length > 0 && (
         <div className="space-y-2" id="task-terminal-sessions">
           <p className="flex items-center gap-1 text-xs font-medium text-secondary-500">
-            <Terminal size={12} aria-hidden /> Terminal sessions
+            <Terminal size={12} aria-hidden /> Web terminal sessions
           </p>
-          <ul className="space-y-1.5">
-            {sessions.map((s) => (
-              <li key={s.uuid} className="flex items-center gap-2 text-xs text-secondary-600">
-                <span className="shrink-0 rounded bg-secondary-100 px-1.5 py-0.5 font-medium">{s.status}</span>
-                <a href={s.terminal_url} target="_blank" rel="noreferrer"
-                  className="truncate text-primary-600 hover:underline inline-flex items-center gap-1">
-                  Open session <ExternalLink size={11} aria-hidden />
-                </a>
-                {s.repo_url && (
-                  <a href={s.repo_url} target="_blank" rel="noreferrer" className="truncate text-secondary-500 hover:underline">
-                    repo
-                  </a>
-                )}
-              </li>
-            ))}
+          <ul className="space-y-2">
+            {sessions.map((s) => <SessionLine key={s.uuid} s={s} />)}
           </ul>
         </div>
       )}

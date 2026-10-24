@@ -9,14 +9,13 @@
  */
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Bot, Copy, ExternalLink, Filter, GitBranch, KeyRound, ListTree, Pause, Play, Plus, RefreshCw, Server, Trash2, Users } from 'lucide-react';
+import { Bot, ExternalLink, Filter, GitBranch, KeyRound, ListTree, Pause, Play, Plus, RefreshCw, Server, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, ConfirmDialog, Input, Modal, Select, Table } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
-import { AiRunnerPage, BASE, PRODUCT, ProfileList, RunnerStatusBadge, ago, useAiData } from '@/components/ai-runner/ui';
+import { AiRunnerPage, BASE, CopyBlock, PRODUCT, ProfileList, RunnerStatusBadge, ago, opsapiUrl, useAiData } from '@/components/ai-runner/ui';
 import { CheckList, TagsInput, strings, useMembers, useProjects } from '@/components/ai-runner/fields';
-import apiClient from '@/lib/api-client';
 import {
   aiRunner, aiErrorText, type ConnectionKind, type GithubInstallation, type Runner, type RunnerAccess, type RunnerAccessMode,
 } from '@/services/ai-runner.service';
@@ -30,27 +29,6 @@ export default function RunnersPage() {
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'runner';
-
-function opsapiUrl(): string {
-  const base = apiClient.defaults.baseURL || '';
-  return /^https?:\/\//.test(base) ? base.replace(/\/$/, '') : `${window.location.origin}${base}`.replace(/\/$/, '');
-}
-
-function copy(text: string, what: string) {
-  navigator.clipboard.writeText(text).then(() => toast.success(`${what} copied`), () => toast.error('Could not copy'));
-}
-
-function CopyBlock({ text, what, testId }: { text: string; what: string; testId?: string }) {
-  return (
-    <div className="relative">
-      <pre data-testid={testId} className="overflow-x-auto whitespace-pre rounded-lg bg-secondary-900 p-3 pr-24 font-mono text-xs text-secondary-100">{text}</pre>
-      <Button size="sm" variant="ghost" className="absolute right-1.5 top-1.5 bg-surface/90" onClick={() => copy(text, what)}
-        leftIcon={<Copy className="h-3.5 w-3.5" aria-hidden />} aria-label={`Copy ${what.toLowerCase()}`}>
-        Copy
-      </Button>
-    </div>
-  );
-}
 
 function runnerJson(name: string): string {
   const s = slug(name);

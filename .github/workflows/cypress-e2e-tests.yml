@@ -71,15 +71,33 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8080' }}
 
+      # Started here rather than via the action's `start`/`wait-on`: since 2026-10-21 the action
+      # failed with "Socket closed before the connection was established" before it ever spawned
+      # the server, and gave no server output to debug with.
+      - name: Start dashboard
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          nohup npm run start > "$RUNNER_TEMP/dashboard.log" 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8039/; then
+              echo "Dashboard up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Dashboard did not respond on http://127.0.0.1:8039 within 120s"
+          cat "$RUNNER_TEMP/dashboard.log"
+          exit 1
+
       - name: Run Cypress tests
         id: cypress
         uses: cypress-io/github-action@v6
         continue-on-error: true
         with:
           working-directory: ${{ env.WORKING_DIRECTORY }}
-          start: npm run start
-          wait-on: "http://127.0.0.1:8039"
-          wait-on-timeout: 120
+          # `npm ci` above already installed deps and the Cypress binary; skipping the action's
+          # install also skips its cache save, which was failing on the same socket error.
+          install: false
           browser: ${{ matrix.browser }}
           spec: cypress/e2e/login.cy.ts
           config: video=true,screenshotOnRunFailure=true
@@ -89,6 +107,10 @@ jobs:
           CYPRESS_TEST_PASSWORD: ${{ secrets.CYPRESS_TEST_PASSWORD }}
           CYPRESS_API_URL: ${{ secrets.CYPRESS_API_URL || 'http://127.0.0.1:8080' }}
           CYPRESS_SKIP_INTEGRATION: ${{ github.event.inputs.run_integration != 'true' }}
+
+      - name: Dashboard server log
+        if: always()
+        run: cat "$RUNNER_TEMP/dashboard.log" 2>/dev/null || echo "(no server log)"
 
       - name: Upload Cypress screenshots
         uses: actions/upload-artifact@v4

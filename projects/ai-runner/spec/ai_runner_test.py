@@ -333,8 +333,8 @@ again = call("POST", P + f"/tasks/{T1['uuid']}/runs", "dev", A,
 check("same Idempotency-Key replays the first answer", again[0] == 201 and again[1]["data"]["uuid"] == R1["uuid"]
       and again[2].get("Idempotent-Replayed") == "true", again[:2])
 check("task got a comment", one(f"SELECT COUNT(*) FROM kanban_task_comments c JOIN kanban_tasks t ON t.id = c.task_id "
-                                f"WHERE t.uuid = '{T1['uuid']}' AND c.content LIKE 'AI run started by AR Test on "
-                                f"mac-studio%'") == "1")
+                                f"WHERE t.uuid = '{T1['uuid']}' AND c.content LIKE 'AI work started by AR Test via "
+                                f"machine (mac-studio)%'") == "1")
 res = start("dev", T1, "/repos/beta")
 check("one open run per task (409 open_run)", res[0] == 409 and res[1]["conflict"]["type"] == "open_run"
       and res[1]["conflict"]["run"]["uuid"] == R1["uuid"], res[:2])
@@ -641,7 +641,9 @@ expect("users of that workspace: 404", call("GET", P + "/runs", "owner_b", B), 4
 # Phase 3 (§23.6): permission bridge, turns and usage, start approval, the run token
 # =====================================================================================================================
 check("plugin migrations are tracked once each", one(
-    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'") == "8")
+    "SELECT COUNT(*) FROM project_migrations WHERE project_code = 'ai_runner'")
+    == str(len([f for f in os.listdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "migrations"))
+                if f.endswith(".lua")])))
 check("status CHECK and one-open-run index include pending_approval", "pending_approval" in (one(
     "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ar_runs_status_check'") or "")
       and "pending_approval" in (one("SELECT indexdef FROM pg_indexes WHERE indexname = 'ar_runs_one_open_per_task'")
@@ -946,7 +948,7 @@ check("list rows: tokens, cost, turns, pending requests", row and row[0]["tokens
 tk = expect("the agent reads its task", call("GET", P + "/public/run/task", token=RT1), 200)
 check("task with url, status, priority and comments", tk.get("uuid") == Q1["uuid"] and tk["title"] == "Bridge permissions"
       and tk["url"].endswith(f"/tasks/{Q1['uuid']}") and tk["priority"] == "high" and tk["checklist"] == "(none)"
-      and any(c["text"].startswith("AI run started by AR Test on p3-") for c in tk["comments"]), tk)
+      and any(c["text"].startswith("AI work started by AR Test via machine (p3-") for c in tk["comments"]), tk)
 cm = expect("the agent comments on its task", call("POST", P + "/public/run/comments", body={
     "text": "Tests pass. Bearer zzz999yyy"}, token=RT1), 201)
 check("comment is the requester's, prefixed and redacted", one(
@@ -972,7 +974,8 @@ Q2R = expect("assignee starts Q2 on Cursor", start3("dev", Q2, "/p3/two", profil
 check("pending_approval", Q2R.get("status") == "pending_approval", Q2R)
 check("task comment says it waits for approval", one(
     f"SELECT COUNT(*) FROM kanban_task_comments c JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = "
-    f"'{Q2['uuid']}' AND c.content LIKE 'AI run requested by AR Test on p3-%a manager must approve it%'") == "1")
+    f"'{Q2['uuid']}' AND c.content LIKE 'AI work requested by AR Test via machine (p3-%a manager must approve it%'")
+    == "1")
 res = r3.claim(wait=0)
 check("pending_approval is not claimable (204)", res[0] == 204, res[:2])
 res = start3("dev", Q2, "/p3/three")
@@ -2809,7 +2812,11 @@ check("preview context lists skills and target repo",
       and len(ctx.get("skills_git_urls") or []) == 1
       and pv_ctx.get("executor_locked") is True
       and pv_ctx.get("can_change_executor") is False
-      and ("standards" in prompt or "skills" in prompt.lower() or "Ways of working" in prompt), pv_ctx)
+      # (the prompt itself follows the workspace template, which an earlier step replaced with one that has no
+      # {{project.context}}; the context pack is what the runner preloads)
+      and [m.get("label") for m in ctx.get("md_refs") or []] == ["Ways of working"],
+      {"context": ctx, "executor_locked": pv_ctx.get("executor_locked"),
+       "can_change_executor": pv_ctx.get("can_change_executor"), "prompt": prompt[:300]})
 
 hb_c(name="cfg runner online for task completion")
 locked = call("POST", P + f"/tasks/{TC['uuid']}/runs", "dev", A, {
@@ -2853,42 +2860,7 @@ n_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
     AND c.content LIKE '%Manager approved PR%'""") or 0)
 check("manager approve posts task comment", n_comments >= 1, n_comments)
 
-# --- Web terminal + webhook + PR poll bookkeeping --------------------------------------------------------------
-print("--- Web terminal ---")
-term = expect("open web terminal session", call(
-    "POST", P + f"/tasks/{TC['uuid']}/terminal-sessions", "dev", A, {}), 201)
-turl = term.get("terminal_url") or ""
-check("terminal deep link has opsapi_task and repo",
-      "opsapi_task=" in turl and ("acme" in turl and "app" in turl)
-      and turl.startswith("https://dev.workstation.co.uk"),
-      term)
-work_t = expect("GET work lists terminal sessions", call("GET", P + f"/tasks/{TC['uuid']}/work", "mgr", A), 200)
-sessions = work_t.get("terminal_sessions") or []
-check("terminal_sessions on work bundle",
-      isinstance(sessions, list) and len(sessions) >= 1 and sessions[0].get("status") == "launched", work_t)
-n_term_comments = int(one(f"""SELECT COUNT(*)::int FROM kanban_task_comments c
-    JOIN kanban_tasks t ON t.id = c.task_id WHERE t.uuid = '{TC["uuid"]}'
-    AND c.content LIKE '%Web terminal opened%'""") or 0)
-check("terminal launch posts comment", n_term_comments >= 1, n_term_comments)
-
-# Simulate sshweb webhook (HMAC over the same JSON bytes call() sends).
-WH_SECRET = "ar-e2e-terminal-webhook"
-sid = "abcdef0123456789abcdef0123456789"
-payload = {"event": "session_start", "session_id": sid, "user": "dev",
-           "opsapi_task": TC["uuid"], "ts": int(time.time())}
-sig = "sha256=" + hmac.new(WH_SECRET.encode(), json.dumps(payload).encode(), hashlib.sha256).hexdigest()
-bad = call("POST", P + "/public/terminal/webhook", body=payload,
-           headers={"X-Opsapi-Signature": "sha256=" + ("0" * 64)})
-check("terminal webhook rejects bad signature", bad[0] == 401, bad[:2])
-wh = expect("terminal webhook session_start", call(
-    "POST", P + "/public/terminal/webhook", body=payload, headers={"X-Opsapi-Signature": sig}), 200)
-check("webhook marks session active", wh.get("status") == "active" and wh.get("session_id") == sid, wh)
-payload_end = dict(payload, event="session_end")
-raw_end = json.dumps(payload_end).encode()
-sig_end = "sha256=" + hmac.new(WH_SECRET.encode(), raw_end, hashlib.sha256).hexdigest()
-wh2 = expect("terminal webhook session_end", call(
-    "POST", P + "/public/terminal/webhook", body=payload_end, headers={"X-Opsapi-Signature": sig_end}), 200)
-check("webhook marks session ended", wh2.get("status") == "ended", wh2)
+# --- PR poll bookkeeping (web terminals: terminal_test.py) ------------------------------------------------
 
 # PR poll: without Vault token, state stays open; github_state_checked_at may still be null.
 sql(f"""UPDATE ar_task_prs SET state = 'open', github_state_checked_at = NULL

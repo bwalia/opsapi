@@ -230,6 +230,79 @@ return {
             .. "Need to change it? Reply or call [phone number]." .. TEXT_FOOT,
     },
     {
+        name = "Shop launch — now open", channel = "email",
+        subject = "Our online shop is open, {{contact.first_name}}",
+        preview_text = "Browse, order and pay online — here’s where to start.",
+        body_html = card({
+            brand("#be123c"),
+            banner("#be123c", "Our shop is now open"),
+            p("Hi {{contact.first_name}},"),
+            p("You can now buy from [Your business name] online. Everything we sell is in one place, "
+                .. "with prices, stock and delivery shown up front."),
+            heading("Popular categories"),
+            list({ '<a href="https://yourwebsite.co.uk/[category-one]" style="color:#be123c;font-weight:600">'
+                    .. "[Category one]</a> — [what people buy here].",
+                '<a href="https://yourwebsite.co.uk/[category-two]" style="color:#be123c;font-weight:600">'
+                    .. "[Category two]</a> — [what people buy here].",
+                '<a href="https://yourwebsite.co.uk/[category-three]" style="color:#be123c;font-weight:600">'
+                    .. "[Category three]</a> — [what people buy here]." }),
+            note("#be123c", "<strong>[Free delivery / launch offer]:</strong> [say what it is and when it ends]."),
+            button("#be123c", "Visit the shop"),
+            sign("Thanks,"),
+            footer(),
+        }),
+        body_text = "Hi {{contact.first_name}},\n\nOur online shop is open. Everything we sell is in one place, with "
+            .. "prices, stock and delivery shown up front.\n\nPopular categories:\n- [Category one]\n- [Category two]\n"
+            .. "- [Category three]\n\nVisit the shop: https://yourwebsite.co.uk" .. TEXT_FOOT,
+    },
+    {
+        name = "Marketplace launch — two sides", channel = "email",
+        subject = "[Your business name] is open, {{contact.first_name}}",
+        preview_text = "Whether you’re [buying] or [selling], here’s how to get started.",
+        body_html = card({
+            brand("#ea580c"),
+            title("[Your business name] is open"),
+            lead("Hi {{contact.first_name}}, [say in one sentence what the marketplace does and who it’s for]."),
+            heading("Looking for [what one side wants]?"),
+            p("[One or two sentences on how it works for them.] "
+                .. '<a href="https://yourwebsite.co.uk/[browse]" style="color:#ea580c;font-weight:600">[Browse]</a>'),
+            heading("Want to [what the other side wants]?"),
+            p("[One or two sentences on how it works for them.] "
+                .. '<a href="https://yourwebsite.co.uk/[post]" style="color:#ea580c;font-weight:600">[Post]</a>'),
+            note("#ea580c", "<strong>[Why it’s different]:</strong> [the one thing you do that others don’t]."),
+            button("#ea580c", "Get started"),
+            sign("Thanks,"),
+            footer(),
+        }),
+        body_text = "Hi {{contact.first_name}},\n\n[Your business name] is open. [What it does and who it’s for.]\n\n"
+            .. "Looking for [what one side wants]? https://yourwebsite.co.uk/[browse]\n"
+            .. "Want to [what the other side wants]? https://yourwebsite.co.uk/[post]" .. TEXT_FOOT,
+    },
+    {
+        name = "What we do — services overview", channel = "email",
+        subject = "How [Your business name] can help, {{contact.first_name}}",
+        preview_text = "[Service one], [service two] and [service three] — in a two-minute read.",
+        body_html = card({
+            brand("#4f46e5"),
+            title("[A one-line promise, e.g. Technology that works for you]"),
+            lead("Hi {{contact.first_name}}, here’s a quick look at what we do and how we could help."),
+            heading("[Service one]"),
+            p("[What it is and who it’s for.] "
+                .. '<a href="https://yourwebsite.co.uk/[service-one]" style="color:#4f46e5;font-weight:600">Find out more</a>'),
+            heading("[Service two]"),
+            p("[What it is and who it’s for.] "
+                .. '<a href="https://yourwebsite.co.uk/[service-two]" style="color:#4f46e5;font-weight:600">Find out more</a>'),
+            heading("[Service three]"),
+            p("[What it is and who it’s for.] "
+                .. '<a href="https://yourwebsite.co.uk/[service-three]" style="color:#4f46e5;font-weight:600">Find out more</a>'),
+            button("#4f46e5", "Book a free consultation"),
+            sign("Kind regards,"),
+            footer(),
+        }),
+        body_text = "Hi {{contact.first_name}},\n\nHere’s a quick look at what we do:\n- [Service one]\n- [Service two]\n"
+            .. "- [Service three]\n\nBook a free consultation: https://yourwebsite.co.uk" .. TEXT_FOOT,
+    },
+    {
         name = "Text message — special offer", channel = "sms",
         body_text = "Hi {{contact.first_name}}, 20% off this week with code SAVE20 at yourwebsite.co.uk. "
             .. "Reply STOP to opt out.",

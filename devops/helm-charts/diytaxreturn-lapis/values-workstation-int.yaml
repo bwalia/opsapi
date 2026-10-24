@@ -33,6 +33,12 @@ extraEnv:
   # (Speaches' own page needs https for the microphone).
   VOICE_URL: "http://192.168.1.177:8014"
   VOICE_TTS_VOICE: "bf_emma"
+  # CMS featured-image upload → public www S3 (lapis/helper/cms-public-media.lua).
+  # Secrets CMS_PUBLIC_S3_ACCESS_KEY + CMS_PUBLIC_S3_SECRET_KEY live in Vault
+  # workstation-opsapi/int/config (or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+  CMS_PUBLIC_S3_BUCKET: "workstation-website"
+  CMS_PUBLIC_S3_REGION: "eu-west-2"
+  CMS_PUBLIC_BASE_URL: "https://www.workstation.co.uk"
 
 # Password-reset / invite links → the workstation admin UI for this ring.
 # Migration 489 bootstraps namespaces.allowed_redirect_origins from this.

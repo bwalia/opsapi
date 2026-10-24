@@ -778,6 +778,7 @@ load_if("cms", "routes.cms-posts")
 load_if("cms", "routes.cms-pages")
 load_if("cms", "routes.cms-taxonomy")
 load_if("cms", "routes.cms-webhooks")
+load_if("cms", "routes.cms-media")
 
 -- ============================================
 -- SHOP (Workstation AI Shop: catalogue, pricing engine, carts, quotes,
