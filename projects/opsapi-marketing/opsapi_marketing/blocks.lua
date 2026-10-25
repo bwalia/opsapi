@@ -5,7 +5,18 @@
 
 local B = {}
 
-local FONT = "font-family:'Helvetica Neue',Helvetica,Arial,sans-serif"
+-- The Workstation website's fonts: Poppins for text, Unbounded for big headings, JetBrains Mono
+-- for small labels. Email apps that can't load web fonts (Gmail, Outlook on Windows) fall back
+-- to Helvetica / Arial. B.document adds the <link> that loads them where they can.
+B.FONT_BODY = "Poppins,'Helvetica Neue',Helvetica,Arial,sans-serif"
+B.FONT_DISPLAY = "Unbounded,Poppins,'Helvetica Neue',Helvetica,Arial,sans-serif"
+B.FONT_MONO = "'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace"
+B.FONTS_CSS = "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700"
+    .. "&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@500&display=swap"
+
+local FONT = "font-family:" .. B.FONT_BODY
+local DISPLAY = "font-family:" .. B.FONT_DISPLAY .. ";"
+local MONO = "font-family:" .. B.FONT_MONO .. ";"
 
 function B.card(inner)
     return '<div style="' .. FONT .. ';max-width:600px;margin:0 auto;padding:36px 32px;background:#ffffff;'
@@ -14,22 +25,23 @@ function B.card(inner)
 end
 
 function B.brand(accent)
-    return '<p style="margin:0 0 28px;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;'
-        .. "color:" .. accent .. '">[Your business name]</p>'
+    return '<p style="margin:0 0 28px;' .. MONO .. 'font-size:12px;font-weight:500;letter-spacing:2px;'
+        .. 'text-transform:uppercase;color:' .. accent .. '">[Your business name]</p>'
 end
 
 function B.banner(bg, text)
     return '<h1 style="margin:0 0 24px;padding:40px 28px;background:' .. bg .. ';color:#ffffff;border-radius:12px;'
-        .. 'font-size:30px;line-height:1.2;font-weight:800;text-align:center">' .. text .. "</h1>"
+        .. DISPLAY .. 'font-size:28px;line-height:1.2;font-weight:700;text-align:center">' .. text .. "</h1>"
 end
 
 function B.title(text)
-    return '<h1 style="margin:0 0 16px;font-size:28px;line-height:1.25;font-weight:800;color:#111827">'
+    return '<h1 style="margin:0 0 16px;' .. DISPLAY .. 'font-size:26px;line-height:1.25;font-weight:700;color:#111827">'
         .. text .. "</h1>"
 end
 
 function B.heading(text)
-    return '<h2 style="margin:28px 0 8px;font-size:20px;line-height:1.3;font-weight:700;color:#111827">'
+    return '<h2 style="margin:28px 0 8px;' .. DISPLAY
+        .. 'font-size:19px;line-height:1.3;font-weight:700;color:#111827">'
         .. text .. "</h2>"
 end
 
@@ -59,7 +71,8 @@ function B.button(bg, label, href)
 end
 
 function B.code(accent, c)
-    return '<p style="margin:24px 0 8px;padding:18px;text-align:center;font-size:30px;font-weight:800;letter-spacing:6px;'
+    return '<p style="margin:24px 0 8px;padding:18px;text-align:center;' .. MONO
+        .. 'font-size:28px;font-weight:500;letter-spacing:6px;'
         .. "color:" .. accent .. ";border:2px dashed " .. accent .. ';border-radius:12px">' .. c .. "</p>"
 end
 
@@ -83,6 +96,19 @@ end
 function B.view_online()
     return '<p style="margin:0 0 16px;font-size:12px;color:#6b7280;text-align:center">Trouble viewing? '
         .. '<a href="{{view_online_url}}" style="color:#6b7280">View this email in your browser</a></p>'
+end
+
+--- A whole HTML document around an email body, with the <link> that loads the fonts.
+-- Email apps read <head> styles, so this is how Apple Mail, iOS and Outlook for Mac get Poppins.
+function B.document(html, title)
+    local t = (tostring(title or ""):gsub("[<>&\"]",
+        { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;", ['"'] = "&quot;" }))
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        .. '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        .. '<meta name="x-apple-disable-message-reformatting"><title>' .. t .. '</title>'
+        .. '<link rel="stylesheet" href="' .. (B.FONTS_CSS:gsub("&", "&amp;")) .. '">'
+        .. '</head><body style="margin:0;padding:16px 8px;font-family:' .. B.FONT_BODY .. '">'
+        .. html .. "</body></html>"
 end
 
 return B
