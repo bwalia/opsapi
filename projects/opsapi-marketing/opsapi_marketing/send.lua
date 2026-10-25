@@ -210,6 +210,7 @@ function S.render_delivery(d, campaign, contact, settings, opts)
             template.body_text = content.body_text or t.body_text
         end
     end
+    template.body_html = Links.unlink_merge_tags(template.body_html)
 
     local prefs = base ~= "" and Tokens.preferences_url(d.namespace_id, d.contact_uuid, base) or nil
     local view = opts.view_online_url

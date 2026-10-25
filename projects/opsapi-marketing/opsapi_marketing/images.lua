@@ -59,7 +59,8 @@ end
 --- The stored bytes of a public image. @return bytes, content_type or nil
 function I.read(uuid)
     local row = U.one("SELECT * FROM mkt_images WHERE uuid = ?", uuid)
-    if not row or not U.plugin_on(row.namespace_id) then return nil end
+    -- Not gated on the plugin switch: sent emails keep their images (see api/public.lua).
+    if not row then return nil end
     local Minio = require("helper.minio").getDefault()
     local url = Minio:getPresignedUrl(row.object_key, 300, row.bucket, false, "GET")
     if not url then return nil end

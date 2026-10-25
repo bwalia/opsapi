@@ -54,6 +54,13 @@ function L.utm_params(campaign, tracking, variant_key)
     }
 end
 
+--- Undo an editor autolink inside a merge tag: {{<a href="http://contact.company">contact.company</a>}}
+-- (saved before the editor stopped autolinking) back to {{contact.company}}.
+function L.unlink_merge_tags(html)
+    if type(html) ~= "string" or html == "" then return html end
+    return (html:gsub("{{%s*<[aA]%s[^>]*>%s*([%w_%.]+)%s*</[aA]>%s*}}", "{{%1}}"))
+end
+
 local function trackable(url, skip)
     if not url:match("^https?://") then return false end
     for _, s in ipairs(skip or {}) do
