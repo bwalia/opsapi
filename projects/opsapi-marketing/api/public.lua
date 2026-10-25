@@ -260,7 +260,8 @@ return function(app)
                 ["X-Robots-Tag"] = "noindex, nofollow",
                 ["Referrer-Policy"] = "no-referrer",
                 ["X-Content-Type-Options"] = "nosniff",
-                ["Content-Security-Policy"] = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; "
+                ["Content-Security-Policy"] = "default-src 'none'; img-src https: data:; "
+                    .. "style-src 'unsafe-inline' https://fonts.googleapis.com; "
                     .. "font-src https: data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
             },
             html,

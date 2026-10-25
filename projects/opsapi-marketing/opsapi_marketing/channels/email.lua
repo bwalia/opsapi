@@ -4,6 +4,7 @@ local NamespaceMail = require("helper.namespace-mail")
 local TemplateRenderer = require("lib.template-renderer")
 local U = require("opsapi_marketing.util")
 local Links = require("opsapi_marketing.links")
+local Blocks = require("opsapi_marketing.blocks")
 
 local C = {}
 
@@ -78,7 +79,7 @@ function C.render(template, merge_context, ctx)
         foot[#foot + 1] = '<a href="' .. ctx.unsubscribe_url .. '">Unsubscribe</a>'
     end
     if #foot > 0 then
-        html = html .. '<p style="max-width:600px;margin:16px auto 0;font-family:Helvetica,Arial,sans-serif;'
+        html = html .. '<p style="max-width:600px;margin:16px auto 0;font-family:' .. Blocks.FONT_BODY .. ';'
             .. 'font-size:12px;line-height:1.5;color:#6b7280;text-align:center">' .. table.concat(foot, " · ") .. "</p>"
     end
     if ctx.unsubscribe_url and not text:find(ctx.unsubscribe_url, 1, true) then
@@ -98,6 +99,11 @@ function C.render(template, merge_context, ctx)
     if ctx.open_pixel_url then
         html = html .. '<img src="' .. ctx.open_pixel_url
             .. '" width="1" height="1" alt="" style="display:none" />'
+    end
+    -- Designs in the website fonts need the font <link>, which only works in a <head>.
+    local web_fonts = html:find("Poppins", 1, true) or html:find("Unbounded", 1, true)
+    if web_fonts and not html:find("<[Hh][Tt][Mm][Ll][%s>]") then
+        html = Blocks.document(html, subject)
     end
 
     return {
