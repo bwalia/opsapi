@@ -54,6 +54,10 @@ local function gif_response()
     }
 end
 
+-- Only the SMS webhook and the website pixel check the plugin switch. The links in an
+-- email (unsubscribe, preferences, view, open, click, images) are signed proof it was sent, and keep working after
+-- the plugin is turned off: platform admins send with it off (the switch doesn't bind
+-- them), and a person must always be able to unsubscribe or follow a link they got.
 local function require_plugin(ns)
     if not U.plugin_on(ns) then
         return nil, "plugin disabled"
@@ -86,11 +90,6 @@ return function(app)
     local function too_many()
         return Pages.page({ status = 429, title = "Please wait a moment",
             body = "<p>There were too many tries in a short time. Please try again in a minute.</p>" })
-    end
-
-    local function stopped(sender)
-        return Pages.page({ status = 404, sender = sender, title = "These messages have stopped",
-            body = "<p>This sender no longer sends marketing messages from here, so there’s nothing to change.</p>" })
     end
 
     --- The person behind a link: their address on this channel and whether they're unsubscribed.
@@ -144,7 +143,6 @@ return function(app)
         if not claims then return bad_link() end
         local ns = claims.namespace_id
         local sender = Pages.sender(ns)
-        if not require_plugin(ns) then return stopped(sender) end
         local channel = claims.channel or "email"
         local p = person(ns, claims.contact_uuid, channel)
         if p.unsubscribed then return unsubscribed_page(sender, token, channel, p.address) end
@@ -166,10 +164,6 @@ return function(app)
         end
         local ns = claims.namespace_id
         local sender = Pages.sender(ns)
-        if not require_plugin(ns) then
-            if page then return stopped(sender) end
-            return sdk.error(404, "plugin disabled")
-        end
         local channel = claims.channel or "email"
         local p = person(ns, claims.contact_uuid, channel)
 
@@ -216,7 +210,6 @@ return function(app)
         if not rate_public("prefs") then return too_many() end
         local claims = T.verify(self.params.token, "preferences")
         if not claims then return bad_link() end
-        if not require_plugin(claims.namespace_id) then return stopped(Pages.sender(claims.namespace_id)) end
         return preferences_page(claims.namespace_id, self.params.token, claims.contact_uuid)
     end))
 
@@ -226,7 +219,6 @@ return function(app)
         local claims = T.verify(token, "preferences")
         if not claims then return bad_link() end
         local ns = claims.namespace_id
-        if not require_plugin(ns) then return stopped(Pages.sender(ns)) end
         local channel = self.params.channel == "sms" and "sms" or "email"
         local p = person(ns, claims.contact_uuid, channel)
         local notice
@@ -284,7 +276,6 @@ return function(app)
         end
         local ns = claims.namespace_id
         local sender = Pages.sender(ns)
-        if not require_plugin(ns) then return stopped(sender) end
 
         local Send = require("opsapi_marketing.send")
         local d = U.one([[
@@ -331,7 +322,7 @@ return function(app)
     app:get("/public/o.gif", sdk.handler({ namespace = false }, function(self)
         if not rate_public("open", 120) then return gif_response() end
         local claims = T.verify(self.params.t, "open")
-        if claims and require_plugin(claims.namespace_id) then
+        if claims then
             local d = U.one("SELECT id, campaign_id, contact_uuid, opened_at FROM mkt_deliveries WHERE uuid = ? AND namespace_id = ?",
                 claims.delivery_uuid, claims.namespace_id)
             if d then
@@ -357,7 +348,6 @@ return function(app)
         if not rate_public("click", 120) then return sdk.error(429, "Too many requests") end
         local claims, err = T.verify(self.params.t, "click")
         if not claims then return sdk.error(400, err or "invalid token") end
-        if not require_plugin(claims.namespace_id) then return sdk.error(404, "plugin disabled") end
         local dest = safe_redirect(claims.dest)
         if not dest then return sdk.error(400, "invalid destination") end
 
