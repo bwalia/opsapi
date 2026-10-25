@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Check, CircleHelp } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { Check, CircleHelp, Sparkles } from 'lucide-react';
+import { useAssistant } from '@/store/assistant.store';
 import { buttonClass } from '@/components/ui';
 import { marketingService } from '@/services/opsapi-marketing.service';
 
@@ -36,7 +38,7 @@ export function downloadExampleCsv() {
   URL.revokeObjectURL(url);
 }
 
-type Progress = {
+export type Progress = {
   via?: string;
   addressSet?: boolean;
   dryRun?: boolean;
@@ -47,8 +49,12 @@ type Progress = {
   sent: number;
 };
 
-type Step = {
+export type Step = {
   title: string;
+  /** One or two words for the step bar at the top of every Marketing page. */
+  short: string;
+  /** What "Ask AI to do it" says to the assistant. */
+  ai: string;
   why: string;
   href: string;
   action: string;
@@ -57,9 +63,11 @@ type Step = {
   done: (p: Progress) => boolean;
 };
 
-const STEPS: Step[] = [
+export const STEPS: Step[] = [
   {
     title: 'Connect your email account',
+    short: 'Connect email',
+    ai: 'Walk me through connecting my email account so my emails come from my own address.',
     why: 'So your emails come from your own address, like hello@yourbusiness.co.uk.',
     href: '/dashboard/namespace/email',
     action: 'Connect email',
@@ -68,6 +76,8 @@ const STEPS: Step[] = [
   },
   {
     title: 'Add your business name and address',
+    short: 'Your address',
+    ai: 'Walk me through adding my business name and postal address to my emails.',
     why: 'The law says every promotional email must show who sent it.',
     href: PLUGIN_SETTINGS,
     action: 'Add address',
@@ -76,6 +86,8 @@ const STEPS: Step[] = [
   },
   {
     title: 'Make a list',
+    short: 'Make a list',
+    ai: 'Make a new email list for me. Ask me what to call it, then make it.',
     why: 'A list is the group of people who will get your email.',
     href: '/dashboard/opsapi-marketing/lists',
     action: 'Make a list',
@@ -84,6 +96,8 @@ const STEPS: Step[] = [
   },
   {
     title: 'Add people to your list',
+    short: 'Add people',
+    ai: 'Help me add people to my list. Ask me who they are and how I got their emails.',
     why: 'Type their email addresses, upload a spreadsheet, or tick people in your contacts.',
     href: '/dashboard/opsapi-marketing/lists',
     action: 'Add people',
@@ -92,6 +106,8 @@ const STEPS: Step[] = [
   },
   {
     title: 'Design an email template',
+    short: 'Design',
+    ai: 'Add the ready-made email designs for me, then ask me what my email is about and design one with AI.',
     why: 'A ready-made design you can reuse for every email. You can skip this.',
     href: '/dashboard/opsapi-marketing/studio',
     action: 'Open the Studio',
@@ -101,6 +117,9 @@ const STEPS: Step[] = [
   },
   {
     title: 'Write your email',
+    short: 'Write email',
+    ai:
+      'Write an email for me: ask me what it is about and who should get it, then make the draft with a nice design.',
     why: 'Give it a subject and the words you want to say.',
     href: '/dashboard/opsapi-marketing/campaigns',
     action: 'Write an email',
@@ -109,6 +128,8 @@ const STEPS: Step[] = [
   },
   {
     title: 'Switch off test mode',
+    short: 'Test mode off',
+    ai: 'Walk me through switching off test mode so my emails are really sent.',
     why: 'While test mode is on, nothing is really sent. Switch it off when you are ready.',
     href: PLUGIN_SETTINGS,
     action: 'Open settings',
@@ -117,6 +138,9 @@ const STEPS: Step[] = [
   },
   {
     title: 'Send yourself a test, then send to your list',
+    short: 'Test & send',
+    ai:
+      'Send a test of my latest email to my own address, then tell me what is left before I can send it to my list.',
     why: 'Check it in your own inbox first, then press Send now (or pick a time).',
     href: '/dashboard/opsapi-marketing/campaigns',
     action: 'Go to my emails',
@@ -132,9 +156,13 @@ const arr = (res: { data?: { data?: unknown } & Record<string, unknown> } | null
   return Array.isArray(items) ? items : [];
 };
 
-function useProgress(): Progress | null {
+/** Live progress; checked again on every page change and whenever the AI panel closes. */
+export function useProgress(): Progress | null {
   const [p, setP] = useState<Progress | null>(null);
+  const pathname = usePathname();
+  const assistantOpen = useAssistant((st) => st.open);
   useEffect(() => {
+    if (assistantOpen) return;
     let cancelled = false;
     void Promise.all([
       marketingService.sendingInfo().catch(() => null),
@@ -166,8 +194,27 @@ function useProgress(): Progress | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname, assistantOpen]);
   return p;
+}
+
+/** Opens the AI assistant and asks it to do (or explain) this step. */
+export function AskAI({
+  text,
+  size = 'md',
+  label = 'Ask AI to do it',
+}: {
+  text: string;
+  size?: 'sm' | 'md' | 'lg';
+  label?: string;
+}) {
+  const ask = useAssistant((st) => st.ask);
+  return (
+    <button type="button" onClick={() => ask(text)} className={buttonClass('outline', size)}>
+      <Sparkles className="h-4 w-4" aria-hidden="true" />
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -206,8 +253,9 @@ export function GettingStarted({ compact = false }: { compact?: boolean }) {
         <p className="text-base text-secondary-700 dark:text-secondary-300">{next.why}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Link href={next.href} className={buttonClass('primary', 'lg')}>
-            {next.action}
+            {next.action} →
           </Link>
+          <AskAI text={next.ai} size="lg" />
           <Link href={GUIDE_HREF} className={buttonClass('outline', 'lg')}>
             See all the steps
           </Link>

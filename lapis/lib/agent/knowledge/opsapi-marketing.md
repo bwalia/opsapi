@@ -4,7 +4,7 @@ pages: /dashboard/opsapi-marketing
 api: /api/v2/opsapi-marketing
 modules: opsapi_marketing_campaigns, opsapi_marketing_lists, opsapi_marketing_templates, opsapi_marketing_consent, opsapi_marketing_analytics, opsapi_marketing_conversations, opsapi_marketing_ai, opsapi_marketing_settings
 tools: mkt_campaign_overview, mkt_audience_preview, mkt_draft_campaign, mkt_classify_reply, mkt_check_eligibility
-suggestions: Summarise campaign performance this month | Draft an email campaign for our newsletter list | Is this contact eligible for SMS? | Classify this reply: not interested thanks
+suggestions: What should I do next? | Write an email to my customers list and send me a test | Make a new list called Customers | Design an email about our new product with AI | How did my last email do?
 readonly: false
 ---
 # Marketing Cloud
@@ -39,9 +39,19 @@ Multi-channel marketing (email + SMS) on CRM contacts. Consent, suppression and 
 - Classify preview: `POST /api/v2/opsapi-marketing/replies/classify-preview`
 - Audience preview: `POST /api/v2/opsapi-marketing/campaigns/{uuid}/audience-preview`
 
+## Do it for the user (steer the whole Marketing Cloud from chat)
+Do each step yourself with call_api, then say in one line what you did, with a link to where they can see it, e.g. [Open the email](/dashboard/opsapi-marketing/campaigns/{uuid}?tab=content). For "what next?", check the state and name ONE next step with its link.
+- Where things stand: `GET /api/v2/opsapi-marketing/analytics/overview`, `GET /api/v2/opsapi-marketing/sending` (is email connected, test mode, daily limit), `GET /api/v2/opsapi-marketing/list-counts`
+- Lists: `GET /api/v2/opsapi-marketing/lists`, make one `POST /api/v2/opsapi-marketing/lists` {name, description, list_type:"static", channel:"email"}, who is on it `GET /api/v2/opsapi-marketing/lists/{uuid}/members`, add a CRM contact `POST /api/v2/opsapi-marketing/lists/{uuid}/members` {contact_uuid}. New addresses need the user's consent answer: send them to [Lists](/dashboard/opsapi-marketing/lists) → "Add people".
+- Designs / templates: `GET /api/v2/opsapi-marketing/templates`, `GET /api/v2/opsapi-marketing/templates/{uuid}`, add the 14 ready-made designs `POST /api/v2/opsapi-marketing/templates/seed`, AI design `POST /api/v2/opsapi-marketing/templates/ai` {brief, tone ("friendly"|"professional"|"excited"), save:true} (takes up to a minute), edit `PUT /api/v2/opsapi-marketing/templates/{uuid}` {name, subject, preview_text, body_html, body_text}, publish `POST /api/v2/opsapi-marketing/templates/{uuid}/publish`.
+- Emails (campaigns): `GET /api/v2/opsapi-marketing/campaigns`, `GET /api/v2/opsapi-marketing/campaigns/{uuid}`, new draft `POST /api/v2/opsapi-marketing/campaigns` {name, channel:"email", subject, preview_text, body_html, body_text} (copy a template's subject/body_html to use a design), change content or choose who gets it `PUT /api/v2/opsapi-marketing/campaigns/{uuid}` {subject, body_html, …, list_uuid}, who would get it `POST /api/v2/opsapi-marketing/campaigns/{uuid}/audience-preview`, "Check it" `POST /api/v2/opsapi-marketing/campaigns/{uuid}/validate` (explain problems plainly, fix what you can), ask for approval `POST /api/v2/opsapi-marketing/campaigns/{uuid}/request-approval`, pause `POST /api/v2/opsapi-marketing/campaigns/{uuid}/pause`.
+- Test email: `POST /api/v2/opsapi-marketing/campaigns/{uuid}/test-send` {email} to the user's own address (never the list).
+- Send (the user is asked to confirm first, automatically): send now `POST /api/v2/opsapi-marketing/campaigns/{uuid}/schedule` {send_now:true}, later `POST /api/v2/opsapi-marketing/campaigns/{uuid}/schedule` {scheduled_at: ISO time}, approve `POST /api/v2/opsapi-marketing/campaigns/{uuid}/approve`, resume `POST /api/v2/opsapi-marketing/campaigns/{uuid}/resume`. Summary like "Send 'Spring offer' to Customers (240 people) now".
+
 ## Rules
-- Never send, schedule, approve, or remove suppressions for the user — point them to the campaign page.
-- Draft campaigns only; always remind that validate → approve → schedule is required.
+- Never say it was sent until the call succeeded. Before sending: "Check it" passed, and offer a test to themselves.
+- Never remove suppressions or unsubscribes, never invent consent; transactional emails are for admins only.
 - Label opens as estimated.
-- Never invent consent; never auto-reply from a classification.
-- Prefer tools `mkt_*` over inventing API bodies.
+- Never auto-reply from a classification.
+- Keep [square brackets] placeholders out of anything sent: fill them from what the user told you, or ask.
+- Prefer tools `mkt_*` where they fit.

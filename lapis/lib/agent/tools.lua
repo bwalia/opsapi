@@ -1274,11 +1274,19 @@ if require("helper.project-config").isFeatureEnabled("forms") then
     })
 end
 
+-- call_api paths that reach real people (send, schedule, approve): the user confirms first.
+local CONFIRM_PATHS = {
+    "^/api/v2/opsapi%-marketing/campaigns/[^/]+/schedule$",
+    "^/api/v2/opsapi%-marketing/campaigns/[^/]+/approve$",
+    "^/api/v2/opsapi%-marketing/campaigns/[^/]+/resume$",
+}
+
 register({
     name = "call_api",
     description = "Call the OpsAPI REST API as the current user for this page's module, using the "
         .. "endpoints in your page guide. GET reads data; POST/PUT/PATCH create or change it. "
-        .. "DELETE is not run straight away: the user is asked to confirm it first.",
+        .. "DELETE, and sending, scheduling or approving a campaign, are not run straight away: "
+        .. "the user is asked to confirm first.",
     parameters = {
         type = "object",
         properties = {
@@ -1289,11 +1297,23 @@ register({
             summary = {
                 type = "string",
                 description = "One short sentence saying what this call does, in the user's terms "
-                    .. "(e.g. 'Delete the 7.5h timesheet for 3 Oct'). Required for DELETE.",
+                    .. "(e.g. 'Delete the 7.5h timesheet for 3 Oct'). Required for DELETE and for "
+                    .. "sending, scheduling or approving a campaign.",
             },
         },
         required = { "method", "path" },
     },
+    -- Calls that send or approve messages to real people ask first, like DELETE below.
+    confirm = function(_, a)
+        local path = tostring(a.path or ""):match("^[^?#]*"):lower()
+        for _, pat in ipairs(CONFIRM_PATHS) do
+            if path:find(pat) then
+                local summary = type(a.summary) == "string" and a.summary ~= "" and a.summary
+                    or (tostring(a.method or "POST"):upper() .. " " .. path)
+                return "Please confirm: **" .. summary .. "**."
+            end
+        end
+    end,
     handler = function(ctx, a)
         local method = tostring(a.method or "GET"):upper()
         if method == "DELETE" and not ctx.confirmed then
