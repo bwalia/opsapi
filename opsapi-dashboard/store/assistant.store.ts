@@ -9,10 +9,17 @@ interface AssistantState {
   open: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
+  /** A message for the panel to send as soon as it is open ("Ask AI to do it" buttons). */
+  queued: string | null;
+  ask: (text: string) => void;
+  clearQueued: () => void;
 }
 
 export const useAssistant = create<AssistantState>((set) => ({
   open: false,
   setOpen: (open) => set({ open }),
   toggle: () => set((s) => ({ open: !s.open })),
+  queued: null,
+  ask: (text) => set({ open: true, queued: text }),
+  clearQueued: () => set({ queued: null }),
 }));

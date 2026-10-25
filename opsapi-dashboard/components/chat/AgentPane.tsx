@@ -24,6 +24,7 @@ import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import { chatService, type AgentTurn, type AgentAction, type AgentScope } from '@/services/chat.service';
 import { onChatEvent } from '@/store/chat-realtime.store';
+import { useAssistant } from '@/store/assistant.store';
 import { useVoice, useVoiceLevel, type LevelStore } from '@/hooks/useVoice';
 import AvatarFace, { type FaceMood } from './AvatarFace';
 import { AgentTaskCards, tasksFromActions } from './AgentTaskCards';
@@ -248,6 +249,14 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
     },
     [thinking, refresh, path]
   );
+
+  // "Ask AI to do it" buttons on the page queue a message: send it once the pane is ready.
+  const queued = useAssistant((st) => st.queued);
+  useEffect(() => {
+    if (!path || !loaded || thinking || !queued) return;
+    useAssistant.getState().clearQueued();
+    void send(queued);
+  }, [path, loaded, thinking, queued, send]);
 
   const decide = async (approve: boolean) => {
     if (deciding) return;

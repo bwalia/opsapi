@@ -5,11 +5,13 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
+  ArrowRight,
   BarChart3,
   Calendar,
   Check,
   CheckCircle,
   ChevronDown,
+  ChevronRight,
   Copy,
   FileText,
   FlaskConical,
@@ -52,7 +54,7 @@ import ContentTab from '../_components/ContentTab';
 import AudienceTab from '../_components/AudienceTab';
 import TrackingTab from '../_components/TrackingTab';
 import AbTestTab from '../_components/AbTestTab';
-import { HelpLink } from '@/components/opsapi-marketing/GettingStarted';
+import { AskAI, HelpLink } from '@/components/opsapi-marketing/GettingStarted';
 import { TestModeBanner, useTestMode } from '@/components/opsapi-marketing/TestMode';
 
 type TabKey = 'performance' | 'content' | 'audience' | 'tracking' | 'ab';
@@ -335,22 +337,50 @@ function CampaignWorkspace({ id }: { id: string }) {
       ? !!(campaign.subject?.trim() && (campaign.body_html?.trim() || campaign.body_text?.trim()))
       : !!campaign.body_text?.trim();
   const hasAudience = !!listUuid || !!campaign.list_id;
-  const steps: { key: TabKey; label: string; done: boolean; hint: string }[] = [
-    { key: 'content', label: 'Content', done: hasContent, hint: hasContent ? 'Ready' : 'Add a subject and body' },
-    { key: 'audience', label: 'Audience', done: hasAudience, hint: hasAudience ? 'List selected' : 'Pick a list' },
-    {
-      key: 'tracking',
-      label: 'Tracking',
-      done: true,
-      hint: campaign.tracking && Object.keys(campaign.tracking).length > 0 ? 'Customised' : 'Defaults (all on)',
-    },
-    {
-      key: 'audience',
-      label: 'Check',
-      done: s === 'validated',
-      hint: s === 'validated' ? 'All good' : 'Press “Check it”',
-    },
+  // Write → who gets it → check → send, joined by arrows, with one "Next" action.
+  const checked = s === 'validated';
+  const steps: { label: string; done: boolean; go: () => void }[] = [
+    { label: 'Write it', done: hasContent, go: () => setTab('content') },
+    { label: 'Who gets it', done: hasAudience, go: () => setTab('audience') },
+    { label: 'Check it', done: checked, go: () => void doValidate() },
+    { label: 'Send', done: false, go: () => setDialog('send') },
   ];
+  type NextStep = { step: number; title: string; why: string; action: string; go: () => void; ai: string };
+  const next: NextStep = !hasContent
+    ? {
+        step: 0,
+        title: 'Write your email',
+        why: 'Choose a design (or let AI make one), then add a subject.',
+        action: 'Write it',
+        go: () => setTab('content'),
+        ai: 'Write the content of this email for me with a nice design. Ask me what it is about first.',
+      }
+    : !hasAudience
+      ? {
+          step: 1,
+          title: 'Choose who gets it',
+          why: 'Pick the list of people this email goes to.',
+          action: 'Choose a list',
+          go: () => setTab('audience'),
+          ai: 'Show me my lists and set the one I choose as who gets this email.',
+        }
+      : !checked
+        ? {
+            step: 2,
+            title: 'Check it',
+            why: 'We look for missing links, empty fields and who can really get it.',
+            action: 'Check it',
+            go: () => void doValidate(),
+            ai: 'Check this email for problems, fix what you can, and tell me what is left.',
+          }
+        : {
+            step: 3,
+            title: 'Send yourself a test, then send it',
+            why: 'It’s ready. Look at a test in your inbox first.',
+            action: 'Send now',
+            go: () => setDialog('send'),
+            ai: 'Send me a test of this email, then tell me how many people will get it.',
+          };
 
   const canSend = s === 'draft' || s === 'validated' || s === 'scheduled';
 
@@ -622,39 +652,67 @@ function CampaignWorkspace({ id }: { id: string }) {
         </Notice>
       )}
 
-      {/* Draft checklist */}
-      {(s === 'draft' || s === 'validated') && (
-        <nav aria-label="Campaign setup steps">
-          <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Next step: arrows from writing to sending, and one big button for what to do now */}
+      {(s === 'draft' || s === 'validated') && editable && (
+        <section
+          aria-label="What to do next"
+          className="rounded-2xl border-2 border-primary-500 bg-primary-50 p-4 dark:bg-primary-900/30"
+        >
+          <ol className="flex flex-wrap items-center gap-1">
             {steps.map((st, i) => (
-              <li key={st.label}>
+              <li key={st.label} className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setTab(st.key)}
-                  className="flex w-full items-center gap-3 rounded-lg border border-secondary-200 p-3 text-left hover:bg-secondary-100/60"
+                  onClick={st.go}
+                  disabled={isBusy}
+                  className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ${
+                    i === next.step
+                      ? 'bg-primary-600 font-semibold text-white'
+                      : 'text-secondary-700 hover:bg-white/70 dark:text-secondary-200 dark:hover:bg-secondary-800'
+                  }`}
                 >
                   <span
-                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                    className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold ${
                       st.done
-                        ? 'bg-green-600 text-white dark:bg-green-500'
-                        : 'border border-secondary-200 text-secondary-500'
+                        ? 'bg-success-600 text-white'
+                        : i === next.step
+                          ? 'bg-white text-primary-700'
+                          : 'border border-secondary-300'
                     }`}
                     aria-hidden="true"
                   >
-                    {st.done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                    {st.done ? <Check className="h-3 w-3" /> : i + 1}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium">
-                      {st.label}
-                      <span className="sr-only">{st.done ? ' (done)' : ' (to do)'}</span>
-                    </span>
-                    <span className="block truncate text-xs text-secondary-500">{st.hint}</span>
-                  </span>
+                  {st.label}
+                  <span className="sr-only">{st.done ? ' (done)' : i === next.step ? ' (do this next)' : ''}</span>
                 </button>
+                {i < steps.length - 1 && <ChevronRight className="h-4 w-4 text-secondary-400" aria-hidden="true" />}
               </li>
             ))}
           </ol>
-        </nav>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <p className="text-lg font-semibold">Next: {next.title}</p>
+              <p className="text-sm text-secondary-700 dark:text-secondary-300">{next.why}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <AskAI text={next.ai} />
+              {next.step === 3 && (
+                <Button variant="outline" onClick={() => setTab('audience')}>
+                  Send me a test
+                </Button>
+              )}
+              <Button
+                onClick={next.go}
+                disabled={isBusy}
+                isLoading={next.step === 2 && busy === 'Validate'}
+                rightIcon={<ArrowRight className="h-4 w-4" />}
+              >
+                {next.action}
+              </Button>
+            </div>
+          </div>
+        </section>
       )}
 
       {/* Tabs */}
