@@ -3,14 +3,16 @@
 /**
  * Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md, ai_runners.manage): connect a workstation-terminal so people can
  * open a task's folder there from Start with AI. Add (the shared secret and the terminal's config block are shown
- * once), edit the name, address and agents, switch off, rotate the secret, remove.
+ * once), edit the name, address and agents, switch off, rotate the secret, remove, and People: the keys managers
+ * issue (§10).
  */
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { KeyRound, Pencil, Plus, Terminal, Trash2, X } from 'lucide-react';
+import { KeyRound, Pencil, Plus, Terminal, Trash2, Users, X } from 'lucide-react';
 import { Badge, Button, Card, Input, Modal, confirmDialog } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import { aiRunner, aiErrorText, type TerminalAgent, type WebTerminal } from '@/services/ai-runner.service';
+import { TerminalPeople } from './TerminalPeople';
 import { CopyBlock, PRODUCT, opsapiUrl, useAiData } from './ui';
 
 // What the terminal runs for the default agents; the terminal's own config decides (shown in the config block).
@@ -23,12 +25,17 @@ const RUN_LINES: Record<string, string> = {
 };
 
 /** The block to paste into the terminal's config.yaml. */
-function configBlock(secret: string, agents: TerminalAgent[], autologin: boolean): string {
+function configBlock(terminal: WebTerminal, secret: string): string {
+  const { agents, autologin } = terminal;
   const lines = [
     "# Paste into the terminal's config.yaml (sshweb), then restart it.",
     'opsapi:',
     `  webhook_url: ${opsapiUrl()}/api/v2/ai-runner/public/terminal/webhook`,
     `  webhook_secret: "${secret}"`,
+    '  # People\'s keys issued in OpsAPI (Web terminals → People), fetched every 30 seconds.',
+    '  keys:',
+    `    url: ${opsapiUrl()}/api/v2/ai-runner/public/terminal/keys`,
+    `    terminal_id: ${terminal.uuid}`,
     '  agents:',
   ];
   for (const a of agents.filter((x) => x.id !== 'shell')) {
@@ -40,13 +47,13 @@ function configBlock(secret: string, agents: TerminalAgent[], autologin: boolean
   }
   if (autologin) {
     lines.push(
-      '  # Auto sign-in from Start with AI (docs §8): only these OpsAPI emails, as these terminal users',
-      '  # (each needs an authorized key with local access).',
+      '  # Auto sign-in from Start with AI (docs §8). People with a key issued in OpsAPI are matched by their',
+      '  # email. Only keys added on the terminal itself (sshweb keys add) need a line in users:',
+      '  #   "their@email.com": their_terminal_user',
       '  autologin:',
       '    enabled: true',
       '    max_stepup_age_secs: 43200',
-      '    users:',
-      '      "you@example.com": you',
+      '    users: {}',
     );
   }
   lines.push(
@@ -78,7 +85,7 @@ function SecretModal({ shown, onClose }: { shown: Shown | null; onClose: () => v
           On the machine that runs the terminal, add this to its <code className="font-mono">config.yaml</code> and
           restart it:
         </p>
-        <CopyBlock what="Config" text={configBlock(shown.secret, shown.terminal.agents, shown.terminal.autologin)} testId="air-terminal-config" />
+        <CopyBlock what="Config" text={configBlock(shown.terminal, shown.secret)} testId="air-terminal-config" />
         <p className="text-xs text-secondary-500">
           Change <code className="font-mono">allowed_roots</code> to the folders people may open, and the
           <code className="font-mono"> run</code> lines to how each agent starts on that machine. The task text reaches
@@ -168,8 +175,8 @@ function EditModal({
           <span>
             Let power users be signed in automatically
             <span className="block text-xs text-secondary-500">
-              People with &quot;Web terminal auto sign-in&quot; skip the SSH key after confirming an emailed code (every 12
-              hours). The terminal&apos;s own <code className="font-mono">autologin.users</code> list must also name them.
+              People with a key from People (or &quot;Web terminal auto sign-in&quot;) are signed in by Start with AI
+              after confirming an emailed code (every 12 hours), without using their key file.
             </span>
           </span>
         </label>
@@ -232,6 +239,7 @@ export function WebTerminals() {
   const terminals = useAiData(() => aiRunner.listTerminals(), []);
   const [editing, setEditing] = useState<WebTerminal | 'new' | null>(null);
   const [shown, setShown] = useState<Shown | null>(null);
+  const [people, setPeople] = useState<WebTerminal | null>(null);
   const list = terminals.data || [];
 
   async function act(what: string, fn: () => Promise<unknown>) {
@@ -319,6 +327,14 @@ export function WebTerminals() {
               <Button
                 size="sm"
                 variant="ghost"
+                leftIcon={<Users className="h-4 w-4" aria-hidden />}
+                onClick={() => setPeople(t)}
+              >
+                People
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
                 leftIcon={<Pencil className="h-4 w-4" aria-hidden />}
                 onClick={() => setEditing(t)}
               >
@@ -368,6 +384,7 @@ export function WebTerminals() {
         />
       )}
       <SecretModal shown={shown} onClose={() => setShown(null)} />
+      {people && <TerminalPeople terminal={people} onClose={() => setPeople(null)} />}
     </section>
   );
 }

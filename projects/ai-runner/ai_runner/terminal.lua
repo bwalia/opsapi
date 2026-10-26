@@ -142,12 +142,17 @@ function T.paths(ns, project_uuid, terminal_uuid, ps)
 end
 
 --- What the Start dialog offers: each active terminal with its agents and folders for this task's project.
-function T.offer(ns, task, ps)
+-- `autologin`: this person may be signed in there by the link (the terminal allows it, and they hold
+-- ai_terminal_autologin or a live key on it; who = { user_uuid, can_autologin }).
+function T.offer(ns, task, ps, who)
+    who = who or {}
     local out = {}
     for i, t in ipairs(T.list(ns, true)) do
         local paths = T.paths(ns, task.project_uuid, t.uuid, ps)
+        local auto = t.autologin == true and (who.can_autologin == true
+            or (who.user_uuid ~= nil and T.live_key(ns, who.user_uuid, t.id) ~= nil))
         out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = U.array(agents(t)),
-            autologin = t.autologin == true, default_path = U.null(paths[1]), recent_paths = U.array(paths) }
+            autologin = auto, default_path = U.null(paths[1]), recent_paths = U.array(paths) }
     end
     return U.array(out)
 end
@@ -234,6 +239,169 @@ end
 
 function T.forget_stepup(ns, user_uuid)
     db.query("DELETE FROM ar_terminal_stepups WHERE namespace_id = ? AND user_uuid = ?", ns, user_uuid)
+end
+
+-- ---------------------------------------------------------------------------
+-- Keys issued by managers (§10)
+-- ---------------------------------------------------------------------------
+
+T.KEY_TTL = 90 * 86400             -- a key works for 90 days, then the manager issues a new one
+T.KEY_REMIND = 14 * 86400          -- the manager who issued it is reminded this long before it expires
+
+-- A key counts only while it isn't blocked or expired and its person is an active user and member of the workspace:
+-- removing someone from the workspace, or deactivating them, blocks their keys with nothing else to do.
+local LIVE_KEY = [[k.revoked_at IS NULL AND k.expires_at > NOW() AND EXISTS (SELECT 1 FROM users ku
+    JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
+    WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]]
+
+--- An OpenSSH ed25519 public key line -> "ssh-ed25519 <base64>" (no comment) and its SHA256 fingerprint, or nil.
+function T.parse_public_key(line)
+    if type(line) ~= "string" or #line > 1000 then return nil end
+    local b64 = line:match("^%s*ssh%-ed25519%s+([%w+/]+=*)[^\r\n]*$")
+    local blob = b64 and ngx.decode_base64(b64)
+    -- string "ssh-ed25519", string <32-byte key>
+    if not blob or #blob ~= 51 or blob:sub(1, 19) ~= "\0\0\0\11ssh-ed25519\0\0\0\32" then return nil end
+    local h = require("resty.sha256"):new()
+    h:update(blob)
+    return "ssh-ed25519 " .. b64, "SHA256:" .. ngx.encode_base64(h:final()):gsub("=+$", "")
+end
+
+-- Keys of people who left the workspace (or were deactivated) are blocked for good, so coming back later doesn't
+-- bring an old key back: a manager issues a new one.
+local function retire_leavers(terminal_id)
+    db.query([[UPDATE ar_terminal_keys k SET revoked_at = NOW(), revoked_reason = 'left'
+        WHERE k.terminal_id = ? AND k.revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM users ku
+            JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
+            WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]], terminal_id)
+end
+
+--- The person's live key on a terminal (any terminal of the workspace when terminal_id is nil), or nil.
+function T.live_key(ns, user_uuid, terminal_id)
+    return U.one("SELECT k.* FROM ar_terminal_keys k WHERE k.namespace_id = ? AND k.user_uuid = ?"
+        .. (terminal_id and " AND k.terminal_id = " .. tonumber(terminal_id) or "") .. " AND " .. LIVE_KEY
+        .. " LIMIT 1", ns, user_uuid)
+end
+
+--- The terminal user a person signs in as: the one they had on this terminal before, else their email's local part
+-- (a terminal user name: [a-z_][a-z0-9_.-]*), numbered when someone else already had it. Names are never reused for
+-- another person, so a new starter can't inherit a leaver's saved tabs.
+local function terminal_user_for(terminal_id, user_uuid, email)
+    local prev = U.one([[SELECT terminal_user FROM ar_terminal_keys WHERE terminal_id = ? AND user_uuid = ?
+        ORDER BY id DESC LIMIT 1]], terminal_id, user_uuid)
+    if prev then return prev.terminal_user end
+    local base = (tostring(email or ""):match("^([^@]+)") or ""):lower():gsub("[^a-z0-9_.-]", "."):gsub("^[^a-z_]+", "")
+    base = base ~= "" and base:sub(1, 28) or "user"
+    for i = 1, 99 do
+        local name = i == 1 and base or (base .. i)
+        if not U.one("SELECT 1 AS x FROM ar_terminal_keys WHERE terminal_id = ? AND terminal_user = ?", terminal_id,
+            name) then return name end
+    end
+end
+
+--- Issue a person a key for a terminal. The manager's browser made the key pair; only the public half comes here.
+-- Their earlier key on this terminal is blocked. @return key row | nil, http status, message
+function T.issue_key(ns, term, user_uuid, public_key, by)
+    local person = U.one([[SELECT u.uuid, u.email FROM users u JOIN namespace_members m ON m.user_id = u.id
+        WHERE m.namespace_id = ? AND u.uuid = ? AND m.status = 'active' AND u.active = true]], ns, user_uuid)
+    if not person then return nil, 422, "Pick someone who is an active member of this workspace" end
+    local line, fp = T.parse_public_key(public_key)
+    if not line then return nil, 422, "public_key must be an ssh-ed25519 public key" end
+    if U.one("SELECT 1 AS x FROM ar_terminal_keys WHERE terminal_id = ? AND fingerprint = ?", term.id, fp) then
+        return nil, 409, "This key was used before. Make a new one."
+    end
+    local name = terminal_user_for(term.id, person.uuid, person.email)
+    if not name then return nil, 409, "No free terminal user name for this person" end
+    db.query([[UPDATE ar_terminal_keys SET revoked_at = NOW(), revoked_by = ?, revoked_reason = 'replaced'
+        WHERE terminal_id = ? AND user_uuid = ? AND revoked_at IS NULL]], by, term.id, person.uuid)
+    return U.one([[INSERT INTO ar_terminal_keys (namespace_id, terminal_id, user_uuid, terminal_user, public_key,
+        fingerprint, created_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW() + interval ']] .. T.KEY_TTL
+        .. [[ seconds') RETURNING *]], ns, term.id, person.uuid, name, line, fp, by)
+end
+
+--- Block a key now (the terminal drops it at its next fetch and closes its sessions). @return row | nil
+function T.block_key(ns, term, key_uuid, by)
+    if not U.is_uuid(key_uuid) then return nil end
+    return U.one([[UPDATE ar_terminal_keys SET revoked_at = NOW(), revoked_by = ?, revoked_reason = 'blocked'
+        WHERE namespace_id = ? AND terminal_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING *]],
+        by, ns, term.id, key_uuid:lower())
+end
+
+--- A terminal's keys for its managers, newest live ones first: who, terminal user, fingerprint, issued, expires, and
+-- status active | expired | blocked | replaced | left (left the workspace or was deactivated).
+function T.keys(ns, term)
+    retire_leavers(term.id)
+    local rows = db.query([[SELECT k.uuid, k.user_uuid, k.terminal_user, k.fingerprint, k.created_at, k.expires_at,
+            k.revoked_at, k.revoked_reason, ]] .. R.name_sql("u") .. [[ AS person_name, u.email AS person_email,
+            ]] .. R.name_sql("cb") .. [[ AS created_by_name, ]] .. R.name_sql("rb") .. [[ AS revoked_by_name,
+            (]] .. LIVE_KEY .. [[) AS live, (k.expires_at <= NOW()) AS expired
+        FROM ar_terminal_keys k LEFT JOIN users u ON u.uuid = k.user_uuid
+        LEFT JOIN users cb ON cb.uuid = k.created_by LEFT JOIN users rb ON rb.uuid = k.revoked_by
+        WHERE k.namespace_id = ? AND k.terminal_id = ?
+        ORDER BY (k.revoked_at IS NULL) DESC, k.created_at DESC LIMIT 200]], ns, term.id)
+    local out = {}
+    for i, k in ipairs(rows) do
+        local status = k.live and "active" or k.revoked_reason == "replaced" and "replaced"
+            or k.revoked_reason == "left" and "left" or k.revoked_reason == "blocked" and "blocked" or "expired"
+        out[i] = { uuid = k.uuid, user_uuid = k.user_uuid, person_name = U.null(k.person_name),
+            person_email = U.null(k.person_email), terminal_user = k.terminal_user, fingerprint = k.fingerprint,
+            created_at = k.created_at, created_by_name = U.null(k.created_by_name), expires_at = k.expires_at,
+            revoked_at = U.null(k.revoked_at), revoked_by_name = U.null(k.revoked_by_name), status = status }
+    end
+    return U.array(out)
+end
+
+--- Active members a key can be issued to.
+function T.key_candidates(ns)
+    return U.array(db.query([[SELECT u.uuid, ]] .. R.name_sql("u") .. [[ AS name, u.email FROM namespace_members m
+        JOIN users u ON u.id = m.user_id WHERE m.namespace_id = ? AND m.status = 'active' AND u.active = true
+        ORDER BY lower(]] .. R.name_sql("u") .. [[) LIMIT 500]], ns))
+end
+
+-- Tell whoever issued a key that it expires soon (once per key; runs when the terminal fetches its keys).
+local function remind_expiring(term)
+    local due = db.query([[UPDATE ar_terminal_keys k SET reminded_at = NOW() WHERE k.terminal_id = ?
+        AND k.reminded_at IS NULL AND k.created_by IS NOT NULL AND k.expires_at < NOW() + interval ']] .. T.KEY_REMIND
+        .. [[ seconds' AND ]] .. LIVE_KEY .. [[ RETURNING k.namespace_id, k.user_uuid, k.created_by,
+        to_char(k.expires_at, 'DD Mon YYYY') AS expires_on]], term.id)
+    for _, k in ipairs(due) do
+        local who = U.one("SELECT " .. R.name_sql("u") .. " AS name FROM users u WHERE u.uuid = ?", k.user_uuid)
+        pcall(require("queries.KanbanNotificationQueries").create, {
+            namespace_id = k.namespace_id, recipient_user_uuid = k.created_by, type = "general", priority = "normal",
+            title = "A web terminal key expires soon",
+            message = ((who and who.name) or "Someone") .. "'s key for " .. tostring(term.name) .. " stops working on "
+                .. k.expires_on .. ". Issue a new one under Machines → Web terminals → People.",
+            action_url = "/dashboard/ai-runner/machines",
+        })
+    end
+end
+
+--- What the terminal fetches (§10): its live keys, signed so it can trust them. The request is signed too:
+-- X-Opsapi-Signature: sha256=hex(HMAC(secret, "keys\n<terminal uuid>\n<X-Opsapi-Timestamp>")).
+-- A terminal switched off in OpsAPI gets an empty list. @return body, signature hex | nil, http status, message
+function T.keys_for_terminal(terminal_uuid, ts, signature)
+    local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
+    if not term then return nil, 401, "Unauthorized" end
+    local secret = secret_of(term)
+    ts = type(ts) == "string" and ts:match("^%d+$")
+    local got = type(signature) == "string" and (signature:match("^[Ss][Hh][Aa]256=(%x+)$") or "") or ""
+    if not secret or not ts or not equal(got:lower(), T.hmac_hex(secret, "keys\n" .. term.uuid .. "\n" .. ts)) then
+        return nil, 401, "Unauthorized"
+    end
+    if math.abs(tonumber(ts) - ngx.time()) > T.CLOCK_SKEW then return nil, 400, "Timestamp too far from now" end
+    local keys = {}
+    retire_leavers(term.id)
+    if term.is_active then
+        pcall(remind_expiring, term)
+        for i, k in ipairs(db.query([[SELECT k.terminal_user AS user, k.public_key,
+                EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email
+            FROM ar_terminal_keys k JOIN users pu ON pu.uuid = k.user_uuid
+            WHERE k.terminal_id = ? AND ]] .. LIVE_KEY .. " ORDER BY k.id", term.id)) do
+            keys[i] = { user = k.user, public_key = k.public_key, expires_unix = tonumber(k.expires_unix),
+                email = U.null(k.email) }
+        end
+    end
+    local body = cjson.encode({ terminal = term.uuid, generated_at = ngx.time(), keys = U.array(keys) })
+    return body, T.hmac_hex(secret, body)
 end
 
 -- ---------------------------------------------------------------------------

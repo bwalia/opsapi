@@ -405,7 +405,7 @@ function KanbanNotificationQueries.shouldNotify(user_uuid, notification_type, pr
         WHERE user_uuid = ? AND (project_id = ? OR project_id IS NULL)
         ORDER BY project_id DESC NULLS LAST
         LIMIT 1
-    ]], user_uuid, project_id)
+    ]], user_uuid, project_id or db.NULL) -- nil: a notification about no project ("general") used to fail here
 
     if not pref or #pref == 0 then
         -- No preferences set, use defaults (notify for everything)

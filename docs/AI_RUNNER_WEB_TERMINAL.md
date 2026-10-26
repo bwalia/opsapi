@@ -20,6 +20,7 @@ link as plain query parameters and had no folder.
 | W6 | Commands come only from the terminal's own config (agent allowlist). The link carries an agent **id**, the folder and the prompt — never a command. | A crafted link must not run anything. |
 | W7 (2026-10-24, narrows W2) | **Power users may be signed in by the link** (§8), when all of these hold: the terminal has auto sign-in on, the OpsAPI user holds `ai_terminal_autologin`, they confirmed an emailed code in the last 12 h (step-up), **and the terminal's own config maps their email to a terminal user**. Everyone else still signs in with an SSH key. | One click from task to working agent for trusted people; a stolen OpsAPI password alone still isn't a shell (step-up code + terminal-side allowlist). |
 | W8 (2026-10-24) | The agent **reports its pull request** to OpsAPI with a per-launch token (§9); the task moves to Review when it opens and to Done when it merges. | Task to finished work with no hand-offs. |
+| W9 (2026-10-26) | **Managers issue each person a key** in OpsAPI (§10), not the people themselves. The key pair is made in the manager's browser; only its public half reaches OpsAPI. Keys last **90 days**; blocking one, or the person leaving the workspace, stops it within a minute. | One place controls who can open a shell, and every sign-in is one named person. |
 
 ## 1. Connecting a terminal (per workspace)
 
@@ -123,13 +124,17 @@ bad signature → 401. The task id is never taken from the webhook.
 | `POST /tasks/:task_uuid/runs/preview` | (as before) | adds `terminals: [{uuid, name, url, agents, default_path, recent_paths}]`, `terminal_prompt` |
 | `POST /public/terminal/webhook` | the terminal's signature | §4 → `session` |
 | `GET /terminal-autologin` | `ai_runs.read` | → `{allowed, stepup: {verified_at, expires_at} \| null}` (§8) |
-| `POST /terminal-autologin/code` | `ai_terminal_autologin.create` | emails a code → `{sent: true}` (429 when too many) |
-| `POST /terminal-autologin/verify` | `ai_terminal_autologin.create` | `{code}` → `{allowed, stepup}`; 401 wrong code |
+| `POST /terminal-autologin/code` | `ai_terminal_autologin.create` or a live key (§10) | emails a code → `{sent: true}` (429 when too many) |
+| `POST /terminal-autologin/verify` | `ai_terminal_autologin.create` or a live key (§10) | `{code}` → `{allowed, stepup}`; 401 wrong code |
 | `DELETE /terminal-autologin` | `ai_runs.read` | forgets the step-up |
 | `POST /public/terminal/report` | `Authorization: Bearer <report token>` | `{pr_url?, note?}` → `{task_uuid, pr?}` (§9) |
+| `GET /terminals/:uuid/keys` | `ai_runners.manage` | → `{keys: [key], people: [{uuid, name, email}]}` (§10) |
+| `POST /terminals/:uuid/keys` | `ai_runners.manage` | `{user_uuid, public_key}` (ssh-ed25519) → 201 `key`; blocks their old key there; 409 a key used before |
+| `POST /terminals/:uuid/keys/:key_uuid/block` | `ai_runners.manage` | → `{blocked: true}`; 404 if not live |
+| `GET /public/terminal/keys` | the terminal's signature | → the live keys, signed (§10) |
 
 `POST /terminals`, `PUT /terminals/:uuid` also take `autologin` (boolean); `POST /tasks/:task_uuid/terminal-sessions`
-takes `autologin: true` → 403 without the permission, 409 if the terminal doesn't allow it, 403 `code: stepup_required`
+takes `autologin: true` → 403 without the permission or a live key on that terminal, 409 if the terminal doesn't allow it, 403 `code: stepup_required`
 without a live step-up. The report address is `OPSAPI_PUBLIC_URL` + `/api/v2/ai-runner/public/terminal/report` when
 set, else the launch request's `Host` (scheme from `X-Forwarded-Proto`); it must be https
 (or localhost), otherwise the launch has no `report` claim.
@@ -138,7 +143,9 @@ set, else the launch request's `Host` (scheme from `X-Forwarded-Proto`); it must
 `session = {uuid, task_uuid, project_uuid, opened_by, opened_by_name, terminal_uuid, terminal_name, terminal_url, path,
 agent, agent_label, terminal_user, session_id, autologin, reported_at, status, started_at, ended_at, exit_code, ended_reason, expires_at,
 created_at, updated_at}`. Tables: `ar_terminals`, `ar_terminal_sessions` (migration
-`20261023120000_ai_runner_web_terminals`).
+`20261023120000_ai_runner_web_terminals`), `ar_terminal_keys` (`20261026120000_ai_runner_terminal_keys`).
+`key = {uuid, user_uuid, person_name, person_email, terminal_user, fingerprint, created_at, created_by_name, expires_at,
+revoked_at, revoked_by_name, status: active|expired|blocked|replaced|left}`.
 
 ## 6. Status on the task
 
@@ -206,3 +213,59 @@ its own task.
 **Unattended agents.** The default agents include `claude_auto` ("Claude Code, unattended"):
 `claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"`. It never stops to ask; this is only acceptable
 because the terminal runs under its own macOS account (W1). Leave it out of a terminal's config to forbid it.
+
+## 10. Keys managers issue (W9)
+
+**Issuing.** Machines → Web terminals → **People** (`ai_runners.manage`). The manager picks a member of the workspace
+and presses **Make a key**. The browser makes an ed25519 key pair (`opsapi-dashboard/lib/ssh-key.ts`) and locks the
+private key with a generated passphrase (OpenSSH format, bcrypt KDF + aes256-ctr, as `ssh-keygen -N` writes). Only
+the public key goes to OpsAPI. The manager downloads the key file and copies the passphrase **once**, and hands them
+over separately. A new key for the same person on the same terminal replaces (blocks) their old one.
+
+**Storage.** `ar_terminal_keys` (per terminal): person, terminal user name, public key, SHA256 fingerprint, issued
+by/at, `expires_at` (90 days), blocked by/at/reason (`blocked`, `replaced`, `left`). The terminal user name comes
+from the email's local part, numbered if taken; a name is never given to a different person, so a new starter can't
+inherit a leaver's saved tabs.
+
+**When a key stops.** It is sent to the terminal only while it isn't blocked or expired **and** its person is an
+active user and an active member of the workspace. Someone who leaves or is deactivated has their keys blocked for
+good (reason `left`); coming back later needs a new key. A terminal switched off in OpsAPI gets an empty list.
+
+**Reminder.** Fourteen days before a key expires, whoever issued it gets a notification (once per key).
+
+**The terminal fetches its keys.** `opsapi.keys` in the terminal's `config.yaml` (the config block shows it):
+
+```yaml
+opsapi:
+  keys:
+    url: https://<opsapi>/api/v2/ai-runner/public/terminal/keys
+    terminal_id: <this terminal's id>
+    interval_secs: 30        # default
+    max_stale_secs: 900      # default: no good fetch for this long and OpsAPI's keys stop working
+```
+
+```
+GET /api/v2/ai-runner/public/terminal/keys
+X-Opsapi-Terminal: <terminal id>
+X-Opsapi-Timestamp: <unix seconds>                 (within 5 minutes)
+X-Opsapi-Signature: sha256=<hex HMAC-SHA256(secret, "keys\n<terminal id>\n<timestamp>")>
+
+200  X-Opsapi-Signature: sha256=<hex HMAC-SHA256(secret, body)>
+{ "terminal": "<id>", "generated_at": 1792828054,
+  "keys": [ { "user": "priya", "public_key": "ssh-ed25519 AAAA…", "expires_unix": 1800604054,
+              "email": "priya@example.com" } ] }
+```
+
+The terminal trusts a list only when its signature checks out, it names this terminal, `generated_at` is within 5
+minutes and not older than the last list it took. OpsAPI keys get `local` access only and can't use a user name (or
+key) that is in the terminal's own `authorized_keys`. A key that drops off the list stops at once, and the terminal
+closes its sessions within seconds. If OpsAPI can't be reached for `max_stale_secs`, all OpsAPI keys stop; keys in
+`authorized_keys` keep working (so the owner can still get in). The terminal audits `opsapi_key_added`,
+`opsapi_key_removed` and `opsapi_keys_stale`; every sign-in is audited with the user and key fingerprint as before.
+
+**Auto sign-in (§8).** A person with a live key on a terminal may also be signed in by Start with AI there, after the
+emailed code, without the key file. The terminal matches them by the email in the key list, so its own
+`autologin.users` is needed only for keys added on the terminal itself.
+
+**What a key doesn't do.** Every shell runs as the macOS account the terminal runs under (W1): keys say *who* signs
+in, not *what* they can reach. People sharing that account can see each other's files.
