@@ -34,7 +34,14 @@ end
 local function aggregateStatements(statement_ids, user_id)
     if #statement_ids == 0 then return 0, 0 end
 
-    local id_list = table.concat(statement_ids, ",")
+    -- Spliced into IN (...): render each id as an integer so nothing else can get in.
+    local ids = {}
+    for i, sid in ipairs(statement_ids) do
+        local n = tonumber(sid)
+        if not n or n ~= math.floor(n) then return 0, 0 end
+        ids[i] = string.format("%d", n)
+    end
+    local id_list = table.concat(ids, ",")
     local result = db.query(string.format([[
         SELECT
             -- Credits in a non-business category (transfer, loan, drawings, personal) are
@@ -133,6 +140,18 @@ return function(app)
             if not statement_ids or type(statement_ids) ~= "table" or #statement_ids == 0 then
                 return { status = 400, json = { error = "statement_ids array is required" } }
             end
+
+            -- The ids are spliced into IN (...) below, so accept positive integers only
+            -- and replace the raw params with the parsed numbers.
+            local ids = {}
+            for i, sid in ipairs(statement_ids) do
+                local n = tostring(sid):match("^%d+$") and tonumber(sid)
+                if not n then
+                    return { status = 400, json = { error = "statement_ids must be numeric ids" } }
+                end
+                ids[i] = n
+            end
+            statement_ids = ids
 
             -- Verify all statements belong to user
             local id_list = table.concat(statement_ids, ",")

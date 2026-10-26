@@ -283,7 +283,7 @@ register({
     end,
     handler = function(ctx, args)
         local cat = db.query([[
-            SELECT c.key, c.label, c.is_tax_deductible, h.box AS hmrc_box
+            SELECT c.key, c.label, c.is_tax_deductible, h.box AS hmrc_box, h.key AS hmrc_key
             FROM tax_categories c LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
             WHERE c.key = ? AND c.is_active = true LIMIT 1]], tostring(args.category or ""))
         if not cat or not cat[1] then
@@ -291,11 +291,14 @@ register({
         end
         local c = cat[1]
         -- Scoped by user_id (the owner); a user can only fix their own transactions.
+        -- hmrc_category stores the catalogue KEY (e.g. car_van_travel), not the box
+        -- number: the HMRC aggregator and the report join on tax_hmrc_categories.key.
+        -- Non-business categories have no HMRC box, so it is cleared.
         local res = db.query([[UPDATE tax_transactions
             SET category = ?, hmrc_category = ?, is_tax_deductible = ?, classification_status = 'CLASSIFIED',
                 classified_by = 'user', confidence_score = 1.0, is_manually_reviewed = true, updated_at = NOW()
             WHERE uuid = ? AND user_id = ?]],
-            c.key, c.hmrc_box, c.is_tax_deductible and true or false,
+            c.key, c.hmrc_key or db.NULL, c.is_tax_deductible and true or false,
             tostring(args.transaction_uuid), ctx.user_id)
         if not res or (res.affected_rows or 0) == 0 then
             return nil, "Transaction not found for this user."
