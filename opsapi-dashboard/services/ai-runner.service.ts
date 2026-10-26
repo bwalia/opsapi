@@ -460,6 +460,105 @@ export interface TerminalSession {
   ended_at?: string | null;
   exit_code?: number | null;
   created_at: string;
+  /** §11: the tab's work log, once the terminal reported it. */
+  work_log?: { uuid: string; active_secs: number; prompts: number; tokens: number; cost_usd: number } | null;
+}
+/** §11: one terminal tab in the work log, with its totals. */
+export interface WorkLogTab {
+  uuid: string;
+  tab_id: string;
+  terminal_name: string | null;
+  user_uuid: string | null;
+  person_name: string | null;
+  person_email: string | null;
+  /** Who they were on the terminal (always known, even without an OpsAPI person). */
+  terminal_user: string | null;
+  /** key | opsapi_launch */
+  via: string | null;
+  ip: string | null;
+  kind: string | null;
+  cwd: string | null;
+  agent: string | null;
+  session_uuid: string | null;
+  task_uuid: string | null;
+  task_number: number | null;
+  task_title: string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+  open: boolean;
+  end_reason: string | null;
+  exit_code: number | null;
+  duration_secs: number;
+  active_secs: number;
+  input_bytes: number;
+  output_bytes: number;
+  prompts: number;
+  requests: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+  lines_added: number;
+  lines_removed: number;
+  commits: number;
+  pull_requests: number;
+  recording_parts: number;
+  recording_bytes: number;
+}
+/** user_prompt | api_request | api_error | tool_result | tool_decision | metric */
+export interface WorkLogEvent {
+  id: string;
+  at: string;
+  type: string;
+  session: string | null;
+  prompt_id: string | null;
+  model: string | null;
+  tool_name: string | null;
+  success: boolean | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
+  /** The prompt, the command/file details or the error (blanked after text_days). */
+  text: string | null;
+  attrs: Record<string, string | number | boolean>;
+}
+export interface WorkLogDetail extends WorkLogTab {
+  events: WorkLogEvent[];
+  recording: { part: number; final: boolean; bytes: number; created_at: string }[];
+  text_days: number;
+  recording_days: number;
+}
+export interface WorkLogPerson {
+  user_uuid: string | null;
+  person_name: string | null;
+  person_email: string | null;
+  terminal_user: string | null;
+  tabs: number;
+  active_secs: number;
+  prompts: number;
+  requests: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  lines_added: number;
+  lines_removed: number;
+  commits: number;
+  pull_requests: number;
+  last_seen: string | null;
+}
+export interface WorkLogFilters {
+  user_uuid?: string;
+  task_uuid?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  per_page?: number;
 }
 export interface TerminalLaunch {
   terminal_uuid: string;
@@ -775,7 +874,7 @@ export const aiErrorText = (e: unknown) => aiError(e).message;
 interface Envelope<T> {
   success: boolean;
   data: T;
-  meta?: { page?: number; per_page?: number; total?: number; total_pages?: number };
+  meta?: { page?: number; per_page?: number; total?: number; total_pages?: number; sees_everyone?: boolean };
 }
 const id = encodeURIComponent;
 
@@ -886,6 +985,19 @@ export const aiRunner = {
     send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys`, body),
   blockTerminalKey: (uuid: string, keyUuid: string) =>
     send<{ blocked: boolean }>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/block`),
+
+  // Work log (§11): everyone's with ai_terminal_worklogs.read, else only your own.
+  workLog: async (f: WorkLogFilters = {}) => {
+    const res = await get<WorkLogTab[]>(`/work-log${buildQueryString({ ...f })}`);
+    return { ...paged<WorkLogTab>(res, f), seesEveryone: res.meta?.sees_everyone === true };
+  },
+  workLogPeople: async (f: Pick<WorkLogFilters, 'from' | 'to'> = {}) =>
+    list<WorkLogPerson>((await get<WorkLogPerson[]>(`/work-log/people${buildQueryString({ ...f })}`)).data),
+  workLogTab: async (uuid: string) => (await get<WorkLogDetail>(`/work-log/tabs/${id(uuid)}`)).data,
+  /** One gzipped asciicast part of a tab's screen recording. */
+  workLogRecordingPart: async (uuid: string, part: number) =>
+    (await apiClient.get<ArrayBuffer>(`${BASE}/work-log/tabs/${id(uuid)}/recording/${part}`,
+      { responseType: 'arraybuffer' })).data,
 
   // Runs
   listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>

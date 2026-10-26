@@ -10,6 +10,7 @@ workspaces; auto sign-in (§8: the permission, the terminal switch, the emailed-
 migrations run again.
 """
 import base64
+import gzip
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ import uuid as uuidlib
 
 API, SECRET, PSQL = os.environ["AR_API"], os.environ["AR_JWT_SECRET"], os.environ["AR_PSQL"]
 MIGRATE = os.environ.get("AR_MIGRATE")
+EXEC = os.environ.get("AR_EXEC")
 P = API + "/api/v2/ai-runner"
 TAG = uuidlib.uuid4().hex[:6]
 USERS = {
@@ -524,6 +526,183 @@ k5 = expect("dev gets a key again", call("POST", K, "mgr", W, {"user_uuid": USER
             201)
 check("dev's name is kept; never given to someone else", k5["terminal_user"] == "dev.a")
 
+# --- Work log (§11) ---------------------------------------------------------------------------------------------
+ACT, REC = P + "/public/terminal/activity", P + "/public/terminal/recordings"
+
+
+def signed(path, body, headers=None, secret=None, msg=None):
+    """A request from the terminal, signed with its secret (over the body, or `msg`)."""
+    sig = hmac.new((secret or SEC2).encode(), body if msg is None else msg, hashlib.sha256).hexdigest()
+    h = {"X-Opsapi-Terminal": TERM["uuid"], "X-Opsapi-Signature": "sha256=" + sig}
+    h.update(headers or {})
+    return call("POST", path, raw=body, headers=h)
+
+
+def get_raw(url, user, ns):
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + jwt(user), "X-Namespace-Id": ns})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def page(user, ns, query=""):
+    res = call("GET", P + "/work-log" + query, user, ns)
+    body = res[1] if isinstance(res[1], dict) else {}
+    return res[0], body.get("data") or [], body.get("meta") or {}
+
+
+NOW, LAUNCH = time.time(), dl["session"]["uuid"]
+SECRET_TXT = "ghp_" + "A1b2C3d4" * 5
+tabs = [
+    {"id": "tab0a", "user": "dev.a", "key": "SHA256:a-file-key", "via": "opsapi_launch", "ip": "203.0.113.4",
+     "launch": LAUNCH, "kind": "local", "cwd": "/Users/agents/projects/site", "agent": "claude",
+     "opened_at": NOW - 600, "closed_at": None, "active_secs": 420, "input_bytes": 1200, "output_bytes": 88000},
+    {"id": "tab0b", "user": "dev.a", "key": k5["fingerprint"], "via": "key", "ip": "203.0.113.4", "launch": None,
+     "kind": "local", "cwd": "/Users/agents/projects", "agent": None, "opened_at": NOW - 300, "closed_at": NOW - 60,
+     "end_reason": "closed", "exit_code": 0, "active_secs": 120, "input_bytes": 50, "output_bytes": 900},
+    {"id": "tab0c", "user": "ownerfile", "key": "SHA256:not-an-opsapi-key", "via": "key", "kind": "local",
+     "opened_at": NOW - 200, "active_secs": 10},
+]
+
+
+def ev(i, tab, typ, attrs):
+    return {"id": f"{tab}:{i}", "tab": tab, "at": NOW - 500 + i, "type": typ, "session": "cs-1", "prompt_id": "p-1",
+            "attrs": attrs}
+
+
+events = [
+    ev(1, "tab0a", "user_prompt", {"prompt": f"Fix the header. Use token {SECRET_TXT}", "prompt_length": 50,
+                                   "user.email": "shared-account@claude.invalid"}),
+    ev(2, "tab0a", "api_request", {"model": "claude-opus-5-5", "input_tokens": "2", "output_tokens": 400,
+                                   "cache_read_tokens": 23910, "cache_creation_tokens": 16690, "cost_usd": 0.13839,
+                                   "duration_ms": 2560}),
+    ev(3, "tab0a", "tool_result", {"tool_name": "Bash", "success": "true", "duration_ms": 900,
+                                   "tool_parameters": '{"command":"npm test"}'}),
+    ev(4, "tab0a", "tool_decision", {"tool_name": "Edit", "decision": "accept", "source": "config"}),
+    ev(5, "tab0a", "api_error", {"model": "claude-opus-5-5", "error": "overloaded", "status_code": "529"}),
+    ev(6, "tab0a", "metric", {"name": "claude_code.lines_of_code.count", "type": "added", "value": 12}),
+    ev(7, "tab0a", "metric", {"name": "claude_code.lines_of_code.count", "type": "removed", "value": "3"}),
+    ev(8, "tab0a", "metric", {"name": "claude_code.commit.count", "value": 1}),
+    ev(9, "tab0a", "metric", {"name": "claude_code.pull_request.count", "value": 1}),
+    ev(10, "tab0b", "api_request", {"model": "claude-haiku-5-5", "input_tokens": 1000, "output_tokens": 10,
+                                    "cost_usd": 0.0001}),
+    {"id": "none:1", "tab": None, "at": NOW - 100, "type": "user_prompt", "attrs": {"prompt": "unattributed"}},
+    {"id": "tab0a:99", "tab": "tab0a", "at": NOW, "type": "hook_registered", "attrs": {}},
+]
+report_body = json.dumps({"terminal": TERM["uuid"], "sent_at": int(NOW), "tabs": tabs, "events": events}).encode()
+expect("activity without a signature", call("POST", ACT, raw=report_body, headers={"X-Opsapi-Terminal": TERM["uuid"]}),
+       401)
+expect("activity signed with the old secret", signed(ACT, report_body, secret=SEC), 401)
+expect("activity that isn't JSON", signed(ACT, b"not json"), 400)
+got = expect("the terminal reports tabs and events", signed(ACT, report_body), 200)
+check("3 tabs, 11 events (other event types dropped)", got == {"tabs": 3, "events": 11}, got)
+check("the same report again adds nothing", expect("report again", signed(ACT, report_body), 200).get("events") == 0)
+
+st_, rows, meta = page("owner_a", W, "?per_page=50")
+tabs_by = {r["tab_id"]: r for r in rows}
+check("the owner sees every tab", st_ == 200 and {"tab0a", "tab0b", "tab0c"} <= set(tabs_by)
+      and meta.get("sees_everyone") is True, (st_, list(tabs_by), meta))
+a = tabs_by.get("tab0a") or {}
+check("a tab from a task link is its opener's, on that task", a.get("user_uuid") == USERS["dev"][0]
+      and a.get("task_uuid") == T1["uuid"] and a.get("session_uuid") == LAUNCH and a.get("person_email") == USERS["dev"][1],
+      a)
+check("…with its totals: prompts, requests, actions, tokens, cost, lines, commits, PRs, active time",
+      a.get("prompts") == 1 and a.get("requests") == 1 and a.get("tool_calls") == 1 and a.get("input_tokens") == 2
+      and a.get("output_tokens") == 400 and a.get("cache_read_tokens") == 23910 and a.get("cache_write_tokens") == 16690
+      and abs((a.get("cost_usd") or 0) - 0.13839) < 1e-6 and a.get("lines_added") == 12 and a.get("lines_removed") == 3
+      and a.get("commits") == 1 and a.get("pull_requests") == 1 and a.get("active_secs") == 420 and a.get("open") is True,
+      a)
+b = tabs_by.get("tab0b") or {}
+check("a tab signed in with an OpsAPI key is that person's", b.get("user_uuid") == USERS["dev"][0]
+      and b.get("task_uuid") is None and b.get("end_reason") == "closed" and b.get("open") is False, b)
+c = tabs_by.get("tab0c") or {}
+check("a key from the terminal's own file: no person, its terminal user", c.get("user_uuid") is None
+      and c.get("terminal_user") == "ownerfile", c)
+_, dev_rows, dev_meta = page("dev", W)
+check("dev sees only their own tabs", sorted(r["tab_id"] for r in dev_rows) == ["tab0a", "tab0b"]
+      and dev_meta.get("sees_everyone") is False, [r["tab_id"] for r in dev_rows])
+check("…and can't widen it", sorted(r["tab_id"] for r in page("dev", W, f"?user_uuid={USERS['owner_a'][0]}")[1])
+      == ["tab0a", "tab0b"])
+check("dev2 sees nothing of theirs", page("dev2", W)[1] == [])
+check("another workspace sees none", page("owner_b", X)[1] == [])
+check("filter by task", [r["tab_id"] for r in page("owner_a", W, f"?task_uuid={T1['uuid']}")[1]] == ["tab0a"])
+expect("totals per person need the permission", call("GET", P + "/work-log/people", "dev", W), 403)
+people = expect("owner: totals per person", call("GET", P + "/work-log/people", "owner_a", W), 200)
+dp = [x for x in people if x["user_uuid"] == USERS["dev"][0]]
+check("dev: 2 tabs, 540 s active, 1 prompt, 2 requests, its cost", len(dp) == 1 and dp[0]["tabs"] == 2
+      and dp[0]["active_secs"] == 540 and dp[0]["prompts"] == 1 and dp[0]["requests"] == 2
+      and abs(dp[0]["cost_usd"] - 0.13849) < 1e-6, dp)
+
+d = expect("dev opens their tab", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+evs = d.get("events") or []
+check("the timeline in order", [e["type"] for e in evs][:5] == ["user_prompt", "api_request", "tool_result",
+                                                                    "tool_decision", "api_error"], [e["type"] for e in evs])
+check("the prompt is kept word for word, a secret in it masked, Claude's account email dropped",
+      evs and "Fix the header" in (evs[0].get("text") or "") and SECRET_TXT not in (evs[0].get("text") or "")
+      and "user.email" not in evs[0].get("attrs", {}), evs[:1])
+check("the command the AI ran", len(evs) > 2 and "npm test" in (evs[2].get("text") or "") and evs[2]["tool_name"] == "Bash"
+      and evs[2]["success"] is True, evs[2:3])
+check("retention is stated", d.get("text_days") == 90 and d.get("recording_days") == 30)
+expect("dev2 can't open dev's tab", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev2", W), 404)
+expect("another workspace can't", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "owner_b", X), 404)
+au = one(f"""SELECT COUNT(*) || '|' || SUM(input_tokens) || '|' || SUM(cached_input_tokens) FROM ai_usage
+    WHERE user_uuid = '{USERS['dev'][0]}' AND feature = 'web_terminal'""")
+check("model requests count in AI usage, as the person's", au == f"2|{2 + 16690 + 23910 + 1000}|23910", au)
+sess = [s for s in expect("the task's sessions", call("GET", L, "dev", W), 200) if s["uuid"] == LAUNCH]
+check("the task's session shows its work log", sess and (sess[0].get("work_log") or {}).get("uuid") == a.get("uuid")
+      and sess[0]["work_log"]["prompts"] == 1, sess)
+
+CAST = (json.dumps({"version": 2, "width": 80, "height": 24, "timestamp": int(NOW)}) + "\n"
+        + json.dumps([0.5, "o", "hello $ "]) + "\n").encode()
+
+
+def rec(part, body, final="0", tab="tab0a", secret=None):
+    return signed(REC, body, secret=secret, msg=f"{tab}\n{part}\n".encode() + body,
+                  headers={"X-Opsapi-Tab": tab, "X-Opsapi-Part": str(part), "X-Opsapi-Final": final,
+                           "Content-Type": "application/gzip"})
+
+
+expect("a recording part signed with the old secret", rec(0, gzip.compress(CAST), secret=SEC), 401)
+expect("a part that isn't gzipped", rec(0, CAST), 400)
+check("a recording part is stored", expect("part 0", rec(0, gzip.compress(CAST)), 200) == {"stored": True})
+check("…once", expect("part 0 again", rec(0, gzip.compress(CAST)), 200) == {"stored": False})
+expect("the final part", rec(1, gzip.compress(json.dumps([1.0, "o", "bye"]).encode() + b"\n"), final="1"), 200)
+d2 = expect("the tab again", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+check("its parts are listed", [x["part"] for x in d2.get("recording", [])] == [0, 1]
+      and d2["recording"][1]["final"] is True and d2.get("recording_parts") == 2, d2.get("recording"))
+PART0 = P + f"/work-log/tabs/{a.get('uuid')}/recording/0"
+st0, raw0 = get_raw(PART0, "dev", W)
+check("the recording comes back as recorded", st0 == 200 and gzip.decompress(raw0) == CAST, st0)
+check("dev2 can't fetch it", get_raw(PART0, "dev2", W)[0] == 404)
+
+if EXEC:
+    sql("UPDATE ar_terminal_events SET created_at = NOW() - interval '91 days' WHERE event_id = 'tab0a:1'")
+    sql("""UPDATE ar_terminal_recordings SET created_at = NOW() - interval '31 days' WHERE part = 0
+        AND tab_ref = (SELECT id FROM ar_terminal_tabs WHERE tab_id = 'tab0a')""")
+    out = subprocess.run(shlex.split(EXEC) + [
+        "package.path = '/app/projects/ai-runner/?.lua;' .. package.path; require('ai_runner.worklog').sweep()"],
+        capture_output=True, text=True)
+    check("the retention sweep runs", out.returncode == 0, (out.stdout + out.stderr)[-300:])
+    check("text older than 90 days is blanked; its numbers stay", one("""SELECT COALESCE(text, 'none') || '|' || type
+        FROM ar_terminal_events WHERE event_id = 'tab0a:1'""") == "none|user_prompt")
+    d3 = expect("the tab after the sweep", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+    check("recordings older than 30 days are deleted", [x["part"] for x in d3.get("recording", [])] == [1]
+          and d3.get("recording_parts") == 1 and get_raw(PART0, "dev", W)[0] == 404, d3.get("recording"))
+    sql("UPDATE ar_terminal_tabs SET updated_at = NOW() - interval '13 hours' WHERE tab_id = 'tab0a'")
+    subprocess.run(shlex.split(EXEC) + [
+        "package.path = '/app/projects/ai-runner/?.lua;' .. package.path; require('ai_runner.worklog').sweep()"],
+        capture_output=True, text=True)
+    lost = expect("the tab after 13 hours without news", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+    check("a tab the terminal stopped reporting is closed", lost.get("open") is False
+          and lost.get("end_reason") == "the terminal stopped reporting", lost.get("end_reason"))
+    alive = json.dumps({"terminal": TERM["uuid"], "tabs": [dict(tabs[0], active_secs=480)], "events": []}).encode()
+    expect("the terminal reports it open again", signed(ACT, alive), 200)
+    back = expect("the tab again", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+    check("…and it reopens", back.get("open") is True and back.get("end_reason") is None
+          and back.get("active_secs") == 480, (back.get("open"), back.get("end_reason")))
+
 # --- Switch off, delete -------------------------------------------------------------------------------------
 expect("switch the terminal off", call("PUT", P + f"/terminals/{TERM['uuid']}", "mgr", W, {"is_active": False}), 200)
 check("a switched-off terminal gets no keys", live_keys() == [], live_keys())
@@ -534,10 +713,12 @@ expect("delete it", call("DELETE", P + f"/terminals/{TERM['uuid']}", "mgr", W), 
 listed = expect("sessions after delete", call("GET", L, "dev", W), 200)
 check("its sessions stay on the task", len(listed) == 6 and all(s["terminal_name"] is None for s in listed), listed)
 expect("webhook for a deleted terminal's launch", webhook(dict(ev2, ts=int(time.time())), NEW), 404)
+check("its work log stays", "tab0a" in [r["tab_id"] for r in page("owner_a", W, "?per_page=50")[1]])
 
 for MIG, table in (("20261023120000_ai_runner_web_terminals", "ar_terminals"),
                    ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups"),
-                   ("20261026120000_ai_runner_terminal_keys", "ar_terminal_keys")):
+                   ("20261026120000_ai_runner_terminal_keys", "ar_terminal_keys"),
+                   ("20261026130000_ai_runner_work_log", "ar_terminal_tabs")):
     if not MIGRATE:
         break
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG}'")

@@ -21,6 +21,7 @@ link as plain query parameters and had no folder.
 | W7 (2026-10-24, narrows W2) | **Power users may be signed in by the link** (§8), when all of these hold: the terminal has auto sign-in on, the OpsAPI user holds `ai_terminal_autologin`, they confirmed an emailed code in the last 12 h (step-up), **and the terminal's own config maps their email to a terminal user**. Everyone else still signs in with an SSH key. | One click from task to working agent for trusted people; a stolen OpsAPI password alone still isn't a shell (step-up code + terminal-side allowlist). |
 | W8 (2026-10-24) | The agent **reports its pull request** to OpsAPI with a per-launch token (§9); the task moves to Review when it opens and to Done when it merges. | Task to finished work with no hand-offs. |
 | W9 (2026-10-26) | **Managers issue each person a key** in OpsAPI (§10), not the people themselves. The key pair is made in the manager's browser; only its public half reaches OpsAPI. Keys last **90 days**; blocking one, or the person leaving the workspace, stops it within a minute. | One place controls who can open a shell, and every sign-in is one named person. |
+| W10 (2026-10-26) | **Work log**: every terminal tab, every prompt (full text, 90 days), every AI request with tokens and cost, every AI action (commands and files, in full), and a **screen replay** of each tab (output only, never keystrokes; 30 days). Managers see everyone; each person sees their own. | Know what was done, by whom, at what cost. Employees must be told what is recorded (UK GDPR). |
 
 ## 1. Connecting a terminal (per workspace)
 
@@ -269,3 +270,105 @@ emailed code, without the key file. The terminal matches them by the email in th
 
 **What a key doesn't do.** Every shell runs as the macOS account the terminal runs under (W1): keys say *who* signs
 in, not *what* they can reach. People sharing that account can see each other's files.
+
+## 11. Work log (W10)
+
+What is recorded, per terminal **tab** (one sshweb session: a task tab or a plain one):
+
+| Kind | Recorded | Kept |
+|---|---|---|
+| Tab | who (terminal user + key fingerprint → the OpsAPI person who holds that key, or the launch's opener), the task (if opened from one), folder, agent, sign-in (`key` / `opsapi_launch`), IP, opened/closed, how it ended, exit code, active seconds (input or output in the last 60 s), bytes in/out | always |
+| AI (Claude Code) | each prompt (text), each model request (model, input/output/cache-read/cache-write tokens, cost estimate, duration), each tool result (tool, success, duration, its parameters: commands, files), tool decisions (accepted/rejected), API errors, lines added/removed, commits, pull requests | text 90 days, numbers always |
+| Screen | the tab's output as an [asciicast v2](https://docs.asciinema.org/manual/asciicast/v2/) recording (`o` and `r` events; **never input**) | 30 days |
+
+Claude's numbers come from its own OpenTelemetry. Cost is Claude's estimate at list price (on a subscription
+nothing is billed per token; it measures usage). Codex/Cursor/plain shells get tab and screen records only.
+
+### 11.1 Terminal side (sshweb, `opsapi.work_log`)
+
+```yaml
+opsapi:
+  work_log:
+    enabled: true
+    url: https://<opsapi>/api/v2/ai-runner/public/terminal   # base; paths below are appended
+    otlp_port: 7683          # loopback-only plain HTTP receiver for Claude's telemetry
+    record: true             # screen recordings
+```
+
+Needs `opsapi.keys.terminal_id` (the terminal's id) and `opsapi.webhook_secret`.
+
+- **Per-tab token.** Every local tab gets a random token (32 bytes, hex) in its shell as `SSHWEB_TAB_TOKEN`, plus
+  Claude's telemetry settings (overridable only by a stricter managed setting):
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`,
+  `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:<otlp_port>/v1/logs`,
+  `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://127.0.0.1:<otlp_port>/v1/metrics`,
+  `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <tab token>`, `OTEL_LOG_USER_PROMPTS=1`, `OTEL_LOG_TOOL_DETAILS=1`,
+  `OTEL_LOGS_EXPORT_INTERVAL=5000`, `OTEL_METRIC_EXPORT_INTERVAL=30000`. On the shared account the admin also installs
+  Claude's managed settings (sshweb `packaging/claude-managed-settings.json`) so these can't be switched off; its
+  `otelHeadersHelper` reads `SSHWEB_TAB_TOKEN`.
+- **OTLP receiver** on `127.0.0.1:<otlp_port>` only: `POST /v1/logs`, `POST /v1/metrics` (JSON). The bearer token
+  names the tab. Posts without a known token are answered 200 and **dropped** (only counted in the terminal's audit
+  log): Claude's managed settings are machine-wide, so the owner's own Claude must not reach OpsAPI. Log records
+  are forwarded when `event.name` is one of `user_prompt`, `api_request`, `api_error`, `tool_result`,
+  `tool_decision`; metric data points for `claude_code.lines_of_code.count`, `claude_code.commit.count`,
+  `claude_code.pull_request.count`, `claude_code.active_time.total` (delta temporality). Everything else is dropped.
+  Text is cut to 16 KiB (`prompt`) and 8 KiB (`tool_parameters` / `tool_input`).
+- **Recording.** Each local tab's PTY output → asciicast v2 lines (`[secs, "o", data]`, resize `[secs, "r", "COLSxROWS"]`),
+  header `{"version":2,"width":..,"height":..,"timestamp":..}` in part 0 only. A part closes every 60 s or 1 MiB
+  (uncompressed), whichever first, and at tab close; it is gzipped and uploaded, then deleted locally (kept in
+  `<state_dir>/recordings`, mode 0600, until uploaded).
+
+### 11.2 Terminal → OpsAPI
+
+Both requests carry `X-Opsapi-Terminal: <terminal id>` and `X-Opsapi-Signature: sha256=<hex HMAC-SHA256(secret, …)>`.
+
+**`POST {url}/activity`** — signature over the raw body. Sent every 10 s while there is something new; retried.
+
+```json
+{ "terminal": "<id>", "sent_at": 1792828054,
+  "tabs": [ { "id": "<sshweb session id>", "user": "priya", "key": "SHA256:…", "via": "key",
+              "ip": "203.0.113.4", "launch": "<launch uuid or null>", "kind": "local", "cwd": "/Users/…",
+              "agent": "claude", "opened_at": 1792828000, "closed_at": null, "end_reason": null,
+              "exit_code": null, "active_secs": 420, "input_bytes": 1200, "output_bytes": 88000 } ],
+  "events": [ { "id": "<tab id>:<seq>", "tab": "<tab id>", "at": 1792828050.123,
+                "type": "user_prompt", "session": "<claude session.id>", "prompt_id": "<prompt.id>",
+                "attrs": { "prompt": "…", "prompt_length": 30 } },
+              { "id": "…", "tab": "…", "at": 1792828051.9, "type": "api_request", "session": "…", "prompt_id": "…",
+                "attrs": { "model": "claude-opus-5-5", "input_tokens": 2, "output_tokens": 4,
+                           "cache_read_tokens": 23910, "cache_creation_tokens": 16690, "cost_usd": 0.13839,
+                           "duration_ms": 2560 } },
+              { "id": "…", "tab": "…", "at": …, "type": "metric", "session": "…",
+                "attrs": { "name": "claude_code.lines_of_code.count", "type": "added", "value": 12 } } ] }
+```
+
+A tab entry is the tab's whole current state (upsert by terminal + id): sent at open, at close, and every 60 s
+while it changes. Events are append-only; `id` is unique per terminal, so a retry is harmless. `attrs` carries the
+OTel attributes as given (Claude sends many numbers as strings), minus `user.email`, `user.account_uuid`,
+`organization.id`, `event.name`, `session.id`, `prompt.id`; `session`/`prompt_id` are left out when Claude sent none.
+Answer `200 {"tabs": n, "events": n}`; `401` bad signature/terminal; `400` bad body. Max body 5 MiB.
+
+**`POST {url}/recordings`** — headers also `X-Opsapi-Tab: <tab id>`, `X-Opsapi-Part: <n>` (0, 1, …),
+`X-Opsapi-Final: 0|1`; body = the gzipped part; signature over `"<tab id>\n<part>\n" .. body`. Max 4 MiB per part.
+`200 {"stored": true}`; a part already stored → `200 {"stored": false}`.
+
+### 11.3 OpsAPI
+
+Tables (migration `20261026130000_ai_runner_work_log`): `ar_terminal_tabs` (one row per tab, totals rolled up from
+events: tokens, cost, prompts, tool calls, lines, commits, PRs), `ar_terminal_events`, `ar_terminal_recordings`
+(one row per stored part; object in MinIO). Each `api_request` with a known person also goes to `ai_usage`
+(`feature = 'web_terminal'`), so the AI usage page includes it; the per-user daily in-app AI limit ignores it.
+
+Who: a tab's person = the opener of its launch, else the holder of the OpsAPI key with that fingerprint on that
+terminal. Unknown (a key added on the terminal itself) shows the terminal user.
+
+Retention: prompt and tool text are blanked after 90 days, recordings deleted after 30 (hourly sweep). The sweep also
+closes a tab still open after 12 hours without news (`end_reason` "the terminal stopped reporting", e.g. after a crash);
+it reopens if the terminal reports it open again.
+
+| Method & path | Who | → |
+|---|---|---|
+| `GET /work-log?user_uuid&task_uuid&from&to&page&per_page` | `ai_terminal_worklogs.read`, else only your own | tabs, newest first, with totals |
+| `GET /work-log/people?from&to` | `ai_terminal_worklogs.read` | per person: tabs, active time, prompts, tokens, cost |
+| `GET /work-log/tabs/:uuid` | same rule | the tab + its events (timeline) + recording parts |
+| `GET /work-log/tabs/:uuid/recording/:part` | same rule | the gzipped asciicast part |
+

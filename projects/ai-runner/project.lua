@@ -28,6 +28,8 @@ return {
         module("ai_runs_settings", "AI run settings", "Workspace AI run settings and the prompt template"),
         module("ai_terminal_autologin", "Web terminal auto sign-in",
             "Be signed in to a web terminal by Start with AI (after an emailed code; the terminal must also allow you)"),
+        module("ai_terminal_worklogs", "Web terminal work logs",
+            "See everyone's web terminal work: sessions, prompts, AI tokens and cost, actions and screen replays"),
     },
 
     -- Native pages in opsapi-dashboard/app/dashboard/ai-runner.
@@ -35,6 +37,7 @@ return {
         { label = "AI Runs", route = "/dashboard/ai-runner/runs", module = "ai_runs", icon = "Bot" },
         { label = "Runners & sources", route = "/dashboard/ai-runner/runners", module = "ai_runners", icon = "Server" },
         { label = "Machines", route = "/dashboard/ai-runner/machines", module = "ai_runners", icon = "Monitor" },
+        { label = "Work log", route = "/dashboard/ai-runner/work-log", module = "ai_runs", icon = "ClipboardList" },
         { label = "AI run settings", route = "/dashboard/ai-runner/settings", module = "ai_runs_settings",
           icon = "Settings" },
     },
