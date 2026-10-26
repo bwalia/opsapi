@@ -17,10 +17,14 @@ const EXPIRY_OPTIONS = [30, 90, 180, 365];
 const AGENT_PRESET: ApiKeyScopes = { kanban: ['read', 'create', 'update'], projects: ['read'] };
 // An agent that may look but never change anything (writes are refused by HTTP method).
 const READ_ONLY: ApiKeyScopes = { kanban: ['read'], projects: ['read'] };
+// Website content through the API or MCP: posts, pages, categories, images, website updates (no deleting).
+const CONTENT: ApiKeyScopes = { cms: ['read', 'create', 'update'] };
 const ACCESS = [
   { key: 'agent', title: 'AI agent (MCP)', text: 'Read your tasks, create tasks, update them, log time and comment.',
     scopes: AGENT_PRESET },
   { key: 'readonly', title: 'Read only', text: 'See your tasks and projects; any change is refused.', scopes: READ_ONLY },
+  { key: 'content', title: 'Website content', text: 'Write and publish blog posts and pages, upload images and update your website. Nothing can be deleted.',
+    scopes: CONTENT },
 ] as const;
 
 // Postgres sends "2027-01-10 09:30:00.123456" (UTC, no zone): make it parseable everywhere.
@@ -134,7 +138,7 @@ function ConnectAgent({ workspaceId, apiKey }: { workspaceId: number; apiKey?: s
         <div>
           <h2 className="text-base font-semibold text-secondary-900">Connect an AI agent</h2>
           <p className="text-sm text-secondary-500 mt-0.5">
-            Give an agent your tasks through MCP. It acts as you, with this key&apos;s access.
+            Give an agent your tasks and website content through MCP. It acts as you, with this key&apos;s access.
           </p>
         </div>
       </div>
@@ -223,7 +227,7 @@ export default function MyApiKeysPage() {
 
   const [name, setName] = useState('');
   const [days, setDays] = useState(90);
-  const [access, setAccess] = useState<'agent' | 'readonly'>('agent');
+  const [access, setAccess] = useState<(typeof ACCESS)[number]['key']>('agent');
   const [isCreating, setIsCreating] = useState(false);
   // The key just made, tied to its workspace so a switch never shows it elsewhere.
   const [made, setMade] = useState<{ ns: string; key: CreatedMyApiKey } | null>(null);
@@ -255,7 +259,8 @@ export default function MyApiKeysPage() {
     setIsCreating(true);
     try {
       setMade({ ns: nsUuid, key: await myApiKeysService.create({
-        name: name.trim(), expires_in_days: days, ...(access === 'readonly' ? { scopes: READ_ONLY } : {}),
+        name: name.trim(), expires_in_days: days,
+        ...(access === 'agent' ? {} : { scopes: ACCESS.find((o) => o.key === access)!.scopes }),
       }) });
       setName('');
       load();
