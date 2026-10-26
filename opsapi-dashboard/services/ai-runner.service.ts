@@ -403,6 +403,28 @@ export interface WebTerminal {
   created_at?: string;
   updated_at?: string;
 }
+/** §10: a key a manager issued someone for a terminal (only its public half is kept). */
+export interface TerminalAccessKey {
+  uuid: string;
+  user_uuid: string;
+  person_name: string | null;
+  person_email: string | null;
+  /** Who they are on the terminal. */
+  terminal_user: string;
+  fingerprint: string;
+  created_at: string;
+  created_by_name: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  revoked_by_name: string | null;
+  /** left = left the workspace or was deactivated; replaced = a newer key was issued. */
+  status: 'active' | 'expired' | 'blocked' | 'replaced' | 'left';
+}
+export interface TerminalKeyPerson {
+  uuid: string;
+  name: string | null;
+  email: string | null;
+}
 /** What Start with AI offers for a terminal: its agents and the folders used before for this project. */
 export interface TerminalOffer {
   uuid: string;
@@ -857,6 +879,13 @@ export const aiRunner = {
   rotateTerminalSecret: (uuid: string) =>
     send<{ terminal: WebTerminal; secret: string }>('post', `/terminals/${id(uuid)}/rotate-secret`),
   deleteTerminal: (uuid: string) => send<unknown>('delete', `/terminals/${id(uuid)}`),
+  // §10: keys managers issue people for a terminal. The key pair is made in the browser (lib/ssh-key.ts).
+  terminalKeys: async (uuid: string) =>
+    (await get<{ keys: TerminalAccessKey[]; people: TerminalKeyPerson[] }>(`/terminals/${id(uuid)}/keys`)).data,
+  issueTerminalKey: (uuid: string, body: { user_uuid: string; public_key: string }) =>
+    send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys`, body),
+  blockTerminalKey: (uuid: string, keyUuid: string) =>
+    send<{ blocked: boolean }>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/block`),
 
   // Runs
   listRuns: async (f: RunFilters = {}): Promise<Page<Run>> =>

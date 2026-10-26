@@ -474,7 +474,7 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
                       <span>
                         Sign me in to {terminal?.name} automatically
                         <span className="block text-xs text-secondary-500">
-                          No SSH key needed. The terminal must also list your email in its own settings.
+                          No key file needed.
                         </span>
                       </span>
                     </label>
