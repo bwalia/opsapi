@@ -1,22 +1,26 @@
 --[[
     Tax Calculation Routes
 
-    UK 2025-26 self-assessment tax calculation with multi-statement support.
+    UK self-assessment tax calculation, per TAX YEAR.
 
     GET  /api/v2/tax/calculate/year-statements     — List statements by tax year
-    GET  /api/v2/tax/calculate/:statement_id        — Single-statement tax calculation
-    POST /api/v2/tax/calculate/multi                — Multi-statement aggregation
-    GET  /api/v2/tax/calculate/summary/:statement_id — Formatted tax summary
+    GET  /api/v2/tax/calculate/:statement_id        — Calculation for the statement's tax year
+    POST /api/v2/tax/calculate/multi                — Calculation for the tax year of a set of statements
+    GET  /api/v2/tax/calculate/summary/:statement_id — Formatted summary for the statement's tax year
 
-    Tax maths + per-year rate loading live in lib/tax-calc (TaxCalc) — the single
-    source of truth shared with the conversational tax agent (lib/agent/tax-tools)
-    so the two can never disagree.
+    Tax is a yearly figure, so every calculation covers ALL the user's statements in the
+    tax year (the statement only picks the year). The figures come from
+    lib/agent/tax-tools (TaxTools.compute_year → lib/tax-calc compute_full) — the same
+    function the chat estimate, the reports tax calculation and the filing workbook use,
+    so they can never disagree.
 ]]
 
 local db = require("lapis.db")
+local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
 local TaxCalc = require("lib.tax-calc")
+local TaxTools = require("lib.agent.tax-tools")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -30,27 +34,40 @@ local function getTaxYearDates(tax_year_str)
     return string.format("%d-04-06", start_year), string.format("%d-04-05", start_year + 1)
 end
 
---- Aggregate income/expenses from transactions for given statement IDs
-local function aggregateStatements(statement_ids, user_id)
-    if #statement_ids == 0 then return 0, 0 end
+local function validTaxYear(y)
+    return type(y) == "string" and y:match("^%d%d%d%d%-%d%d$") ~= nil
+end
 
-    local id_list = table.concat(statement_ids, ",")
-    local result = db.query(string.format([[
-        SELECT
-            -- Credits in a non-business category (transfer, loan, drawings, personal) are
-            -- not income — same rule as compute_estimate and lib/tax-report.
-            COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' AND NOT EXISTS (
-                SELECT 1 FROM tax_categories c WHERE c.key = tax_transactions.category AND c.hmrc_category_id IS NULL)
-                THEN amount ELSE 0 END), 0) as gross_income,
-            COALESCE(SUM(CASE WHEN transaction_type = 'DEBIT' AND is_tax_deductible = true THEN amount ELSE 0 END), 0) as total_expenses
-        FROM tax_transactions
-        WHERE statement_id IN (%s) AND user_id = ?
-    ]], id_list), user_id)
+--- The user's statement by numeric id, or nil.
+local function findStatement(statement_id, user_id)
+    if not tostring(statement_id or ""):match("^%d+$") then return nil end
+    local rows = db.select("* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
+        tonumber(statement_id), user_id)
+    return rows and rows[1]
+end
 
-    if result and result[1] then
-        return tonumber(result[1].gross_income) or 0, tonumber(result[1].total_expenses) or 0
+--- The tax year a statement belongs to. Uses the stamped tax_year; otherwise derives it
+-- from the statement period (end, then start) or its latest transaction, and stamps it —
+-- the year calculation only counts statements stamped with that year (as the tax agent's
+-- background processing does).
+local function statementYear(stmt)
+    if validTaxYear(stmt.tax_year) then return stmt.tax_year end
+    local year = TaxCalc.tax_year_for_date(stmt.period_end) or TaxCalc.tax_year_for_date(stmt.period_start)
+    if not year then
+        local last = db.query("SELECT MAX(transaction_date)::text AS d FROM tax_transactions WHERE statement_id = ?",
+            stmt.id)
+        year = TaxCalc.tax_year_for_date(last and last[1] and last[1].d)
     end
-    return 0, 0
+    if year then
+        db.query([[UPDATE tax_statements SET tax_year = ?
+            WHERE id = ? AND (tax_year IS NULL OR tax_year = '')]], year, stmt.id)
+        stmt.tax_year = year
+    end
+    return year
+end
+
+local function computeYear(user_id, tax_year)
+    return TaxTools.compute_year(user_id, tax_year, TaxTools.profile_for(user_id, tax_year))
 end
 
 return function(app)
@@ -90,7 +107,7 @@ return function(app)
         end)
     )
 
-    -- GET /api/v2/tax/calculate/:statement_id
+    -- GET /api/v2/tax/calculate/:statement_id — the calculation for the statement's year
     app:get("/api/v2/tax/calculate/:statement_id",
         AuthMiddleware.requireAuth(function(self)
             local user_id = getUserId(self.current_user)
@@ -98,28 +115,23 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            local statements = db.select(
-                "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                self.params.statement_id, user_id
-            )
-            if #statements == 0 then
+            local stmt = findStatement(self.params.statement_id, user_id)
+            if not stmt then
                 return { status = 404, json = { error = "Statement not found" } }
             end
+            local tax_year = statementYear(stmt)
+            if not tax_year then
+                return { status = 422, json = { error = "Can't tell which tax year this statement is for" } }
+            end
 
-            local stmt = statements[1]
-            local tax_year = stmt.tax_year or TaxCalc.current_tax_year()
-            local rates = TaxCalc.load_rates(tax_year)
-
-            local gross_income, total_expenses = aggregateStatements({ self.params.statement_id }, user_id)
-            local calculation = TaxCalc.compute(gross_income, total_expenses, rates)
-            calculation.tax_year = tax_year
-            calculation.statement_id = tonumber(self.params.statement_id)
+            local calculation = computeYear(user_id, tax_year)
+            calculation.statement_id = stmt.id
 
             return { status = 200, json = { data = calculation } }
         end)
     )
 
-    -- POST /api/v2/tax/calculate/multi
+    -- POST /api/v2/tax/calculate/multi — the calculation for the statements' tax year
     app:post("/api/v2/tax/calculate/multi",
         AuthMiddleware.requireAuth(function(self)
             local user_id = getUserId(self.current_user)
@@ -127,35 +139,72 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            local statement_ids = self.params.statement_ids
-            local tax_year = self.params.tax_year or TaxCalc.current_tax_year()
+            -- Lapis only parses form bodies into self.params; read a JSON body too.
+            local body = {}
+            pcall(function()
+                ngx.req.read_body()
+                local raw = ngx.req.get_body_data()
+                if raw and raw ~= "" then
+                    local decoded = cjson.decode(raw)
+                    if type(decoded) == "table" then body = decoded end
+                end
+            end)
 
+            local statement_ids = body.statement_ids or self.params.statement_ids
             if not statement_ids or type(statement_ids) ~= "table" or #statement_ids == 0 then
                 return { status = 400, json = { error = "statement_ids array is required" } }
             end
 
-            -- Verify all statements belong to user
-            local id_list = table.concat(statement_ids, ",")
-            local verified = db.query(string.format(
-                "SELECT id FROM tax_statements WHERE id IN (%s) AND user_id = ?", id_list
-            ), user_id)
+            local requested_year = body.tax_year or self.params.tax_year
+            if requested_year ~= nil and requested_year ~= "" and not validTaxYear(requested_year) then
+                return { status = 400, json = { error = "Invalid tax year format (e.g. 2025-26)" } }
+            end
+            if requested_year == "" then requested_year = nil end
 
-            if not verified or #verified ~= #statement_ids then
-                return { status = 403, json = { error = "Some statements not found or not owned by user" } }
+            -- Every statement must be the caller's, and all must be in ONE tax year.
+            local statements, tax_year = {}, requested_year
+            for _, sid in ipairs(statement_ids) do
+                if not tostring(sid):match("^%d+$") then
+                    return { status = 400, json = { error = "statement_ids must be numeric ids" } }
+                end
+                local stmt = findStatement(sid, user_id)
+                if not stmt then
+                    return { status = 403, json = { error = "Some statements not found or not owned by user" } }
+                end
+                local year = validTaxYear(stmt.tax_year) and stmt.tax_year or nil
+                if not year and not requested_year then year = statementYear(stmt) end
+                if year then
+                    tax_year = tax_year or year
+                    if year ~= tax_year then
+                        return { status = 400, json = {
+                            error = "Statements span more than one tax year (" .. tax_year .. ", " .. year
+                                .. "). Tax is calculated per year — choose statements from one year.",
+                        } }
+                    end
+                end
+                statements[#statements + 1] = stmt
+            end
+            if not tax_year then
+                return { status = 422, json = { error = "Can't tell which tax year these statements are for" } }
             end
 
-            local rates = TaxCalc.load_rates(tax_year)
-            local gross_income, total_expenses = aggregateStatements(statement_ids, user_id)
-            local calculation = TaxCalc.compute(gross_income, total_expenses, rates)
-            calculation.tax_year = tax_year
-            calculation.statement_ids = statement_ids
+            -- Unstamped statements join the chosen year (only when not already set).
+            for _, stmt in ipairs(statements) do
+                db.query([[UPDATE tax_statements SET tax_year = ?
+                    WHERE id = ? AND (tax_year IS NULL OR tax_year = '')]], tax_year, stmt.id)
+            end
+
+            local calculation = computeYear(user_id, tax_year)
+            local ids = {}
+            for i, stmt in ipairs(statements) do ids[i] = stmt.id end
+            calculation.statement_ids = ids
 
             -- Advance workflow for all included statements
-            for _, sid in ipairs(statement_ids) do
+            for _, stmt in ipairs(statements) do
                 db.update("tax_statements", {
                     workflow_step = "TAX_CALCULATED",
                     updated_at = db.raw("NOW()"),
-                }, { id = sid, user_id = user_id })
+                }, { id = stmt.id, user_id = user_id })
             end
 
             -- Upsert tax_returns record
@@ -167,9 +216,9 @@ return function(app)
             local return_data = {
                 user_id = user_id,
                 tax_year = tax_year,
-                trading_income = gross_income,
-                total_income = gross_income,
-                total_expenses = total_expenses,
+                trading_income = calculation.gross_income,
+                total_income = calculation.gross_income,
+                total_expenses = calculation.total_expenses,
                 trading_profit = calculation.trading_profit,
                 personal_allowance = calculation.personal_allowance,
                 taxable_income = calculation.taxable_income,
@@ -192,7 +241,7 @@ return function(app)
         end)
     )
 
-    -- GET /api/v2/tax/calculate/summary/:statement_id
+    -- GET /api/v2/tax/calculate/summary/:statement_id — summary for the statement's year
     app:get("/api/v2/tax/calculate/summary/:statement_id",
         AuthMiddleware.requireAuth(function(self)
             local user_id = getUserId(self.current_user)
@@ -200,32 +249,28 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            local statements = db.select(
-                "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                self.params.statement_id, user_id
-            )
-            if #statements == 0 then
+            local stmt = findStatement(self.params.statement_id, user_id)
+            if not stmt then
                 return { status = 404, json = { error = "Statement not found" } }
             end
+            local tax_year = statementYear(stmt)
+            if not tax_year then
+                return { status = 422, json = { error = "Can't tell which tax year this statement is for" } }
+            end
 
-            local stmt = statements[1]
-            local tax_year = stmt.tax_year or TaxCalc.current_tax_year()
-            local rates = TaxCalc.load_rates(tax_year)
+            local calc = computeYear(user_id, tax_year)
 
-            local gross_income, total_expenses = aggregateStatements({ self.params.statement_id }, user_id)
-            local calc = TaxCalc.compute(gross_income, total_expenses, rates)
-
-            -- Category breakdown
-            local categories = db.select([[
-                category, hmrc_category,
-                SUM(amount) as total,
-                COUNT(*) as count,
-                transaction_type
-                FROM tax_transactions
-                WHERE statement_id = ? AND classification_status != 'PENDING'
-                GROUP BY category, hmrc_category, transaction_type
+            -- Category breakdown for the same year, so it adds up to the calculation.
+            local categories = db.query([[
+                SELECT t.category, t.hmrc_category,
+                    SUM(t.amount) as total,
+                    COUNT(*) as count,
+                    t.transaction_type
+                FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
+                WHERE t.user_id = ? AND s.tax_year = ? AND t.classification_status != 'PENDING'
+                GROUP BY t.category, t.hmrc_category, t.transaction_type
                 ORDER BY total DESC
-            ]], self.params.statement_id)
+            ]], user_id, tax_year)
 
             return {
                 status = 200,

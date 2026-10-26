@@ -283,7 +283,7 @@ register({
     end,
     handler = function(ctx, args)
         local cat = db.query([[
-            SELECT c.key, c.label, c.is_tax_deductible, h.box AS hmrc_box
+            SELECT c.key, c.label, c.is_tax_deductible, h.box AS hmrc_box, h.key AS hmrc_key
             FROM tax_categories c LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
             WHERE c.key = ? AND c.is_active = true LIMIT 1]], tostring(args.category or ""))
         if not cat or not cat[1] then
@@ -291,11 +291,14 @@ register({
         end
         local c = cat[1]
         -- Scoped by user_id (the owner); a user can only fix their own transactions.
+        -- hmrc_category stores the catalogue KEY (e.g. car_van_travel), not the box
+        -- number: the HMRC aggregator and the report join on tax_hmrc_categories.key.
+        -- Non-business categories have no HMRC box, so it is cleared.
         local res = db.query([[UPDATE tax_transactions
             SET category = ?, hmrc_category = ?, is_tax_deductible = ?, classification_status = 'CLASSIFIED',
                 classified_by = 'user', confidence_score = 1.0, is_manually_reviewed = true, updated_at = NOW()
             WHERE uuid = ? AND user_id = ?]],
-            c.key, c.hmrc_box, c.is_tax_deductible and true or false,
+            c.key, c.hmrc_key or db.NULL, c.is_tax_deductible and true or false,
             tostring(args.transaction_uuid), ctx.user_id)
         if not res or (res.affected_rows or 0) == 0 then
             return nil, "Transaction not found for this user."
@@ -303,6 +306,136 @@ register({
         return { updated = true, category = c.key, label = c.label, hmrc_box = c.hmrc_box }
     end,
 })
+
+-- ======================= shared year estimate =======================
+-- The chat estimate, the Calculate screens (routes/tax-calculate), the reports
+-- tax calculation (routes/tax-reports) and the filing workbook (lib/tax-report)
+-- all use these, so they cannot disagree.
+
+--- Money in / allowable money out for a user's tax year, from classified transactions.
+-- Income = credits, EXCEPT those classified into a non-business category (one with no
+-- HMRC box: transfer, loan, drawings, personal) — a transfer from your own savings or a
+-- loan is not taxable income. (is_tax_deductible applies to EXPENSES; every income
+-- category is stored is_tax_deductible=false.) Expenses = debits the classifier marked
+-- deductible. A statement belongs to the year stamped on it (tax_statements.tax_year).
+-- @return { income, expenses, unreviewed }
+function TaxTools.year_totals(user_id, tax_year)
+    local agg = db.query([[
+        SELECT
+          COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' AND NOT EXISTS (
+               SELECT 1 FROM tax_categories c WHERE c.key = t.category AND c.hmrc_category_id IS NULL)
+               THEN t.amount ELSE 0 END), 0) AS gross_income,
+          COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
+               THEN t.amount ELSE 0 END), 0) AS total_expenses,
+          COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
+        FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
+        WHERE t.user_id = ? AND s.tax_year = ?]],
+        user_id, tax_year)
+    local row = (agg and agg[1]) or {}
+    return {
+        income = tonumber(row.gross_income) or 0,
+        expenses = tonumber(row.total_expenses) or 0,
+        unreviewed = tonumber(row.unreviewed) or 0,
+    }
+end
+
+--- The income types / extra figures the customer gave the tax agent for this year
+-- (latest chat), defaulting to self-employment. namespace_id is optional: routes that
+-- aren't namespace-scoped look across the user's chats.
+function TaxTools.profile_for(user_id, tax_year, namespace_id)
+    local rows
+    if namespace_id then
+        rows = db.query([[SELECT profile FROM tax_agent_sessions
+            WHERE namespace_id = ? AND user_id = ? AND tax_year = ?
+            ORDER BY archived ASC, updated_at DESC LIMIT 1]], namespace_id, user_id, tax_year)
+    else
+        rows = db.query([[SELECT profile FROM tax_agent_sessions
+            WHERE user_id = ? AND tax_year = ?
+            ORDER BY archived ASC, updated_at DESC LIMIT 1]], user_id, tax_year)
+    end
+    local raw = rows and rows[1] and rows[1].profile
+    local profile = type(raw) == "table" and raw or {}
+    if type(raw) == "string" and raw ~= "" then
+        local ok, t = pcall(cjson.decode, raw)
+        if ok and type(t) == "table" then profile = t end
+    end
+    if type(profile.income_types) ~= "table" or #profile.income_types == 0 then
+        profile.income_types = { "self_employment" }
+    end
+    return profile
+end
+
+--- Full UK estimate for a year from money in / allowable money out (lib/tax-calc
+-- compute_full), plus the legacy-compatible fields the screens read.
+-- Routes the bank-statement totals to the right schedule from the profile, then adds
+-- any other income the agent gathered (employment, savings, dividends, Gift Aid). The
+-- engine applies the bands, allowances and NIC (Class 4 on trading profit only).
+-- opts: { unreviewed = n }
+function TaxTools.estimate(income, expenses, tax_year, profile, opts)
+    opts = opts or {}
+    profile = profile or {}
+    local types = type(profile.income_types) == "table" and profile.income_types or {}
+    local has_se, only_property = false, #types > 0
+    for _, t in ipairs(types) do
+        if t == "self_employment" then has_se = true end
+        if t ~= "uk_property" then only_property = false end
+    end
+    local inp = {
+        employment_income = tonumber(profile.employment_income) or 0,
+        paye_deducted = tonumber(profile.paye_deducted) or 0,
+        savings_interest = tonumber(profile.savings_interest) or 0,
+        dividends = tonumber(profile.dividends) or 0,
+        gift_aid_net = tonumber(profile.gift_aid_net) or 0,
+    }
+    if only_property and not has_se then
+        inp.property_rents = income
+        inp.property_expenses = expenses
+        inp.property_finance_costs = tonumber(profile.property_finance_costs) or 0
+    else
+        inp.se_turnover = income
+        inp.se_expenses = expenses
+    end
+
+    local rates = TaxCalc.load_rates(tax_year)
+    local full = TaxCalc.compute_full(inp, rates)
+    full.tax_year = tax_year
+    full.gross_income = income
+    full.total_expenses = expenses
+    full.unreviewed_count = tonumber(opts.unreviewed) or 0
+    full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
+    full.trading_profit = full.profit
+    full.taxable_income = full.total_taxable
+    -- "NIC applies to this profile?" — true for self-employment (even at a loss,
+    -- where the amount is just £0), false only for property-only income (no Class
+    -- 2/4). The frontend shows "N/A — property income" only when this is false.
+    full.nic_applied = not (only_property and not has_se)
+    local by_name = {}
+    for _, b in ipairs(full.income_tax_bands or {}) do by_name[b.name] = b end
+    local function band(name, rate)
+        local b = by_name[name]
+        return { amount = b and b.tax or 0, rate = rate }
+    end
+    full.income_tax = {
+        basic = band("Basic Rate", rates.basic_rate),
+        higher = band("Higher Rate", rates.higher_rate),
+        additional = band("Additional Rate", rates.additional_rate),
+        total = full.income_tax_due,
+    }
+    full.national_insurance = { class4 = full.class4_nic, class2 = full.class2_nic,
+        total = (full.class4_nic or 0) + (full.class2_nic or 0) }
+    full.total_tax_due = full.total_liability
+    full.effective_rate = (full.total_income or 0) > 0
+        and (math.floor(full.total_liability / full.total_income * 10000) / 100) or 0
+    full.is_estimate = true
+    return full
+end
+
+--- The estimate for a user's tax year from their classified transactions.
+function TaxTools.compute_year(user_id, tax_year, profile)
+    local totals = TaxTools.year_totals(user_id, tax_year)
+    return TaxTools.estimate(totals.income, totals.expenses, tax_year, profile,
+        { unreviewed = totals.unreviewed })
+end
 
 -- The deterministic running estimate. The ONLY tax figure the user sees — computed
 -- by lib/tax-calc, never by the model.
@@ -318,78 +451,7 @@ register({
         properties = { tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." } },
     },
     handler = function(ctx, args)
-        local tax_year = year_of(ctx, args)
-        -- Income = credits, EXCEPT those classified into a non-business category (one
-        -- with no HMRC box: transfer, loan, drawings, personal) — a transfer from your own
-        -- savings or a loan is not taxable income. (is_tax_deductible applies to EXPENSES;
-        -- every income category is stored is_tax_deductible=false.) Expenses = debits the
-        -- classifier marked deductible. Same rules in routes/tax-calculate and
-        -- lib/tax-report, so the chat estimate, the Calculate screen and the filing
-        -- workbook all agree.
-        local agg = db.query([[
-            SELECT
-              COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' AND NOT EXISTS (
-                   SELECT 1 FROM tax_categories c WHERE c.key = t.category AND c.hmrc_category_id IS NULL)
-                   THEN t.amount ELSE 0 END), 0) AS gross_income,
-              COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
-                   THEN t.amount ELSE 0 END), 0) AS total_expenses,
-              COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
-            FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-            WHERE t.user_id = ? AND s.tax_year = ?]],
-            ctx.user_id, tax_year)
-        local row = (agg and agg[1]) or { gross_income = 0, total_expenses = 0, unreviewed = 0 }
-        local rates = TaxCalc.load_rates(tax_year)
-        local income = tonumber(row.gross_income) or 0
-        local expenses = tonumber(row.total_expenses) or 0
-
-        -- Route the bank-statement totals to the right schedule from the session
-        -- profile, then add any other income the agent has gathered into the profile
-        -- (employment, savings, dividends, Gift Aid). The full engine then applies
-        -- the correct bands, allowances and NIC (Class 4 on trading profit only).
-        local profile = ctx._profile or {}
-        local types = type(profile.income_types) == "table" and profile.income_types or {}
-        local has_se, only_property = false, #types > 0
-        for _, t in ipairs(types) do
-            if t == "self_employment" then has_se = true end
-            if t ~= "uk_property" then only_property = false end
-        end
-        local inp = {
-            employment_income = tonumber(profile.employment_income) or 0,
-            paye_deducted = tonumber(profile.paye_deducted) or 0,
-            savings_interest = tonumber(profile.savings_interest) or 0,
-            dividends = tonumber(profile.dividends) or 0,
-            gift_aid_net = tonumber(profile.gift_aid_net) or 0,
-        }
-        if only_property and not has_se then
-            inp.property_rents = income
-            inp.property_expenses = expenses
-            inp.property_finance_costs = tonumber(profile.property_finance_costs) or 0
-        else
-            inp.se_turnover = income
-            inp.se_expenses = expenses
-        end
-
-        local full = TaxCalc.compute_full(inp, rates)
-        -- Context + legacy-compatible fields the estimate panel reads.
-        full.tax_year = tax_year
-        full.gross_income = income
-        full.total_expenses = expenses
-        full.unreviewed_count = tonumber(row.unreviewed) or 0
-        full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
-        full.trading_profit = full.profit
-        full.taxable_income = full.total_taxable
-        -- "NIC applies to this profile?" — true for self-employment (even at a loss,
-        -- where the amount is just £0), false only for property-only income (no Class
-        -- 2/4). The frontend shows "N/A — property income" only when this is false.
-        full.nic_applied = not (only_property and not has_se)
-        full.income_tax = { total = full.income_tax_due }
-        full.national_insurance = { class4 = full.class4_nic, class2 = full.class2_nic,
-            total = (full.class4_nic or 0) + (full.class2_nic or 0) }
-        full.total_tax_due = full.total_liability
-        full.effective_rate = (full.total_income or 0) > 0
-            and (math.floor(full.total_liability / full.total_income * 10000) / 100) or 0
-        full.is_estimate = true
-        return full
+        return TaxTools.compute_year(ctx.user_id, year_of(ctx, args), ctx._profile)
     end,
 })
 
@@ -402,7 +464,8 @@ register({
     perms = { { "tax_file", "access" } },
     parameters = { type = "object", properties = {} },
     handler = function(ctx)
-        local rows = db.query([[SELECT 1 FROM hmrc_tokens WHERE user_id = ? LIMIT 1]], ctx.user_id)
+        -- hmrc_tokens is keyed by the user's uuid (it has no user_id column).
+        local rows = db.query([[SELECT 1 FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1]], tostring(ctx.user_uuid))
         local connected = rows and rows[1] ~= nil
         return {
             connected = connected,

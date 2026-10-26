@@ -10,6 +10,7 @@
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local TaxTools = require("lib.agent.tax-tools")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -31,101 +32,6 @@ local function getTaxYearDates(tax_year_str)
     local start_year = tonumber(tax_year_str:sub(1, 4))
     if not start_year then return nil, nil end
     return string.format("%d-04-06", start_year), string.format("%d-04-05", start_year + 1)
-end
-
--- Load tax rates from DB for a given tax year, with hardcoded fallback
-local function loadTaxRates(tax_year)
-    local rows = db.query("SELECT * FROM tax_rates WHERE tax_year = ? LIMIT 1", tax_year)
-    if rows and #rows > 0 then
-        local r = rows[1]
-        return {
-            personal_allowance = tonumber(r.personal_allowance) or 12570,
-            taper_threshold = tonumber(r.personal_allowance_taper_threshold) or 100000,
-            basic_rate = tonumber(r.basic_rate) or 0.20,
-            basic_rate_upper = tonumber(r.basic_rate_upper) or 50270,
-            higher_rate = tonumber(r.higher_rate) or 0.40,
-            higher_rate_upper = tonumber(r.higher_rate_upper) or 125140,
-            additional_rate = tonumber(r.additional_rate) or 0.45,
-            nic_main_rate = tonumber(r.nic_class4_main_rate) or 0.06,
-            nic_lower = tonumber(r.nic_class4_lower_threshold) or 12570,
-            nic_upper = tonumber(r.nic_class4_upper_threshold) or 50270,
-            nic_additional_rate = tonumber(r.nic_class4_additional_rate) or 0.02,
-            class2_annual = tonumber(r.nic_class2_annual) or 179.40,
-            class2_threshold = tonumber(r.nic_class2_threshold) or 12570,
-        }
-    end
-    -- Fallback defaults (2025-26 HMRC rates)
-    return {
-        personal_allowance = 12570, taper_threshold = 100000,
-        basic_rate = 0.20, basic_rate_upper = 50270,
-        higher_rate = 0.40, higher_rate_upper = 125140,
-        additional_rate = 0.45,
-        nic_main_rate = 0.06, nic_lower = 12570, nic_upper = 50270,
-        nic_additional_rate = 0.02,
-        class2_annual = 179.40, class2_threshold = 12570,
-    }
-end
-
-local function buildTaxBands(rates)
-    return {
-        { name = "Personal Allowance", lower = 0, upper = rates.personal_allowance, rate = 0 },
-        { name = "Basic Rate", lower = rates.personal_allowance, upper = rates.basic_rate_upper, rate = rates.basic_rate },
-        { name = "Higher Rate", lower = rates.basic_rate_upper, upper = rates.higher_rate_upper, rate = rates.higher_rate },
-        { name = "Additional Rate", lower = rates.higher_rate_upper, upper = math.huge, rate = rates.additional_rate },
-    }
-end
-
-local function buildNICBands(rates)
-    return {
-        { name = "Below threshold", lower = 0, upper = rates.nic_lower, rate = 0 },
-        { name = "Main rate", lower = rates.nic_lower, upper = rates.nic_upper, rate = rates.nic_main_rate },
-        { name = "Upper rate", lower = rates.nic_upper, upper = math.huge, rate = rates.nic_additional_rate },
-    }
-end
-
-local function calculateTaxBreakdown(taxable_income, tax_bands)
-    local bands = {}
-    local total_tax = 0
-    local remaining = taxable_income
-
-    for _, band in ipairs(tax_bands) do
-        local band_width = band.upper - band.lower
-        local taxable_in_band = math.min(math.max(remaining - band.lower, 0), band_width)
-        if taxable_in_band <= 0 and remaining <= band.lower then break end
-        local tax = taxable_in_band * band.rate
-        total_tax = total_tax + tax
-        table.insert(bands, {
-            name = band.name,
-            lower = band.lower,
-            upper = band.upper == math.huge and nil or band.upper,
-            rate = band.rate,
-            taxable_amount = math.floor(taxable_in_band * 100) / 100,
-            tax = math.floor(tax * 100) / 100,
-        })
-    end
-
-    return bands, math.floor(total_tax * 100) / 100
-end
-
-local function calculateNIC(profit, nic_bands)
-    local total_nic = 0
-    local bands = {}
-
-    for _, band in ipairs(nic_bands) do
-        local band_width = band.upper - band.lower
-        local in_band = math.min(math.max(profit - band.lower, 0), band_width)
-        if in_band <= 0 and profit <= band.lower then break end
-        local nic = in_band * band.rate
-        total_nic = total_nic + nic
-        table.insert(bands, {
-            name = band.name,
-            rate = band.rate,
-            amount = math.floor(in_band * 100) / 100,
-            nic = math.floor(nic * 100) / 100,
-        })
-    end
-
-    return bands, math.floor(total_nic * 100) / 100
 end
 
 return function(app)
@@ -322,85 +228,58 @@ return function(app)
             end
         end
 
-        local tax_year = params.tax_year or getCurrentTaxYear()
-        local ty_start, ty_end = getTaxYearDates(tax_year)
+        -- The dashboard posts form-encoded, diy posts JSON: accept both.
+        for _, k in ipairs({ "tax_year", "total_income", "total_expenses", "additional_income" }) do
+            if params[k] == nil and self.params[k] ~= nil and self.params[k] ~= "" then
+                params[k] = self.params[k]
+            end
+        end
 
-        -- If income/expenses provided, use those (scenario mode)
-        -- Otherwise fetch from database (real mode)
+        local tax_year = params.tax_year or getCurrentTaxYear()
+        if not getTaxYearDates(tostring(tax_year)) then
+            return { status = 400, json = { error = "Invalid tax year format (e.g. 2025-26)" } }
+        end
+
+        -- If income/expenses provided, use those (scenario mode). Otherwise use the
+        -- year's classified transactions — the same totals as the chat estimate.
         local total_income = tonumber(params.total_income)
         local total_expenses = tonumber(params.total_expenses)
         local additional_income = tonumber(params.additional_income) or 0
+        local is_scenario = total_income ~= nil and total_expenses ~= nil
 
-        if not total_income or not total_expenses then
-            -- Fetch real data
-            local totals = db.query([[
-                SELECT
-                    COALESCE(SUM(total_income), 0) as income,
-                    COALESCE(SUM(total_expenses), 0) as expenses
-                FROM tax_statements
-                WHERE user_id = ?
-                  AND (tax_year = ? OR (tax_year IS NULL AND period_end >= ?::date AND period_end <= ?::date))
-            ]], user_id, tax_year, ty_start, ty_end)
-
-            local t = totals[1] or {}
-            total_income = tonumber(t.income) or 0
-            total_expenses = tonumber(t.expenses) or 0
+        if not is_scenario then
+            local totals = TaxTools.year_totals(user_id, tax_year)
+            total_income = totals.income
+            total_expenses = totals.expenses
         end
 
-        -- Load configurable rates from DB
-        local rates = loadTaxRates(tax_year)
-        local nic_band_config = buildNICBands(rates)
-
+        -- The figures come from the one UK engine (lib/tax-calc compute_full via
+        -- TaxTools.estimate), shared with the chat estimate, the Calculate screens and
+        -- the filing workbook. Response shape is unchanged for the web/mobile clients.
         local gross_income = total_income + additional_income
-        local trading_profit = math.max(gross_income - total_expenses, 0)
-        local personal_allowance = rates.personal_allowance
-        -- Taper: reduce by £1 for every £2 over threshold
-        if trading_profit > rates.taper_threshold then
-            local reduction = math.floor((trading_profit - rates.taper_threshold) / 2)
-            personal_allowance = math.max(personal_allowance - reduction, 0)
-        end
-        local taxable_income = math.max(trading_profit - personal_allowance, 0)
+        local est = TaxTools.estimate(gross_income, total_expenses, tax_year,
+            TaxTools.profile_for(user_id, tax_year))
 
-        -- Build tax bands with actual PA (may be tapered)
-        local tax_band_config = {
-            { name = "Personal Allowance", lower = 0, upper = personal_allowance, rate = 0 },
-            { name = "Basic Rate", lower = personal_allowance, upper = rates.basic_rate_upper, rate = rates.basic_rate },
-            { name = "Higher Rate", lower = rates.basic_rate_upper, upper = rates.higher_rate_upper, rate = rates.higher_rate },
-            { name = "Additional Rate", lower = rates.higher_rate_upper, upper = math.huge, rate = rates.additional_rate },
-        }
-
-        -- Pass trading_profit (pre-PA) so the PA band correctly absorbs the allowance
-        local tax_bands, income_tax = calculateTaxBreakdown(trading_profit, tax_band_config)
-        local nic_bands, national_insurance = calculateNIC(trading_profit, nic_band_config)
-
-        -- Class 2 NIC: annual amount if profit exceeds threshold
-        local class_2_nic = 0
-        if trading_profit > rates.class2_threshold then
-            class_2_nic = rates.class2_annual
-        end
-
-        local total_tax = income_tax + national_insurance + class_2_nic
+        local function r2(v) return math.floor((tonumber(v) or 0) * 100 + 0.5) / 100 end
 
         return {
             status = 200,
             json = {
                 tax_year = tax_year,
-                is_scenario = params.total_income ~= nil,
-                gross_income = math.floor(gross_income * 100) / 100,
-                total_expenses = math.floor(total_expenses * 100) / 100,
+                is_scenario = is_scenario,
+                gross_income = r2(gross_income),
+                total_expenses = r2(total_expenses),
                 additional_income = additional_income,
-                trading_profit = math.floor(trading_profit * 100) / 100,
-                personal_allowance = personal_allowance,
-                taxable_income = math.floor(taxable_income * 100) / 100,
-                income_tax = income_tax,
-                income_tax_bands = tax_bands,
-                national_insurance = national_insurance,
-                nic_bands = nic_bands,
-                class_2_nic = math.floor(class_2_nic * 100) / 100,
-                total_tax_due = math.floor(total_tax * 100) / 100,
-                effective_rate = trading_profit > 0
-                    and math.floor((total_tax / trading_profit) * 10000) / 100
-                    or 0,
+                trading_profit = r2(est.profit),
+                personal_allowance = est.personal_allowance,
+                taxable_income = r2(est.total_taxable),
+                income_tax = r2(est.income_tax_due),
+                income_tax_bands = est.income_tax_bands,
+                national_insurance = r2(est.class4_nic),
+                nic_bands = est.class4_bands,
+                class_2_nic = r2(est.class2_nic),
+                total_tax_due = r2(est.total_liability),
+                effective_rate = est.effective_rate,
             }
         }
     end)

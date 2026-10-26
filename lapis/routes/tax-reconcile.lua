@@ -60,9 +60,11 @@ local function reconcile(statement_id, user_id)
     -- HMRC SA103F box aggregation
     local hmrc_boxes_raw = db.query([[
         SELECT
-            COALESCE(t.hmrc_category, hc.key, 'otherExpenses') as hmrc_key,
+            COALESCE(t.hmrc_category, hc.key, 'other_expenses') as hmrc_key,
             hc.label as hmrc_label,
-            hc.box_number,
+            -- tax_hmrc_categories stores the SA103F box as varchar `box` (e.g. "20a");
+            -- aliased to box_number, the field the dashboard reads.
+            hc.box as box_number,
             SUM(t.amount) as total_amount,
             COUNT(*) as transaction_count,
             t.transaction_type
@@ -70,8 +72,8 @@ local function reconcile(statement_id, user_id)
         LEFT JOIN tax_hmrc_categories hc ON hc.key = t.hmrc_category
         WHERE t.statement_id = ?
         AND t.classification_status != 'PENDING'
-        GROUP BY COALESCE(t.hmrc_category, hc.key, 'otherExpenses'), hc.label, hc.box_number, t.transaction_type
-        ORDER BY hc.box_number, hmrc_key
+        GROUP BY COALESCE(t.hmrc_category, hc.key, 'other_expenses'), hc.label, hc.box, t.transaction_type
+        ORDER BY hc.box, hmrc_key
     ]], statement_id)
 
     -- Organize by HMRC box
@@ -80,7 +82,7 @@ local function reconcile(statement_id, user_id)
     local total_expenses = 0
 
     for _, row in ipairs(hmrc_boxes_raw or {}) do
-        local key = row.hmrc_key or "otherExpenses"
+        local key = row.hmrc_key or "other_expenses"
         if not hmrc_boxes[key] then
             hmrc_boxes[key] = {
                 key = key,
@@ -104,13 +106,19 @@ local function reconcile(statement_id, user_id)
         end
     end
 
-    -- Convert to array sorted by box number
+    -- Convert to array sorted by box number. Boxes are strings ("15" < "20" < "20a" <
+    -- "21"), so order on the numeric part then the letter suffix; unboxed rows go last.
+    local function box_order(box)
+        local n, suffix = tostring(box or ""):match("^(%d+)(%a*)$")
+        if not n then return 9999 end
+        return tonumber(n) * 10 + (suffix ~= "" and (suffix:lower():byte() - 96) or 0)
+    end
     local boxes_array = {}
     for _, box in pairs(hmrc_boxes) do
         table.insert(boxes_array, box)
     end
     table.sort(boxes_array, function(a, b)
-        return (a.box_number or 99) < (b.box_number or 99)
+        return box_order(a.box_number) < box_order(b.box_number)
     end)
 
     return {

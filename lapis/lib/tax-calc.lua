@@ -43,6 +43,13 @@ function TaxCalc.filing_tax_year(now)
     return year .. "-" .. string.format("%02d", (year + 1) % 100)
 end
 
+--- The UK tax year a "YYYY-MM-DD..." date string falls in, or nil if it isn't one.
+function TaxCalc.tax_year_for_date(date_str)
+    local y, m, d = tostring(date_str or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
+    if not y then return nil end
+    return TaxCalc.current_tax_year({ year = tonumber(y), month = tonumber(m), day = tonumber(d) })
+end
+
 -- The hardcoded fallback is 2025-26; any supported year SHOULD have a `tax_rates`
 -- row (ponytail: fallback keeps estimates working if a year is unseeded, but it
 -- will silently use 2025-26 figures — seed every year you support).
@@ -260,11 +267,18 @@ function TaxCalc.compute_full(inp, rates)
     elseif total_taxable > basic_limit then psa = p.psa_higher end
 
     -- Step 7: tax by band. A slice sits on top of `floor` (band space already used).
+    -- `band_use` accumulates income + tax per band across all slices (for breakdowns).
+    local band_use = { basic = { income = 0, tax = 0 }, higher = { income = 0, tax = 0 },
+        additional = { income = 0, tax = 0 } }
     local function tax_bands(amount, floor, rb, rh, ra)
         local tax, rem = 0, amount
         local inb = math.min(rem, math.max(0, basic_limit - floor)); tax = tax + inb * rb; rem = rem - inb; floor = floor + inb
         local inh = math.min(rem, math.max(0, higher_limit - floor)); tax = tax + inh * rh; rem = rem - inh; floor = floor + inh
         tax = tax + rem * ra; floor = floor + rem
+        band_use.basic.income = band_use.basic.income + inb; band_use.basic.tax = band_use.basic.tax + inb * rb
+        band_use.higher.income = band_use.higher.income + inh; band_use.higher.tax = band_use.higher.tax + inh * rh
+        band_use.additional.income = band_use.additional.income + rem
+        band_use.additional.tax = band_use.additional.tax + rem * ra
         return tax, floor
     end
 
@@ -300,6 +314,35 @@ function TaxCalc.compute_full(inp, rates)
     class4 = r2(class4)
     local class2 = 0
 
+    -- Breakdowns for display (gross-income scale, as the reports screens show them).
+    -- The personal allowance band is always listed; a rate band only once it is used.
+    local basic_top = pa + basic_limit
+    local income_tax_bands = { { name = "Personal Allowance", lower = 0, upper = pa, rate = 0,
+        taxable_amount = r2(math.min(pa, total_income)), tax = 0 } }
+    for _, b in ipairs({
+        { "Basic Rate", "basic", pa, basic_top, p.basic_rate },
+        { "Higher Rate", "higher", basic_top, math.max(basic_top, higher_limit), p.higher_rate },
+        { "Additional Rate", "additional", math.max(basic_top, higher_limit), nil, p.add_rate },
+    }) do
+        local use = band_use[b[2]]
+        if use.income > 0 then
+            income_tax_bands[#income_tax_bands + 1] = { name = b[1], lower = b[3], upper = b[4], rate = b[5],
+                taxable_amount = r2(use.income), tax = r2(use.tax) }
+        end
+    end
+    local class4_bands = { { name = "Below threshold", rate = 0,
+        amount = r2(math.min(trading_profit, p.nic4_lower)), nic = 0 } }
+    if trading_profit > p.nic4_lower then
+        local main = math.min(trading_profit, p.nic4_upper) - p.nic4_lower
+        class4_bands[#class4_bands + 1] = { name = "Main rate", rate = p.nic4_main,
+            amount = r2(main), nic = r2(main * p.nic4_main) }
+    end
+    if trading_profit > p.nic4_upper then
+        local upper = trading_profit - p.nic4_upper
+        class4_bands[#class4_bands + 1] = { name = "Upper rate", rate = p.nic4_add,
+            amount = r2(upper), nic = r2(upper * p.nic4_add) }
+    end
+
     -- Step 10: total, tax at source, payments on account.
     local total_liability = r2(income_tax_due + class4 + class2)
     local paye = num(inp.paye_deducted)
@@ -328,7 +371,9 @@ function TaxCalc.compute_full(inp, rates)
         finance_cost_reduction = finance_cost_reduction,
         finance_costs_carried_forward = math.max(0, finance_costs - fc_lowest),
         income_tax_due = r2(income_tax_due),
+        income_tax_bands = income_tax_bands,
         class4_nic = class4, class2_nic = class2,
+        class4_bands = class4_bands,
         total_liability = total_liability,
         paye_deducted = paye,
         balancing_payment = balancing,

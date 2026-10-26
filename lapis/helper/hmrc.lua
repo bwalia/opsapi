@@ -126,45 +126,42 @@ end
 
 --- Get a valid HMRC access token, refreshing if needed
 function HMRC.get_valid_token(user_uuid)
-    local rows = db.select(
-        "* FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1", user_uuid
-    )
-    if not rows or #rows == 0 then
+    -- Valid = more than 5 minutes left on the access token.
+    local function fresh(t)
+        local exp = tonumber(t.exp)
+        return exp ~= nil and (exp - 300) > ngx.time()
+    end
+    local sql = "SELECT access_token, refresh_token, EXTRACT(EPOCH FROM expires_at) AS exp "
+        .. "FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1"
+
+    local rows = db.query(sql, user_uuid)
+    local token = rows and rows[1]
+    if not token then
         return nil, "No HMRC token found. Please connect HMRC first."
     end
+    if fresh(token) then return token.access_token, nil end
 
-    local token = rows[1]
-    local now = ngx.time()
-    local expires_at = token.expires_at
-
-    -- Parse expires_at if it's a string
-    if type(expires_at) == "string" then
-        -- Approximate: check if the token looks expired
-        local exp_rows = db.query(
-            "SELECT EXTRACT(EPOCH FROM expires_at) as exp_epoch FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1",
-            user_uuid
-        )
-        if exp_rows and exp_rows[1] then
-            expires_at = tonumber(exp_rows[1].exp_epoch)
+    -- Expired: refresh under a row lock. HMRC refresh tokens are SINGLE-USE, and the
+    -- filing wizard fires several HMRC calls at once — two unserialised refreshes both
+    -- spend the same refresh token, the loser gets invalid_grant, and (if it wrote last)
+    -- the user is left with a dead token and must reconnect. The lock holds across pods;
+    -- whoever waited re-reads the row and reuses the token the winner just stored.
+    db.query("BEGIN")
+    local ok, access, err = pcall(function()
+        local locked = db.query((sql:gsub("LIMIT 1$", "FOR UPDATE")), user_uuid)
+        local t = locked and locked[1]
+        if not t then return nil, "No HMRC token found. Please connect HMRC first." end
+        if fresh(t) then return t.access_token, nil end
+        if not t.refresh_token or t.refresh_token == "" then
+            return nil, "HMRC token expired and no refresh token available"
         end
-    end
-
-    -- If token is still valid (with 5 minute buffer)
-    if expires_at and (expires_at - 300) > now then
-        return token.access_token, nil
-    end
-
-    -- Token expired or about to expire — refresh it
-    if not token.refresh_token then
-        return nil, "HMRC token expired and no refresh token available"
-    end
-
-    local new_token, err = HMRC.refresh_token(user_uuid, token.refresh_token)
-    if not new_token then
-        return nil, "Token refresh failed: " .. tostring(err)
-    end
-
-    return new_token, nil
+        local new_token, rerr = HMRC.refresh_token(user_uuid, t.refresh_token)
+        if not new_token then return nil, "Token refresh failed: " .. tostring(rerr) end
+        return new_token, nil
+    end)
+    db.query(ok and "COMMIT" or "ROLLBACK")
+    if not ok then return nil, "Token refresh failed: " .. tostring(access) end
+    return access, err
 end
 
 --- Refresh an HMRC OAuth token
@@ -207,7 +204,8 @@ function HMRC.refresh_token(user_uuid, refresh_token)
             access_token = EXCLUDED.access_token,
             refresh_token = EXCLUDED.refresh_token,
             scope = EXCLUDED.scope,
-            expires_at = EXCLUDED.expires_at
+            expires_at = EXCLUDED.expires_at,
+            updated_at = NOW()
     ]], user_uuid, namespace_id, data.access_token, data.refresh_token or refresh_token, data.scope or "", expires_at)
 
     return data.access_token, nil

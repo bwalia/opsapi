@@ -20,7 +20,6 @@
 ]]
 
 local db = require("lapis.db")
-local cjson = require("cjson")
 local TaxTools = require("lib.agent.tax-tools")
 local Xlsx = require("lib.xlsx")
 
@@ -31,13 +30,6 @@ local function r2(v)
     v = num(v)
     local s = v < 0 and -1 or 1
     return s * math.floor(math.abs(v) * 100 + 0.5) / 100
-end
-
-local function decode(v)
-    if type(v) == "table" then return v end
-    if type(v) ~= "string" or v == "" then return nil end
-    local ok, t = pcall(cjson.decode, v)
-    return ok and t or nil
 end
 
 -- "15" < "16" < "20" < "20a" < "21" … (numeric part first, then the letter suffix).
@@ -51,14 +43,7 @@ end
 --- Income types the customer gave the tax agent for this year (latest chat), else
 -- self-employment — the same profile compute_estimate routes income with.
 function TaxReport.profile_for(namespace_id, user_id, tax_year)
-    local rows = db.query([[SELECT profile FROM tax_agent_sessions
-        WHERE namespace_id = ? AND user_id = ? AND tax_year = ?
-        ORDER BY archived ASC, updated_at DESC LIMIT 1]], namespace_id, user_id, tax_year)
-    local profile = rows[1] and decode(rows[1].profile) or {}
-    if type(profile.income_types) ~= "table" or #profile.income_types == 0 then
-        profile.income_types = { "self_employment" }
-    end
-    return profile
+    return TaxTools.profile_for(user_id, tax_year, namespace_id)
 end
 
 --- Gather the report. ctx: { namespace_id, user_id, tax_year, has_permission(m, a) }

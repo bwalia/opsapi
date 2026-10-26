@@ -29,6 +29,9 @@ local function base_url()
     return BASE_URLS[environment()] or BASE_URLS.sandbox
 end
 
+-- TLS is always verified: HMRC's sandbox and live APIs both have publicly trusted
+-- certificates, nginx trusts the system CA bundle, and NINOs + tokens travel on these
+-- calls (helper/hmrc.lua does the same).
 local function http_client()
     local ok, http = pcall(require, "resty.http")
     if not ok then return nil, "resty.http not available" end
@@ -68,7 +71,7 @@ function Client.list_businesses(token, nino)
     if not httpc then return nil, err end
     local res, rerr = httpc:request_uri(
         base_url() .. "/individuals/business/details/" .. nino .. "/list",
-        { method = "GET", headers = headers(token, "2.0"), ssl_verify = not Client.is_sandbox() })
+        { method = "GET", headers = headers(token, "2.0"), ssl_verify = true })
     if not res then return nil, "list_businesses request failed: " .. tostring(rerr) end
     if res.status >= 400 then
         return nil, "HTTP " .. res.status, decode(res.body)
@@ -111,7 +114,7 @@ function Client.list_obligations(token, nino, opts)
     local res, rerr = httpc:request_uri(url, {
         method = "GET",
         headers = headers(token, "3.0", { test_scenario = opts.test_scenario }),
-        ssl_verify = not Client.is_sandbox(),
+        ssl_verify = true,
     })
     if not res then return nil, "list_obligations request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
@@ -132,7 +135,7 @@ function Client.submit_cumulative(token, nino, business_id, tax_year, body)
         method = "PUT",
         body = cjson.encode(body),
         headers = headers(token, "5.0", { json_body = true, test_scenario = "STATEFUL" }),
-        ssl_verify = not Client.is_sandbox(),
+        ssl_verify = true,
     })
     if not res then return nil, "submit_cumulative request failed: " .. tostring(rerr) end
     if res.status >= 400 then
@@ -155,7 +158,7 @@ function Client.trigger_calculation(token, nino, tax_year, calc_type)
     local res, rerr = httpc:request_uri(url, {
         method = "POST",
         headers = headers(token, "8.0"),
-        ssl_verify = not Client.is_sandbox(),
+        ssl_verify = true,
     })
     if not res then return nil, "trigger_calculation request failed: " .. tostring(rerr) end
     if res.status >= 400 then
@@ -176,7 +179,7 @@ function Client.get_calculation(token, nino, tax_year, calc_id)
     local res, rerr = httpc:request_uri(url, {
         method = "GET",
         headers = headers(token, "8.0", { test_scenario = "DYNAMIC" }),
-        ssl_verify = not Client.is_sandbox(),
+        ssl_verify = true,
     })
     if not res then return nil, "get_calculation request failed: " .. tostring(rerr) end
     if res.status == 404 then
@@ -223,7 +226,7 @@ function Client.submit_final_declaration(token, nino, tax_year, calc_id)
     local res, rerr = httpc:request_uri(url, {
         method = "POST",
         headers = headers(token, "8.0"),
-        ssl_verify = not Client.is_sandbox(),
+        ssl_verify = true,
     })
     if not res then return nil, "submit_final_declaration request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
@@ -267,7 +270,7 @@ function Client.create_test_business(token, nino, params)
             method = "POST",
             body = cjson.encode(params),
             headers = headers(token, "1.0", { json_body = true }),
-            ssl_verify = not Client.is_sandbox(),
+            ssl_verify = true,
         })
     if not res then return nil, "create_test_business request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
@@ -283,7 +286,7 @@ function Client.set_itsa_status(token, nino, tax_year, details)
             method = "POST",
             body = cjson.encode({ itsaStatusDetails = details }),
             headers = headers(token, "1.0", { json_body = true }),
-            ssl_verify = not Client.is_sandbox(),
+            ssl_verify = true,
         })
     if not res then return nil, "set_itsa_status request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end

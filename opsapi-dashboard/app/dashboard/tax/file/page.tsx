@@ -670,7 +670,8 @@ function FileWizardContent() {
     try {
       const res = await taxService.submitHmrcFinalDeclaration(taxYear);
       setFiled(res);
-      toast.success('Your return has been filed with HMRC');
+      if (res.already_filed) toast.success(res.message || `Your ${taxYear} return was already filed with HMRC`);
+      else toast.success('Your return has been filed with HMRC');
     } catch (err: unknown) {
       toast.error(extractApiError(err, 'Final declaration failed'));
     } finally {
