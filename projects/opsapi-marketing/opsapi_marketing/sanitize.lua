@@ -43,22 +43,6 @@ function S.strip_html(html)
     return html
 end
 
-function S.safe_url(url)
-    if type(url) ~= "string" or url == "" then return nil, "empty url" end
-    local u = url:match("^%s*(.-)%s*$")
-    if u:match("^{{.+}}$") then return u end
-    if u:match("^#") then return u end
-    if u:match("^mailto:[^%s]+@[^%s]+$") then return u end
-    if is_dangerous_proto(u) then return nil, "dangerous protocol" end
-    if u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$") then
-        if u:match("^https?://(localhost|127%.|10%.|192%.168%.|169%.254%.)") then
-            return nil, "private host"
-        end
-        return u
-    end
-    return nil, "invalid url"
-end
-
 function S.extract_merge_keys(tpl)
     local keys, seen = {}, {}
     if type(tpl) ~= "string" then return keys end

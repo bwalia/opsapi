@@ -432,6 +432,19 @@ function T.report(token, body)
             return nil, 422, "pr_url must be a GitHub pull request (or GitLab merge request) URL"
         end
         pr_url = pr_url:gsub("/$", "")
+        -- Only a PR in the project's repository (or the folder's): the poll moves the task to Done when the reported
+        -- PR merges, so an unrelated, already-merged PR would otherwise finish the task.
+        local V = require("ai_runner.vault_pr")
+        local repo, known = (pr_parts(pr_url) or ""):lower(), {}
+        for _, u in ipairs({ R.project_settings(s.namespace_id, s.project_uuid).target_repo_url, s.repo_url }) do
+            local r = V.parse_repo(u)
+            if r then known[#known + 1] = r end
+        end
+        local ok = repo == "" or #known == 0
+        for _, r in ipairs(known) do ok = ok or r:lower() == repo end
+        if not ok then
+            return nil, 422, "pr_url must be a pull request in " .. table.concat(known, " or ")
+        end
     else
         pr_url = nil
     end
