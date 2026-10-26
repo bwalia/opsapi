@@ -253,6 +253,7 @@ check("image kept in the sent email", any(url in r for r in one(c3, "img@p11.inv
       one(c3, "img@p11.invalid", "d.body_html"))
 
 expect("turn the plugin off", call("PUT", PLUGINS, "owner_a", W, {"enabled": False}), 200)
-check("images stop when the plugin is off", get(path)[0] == 404)
+# #801: emails already sent keep working (images, links, unsubscribe) when the plugin is switched off.
+check("images in sent emails still show when the plugin is off", get(path)[0] == 200)
 
 sys.exit(finish())

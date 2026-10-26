@@ -10,10 +10,14 @@
 --   GET    /tasks/:task_uuid/terminal-sessions   ai_runs.read
 --   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>)
 --   GET    /terminal-autologin              ai_runs.read: may I be signed in automatically, and my step-up (§8)
---   POST   /terminal-autologin/code         ai_terminal_autologin.create: email me a code
---   POST   /terminal-autologin/verify { code }   ai_terminal_autologin.create -> the step-up (12 h)
+--   POST   /terminal-autologin/code         ai_terminal_autologin.create or a live key: email me a code
+--   POST   /terminal-autologin/verify { code }   same -> the step-up (12 h)
 --   DELETE /terminal-autologin              forget my step-up
 --   POST   /public/terminal/report { pr_url?, note? }   Authorization: Bearer <the launch's report token> (§9)
+--   GET    /terminals/:uuid/keys            ai_runners.manage: { keys, people } (§10)
+--   POST   /terminals/:uuid/keys { user_uuid, public_key }   ai_runners.manage -> 201 key (blocks their old one)
+--   POST   /terminals/:uuid/keys/:key_uuid/block   ai_runners.manage
+--   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer)
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -36,8 +40,10 @@ local function terminal_or_404(ns, uuid)
     return t
 end
 
-local function may_autologin(self)
+-- §8 + §10: power users (the permission) and anyone a manager issued a live key (on that terminal, when given).
+local function may_autologin(self, terminal_id)
     return sdk.can(self, T.AUTOLOGIN_PERMISSION[1], T.AUTOLOGIN_PERMISSION[2])
+        or T.live_key(sdk.namespace_id(self), sdk.user(self).uuid, terminal_id) ~= nil
 end
 
 local function stepup_view(st)
@@ -111,6 +117,47 @@ return function(app)
         return sdk.ok({ deleted = true })
     end)))
 
+    -- §10: keys managers issue to people for a terminal.
+    app:get("/terminals/:uuid/keys", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        return sdk.ok({ keys = T.keys(ns, terminal_or_404(ns, self.params.uuid)), people = T.key_candidates(ns) })
+    end)))
+
+    app:post("/terminals/:uuid/keys", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
+        local ns = sdk.namespace_id(self)
+        local t = terminal_or_404(ns, self.params.uuid)
+        local d, errors = sdk.validate(body(self), {
+            user_uuid = { required = true, type = "uuid" }, public_key = { required = true, max = 1000 },
+        })
+        if not d then U.invalid(errors) end
+        local row, status, message = T.issue_key(ns, t, d.user_uuid, d.public_key, sdk.user(self).uuid)
+        if not row then return sdk.error(status, message) end
+        for _, k in ipairs(T.keys(ns, t)) do
+            if k.uuid == row.uuid then return sdk.created(k) end
+        end
+    end)))
+
+    app:post("/terminals/:uuid/keys/:key_uuid/block", sdk.handler({ permission = "ai_runners.manage" },
+        U.guard(function(self)
+            local ns = sdk.namespace_id(self)
+            local t = terminal_or_404(ns, self.params.uuid)
+            if not T.block_key(ns, t, self.params.key_uuid, sdk.user(self).uuid) then
+                U.fail(404, "No live key with that id on this terminal")
+            end
+            return sdk.ok({ blocked = true })
+        end)))
+
+    app:get("/public/terminal/keys", sdk.handler({ namespace = false }, U.guard(function()
+        local h = ngx.req.get_headers()
+        local function one(v) return type(v) == "table" and v[1] or v end
+        local out, sig_or_status, message = T.keys_for_terminal(one(h["x-opsapi-terminal"]),
+            one(h["x-opsapi-timestamp"]), one(h["x-opsapi-signature"]))
+        if not out then return sdk.error(sig_or_status, message) end
+        -- The exact bytes signed: the terminal checks X-Opsapi-Signature before trusting a single key.
+        return { status = 200, layout = false, out, headers = { ["Content-Type"] = "application/json",
+            ["Cache-Control"] = "no-store", ["X-Opsapi-Signature"] = "sha256=" .. sig_or_status } }
+    end)))
+
     local launch = sdk.handler({ permission = "ai_runs.create" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         local task = R.task(ns, self.params.task_uuid)
@@ -143,8 +190,8 @@ return function(app)
         -- §8: signed in by the link only for power users, on a terminal that allows it, after a recent step-up.
         local login
         if d.autologin == true then
-            if not may_autologin(self) then
-                return sdk.error(403, "You can't be signed in to web terminals automatically in this workspace")
+            if not may_autologin(self, term.id) then
+                return sdk.error(403, "You can't be signed in to this web terminal automatically")
             end
             if not term.autologin then U.fail(409, "This terminal doesn't allow automatic sign-in") end
             local st = T.stepup(ns, sdk.user(self).uuid)
@@ -178,15 +225,17 @@ return function(app)
             stepup = allowed and stepup_view(T.stepup(sdk.namespace_id(self), sdk.user(self).uuid)) or cjson.null })
     end)))
 
-    app:post("/terminal-autologin/code", sdk.handler({ permission = "ai_terminal_autologin.create" },
+    app:post("/terminal-autologin/code", sdk.handler({ permission = "ai_runs.read" },
         U.guard(function(self)
+            if not may_autologin(self) then return sdk.error(403, "Permission denied") end
             local ok, status, message = T.send_stepup_code(sdk.user(self).uuid)
             if not ok then return sdk.error(status, message) end
             return sdk.ok({ sent = true })
         end)))
 
-    app:post("/terminal-autologin/verify", sdk.handler({ permission = "ai_terminal_autologin.create" },
+    app:post("/terminal-autologin/verify", sdk.handler({ permission = "ai_runs.read" },
         U.guard(function(self)
+            if not may_autologin(self) then return sdk.error(403, "Permission denied") end
             local d, errors = sdk.validate(body(self), { code = { required = true, max = 12 } })
             if not d then U.invalid(errors) end
             local st, status, message = T.verify_stepup(sdk.namespace_id(self), sdk.user(self).uuid, d.code)

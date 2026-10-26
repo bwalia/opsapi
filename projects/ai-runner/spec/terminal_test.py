@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import shlex
+import struct
 import subprocess
 import time
 import urllib.error
@@ -386,6 +387,12 @@ check("…posted as a comment", comments(T1["uuid"], "%: Tests pass.") == 1)
 prs = expect("the task's PRs", call("GET", P + f"/tasks/{T1['uuid']}/prs", "dev2", W), 200)
 check("listed with the task's PRs, ready for sign-off", any(p["pr_url"] == "https://github.com/acme/web/pull/7"
       and p["review_status"] == "pending" for p in prs), prs)
+expect("the project names its repository", call("PUT", P + f"/projects/{proj['uuid']}/settings", "owner_a", W,
+                                                {"target_repo_url": "https://github.com/acme/web.git"}), 200)
+expect("a PR in another repository is refused (it could finish the task when it merges)",
+       report({"pr_url": "https://github.com/someone/else/pull/1"}), 422)
+expect("a PR in the project's repository (any case) is fine", report({"pr_url": "https://github.com/Acme/Web/pull/8"}),
+       200)
 sql(f"UPDATE ar_terminal_sessions SET created_at = NOW() - interval '8 days' WHERE uuid = '{auto['session']['uuid']}'")
 expect("a week-old token stops working", report({"note": "late"}), 401)
 s_ = expect("settings", call("GET", P + "/settings", "owner_a", W), 200)["task_automation"]
@@ -397,18 +404,140 @@ saved = expect("switch off the merge move", call("PUT", P + "/settings", "owner_
 check("…saved, the rest kept", saved["task_automation"]["on_pr_merged"]["enabled"] is False
       and saved["task_automation"]["on_pr_open"]["enabled"] is True, saved["task_automation"])
 
+# --- Keys managers issue (§10) --------------------------------------------------------------------------------
+K = P + f"/terminals/{TERM['uuid']}/keys"
+
+
+def pubkey():
+    """An ssh-ed25519 public key line (the dashboard makes the pair in the manager's browser; only this comes here)."""
+    blob = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + os.urandom(32)
+    return "ssh-ed25519 " + base64.b64encode(blob).decode() + " made-in-test"
+
+
+def fetch_keys(term_uuid=None, secret=None, ts=None, sig=None):
+    """What the terminal does: a signed GET. @return status, raw body, the answer's X-Opsapi-Signature"""
+    term_uuid, secret = term_uuid or TERM["uuid"], secret or SEC2
+    ts = str(int(time.time()) if ts is None else ts)
+    sig = sig or "sha256=" + hmac.new(secret.encode(), f"keys\n{term_uuid}\n{ts}".encode(), hashlib.sha256).hexdigest()
+    req = urllib.request.Request(P + "/public/terminal/keys", headers={
+        "X-Opsapi-Terminal": term_uuid, "X-Opsapi-Timestamp": ts, "X-Opsapi-Signature": sig})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, r.read(), r.headers.get("X-Opsapi-Signature", "")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), ""
+
+
+def live_keys():
+    """The terminal's view: the keys, only if the answer's signature checks out."""
+    st, raw, sig = fetch_keys()
+    good = "sha256=" + hmac.new(SEC2.encode(), raw, hashlib.sha256).hexdigest()
+    return json.loads(raw)["keys"] if st == 200 and hmac.compare_digest(sig, good) else None
+
+
+expect("a member can't see the keys", call("GET", K, "dev", W), 403)
+expect("another workspace can't see them", call("GET", K, "owner_b", X), 404)
+kl = expect("manager lists keys", call("GET", K, "mgr", W), 200)
+check("no keys yet; the people list has the workspace's members",
+      kl["keys"] == [] and {USERS[u][0] for u in ("dev", "dev2", "mgr")} <= {p["uuid"] for p in kl["people"]}, kl)
+expect("not an ed25519 public key", call("POST", K, "mgr", W, {"user_uuid": USERS["dev"][0],
+                                                               "public_key": "ssh-rsa AAAAB3Nza"}), 422)
+expect("only members of this workspace", call("POST", K, "mgr", W, {"user_uuid": USERS["owner_b"][0],
+                                                                    "public_key": pubkey()}), 422)
+expect("a member can't issue keys", call("POST", K, "dev", W, {"user_uuid": USERS["dev"][0],
+                                                               "public_key": pubkey()}), 403)
+k1_line = pubkey()
+k1 = expect("manager issues dev a key", call("POST", K, "mgr", W, {"user_uuid": USERS["dev"][0],
+                                                                   "public_key": k1_line}), 201)
+check("active, named after the email, fingerprinted", k1.get("status") == "active" and k1.get("terminal_user")
+      == "dev.a" and k1.get("fingerprint", "").startswith("SHA256:") and k1.get("person_email") == USERS["dev"][1], k1)
+check("works for 90 days", one(f"""SELECT EXTRACT(EPOCH FROM expires_at - created_at)::int FROM ar_terminal_keys
+    WHERE uuid = '{k1['uuid']}'""") == str(90 * 86400))
+check("only the public half is stored, without its comment", one(f"""SELECT public_key FROM ar_terminal_keys
+    WHERE uuid = '{k1['uuid']}'""") == k1_line.rsplit(" ", 1)[0])
+expect("the same key can't be issued twice", call("POST", K, "mgr", W, {"user_uuid": USERS["dev"][0],
+                                                                        "public_key": k1_line}), 409)
+k2_line = pubkey()
+k2 = expect("a new key for dev", call("POST", K, "mgr", W, {"user_uuid": USERS["dev"][0], "public_key": k2_line}), 201)
+st_ = {k["uuid"]: k["status"] for k in expect("list again", call("GET", K, "mgr", W), 200)["keys"]}
+check("the old one is replaced; same terminal user", st_ == {k1["uuid"]: "replaced", k2["uuid"]: "active"}
+      and k2["terminal_user"] == "dev.a", st_)
+
+# The terminal fetching its keys.
+check("unknown terminal: 401", fetch_keys(term_uuid=str(uuidlib.uuid4()))[0] == 401)
+check("wrong signature: 401", fetch_keys(sig="sha256=" + "0" * 64)[0] == 401)
+check("signed with the old secret: 401", fetch_keys(secret=SEC)[0] == 401)
+check("an old request can't be replayed", fetch_keys(ts=int(time.time()) - 3600)[0] == 400)
+lk = live_keys()
+check("the terminal gets dev's live key, signed", lk is not None and len(lk) == 1 and lk[0]["user"] == "dev.a"
+      and lk[0]["public_key"] == k2_line.rsplit(" ", 1)[0] and lk[0]["email"] == USERS["dev"][1]
+      and lk[0]["expires_unix"] > time.time() + 89 * 86400, lk)
+
+# A person with a live key may be signed in by the link (after the emailed code), on that terminal.
+check("dev with a key may be signed in automatically",
+      expect("dev asks", call("GET", A, "dev", W), 200)["allowed"] is True)
+pv6 = expect("dev previews", call("POST", P + f"/tasks/{T1['uuid']}/runs/preview", "dev", W, {}), 200)
+check("the offer lets dev be signed in there", pv6["terminals"][0]["autologin"] is True, pv6["terminals"])
+check("dev2 without a key still may not", expect("dev2 asks", call("GET", A, "dev2", W), 200)["allowed"] is False)
+expect("dev asks for a code", call("POST", A + "/code", "dev", W), 200)
+dcode = one(f"""SELECT o.peek_code FROM admin_otp_codes o JOIN users u ON u.id = o.user_id
+    WHERE u.uuid = '{USERS['dev'][0]}' ORDER BY o.id DESC LIMIT 1""")
+expect("dev confirms it", call("POST", A + "/verify", "dev", W, {"code": dcode}), 200)
+dl = expect("dev launches signed in", call("POST", L, "dev", W, dict(good, autologin=True)), 201)
+dc = verify_ticket(dl["launch_url"].split("#launch=", 1)[1], SEC2) or {}
+check("…the link signs dev in by email", (dc.get("login") or {}).get("email") == USERS["dev"][1], dc.get("login"))
+
+# Blocking, leaving, expiring.
+expect("a member can't block keys", call("POST", K + f"/{k2['uuid']}/block", "dev", W), 403)
+expect("manager blocks dev's key", call("POST", K + f"/{k2['uuid']}/block", "mgr", W), 200)
+expect("blocking twice: not found", call("POST", K + f"/{k2['uuid']}/block", "mgr", W), 404)
+check("the terminal no longer gets it", live_keys() == [], live_keys())
+check("…and dev can't be signed in automatically any more",
+      expect("dev asks again", call("GET", A, "dev", W), 200)["allowed"] is False)
+expect("dev's launch with auto sign-in is refused", call("POST", L, "dev", W, dict(good, autologin=True)), 403)
+kb = [k for k in expect("list", call("GET", K, "mgr", W), 200)["keys"] if k["uuid"] == k2["uuid"]][0]
+check("listed as blocked, with who blocked it", kb["status"] == "blocked" and kb["revoked_by_name"], kb)
+
+k3 = expect("a key for dev2", call("POST", K, "mgr", W, {"user_uuid": USERS["dev2"][0], "public_key": pubkey()}), 201)
+check("dev2's key is live", [k["user"] for k in live_keys()] == ["dev2.a"])
+sql(f"UPDATE users SET active = false WHERE uuid = '{USERS['dev2'][0]}'")
+check("a deactivated person's key stops at once", live_keys() == [])
+sql(f"UPDATE users SET active = true WHERE uuid = '{USERS['dev2'][0]}'")
+check("…for good: reactivating them doesn't bring the old key back", live_keys() == [])
+check("listed as left", [k["status"] for k in expect("list", call("GET", K, "mgr", W), 200)["keys"]
+                         if k["uuid"] == k3["uuid"]] == ["left"])
+
+k4 = expect("a new key for dev2", call("POST", K, "mgr", W, {"user_uuid": USERS["dev2"][0], "public_key": pubkey()}),
+            201)
+sql(f"UPDATE ar_terminal_keys SET expires_at = NOW() + interval '5 days' WHERE uuid = '{k4['uuid']}'")
+REMIND = f"""SELECT COUNT(*)::int FROM kanban_notifications WHERE recipient_user_uuid = '{USERS['mgr'][0]}'
+    AND title = 'A web terminal key expires soon'"""
+live_keys()
+check("the manager who issued it is reminded before it expires", one(REMIND) == "1", one(REMIND))
+live_keys()
+check("…once", one(REMIND) == "1", one(REMIND))
+sql(f"UPDATE ar_terminal_keys SET expires_at = NOW() - interval '1 minute' WHERE uuid = '{k4['uuid']}'")
+check("an expired key isn't sent", live_keys() == [])
+check("listed as expired", [k["status"] for k in expect("list", call("GET", K, "mgr", W), 200)["keys"]
+                            if k["uuid"] == k4["uuid"]] == ["expired"])
+k5 = expect("dev gets a key again", call("POST", K, "mgr", W, {"user_uuid": USERS["dev"][0], "public_key": pubkey()}),
+            201)
+check("dev's name is kept; never given to someone else", k5["terminal_user"] == "dev.a")
+
 # --- Switch off, delete -------------------------------------------------------------------------------------
 expect("switch the terminal off", call("PUT", P + f"/terminals/{TERM['uuid']}", "mgr", W, {"is_active": False}), 200)
+check("a switched-off terminal gets no keys", live_keys() == [], live_keys())
 pv4 = expect("preview with it off", call("POST", P + f"/tasks/{T1['uuid']}/runs/preview", "dev", W, {}), 200)
 check("not offered, no terminal prompt", pv4.get("terminals") == [] and pv4.get("terminal_prompt") is None, pv4)
 expect("can't launch on it", call("POST", L, "dev", W, good), 404)
 expect("delete it", call("DELETE", P + f"/terminals/{TERM['uuid']}", "mgr", W), 200)
 listed = expect("sessions after delete", call("GET", L, "dev", W), 200)
-check("its sessions stay on the task", len(listed) == 5 and all(s["terminal_name"] is None for s in listed), listed)
+check("its sessions stay on the task", len(listed) == 6 and all(s["terminal_name"] is None for s in listed), listed)
 expect("webhook for a deleted terminal's launch", webhook(dict(ev2, ts=int(time.time())), NEW), 404)
 
 for MIG, table in (("20261023120000_ai_runner_web_terminals", "ar_terminals"),
-                   ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups")):
+                   ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups"),
+                   ("20261026120000_ai_runner_terminal_keys", "ar_terminal_keys")):
     if not MIGRATE:
         break
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG}'")
