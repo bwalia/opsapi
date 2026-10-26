@@ -93,6 +93,30 @@ check("a broken link gets a page, not JSON", st == 400 and "text/html" in ctype 
 forged = mint({"purpose": "unsubscribe", "namespace_id": ns_id, "contact_uuid": cu}).rsplit(".", 1)[0] + "." + "0" * 64
 check("a forged link is refused", http("GET", UNSUB + "?token=" + forged)[0] == 400)
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def click(dest):
+    """Status and Location of a tracked link to `dest` (redirects not followed)."""
+    t = mint({"purpose": "click", "namespace_id": ns_id, "delivery_uuid": new_uuid(), "dest": dest,
+              "iat": now, "exp": now + 3600})
+    try:
+        r = urllib.request.build_opener(_NoRedirect).open(API + "/api/v2/opsapi-marketing/public/c?t="
+                                                          + urllib.parse.quote(t), timeout=30)
+        return r.status, r.headers.get("Location")
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Location")
+
+
+check("a tracked link redirects", click("https://example.com/sale") == (302, "https://example.com/sale"),
+      click("https://example.com/sale"))
+for dest in ("http://127.0.0.1/admin", "http://localhost:8080/", "http://192.168.1.1/", "http://10.0.0.5/",
+             "http://169.254.169.254/latest/meta-data", "http://172.20.0.1/", "http://user@127.0.0.1/"):
+    check(f"a tracked link never bounces to {dest}", click(dest)[0] == 400, click(dest))
+
 ptok = mint({"purpose": "preferences", "namespace_id": ns_id, "contact_uuid": cu, "iat": now, "exp": now + 3600})
 st, html, _ = http("GET", PREFS + "?token=" + urllib.parse.quote(ptok))
 check("preferences is a page", st == 200 and "Your preferences" in html and "Marketing emails" in html

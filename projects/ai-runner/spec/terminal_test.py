@@ -387,6 +387,12 @@ check("…posted as a comment", comments(T1["uuid"], "%: Tests pass.") == 1)
 prs = expect("the task's PRs", call("GET", P + f"/tasks/{T1['uuid']}/prs", "dev2", W), 200)
 check("listed with the task's PRs, ready for sign-off", any(p["pr_url"] == "https://github.com/acme/web/pull/7"
       and p["review_status"] == "pending" for p in prs), prs)
+expect("the project names its repository", call("PUT", P + f"/projects/{proj['uuid']}/settings", "owner_a", W,
+                                                {"target_repo_url": "https://github.com/acme/web.git"}), 200)
+expect("a PR in another repository is refused (it could finish the task when it merges)",
+       report({"pr_url": "https://github.com/someone/else/pull/1"}), 422)
+expect("a PR in the project's repository (any case) is fine", report({"pr_url": "https://github.com/Acme/Web/pull/8"}),
+       200)
 sql(f"UPDATE ar_terminal_sessions SET created_at = NOW() - interval '8 days' WHERE uuid = '{auto['session']['uuid']}'")
 expect("a week-old token stops working", report({"note": "late"}), 401)
 s_ = expect("settings", call("GET", P + "/settings", "owner_a", W), 200)["task_automation"]

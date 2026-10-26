@@ -1274,18 +1274,20 @@ if require("helper.project-config").isFeatureEnabled("forms") then
     })
 end
 
--- call_api paths that reach real people (send, schedule, approve): the user confirms first.
+-- call_api paths that reach real people (send, schedule, approve, a test email): the user confirms first.
 local CONFIRM_PATHS = {
     "^/api/v2/opsapi%-marketing/campaigns/[^/]+/schedule$",
     "^/api/v2/opsapi%-marketing/campaigns/[^/]+/approve$",
     "^/api/v2/opsapi%-marketing/campaigns/[^/]+/resume$",
+    -- Takes any address or contact, so the model could otherwise "test" its way through a whole list.
+    "^/api/v2/opsapi%-marketing/campaigns/[^/]+/test%-send$",
 }
 
 register({
     name = "call_api",
     description = "Call the OpsAPI REST API as the current user for this page's module, using the "
         .. "endpoints in your page guide. GET reads data; POST/PUT/PATCH create or change it. "
-        .. "DELETE, and sending, scheduling or approving a campaign, are not run straight away: "
+        .. "DELETE, and sending (or test-sending), scheduling or approving a campaign, are not run straight away: "
         .. "the user is asked to confirm first.",
     parameters = {
         type = "object",
@@ -1310,7 +1312,11 @@ register({
             if path:find(pat) then
                 local summary = type(a.summary) == "string" and a.summary ~= "" and a.summary
                     or (tostring(a.method or "POST"):upper() .. " " .. path)
-                return "Please confirm: **" .. summary .. "**."
+                -- The recipient as the request names it, not as the model describes it.
+                local b = type(a.body) == "table" and a.body or {}
+                local to = type(b.email) == "string" and b.email ~= "" and b.email
+                    or type(b.contact_uuid) == "string" and ("contact " .. b.contact_uuid) or nil
+                return "Please confirm: **" .. summary .. "**" .. (to and (" (sends to " .. to .. ")") or "") .. "."
             end
         end
     end,

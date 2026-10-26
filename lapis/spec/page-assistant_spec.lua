@@ -130,6 +130,7 @@ check("server failure notices are hidden from the model; a note says the request
     and read("lapis/routes/chat-agent.lua"):find("That request was not carried out", 1, true) ~= nil)
 local tools = read("lapis/lib/agent/tools.lua")
 check("DELETE waits for confirmation", tools:find("needs_confirmation = true", 1, true) ~= nil)
+check("a test email waits for confirmation", tools:find('[^/]+/test%-send$"', 1, true) ~= nil)
 check("auth/keys/secrets are never callable", tools:find('"api%-keys", "secret", "vault"', 1, true) ~= nil)
 check("migration adds the scope column",
     read("lapis/migrations.lua"):find("ADD COLUMN IF NOT EXISTS scope", 1, true) ~= nil)

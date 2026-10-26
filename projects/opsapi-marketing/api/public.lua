@@ -65,10 +65,20 @@ local function require_plugin(ns)
     return true
 end
 
+-- A tracked link must not bounce recipients to their own machine or a private network. (Lua patterns have no
+-- `|`: the old `(localhost|127%.|…)` check never matched anything.)
+local function private_host(url)
+    local host = (url:match("^https?://([^/?#]*)") or ""):gsub("^.*@", ""):gsub(":%d*$", ""):lower()
+    local b = tonumber(host:match("^172%.(%d+)%."))
+    return host == "localhost" or host:find("%.localhost$") ~= nil or host == "0.0.0.0" or host:find("^%[") ~= nil
+        or host:find("^127%.") ~= nil or host:find("^10%.") ~= nil or host:find("^192%.168%.") ~= nil
+        or host:find("^169%.254%.") ~= nil or (b ~= nil and b >= 16 and b <= 31)
+end
+
 local function safe_redirect(url)
     if type(url) ~= "string" then return nil end
     if not url:match("^https?://") then return nil end
-    if url:match("^https?://(localhost|127%.|10%.|192%.168%.|169%.254%.)") then return nil end
+    if private_host(url) then return nil end
     return url
 end
 
