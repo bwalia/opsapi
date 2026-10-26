@@ -273,8 +273,19 @@ export function getNotificationIcon(type: NotificationType): string {
 /**
  * Format notification time for display
  */
+/**
+ * The API sends notification times in UTC without a zone ("2026-10-26 07:24:12.1"). Plain `new Date()` reads that
+ * as local time, so outside the UK a notification made a moment ago showed as hours old.
+ */
+export function parseNotificationTime(dateString: string): Date {
+  let s = dateString.includes('T') ? dateString : dateString.replace(' ', 'T');
+  if (!/([zZ]|[+-]\d\d(:?\d\d)?)$/.test(s)) s += 'Z';
+  // "+00" / "+0530" -> "+00:00" / "+05:30", which every browser parses.
+  return new Date(s.replace(/(T[\d:.]+[+-]\d\d)(\d\d)?$/, (_, t: string, m?: string) => `${t}:${m || '00'}`));
+}
+
 export function formatNotificationTime(dateString: string): string {
-  const date = new Date(dateString);
+  const date = parseNotificationTime(dateString);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -306,7 +317,7 @@ export function groupNotificationsByDate(
   yesterday.setDate(yesterday.getDate() - 1);
 
   for (const notification of notifications) {
-    const date = new Date(notification.created_at);
+    const date = parseNotificationTime(notification.created_at);
     date.setHours(0, 0, 0, 0);
 
     let key: string;
