@@ -17,7 +17,7 @@ local TaxBankAccountQueries = {}
 -- is diy-tax-return-uk's DMS table; other deployments only have
 -- tax_statements, and must not fail on the missing table.
 local function statement_count(account_uuid)
-    local dms = require("helper.table-exists")("dms_documents") and [[
+    local dms = require("helper.table-exists")("dms_documents", "bank_account_uuid") and [[
               +
               (SELECT COUNT(*) FROM dms_documents
                  WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')]] or ""

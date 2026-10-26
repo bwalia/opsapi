@@ -215,8 +215,11 @@ function TaxStatementQueries.all(params, user)
         dms_include = false
     end
     -- dms_documents belongs to diy-tax-return-uk's DMS: other deployments
-    -- don't have it, and their statement lists must still work.
-    if not require("helper.table-exists")("dms_documents") then
+    -- don't have it, and their statement lists must still work. Its
+    -- bank_account_uuid column and user_profile_entities (joined below) come
+    -- from later diy migrations, so check those too.
+    local exists = require("helper.table-exists")
+    if not (exists("dms_documents", "bank_account_uuid") and exists("user_profile_entities")) then
         dms_include = false
     end
     if params.search and params.search ~= "" then

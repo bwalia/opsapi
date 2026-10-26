@@ -170,8 +170,10 @@ check("columns the code expects are ensured", repair:find('{ "order_delivery_ass
 check("workspace owners get namespace.manage (core module + backfill)",
     read("lapis/helper/project-config.lua"):find('machine_name = "namespace"', 1, true)
     and read("lapis/migrations/namespace-module.lua"):find('grant("owner", \'["manage"]\')', 1, true))
-check("statements work without diy's dms_documents",
-    read("lapis/queries/TaxStatementQueries.lua"):find('require("helper.table-exists")("dms_documents")', 1, true) ~= nil)
+check("statements work without diy's dms_documents (or its later bank_account_uuid column)",
+    read("lapis/queries/TaxStatementQueries.lua"):find('exists("dms_documents", "bank_account_uuid")', 1, true) ~= nil
+    and read("lapis/queries/TaxBankAccountQueries.lua")
+        :find('require("helper.table-exists")("dms_documents", "bank_account_uuid")', 1, true) ~= nil)
 
 -- ── dark mode ───────────────────────────────────────────────────────────────
 print("theme")
