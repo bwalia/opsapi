@@ -65,15 +65,17 @@ export class OpsApi {
   async request<T = unknown>(
     method: string,
     path: string,
-    body?: Record<string, unknown>
+    body?: Record<string, unknown> | FormData
   ): Promise<HouseResponse<T>> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.cfg.apiKey}`,
       Accept: "application/json",
     };
     if (this.cfg.namespace) headers["X-Namespace-Id"] = this.cfg.namespace;
-    let payload: string | undefined;
-    if (body !== undefined) {
+    let payload: string | FormData | undefined;
+    if (body instanceof FormData) {
+      payload = body; // multipart: fetch sets the Content-Type with its boundary
+    } else if (body !== undefined) {
       headers["Content-Type"] = "application/x-www-form-urlencoded";
       payload = encodeForm(body);
     }

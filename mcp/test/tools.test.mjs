@@ -47,12 +47,15 @@ function fakeOpsApi(t, routes) {
       path: u.pathname,
       query: Object.fromEntries(u.searchParams),
       headers: init.headers ?? {},
-      body: init.body ? Object.fromEntries(new URLSearchParams(init.body)) : undefined,
+      form: init.body instanceof FormData ? init.body : undefined,
+      body: init.body && !(init.body instanceof FormData) ? Object.fromEntries(new URLSearchParams(init.body)) : undefined,
     };
     calls.push(call);
     const h = routes[`${call.method} ${call.path}`];
     if (h === undefined) return Response.json({ success: false, error: "no such route" }, { status: 404 });
-    return Response.json({ success: true, data: typeof h === "function" ? h(call) : h });
+    const data = typeof h === "function" ? h(call) : h;
+    if (data instanceof Response) return data;
+    return Response.json({ success: true, data });
   });
   return calls;
 }
@@ -65,9 +68,9 @@ const kanbanRoutes = {
   [`GET /api/v2/kanban/boards/${B2}`]: { ...boards[1], columns },
 };
 
-async function connect() {
+async function connect(opts) {
   const api = new OpsApi({ baseUrl: "http://opsapi.test/", apiKey: "opsk_test", dashboardUrl: "https://app.test" });
-  const server = createServer(api);
+  const server = createServer(api, opts);
   const client = new Client({ name: "test", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -265,6 +268,146 @@ test("ids must be uuids and PR links https: anything else is refused before OpsA
   for (const pr_url of ["http://github.com/o/r/pull/1", "javascript:alert(1)", "ftp://x/y", "github.com/o/r/pull/1"]) {
     await refused("set_task_pr", { task_uuid: T1, pr_url });
     await refused("complete_task", { task_uuid: T1, pr_url });
+  }
+  assert.equal(calls.length, 0);
+});
+
+// ── website content (CMS) ────────────────────────────────────────────────────
+
+const C1 = "c1c1c1c1-0000-4000-8000-0000000000c1";
+const C2 = "c2c2c2c2-0000-4000-8000-0000000000c2";
+const PO = "eeeeeeee-0000-4000-8000-00000000000e";
+const W1 = "f1f1f1f1-0000-4000-8000-0000000000f1";
+const W2 = "f2f2f2f2-0000-4000-8000-0000000000f2";
+const W3 = "f3f3f3f3-0000-4000-8000-0000000000f3";
+const categories = [
+  { uuid: C1, name: "News", slug: "news", post_count: 3 },
+  { uuid: C2, name: "News Archive", slug: "news-archive", post_count: 1 },
+];
+const tags = [{ uuid: "t1", name: "Product Launch", slug: "product-launch", post_count: 2 }];
+const post = (over = {}) => ({
+  uuid: PO, title: "Spring sale", slug: "spring-sale", status: "draft", visibility: "public",
+  categories: [{ uuid: C1, name: "News", slug: "news" }], tags: [{ name: "sale", slug: "sale" }], ...over,
+});
+const cmsRoutes = {
+  "GET /api/v2/cms/categories": categories,
+  "GET /api/v2/cms/tags": tags,
+};
+
+test("create_post files the post under exactly-named categories, sends tags, and says drafts are not live", async (t) => {
+  const calls = fakeOpsApi(t, { ...cmsRoutes, "POST /api/v2/cms/posts": () => post() });
+  const client = await connect();
+  const r = await client.callTool({
+    name: "create_post",
+    arguments: { title: "Spring sale", content_html: "<p>Hi</p>", categories: ["news"], tags: ["sale"], featured: true },
+  });
+  assert.ok(!r.isError, text(r));
+  const [w] = writes(calls);
+  assert.equal(w.path, "/api/v2/cms/posts");
+  assert.deepEqual(JSON.parse(w.body.category_uuids), [C1]); // "news" is News, not News Archive
+  assert.deepEqual(JSON.parse(w.body.tags), ["sale"]);
+  assert.equal(w.body.is_featured, "true");
+  assert.equal(w.body.categories, undefined);
+  assert.match(text(r), /Not on the website until its status is published/);
+  assert.equal(r.structuredContent.post.url, `https://app.test/dashboard/cms/posts/${PO}`);
+
+  const bad = await client.callTool({ name: "create_post", arguments: { title: "x", categories: ["Sport"] } });
+  assert.ok(bad.isError);
+  assert.match(text(bad), /No category matches "Sport". Available: News/);
+  assert.equal(writes(calls).length, 1);
+});
+
+test("update_post sends only the given fields; publishing is status=published; nothing given → no call", async (t) => {
+  const calls = fakeOpsApi(t, { [`PUT /api/v2/cms/posts/${PO}`]: () => post({ status: "published", published_at: "2026-10-26T10:00:00Z" }) });
+  const client = await connect();
+  const r = await client.callTool({ name: "update_post", arguments: { post_uuid: PO, status: "published" } });
+  assert.ok(!r.isError, text(r));
+  assert.deepEqual(writes(calls)[0].body, { status: "published" });
+  assert.doesNotMatch(text(r), /Not on the website/);
+
+  const none = await client.callTool({ name: "update_post", arguments: { post_uuid: PO } });
+  assert.ok(none.isError);
+  assert.equal(writes(calls).length, 1);
+});
+
+test("list_posts turns a category name into its uuid and a tag name into its slug", async (t) => {
+  const calls = fakeOpsApi(t, { ...cmsRoutes, "GET /api/v2/cms/posts": [post()] });
+  const client = await connect();
+  const r = await client.callTool({ name: "list_posts", arguments: { category: "News", tag: "product launch", status: "draft" } });
+  assert.ok(!r.isError, text(r));
+  const q = calls.find((c) => c.path === "/api/v2/cms/posts").query;
+  assert.deepEqual(q, { category: C1, tag: "product-launch", status: "draft", perPage: "20" });
+  assert.match(text(r), /Spring sale \[draft\] · News · #sale/);
+});
+
+test("upload_image sends multipart; file_path only when the server runs locally", async (t) => {
+  const calls = fakeOpsApi(t, { "POST /api/v2/cms/media": { url: "https://www.example.com/img/blog/spring-sale/cover.png", size: 3 } });
+  const remote = await connect();
+  const r = await remote.callTool({
+    name: "upload_image",
+    arguments: { data_base64: Buffer.from("png").toString("base64"), filename: "cover.png", slug: "spring-sale" },
+  });
+  assert.ok(!r.isError, text(r));
+  assert.equal(r.structuredContent.url, "https://www.example.com/img/blog/spring-sale/cover.png");
+  const form = calls[0].form;
+  assert.equal(form.get("file").name, "cover.png");
+  assert.equal(await form.get("file").text(), "png");
+  assert.equal(form.get("slug"), "spring-sale");
+  assert.equal(calls[0].headers["Content-Type"], undefined); // fetch adds the multipart boundary
+
+  const path = (await import("node:path")).join((await import("node:os")).tmpdir(), `opsapi-mcp-${process.pid}.jpg`);
+  await (await import("node:fs/promises")).writeFile(path, "jpg");
+  const refused = await remote.callTool({ name: "upload_image", arguments: { file_path: path } });
+  assert.ok(refused.isError);
+  assert.match(text(refused), /only works when the MCP server runs on your machine/);
+  const local = await connect({ localFiles: true });
+  const ok = await local.callTool({ name: "upload_image", arguments: { file_path: path } });
+  assert.ok(!ok.isError, text(ok));
+  assert.equal(calls[1].form.get("file").name, path.split("/").pop());
+
+  const notImage = await local.callTool({ name: "upload_image", arguments: { file_path: "/etc/passwd" } });
+  assert.ok(notImage.isError);
+  assert.equal(calls.length, 2);
+});
+
+test("notify_website sends every active webhook with the post, and reports failures", async (t) => {
+  const calls = fakeOpsApi(t, {
+    "GET /api/v2/cms/webhooks": [
+      { uuid: W1, name: "Vercel", url: "https://api.vercel.com/hook", active: true },
+      { uuid: W2, name: "Old site", url: "https://old.example.com", active: false },
+      { uuid: W3, name: "Netlify", url: "https://api.netlify.com/hook", active: true },
+    ],
+    [`GET /api/v2/cms/posts/${PO}`]: post({ status: "published" }),
+    [`POST /api/v2/cms/webhooks/${W1}/trigger`]: () => Response.json({ success: true, status: 204 }),
+    [`POST /api/v2/cms/webhooks/${W3}/trigger`]: () => Response.json({ success: false, error: "connection refused" }, { status: 502 }),
+  });
+  const client = await connect();
+  const r = await client.callTool({ name: "notify_website", arguments: { post_uuid: PO } });
+  assert.ok(!r.isError, text(r));
+  const sent = writes(calls);
+  assert.deepEqual(sent.map((c) => c.path).sort(), [`/api/v2/cms/webhooks/${W1}/trigger`, `/api/v2/cms/webhooks/${W3}/trigger`]);
+  assert.deepEqual(sent[0].body, { event: "post.published", uuid: PO, slug: "spring-sale", status: "published" });
+  assert.match(text(r), /Sent 1 of 2 webhook\(s\)/);
+  assert.match(text(r), /Vercel: delivered \(HTTP 204\)/);
+  assert.match(text(r), /Netlify: FAILED — OpsAPI 502/);
+});
+
+test("notify_website with no webhooks says how to add one", async (t) => {
+  fakeOpsApi(t, { "GET /api/v2/cms/webhooks": [] });
+  const client = await connect();
+  const r = await client.callTool({ name: "notify_website", arguments: {} });
+  assert.ok(!r.isError);
+  assert.match(text(r), /no active website webhooks/);
+});
+
+test("content ids must be uuids", async (t) => {
+  const calls = fakeOpsApi(t, {});
+  const client = await connect();
+  for (const id of ["../posts", "spring-sale", ""]) {
+    for (const [name, args] of [["get_post", { post_uuid: id }], ["update_page", { page_uuid: id, title: "x" }]]) {
+      const r = await client.callTool({ name, arguments: args }).catch((e) => ({ isError: true, content: [{ text: e.message }] }));
+      assert.ok(r.isError, `${name} ${id}`);
+    }
   }
   assert.equal(calls.length, 0);
 });

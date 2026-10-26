@@ -3,11 +3,13 @@
  * with a client bound to one caller's key.
  */
 
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { OpsApi, parseMetadata } from "./opsapi.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 interface KanbanTask {
   uuid: string;
@@ -54,6 +56,58 @@ interface Member {
   role?: string;
 }
 
+// Website content (CMS): blog posts, pages, categories, tags.
+interface CmsTerm {
+  uuid: string;
+  name: string;
+  slug?: string;
+  description?: string | null;
+  post_count?: number | string;
+}
+interface CmsPost {
+  uuid: string;
+  title?: string;
+  slug?: string;
+  status?: string;
+  visibility?: string;
+  excerpt?: string | null;
+  content_html?: string | null;
+  featured_image_url?: string | null;
+  author_name?: string | null;
+  is_featured?: boolean;
+  published_at?: string | null;
+  scheduled_at?: string | null;
+  updated_at?: string | null;
+  categories?: CmsTerm[];
+  tags?: CmsTerm[];
+  seo_title?: string | null;
+  seo_description?: string | null;
+  seo_keywords?: string | null;
+}
+interface CmsPage {
+  uuid: string;
+  title?: string;
+  slug?: string;
+  status?: string;
+  excerpt?: string | null;
+  content_html?: string | null;
+  featured_image_url?: string | null;
+  template?: string | null;
+  menu_order?: number;
+  show_in_nav?: boolean;
+  published_at?: string | null;
+  updated_at?: string | null;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  seo_keywords?: string | null;
+}
+interface CmsWebhook {
+  uuid: string;
+  name?: string | null;
+  url: string;
+  active?: boolean;
+}
+
 const PRIORITIES = ["critical", "high", "medium", "low", "none"] as const;
 const OPEN_STATUSES = ["open", "in_progress", "blocked", "review"] as const;
 const STATUSES = [...OPEN_STATUSES, "completed", "cancelled"] as const;
@@ -64,6 +118,9 @@ const ymd = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "use YYYY-MM-DD");
 // (Project, board, column and people given by name are matched against OpsAPI's own lists.)
 const uuid = () => z.string().trim().regex(UUID_RE, "must be a uuid");
 const httpsUrl = () => z.string().url().regex(/^https:\/\//i, "must be an https:// URL");
+const POST_STATUSES = ["draft", "published", "scheduled", "archived"] as const;
+const PAGE_STATUSES = ["draft", "published", "archived"] as const;
+const IMAGE_NAME = /\.(jpe?g|png|webp|gif|svg)$/i;
 
 type Result = {
   content: { type: "text"; text: string }[];
@@ -128,7 +185,12 @@ export function pick<T>(
 const fullName = (m: Member) => [m.first_name, m.last_name].filter(Boolean).join(" ") || undefined;
 const day = (d?: string | null) => (d ? String(d).slice(0, 10) : undefined);
 
-export function createServer(api: OpsApi): McpServer {
+export interface ServerOptions {
+  /** Let upload_image read files from this machine: stdio only, never the shared HTTP service. */
+  localFiles?: boolean;
+}
+
+export function createServer(api: OpsApi, opts: ServerOptions = {}): McpServer {
   const server = new McpServer({ name: "opsapi", version: VERSION });
 
   // ── lookups ──────────────────────────────────────────────────────────────
@@ -622,6 +684,410 @@ export function createServer(api: OpsApi): McpServer {
     safe(async ({ task_uuid, content }) => {
       await api.request("POST", `/api/v2/kanban/tasks/${task_uuid}/comments`, { content });
       return ok(`Comment added to task ${task_uuid}.`);
+    })
+  );
+
+  // ── website content (CMS) ────────────────────────────────────────────────
+  // Writes go to the workspace the key belongs to; the public website reads
+  // only published + public items (GET /api/v2/public/cms/<workspace-slug>/…).
+
+  const listCategories = async () => (await api.get<CmsTerm[]>("/api/v2/cms/categories")).data ?? [];
+  const listTags = async () => (await api.get<CmsTerm[]>("/api/v2/cms/tags")).data ?? [];
+
+  // Categories must already exist (tags are created on the fly), and are matched
+  // exactly: a partial match could file the post under the wrong category.
+  async function resolveCategories(refs: string[]): Promise<string[]> {
+    if (!refs.length) return [];
+    const cats = await listCategories();
+    return refs.map((r) => pick(cats, r, "category", (c) => c.uuid, (c) => [c.name, c.slug], true).uuid);
+  }
+
+  const seo = {
+    seo_title: z.string().optional().describe("Title for search engines (default: the title)."),
+    seo_description: z.string().optional().describe("Meta description for search engines (~160 characters)."),
+    seo_keywords: z.string().optional().describe("Comma-separated keywords."),
+  };
+  const postFields = {
+    content_html: z.string().optional().describe("The body as HTML (<p>, <h2>, <ul>, <img src>, <a href>…)."),
+    excerpt: z.string().optional().describe("One or two sentences shown in lists and previews."),
+    slug: z.string().optional().describe("URL part, e.g. 'spring-sale' (default: made from the title, kept unique)."),
+    status: z
+      .enum(POST_STATUSES)
+      .optional()
+      .describe(
+        "draft (default on create) · published (live on the website) · scheduled (only records scheduled_at; NOT published automatically) · archived (taken off the website)."
+      ),
+    visibility: z.enum(["public", "private"]).optional().describe("private posts never show on the website (default public)."),
+    featured: z.boolean().optional().describe("Mark as a featured post."),
+    categories: z
+      .array(z.string())
+      .optional()
+      .describe("Category names or uuids; they must exist (see list_categories_and_tags / create_category). Replaces the post's categories; [] clears them."),
+    tags: z.array(z.string()).optional().describe("Tag names; new ones are created. Replaces the post's tags; [] clears them."),
+    featured_image_url: z.string().optional().describe("Cover image URL (e.g. from upload_image)."),
+    author_name: z.string().optional().describe("Shown author (default: the key's owner)."),
+    scheduled_at: z.string().optional().describe("ISO date-time, with status=scheduled."),
+    ...seo,
+  };
+  const pageFields = {
+    content_html: z.string().optional().describe("The page body as HTML."),
+    excerpt: z.string().optional().describe("Short summary."),
+    slug: z.string().optional().describe("URL part, e.g. 'about' (default: made from the title)."),
+    status: z.enum(PAGE_STATUSES).optional().describe("draft (default on create) · published (live) · archived (taken off)."),
+    show_in_nav: z.boolean().optional().describe("List the page in the website's navigation (public /nav)."),
+    menu_order: z.number().int().optional().describe("Position in the navigation, lowest first."),
+    template: z.string().optional().describe("Layout template slug (default: the plain page)."),
+    featured_image_url: z.string().optional().describe("Cover image URL."),
+    ...seo,
+  };
+  type PostArgs = { [K in keyof typeof postFields]?: unknown } & { title?: string };
+
+  async function postBody(a: PostArgs) {
+    const { categories, featured, ...rest } = a;
+    const body: Record<string, unknown> = { ...rest, is_featured: featured };
+    if (categories) body.category_uuids = await resolveCategories(categories as string[]);
+    return body;
+  }
+  const hasFields = (body: Record<string, unknown>) => Object.values(body).some((v) => v !== undefined);
+
+  const postLink = (p: CmsPost) => api.link(`/dashboard/cms/posts/${p.uuid}`);
+  const pageLink = (p: CmsPage) => api.link(`/dashboard/cms/pages/${p.uuid}`);
+  const names = (ts?: CmsTerm[]) => (ts ?? []).map((t) => t.name).join(", ");
+  const liveNote = (status?: string) =>
+    status === "published" ? "" : " Not on the website until its status is published.";
+
+  function postSummary(p: CmsPost) {
+    return {
+      uuid: p.uuid,
+      title: p.title,
+      slug: p.slug,
+      status: p.status,
+      visibility: p.visibility,
+      featured: !!p.is_featured,
+      published_at: p.published_at ?? null,
+      categories: (p.categories ?? []).map((c) => c.name),
+      tags: (p.tags ?? []).map((t) => t.name),
+      url: postLink(p),
+    };
+  }
+  function postLine(p: CmsPost) {
+    const bits = [`${p.title ?? "(untitled)"} [${p.status ?? "?"}${p.visibility === "private" ? ", private" : ""}]`];
+    if (p.published_at) bits.push(`published ${day(p.published_at)}`);
+    if (p.categories?.length) bits.push(names(p.categories));
+    if (p.tags?.length) bits.push(`#${(p.tags ?? []).map((t) => t.name).join(" #")}`);
+    return `- ${bits.join(" · ")}\n  uuid: ${p.uuid} · slug: ${p.slug ?? "?"}`;
+  }
+  function postDetails(p: CmsPost) {
+    return (
+      `${p.title ?? "(untitled)"}\n` +
+      `Status: ${p.status ?? "?"} · Visibility: ${p.visibility ?? "?"}${p.is_featured ? " · Featured" : ""}` +
+      (p.published_at ? ` · Published: ${day(p.published_at)}` : "") +
+      `\nSlug: ${p.slug ?? "?"}` +
+      (p.categories?.length ? `\nCategories: ${names(p.categories)}` : "") +
+      (p.tags?.length ? `\nTags: ${names(p.tags)}` : "") +
+      (p.featured_image_url ? `\nImage: ${p.featured_image_url}` : "") +
+      (p.excerpt ? `\nExcerpt: ${p.excerpt}` : "") +
+      `\n\nuuid: ${p.uuid}\nurl: ${postLink(p)}`
+    );
+  }
+
+  server.registerTool(
+    "list_posts",
+    {
+      title: "List blog posts",
+      description:
+        "List the workspace's blog posts (drafts too), newest first: title, status, slug, uuid, categories and tags. " +
+        "Use it to find a post before get_post / update_post.",
+      inputSchema: {
+        status: z.enum(POST_STATUSES).optional().describe("Only posts with this status."),
+        search: z.string().optional().describe("Text in the title or excerpt."),
+        category: z.string().optional().describe("Only posts in this category (name or uuid)."),
+        tag: z.string().optional().describe("Only posts with this tag (name or slug)."),
+        featured: z.boolean().optional().describe("Only featured posts."),
+        page: z.number().int().min(1).optional().describe("Page number (default 1)."),
+        limit: z.number().int().min(1).max(100).optional().describe("Posts per page (default 20)."),
+      },
+    },
+    safe(async ({ status, search, category, tag, featured, page, limit }) => {
+      const category_uuid = category ? (await resolveCategories([category]))[0] : undefined;
+      const tag_slug = tag
+        ? pick(await listTags(), tag, "tag", (t) => t.slug ?? t.uuid, (t) => [t.name], true).slug
+        : undefined;
+      const r = await api.get<CmsPost[]>("/api/v2/cms/posts", {
+        status,
+        search,
+        category: category_uuid,
+        tag: tag_slug,
+        featured: featured ? "true" : undefined,
+        page,
+        perPage: limit ?? 20,
+      });
+      const posts = r.data ?? [];
+      const total = Number(r.meta?.total ?? posts.length);
+      const structured = { posts: posts.map(postSummary), total, page: Number(r.meta?.page ?? 1) };
+      if (!posts.length) return ok("No posts match.", structured);
+      const head = total > posts.length ? `${total} post(s), showing ${posts.length}` : `${posts.length} post(s)`;
+      return ok(`${head}:\n\n${posts.map(postLine).join("\n")}`, structured);
+    })
+  );
+
+  server.registerTool(
+    "get_post",
+    {
+      title: "Get a blog post",
+      description: "Fetch one blog post by uuid with its full HTML body, SEO fields, categories and tags.",
+      inputSchema: { post_uuid: uuid().describe("The post's uuid (from list_posts).") },
+    },
+    safe(async ({ post_uuid }) => {
+      const p = (await api.request<CmsPost>("GET", `/api/v2/cms/posts/${post_uuid}`)).data;
+      if (!p) return fail("Post not found.");
+      return ok(`${postDetails(p)}\n\n--- content_html ---\n${p.content_html ?? ""}`, { post: { ...postSummary(p), ...p } });
+    })
+  );
+
+  server.registerTool(
+    "create_post",
+    {
+      title: "Create a blog post",
+      description:
+        "Create a blog post in the workspace. It is a draft unless status=published. " +
+        "Categories must exist (matched by exact name or uuid; if one doesn't, nothing is created and the error lists them). " +
+        "Needs the key scope cms:create. Returns the uuid, slug and dashboard link.",
+      inputSchema: { title: z.string().min(1).describe("Post title."), ...postFields },
+    },
+    safe(async (a) => {
+      const p = (await api.request<CmsPost>("POST", "/api/v2/cms/posts", await postBody(a))).data;
+      if (!p) return fail("OpsAPI did not return the new post.");
+      return ok(`Created post "${p.title}" (${p.status}).${liveNote(p.status)}\n\n${postDetails(p)}`, { post: postSummary(p) });
+    })
+  );
+
+  server.registerTool(
+    "update_post",
+    {
+      title: "Update or publish a blog post",
+      description:
+        "Change a blog post: only the fields you pass change. Publish with status=published (the first publish stamps the date); " +
+        "unpublish with status=draft or archived. categories/tags replace the current ones. Needs cms:update.",
+      inputSchema: {
+        post_uuid: uuid().describe("The post's uuid."),
+        title: z.string().min(1).optional().describe("New title."),
+        ...postFields,
+      },
+    },
+    safe(async ({ post_uuid, ...a }) => {
+      const body = await postBody(a);
+      if (!hasFields(body)) return fail("Nothing to change: pass at least one field.");
+      const p = (await api.request<CmsPost>("PUT", `/api/v2/cms/posts/${post_uuid}`, body)).data;
+      if (!p) return fail("Post not found.");
+      return ok(`Updated post "${p.title}" (${p.status}).${liveNote(p.status)}\n\n${postDetails(p)}`, { post: postSummary(p) });
+    })
+  );
+
+  function pageSummary(p: CmsPage) {
+    return {
+      uuid: p.uuid,
+      title: p.title,
+      slug: p.slug,
+      status: p.status,
+      show_in_nav: !!p.show_in_nav,
+      menu_order: p.menu_order,
+      url: pageLink(p),
+    };
+  }
+  const pageDetails = (p: CmsPage) =>
+    `${p.title ?? "(untitled)"}\nStatus: ${p.status ?? "?"} · Slug: ${p.slug ?? "?"}` +
+    (p.show_in_nav ? ` · In navigation (order ${p.menu_order ?? 0})` : "") +
+    (p.template ? ` · Template: ${p.template}` : "") +
+    `\n\nuuid: ${p.uuid}\nurl: ${pageLink(p)}`;
+
+  server.registerTool(
+    "list_pages",
+    {
+      title: "List website pages",
+      description: "List the workspace's static website pages (About, Contact…), drafts too, in navigation order.",
+      inputSchema: {
+        status: z.enum(PAGE_STATUSES).optional().describe("Only pages with this status."),
+        search: z.string().optional().describe("Text in the title."),
+      },
+    },
+    safe(async ({ status, search }) => {
+      const pages = (await api.get<CmsPage[]>("/api/v2/cms/pages", { status, search })).data ?? [];
+      const structured = { pages: pages.map(pageSummary) };
+      if (!pages.length) return ok("No pages match.", structured);
+      const lines = pages.map(
+        (p) => `- ${p.title ?? "(untitled)"} [${p.status ?? "?"}]${p.show_in_nav ? " · in nav" : ""}\n  uuid: ${p.uuid} · slug: ${p.slug ?? "?"}`
+      );
+      return ok(`${pages.length} page(s):\n\n${lines.join("\n")}`, structured);
+    })
+  );
+
+  server.registerTool(
+    "get_page",
+    {
+      title: "Get a website page",
+      description: "Fetch one website page by uuid with its full HTML body and SEO fields.",
+      inputSchema: { page_uuid: uuid().describe("The page's uuid (from list_pages).") },
+    },
+    safe(async ({ page_uuid }) => {
+      const p = (await api.request<CmsPage>("GET", `/api/v2/cms/pages/${page_uuid}`)).data;
+      if (!p) return fail("Page not found.");
+      return ok(`${pageDetails(p)}\n\n--- content_html ---\n${p.content_html ?? ""}`, { page: { ...pageSummary(p), ...p } });
+    })
+  );
+
+  server.registerTool(
+    "create_page",
+    {
+      title: "Create a website page",
+      description: "Create a static website page. It is a draft unless status=published. Needs cms:create.",
+      inputSchema: { title: z.string().min(1).describe("Page title."), ...pageFields },
+    },
+    safe(async (a) => {
+      const p = (await api.request<CmsPage>("POST", "/api/v2/cms/pages", a)).data;
+      if (!p) return fail("OpsAPI did not return the new page.");
+      return ok(`Created page "${p.title}" (${p.status}).${liveNote(p.status)}\n\n${pageDetails(p)}`, { page: pageSummary(p) });
+    })
+  );
+
+  server.registerTool(
+    "update_page",
+    {
+      title: "Update or publish a website page",
+      description:
+        "Change a website page: only the fields you pass change. Publish with status=published, unpublish with draft or archived. Needs cms:update.",
+      inputSchema: {
+        page_uuid: uuid().describe("The page's uuid."),
+        title: z.string().min(1).optional().describe("New title."),
+        ...pageFields,
+      },
+    },
+    safe(async ({ page_uuid, ...a }) => {
+      if (!hasFields(a)) return fail("Nothing to change: pass at least one field.");
+      const p = (await api.request<CmsPage>("PUT", `/api/v2/cms/pages/${page_uuid}`, a)).data;
+      if (!p) return fail("Page not found.");
+      return ok(`Updated page "${p.title}" (${p.status}).${liveNote(p.status)}\n\n${pageDetails(p)}`, { page: pageSummary(p) });
+    })
+  );
+
+  server.registerTool(
+    "list_categories_and_tags",
+    {
+      title: "List blog categories and tags",
+      description: "List the workspace's blog categories and tags (name, slug, uuid, number of posts).",
+      inputSchema: {},
+    },
+    safe(async () => {
+      const [cats, tags] = await Promise.all([listCategories(), listTags()]);
+      const term = (t: CmsTerm) => ({ uuid: t.uuid, name: t.name, slug: t.slug, posts: Number(t.post_count ?? 0) });
+      const fmt = (ts: CmsTerm[]) =>
+        ts.map((t) => `- ${t.name} (slug ${t.slug ?? "?"}, ${t.post_count ?? 0} posts) · uuid: ${t.uuid}`).join("\n") || "none";
+      return ok(`Categories:\n${fmt(cats)}\n\nTags:\n${fmt(tags)}`, { categories: cats.map(term), tags: tags.map(term) });
+    })
+  );
+
+  server.registerTool(
+    "create_category",
+    {
+      title: "Create a blog category",
+      description: "Create a blog category (posts can then be filed under it by name). Needs cms:create.",
+      inputSchema: {
+        name: z.string().min(1).describe("Category name, e.g. 'News'."),
+        description: z.string().optional().describe("Short description."),
+        slug: z.string().optional().describe("URL part (default: made from the name)."),
+      },
+    },
+    safe(async ({ name, description, slug }) => {
+      const c = (await api.request<CmsTerm>("POST", "/api/v2/cms/categories", { name, description, slug })).data;
+      if (!c) return fail("OpsAPI did not return the new category.");
+      return ok(`Created category "${c.name}" (slug ${c.slug ?? "?"}, uuid ${c.uuid}).`, { category: c });
+    })
+  );
+
+  server.registerTool(
+    "upload_image",
+    {
+      title: "Upload an image for the website",
+      description:
+        "Upload a jpg/png/webp/gif/svg (max 8 MB) to the workspace's public website storage and get its public URL, " +
+        "for a post's featured_image_url or an <img src> in content_html. Give file_path (only when this server runs on your machine) " +
+        "or data_base64 + filename. With slug, the file is stored as img/blog/<slug>/<kind>.<ext> (the same name again replaces it). " +
+        "Needs cms:update, and the server must have public media storage configured.",
+      inputSchema: {
+        file_path: z.string().optional().describe("Path of the image on this machine."),
+        data_base64: z.string().optional().describe("The image bytes, base64-encoded (instead of file_path)."),
+        filename: z.string().regex(IMAGE_NAME, "must end in .jpg .jpeg .png .webp .gif or .svg").optional()
+          .describe("File name with its extension; required with data_base64."),
+        slug: z.string().optional().describe("The post's slug, to store it next to that post."),
+        kind: z.string().optional().describe("'cover' (default) for the featured image, or e.g. 'inline-1' for an image in the body."),
+      },
+    },
+    safe(async ({ file_path, data_base64, filename, slug, kind }) => {
+      if (!!file_path === !!data_base64) return fail("Give exactly one of file_path or data_base64.");
+      let bytes: Buffer;
+      let name: string;
+      if (file_path) {
+        if (!opts.localFiles) {
+          return fail("file_path only works when the MCP server runs on your machine (stdio). Send data_base64 + filename instead.");
+        }
+        name = filename ?? basename(file_path);
+        if (!IMAGE_NAME.test(name)) return fail("Only .jpg .jpeg .png .webp .gif or .svg images can be uploaded.");
+        bytes = await readFile(file_path);
+      } else {
+        if (!filename) return fail("filename is required with data_base64 (its extension sets the image type).");
+        name = filename;
+        bytes = Buffer.from(data_base64 as string, "base64");
+      }
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(bytes)]), name);
+      if (slug) form.append("slug", slug);
+      if (kind) form.append("kind", kind);
+      const r = (await api.request<{ url: string; size?: number }>("POST", "/api/v2/cms/media", form)).data;
+      if (!r?.url) return fail("OpsAPI did not return the image URL.");
+      return ok(`Uploaded ${name}: ${r.url}`, { url: r.url, size: r.size ?? bytes.length });
+    })
+  );
+
+  server.registerTool(
+    "notify_website",
+    {
+      title: "Tell the website to update",
+      description:
+        "Send the workspace's website webhooks now, so connected sites rebuild or refresh. OpsAPI never sends them by itself: " +
+        "call this after publishing, changing or unpublishing content the site shows. With post_uuid the payload names that post. " +
+        "With no webhook, every active one is sent. Needs cms:update.",
+      inputSchema: {
+        post_uuid: uuid().optional().describe("The post that changed (its uuid, slug and status go in the payload)."),
+        webhook: z.string().optional().describe("Only this webhook (name or uuid)."),
+        event: z
+          .enum(["post.published", "post.created", "post.updated", "post.deleted"])
+          .optional()
+          .describe("Event name sent to the site (default post.published)."),
+      },
+    },
+    safe(async ({ post_uuid, webhook, event }) => {
+      const all = (await api.get<CmsWebhook[]>("/api/v2/cms/webhooks")).data ?? [];
+      const targets = webhook
+        ? [pick(all, webhook, "webhook", (w) => w.uuid, (w) => [w.name ?? undefined], true)]
+        : all.filter((w) => w.active !== false);
+      if (!targets.length) {
+        return ok("This workspace has no active website webhooks, so there is nothing to send. Add one in the dashboard under Content → Website updates.", { sent: [] });
+      }
+      const post = post_uuid ? (await api.request<CmsPost>("GET", `/api/v2/cms/posts/${post_uuid}`)).data : undefined;
+      const payload = { event: event ?? "post.published", uuid: post?.uuid, slug: post?.slug, status: post?.status };
+      const sent = await Promise.all(
+        targets.map(async (w) => {
+          try {
+            const r = await api.request<unknown>("POST", `/api/v2/cms/webhooks/${w.uuid}/trigger`, payload);
+            return { webhook: w.name || w.url, ok: true, status: (r as { status?: number }).status };
+          } catch (e) {
+            return { webhook: w.name || w.url, ok: false, error: message(e) };
+          }
+        })
+      );
+      const lines = sent.map((s) => `- ${s.webhook}: ${s.ok ? `delivered${s.status ? ` (HTTP ${s.status})` : ""}` : `FAILED — ${s.error}`}`);
+      const failed = sent.filter((s) => !s.ok).length;
+      return { ...ok(`Sent ${sent.length - failed} of ${sent.length} webhook(s):\n${lines.join("\n")}`, { sent }), ...(failed === sent.length && { isError: true }) };
     })
   );
 
