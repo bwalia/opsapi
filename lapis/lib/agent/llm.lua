@@ -565,6 +565,7 @@ local function over_limit(user)
         return require("lapis.db").query([[
             SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM ai_usage
             WHERE user_uuid = ? AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+              AND feature <> 'web_terminal' -- Claude in a web terminal is counted, not limited, here (§11.3)
         ]], user)
     end)
     return ok and rows[1] ~= nil and tonumber(rows[1].used) >= DAILY_LIMIT

@@ -17,10 +17,10 @@ cleanup() {
   if [ -n "${KEEP:-}" ]; then
     echo "KEEP: sandbox left running (ar-api-$ID, ar-pg-$ID, network $NET, $W)"
     echo "      API $AR_API  ·  psql: docker exec -it ar-pg-$ID psql -U postgres -d e2e"
-    echo "      remove: docker rm -f ar-api-$ID ar-pg-$ID ar-mock-$ID; docker network rm $NET; rm -rf $W"
+    echo "      remove: docker rm -f ar-api-$ID ar-pg-$ID ar-mock-$ID ar-minio-$ID; docker network rm $NET; rm -rf $W"
     return
   fi
-  docker rm -f "ar-api-$ID" "ar-pg-$ID" "ar-mock-$ID" >/dev/null 2>&1 || true
+  docker rm -f "ar-api-$ID" "ar-pg-$ID" "ar-mock-$ID" "ar-minio-$ID" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$W"
 }
@@ -53,6 +53,9 @@ docker exec "ar-pg-$ID" psql -U postgres -d e2e -qc 'CREATE EXTENSION IF NOT EXI
 # A stand-in for Ollama (the platform model) and GitHub, for the built-in runner suite (builtin_test.py).
 docker run -d --name "ar-mock-$ID" --network "$NET" --network-alias ar-mock -p 127.0.0.1::8080 \
   -v "$W/src/projects/ai-runner/spec/mock_ai_github.py:/mock.py:ro" python:3.12-alpine python3 -I /mock.py >/dev/null
+# Object storage for work log recordings (terminal_test.py).
+docker run -d --name "ar-minio-$ID" --network "$NET" --network-alias ar-minio -e MINIO_ROOT_USER=sbxminio \
+  -e MINIO_ROOT_PASSWORD=sbxminio-secret-key minio/minio:latest server /data >/dev/null
 docker run -d --name "ar-api-$ID" --network "$NET" -p 127.0.0.1::80 -v "$W/src/lapis:/app" \
   -v "$W/src/projects:/app/projects" \
   -e POSTGRES_HOST=ar-pg -e POSTGRES_USER=pguser -e POSTGRES_PASSWORD=pgpassword -e POSTGRES_DB=e2e \
@@ -60,6 +63,8 @@ docker run -d --name "ar-api-$ID" --network "$NET" -p 127.0.0.1::80 -v "$W/src/l
   -e OPENSSL_SECRET_KEY="$(openssl rand -hex 16)" -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" \
   -e FRONTEND_URL=https://dash.example.invalid -e REDIS_ENABLED=false \
   -e OPSAPI_DEPLOY_ENV=test -e E2E_OTP_PEEK_ENABLED=true -e 'OTP_SUPPRESS_FOR_EMAIL_REGEX=@ar\.invalid$' \
+  -e MINIO_ENDPOINT=http://ar-minio:9000 -e MINIO_ACCESS_KEY=sbxminio -e MINIO_SECRET_KEY=sbxminio-secret-key \
+  -e MINIO_BUCKET=sbx -e MINIO_REGION=us-east-1 \
   -e OLLAMA_URL=http://ar-mock:8080 -e OLLAMA_MODEL=mock-qwen -e AI_FALLBACK_PROVIDER=none lapis-lapis >/dev/null
 sleep 6
 [ "$(docker inspect -f '{{.State.Running}}' "ar-api-$ID")" = true ] || { docker logs "ar-api-$ID" 2>&1 | tail -40; exit 1; }
@@ -90,7 +95,7 @@ PORT=$(docker port "ar-api-$ID" 80/tcp | head -1 | sed 's/.*://')
 AR_API="http://127.0.0.1:$PORT"
 AR_MOCK="http://127.0.0.1:$(docker port "ar-mock-$ID" 8080/tcp | head -1 | sed 's/.*://')"
 export AR_API AR_MOCK AR_JWT_SECRET="$JWT_SECRET" AR_PSQL="docker exec -i ar-pg-$ID psql -U postgres -d e2e -tA -c" \
-  AR_MIGRATE="docker exec -w /app ar-api-$ID lapis migrate"
+  AR_MIGRATE="docker exec -w /app ar-api-$ID lapis migrate" AR_EXEC="docker exec -w /app ar-api-$ID lapis exec"
 # PROMPTPILOT_BIN=/path/to/promptpilot PROMPTPILOT_DIR=/path/to/promptpilot-source adds the real runner suite.
 SUITES=${ONLY:-ai_runner_test builtin_test terminal_test${PROMPTPILOT_BIN:+ promptpilot_test}}
 ( for s in $SUITES; do python3 -I "$HERE/$s.py" || exit 1; done ) || {
