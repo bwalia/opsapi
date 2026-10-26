@@ -59,6 +59,26 @@ local z = TaxCalc.compute_full({ trading_profit = 110000 }, {})
 check("taper PA = 7,570", z.personal_allowance, 7570)
 check("taper income_tax_before_reductions", z.income_tax_before_reductions, 33432)
 
+-- ===== Band breakdown (reports screens) adds up to the income tax =====
+local function band_sum(r)
+    local s = 0
+    for _, b in ipairs(r.income_tax_bands) do s = s + b.tax end
+    return s
+end
+check("pdf bands sum = income tax before reductions", band_sum(pdf), pdf.income_tax_before_reductions)
+check("taper bands sum = income tax", band_sum(z), z.income_tax_before_reductions)
+-- Tapered PA: the basic band stays 37,700 wide (the old simple compute() widened it).
+local basic_z
+for _, b in ipairs(z.income_tax_bands) do if b.name == "Basic Rate" then basic_z = b end end
+check("taper basic band taxable_amount", basic_z and basic_z.taxable_amount, 37700)
+local top = TaxCalc.compute_full({ trading_profit = 160000 }, {})
+check("160k PA fully withdrawn", top.personal_allowance, 0)
+check("160k bands sum", band_sum(top), top.income_tax_due)
+check("160k additional-rate slice", top.income_tax_bands[#top.income_tax_bands].taxable_amount, 34860)
+local c4 = 0
+for _, b in ipairs(top.class4_bands) do c4 = c4 + b.nic end
+check("160k class4 bands sum", c4, top.class4_nic)
+
 -- ===== Low earner: starting rate for savings covers modest savings =====
 local low = TaxCalc.compute_full({ trading_profit = 3000, savings_interest = 10000 }, {})
 check("low taxable_savings", low.taxable_savings, 430)                 -- 10,000 - (12,570-3,000)
