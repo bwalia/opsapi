@@ -153,9 +153,35 @@ return function(app)
     -- Tool context + model wiring
     -- ------------------------------------------------------------------
 
+    -- Headers the HMRC tools (lib/agent/tax-tools hmrc_api) send on their internal
+    -- calls, AS the user: auth + namespace, X-Opsapi-Agent so the JSON body reaches
+    -- self.params (app.lua), and the user's anti-fraud signals — the browser's
+    -- X-Gov-Client-* headers, their public IP/port and user agent — so HMRC's
+    -- Gov-Client-* headers describe the user, not 127.0.0.1.
+    local function forward_headers(self)
+        local h = self.req.headers
+        local out = {
+            ["Authorization"] = h["authorization"],
+            ["X-Namespace-Id"] = h["x-namespace-id"],
+            ["X-Namespace-Slug"] = h["x-namespace-slug"],
+            ["X-Opsapi-Agent"] = "tax",
+            ["User-Agent"] = h["user-agent"],
+            ["X-Forwarded-For"] = h["x-forwarded-for"] or ngx.var.remote_addr,
+            ["X-Forwarded-Port"] = h["x-forwarded-port"] or ngx.var.remote_port,
+        }
+        for k, v in pairs(h) do
+            if type(k) == "string" and k:lower():find("^x%-gov%-client%-") and type(v) == "string" then
+                out[k] = v
+            end
+        end
+        return out
+    end
+
     local function build_ctx(self, ns_id, user_id, user_uuid, session, confirmed)
         local profile = decode(session.profile) or {}
         return {
+            port = tonumber(ngx.var.server_port) or 80,
+            forward_headers = forward_headers(self),
             namespace_id = ns_id,
             user_id = user_id,
             user_uuid = user_uuid,

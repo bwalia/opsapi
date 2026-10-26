@@ -667,11 +667,13 @@ export const taxService = {
   // intent-to-finalise calc polling + declaration), so allow a long timeout.
   async submitHmrcFinalDeclaration(taxYear: string): Promise<{
     filed: boolean;
+    already_filed?: boolean;
+    message?: string;
     tax_year: string;
-    business_id: string;
+    business_id?: string;
     calculation_id: string;
     sandbox: boolean;
-    figures: {
+    figures?: {
       total_income_tax_and_nics_due?: number;
       total_taxable_income?: number;
       income_tax_charged?: number;

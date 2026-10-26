@@ -112,7 +112,11 @@ end
 -- sandbox self-heal that provisions a stateful business if HMRC has none. Returns
 -- (ctx, nil) on success, or (nil, response) where `response` is a ready-to-return
 -- { status, json } error envelope. `ctx` carries everything the calc/declaration steps need.
-local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator)
+-- opts.require_reviewed: refuse (before anything is sent to HMRC) while any transaction
+-- for the year is still PENDING/NEEDS_REVIEW — they are left out of the body, so a
+-- binding return would silently under-report them.
+local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
+    opts = opts or {}
     local tax_year = self.params.tax_year
     if not tax_year then
         return nil, { status = 400, json = { error = "tax_year is required (e.g. 2025-26)" } }
@@ -152,6 +156,14 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator)
     end
     if agg.empty then
         return nil, { status = 422, json = { error = "No income or expenses to submit for this tax year" } }
+    end
+    local unreviewed = tonumber(agg.stats and agg.stats.excluded_unreviewed) or 0
+    if opts.require_reviewed and unreviewed > 0 then
+        return nil, { status = 422, json = {
+            code = "UNREVIEWED_TRANSACTIONS",
+            unreviewed = unreviewed,
+            error = unreviewed .. " transaction(s) for " .. tax_year .. " still need review. They are "
+                .. "left out of the figures, so filing now would under-report them — review them first." } }
     end
 
     -- Resolve the business id: param → stored default → first self-employment from HMRC.
@@ -384,8 +396,40 @@ return function(app)
                     error = "You must confirm the declaration before filing your return." } }
             end
 
+            -- Idempotency (as diy-tax-return-uk): never file the same year twice, and refuse
+            -- while another submission for it is in flight (double-click, retried request).
+            local guard_year = tostring(self.params.tax_year or "")
+            local guard_uuid = getUserUuid(self.current_user)
+            local guard_uid = getUserId(self.current_user)
+            local prior = db.query([[
+                SELECT status, calculation_id, business_id, correlation_id, updated_at,
+                       updated_at > NOW() - INTERVAL '10 minutes' AS recent
+                FROM hmrc_calculations
+                WHERE user_uuid = ? AND tax_year = ? AND calculation_type = 'final-declaration'
+                  AND status IN ('filed', 'submitting')
+                ORDER BY (status = 'filed') DESC, updated_at DESC LIMIT 1]], guard_uuid, guard_year)
+            local filed_return = guard_uid and db.query([[SELECT hmrc_submission_id, hmrc_filed_at
+                FROM tax_returns WHERE user_id = ? AND tax_year = ? AND status = 'FILED' LIMIT 1]],
+                guard_uid, guard_year)[1]
+            local p = prior and prior[1]
+            if (p and p.status == "filed") or filed_return then
+                return { status = 200, json = { success = true, data = {
+                    already_filed = true, filed = true, tax_year = guard_year,
+                    business_id = p and p.business_id or nil,
+                    sandbox = Client.is_sandbox(),
+                    calculation_id = (p and p.calculation_id) or (filed_return and filed_return.hmrc_submission_id),
+                    message = "Your return for " .. guard_year .. " has already been filed.",
+                } } }
+            end
+            if p and p.status == "submitting" and p.recent then
+                return { status = 409, json = { code = "FILING_IN_PROGRESS",
+                    error = "A filing for " .. guard_year .. " is already in progress. Wait a minute, then "
+                        .. "refresh to see whether it went through." } }
+            end
+
             -- Resolve + submit the cumulative period (shared with calculate-preview).
-            local ctx, errResp = buildAndSubmitCumulative(self, HMRC, Client, Aggregator)
+            local ctx, errResp = buildAndSubmitCumulative(self, HMRC, Client, Aggregator,
+                { require_reviewed = true })
             if not ctx then return errResp end
 
             -- 1) Trigger the intent-to-finalise calculation. The final declaration MUST
@@ -407,9 +451,51 @@ return function(app)
             end
             local figures = Client.parse_figures(cres.data)
 
-            -- 3) Submit the BINDING final declaration against that calculation.
+            -- 3) Write the audit row BEFORE the binding call (as diy does): a filed return
+            -- must always leave a record. If we can't write it, we don't file.
+            local audit_uuid = Global.generateUUID()
+            local ok_audit, audit_err = pcall(db.insert, "hmrc_calculations", {
+                uuid = audit_uuid,
+                user_uuid = ctx.user_uuid,
+                business_id = ctx.business_id,
+                tax_year = ctx.tax_year,
+                calculation_id = calc_id,
+                calculation_type = "final-declaration",
+                status = "submitting",
+                correlation_id = cres.correlation_id,
+                period_start = ctx.agg.tax_year_start,
+                period_end = ctx.agg.tax_year_end,
+                total_income_tax_and_nics_due = figures.total_income_tax_and_nics_due,
+                total_taxable_income = figures.total_taxable_income,
+                income_tax_charged = figures.income_tax_charged,
+                class2_nics = figures.class2_nics,
+                class4_nics = figures.class4_nics,
+                personal_allowance = figures.personal_allowance,
+                tx_total = ctx.agg.stats.rows,
+                tx_applied = ctx.agg.stats.applied,
+                tx_excluded_no_mtd = ctx.agg.stats.excluded_no_mtd_field,
+                poll_attempts = attempts,
+                request_payload = cjson.encode(ctx.body),
+                raw_response = cjson.encode(cres.data),
+                triggered_at = db.raw("NOW()"),
+                retrieved_at = db.raw("NOW()"),
+                created_at = db.raw("NOW()"),
+                updated_at = db.raw("NOW()"),
+            })
+            if not ok_audit then
+                ngx.log(ngx.ERR, "[hmrc] final declaration NOT sent — audit row failed: ", tostring(audit_err))
+                return { status = 500, json = {
+                    error = "Couldn't record the filing, so it was not sent to HMRC. Please try again." } }
+            end
+
+            -- 4) Submit the BINDING final declaration against that calculation.
             local fres, ferr, fbody = Client.submit_final_declaration(ctx.token, ctx.nino, ctx.tax_year, calc_id)
             if not fres then
+                pcall(db.update, "hmrc_calculations", {
+                    status = "failed",
+                    error_message = tostring(ferr) .. " " .. cjson.encode(fbody or {}),
+                    updated_at = db.raw("NOW()"),
+                }, { uuid = audit_uuid })
                 return { status = 502, json = {
                     error = "HMRC rejected the final declaration.",
                     detail = ferr, hmrc = fbody,
@@ -417,37 +503,36 @@ return function(app)
                     calculation_id = calc_id, tax_year = ctx.tax_year } }
             end
 
-            -- 4) Persist as a binding, filed declaration (best-effort audit trail).
-            pcall(function()
-                db.insert("hmrc_calculations", {
-                    uuid = Global.generateStaticUUID(),
-                    user_uuid = ctx.user_uuid,
-                    business_id = ctx.business_id,
-                    tax_year = ctx.tax_year,
-                    calculation_id = calc_id,
-                    calculation_type = "final-declaration",
+            -- 5) Filed. Mark the audit row and the year's return (tax_returns is what
+            -- diy-tax-return-uk's already-filed checks read). Logged loudly on failure:
+            -- the return IS filed with HMRC at this point.
+            local ok_mark, mark_err = pcall(function()
+                db.update("hmrc_calculations", {
                     status = "filed",
                     correlation_id = fres.correlation_id or cres.correlation_id,
-                    period_start = ctx.agg.tax_year_start,
-                    period_end = ctx.agg.tax_year_end,
-                    total_income_tax_and_nics_due = figures.total_income_tax_and_nics_due,
-                    total_taxable_income = figures.total_taxable_income,
-                    income_tax_charged = figures.income_tax_charged,
-                    class2_nics = figures.class2_nics,
-                    class4_nics = figures.class4_nics,
-                    personal_allowance = figures.personal_allowance,
-                    tx_total = ctx.agg.stats.rows,
-                    tx_applied = ctx.agg.stats.applied,
-                    tx_excluded_no_mtd = ctx.agg.stats.excluded_no_mtd_field,
-                    poll_attempts = attempts,
-                    request_payload = cjson.encode(ctx.body),
-                    raw_response = cjson.encode(cres.data),
-                    triggered_at = db.raw("NOW()"),
-                    retrieved_at = db.raw("NOW()"),
-                    created_at = db.raw("NOW()"),
                     updated_at = db.raw("NOW()"),
-                })
+                }, { uuid = audit_uuid })
+                local updated = db.query([[UPDATE tax_returns
+                    SET status = 'FILED', hmrc_submission_id = ?, hmrc_filed_at = NOW(), updated_at = NOW()
+                    WHERE user_id = ? AND tax_year = ?]], calc_id, ctx.user_id, ctx.tax_year)
+                if (updated.affected_rows or 0) == 0 then
+                    db.insert("tax_returns", {
+                        uuid = Global.generateUUID(),
+                        user_id = ctx.user_id,
+                        tax_year = ctx.tax_year,
+                        status = "FILED",
+                        hmrc_submission_id = calc_id,
+                        hmrc_filed_at = db.raw("NOW()"),
+                        total_tax_due = figures.total_income_tax_and_nics_due,
+                        created_at = db.raw("NOW()"),
+                        updated_at = db.raw("NOW()"),
+                    })
+                end
             end)
+            if not ok_mark then
+                ngx.log(ngx.ERR, "[hmrc] return FILED with HMRC (calc ", calc_id, ", user ", ctx.user_uuid,
+                    ", ", ctx.tax_year, ") but marking it failed: ", tostring(mark_err))
+            end
 
             return { status = 200, json = { success = true, data = {
                 filed = true,

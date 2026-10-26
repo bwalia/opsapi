@@ -218,8 +218,10 @@ apiClient.interceptors.request.use(
       }
 
       // On HMRC-bound requests, forward the browser-collected anti-fraud signals so the
-      // backend can build HMRC's mandatory Gov-Client-* fraud-prevention headers.
-      if (config.headers && (config.url || '').includes('hmrc')) {
+      // backend can build HMRC's mandatory Gov-Client-* fraud-prevention headers. The tax
+      // agent chat counts too: its HMRC tools call HMRC on the user's behalf.
+      const url = config.url || '';
+      if (config.headers && (url.includes('hmrc') || url.includes('/tax/agent/'))) {
         const fraud = hmrcFraudHeaders(getAuthUserId());
         for (const [k, v] of Object.entries(fraud)) {
           config.headers[k] = v;

@@ -68,19 +68,23 @@ return function(app)
             end
 
             local token = rows[1]
-            local exp_rows = db.query(
-                "SELECT expires_at > NOW() as is_valid, expires_at FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1",
-                user_uuid
-            )
-            local is_valid = exp_rows and exp_rows[1] and exp_rows[1].is_valid
+            -- The access token only lives 4 hours; the refresh token keeps the connection
+            -- alive far longer. Report "valid" when we can get a working access token
+            -- (refreshing if needed) — judging by the access-token expiry alone told the
+            -- wizard "authorisation expired, reconnect" 4 hours after every connect.
+            local ok_hmrc, HMRC = pcall(require, "helper.hmrc")
+            local access, terr
+            if ok_hmrc then access, terr = HMRC.get_valid_token(user_uuid) end
+            local exp_rows = db.query("SELECT expires_at FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1", user_uuid)
 
             return {
                 status = 200,
                 json = {
                     connected = true,
-                    is_valid = is_valid,
-                    expires_at = token.expires_at,
+                    is_valid = access ~= nil,
+                    expires_at = exp_rows and exp_rows[1] and exp_rows[1].expires_at or token.expires_at,
                     scope = token.scope,
+                    reconnect_reason = (access == nil) and tostring(terr or "HMRC module unavailable") or nil,
                 }
             }
         end)
