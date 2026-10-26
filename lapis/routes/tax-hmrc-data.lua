@@ -19,6 +19,12 @@ local NamespaceResolver = require("helper.namespace-resolver")
 local IdentityLock = require("lib.identity_lock")
 local respond_to = require("lapis.application").respond_to
 
+-- True on HMRC's test service, so the dashboard shows test-only help there only.
+local function hmrc_sandbox()
+    local ok, Client = pcall(require, "lib.hmrc-mtd-client")
+    return not ok or Client.is_sandbox()
+end
+
 -- Resolve the numeric user id (tax_user_profiles is keyed on it) from the JWT uuid.
 local function getUserId(user_uuid)
     local rows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
@@ -64,7 +70,9 @@ return function(app)
             )
 
             if not rows or #rows == 0 then
-                return { status = 200, json = { connected = false, message = "No HMRC connection" } }
+                return { status = 200, json = {
+                    connected = false, sandbox = hmrc_sandbox(), message = "No HMRC connection",
+                } }
             end
 
             local token = rows[1]
@@ -81,6 +89,7 @@ return function(app)
                 status = 200,
                 json = {
                     connected = true,
+                    sandbox = hmrc_sandbox(),
                     is_valid = access ~= nil,
                     expires_at = exp_rows and exp_rows[1] and exp_rows[1].expires_at or token.expires_at,
                     scope = token.scope,

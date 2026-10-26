@@ -302,6 +302,15 @@ spec:
             - name: GOOGLE_REDIRECT_URI
               value: {{ .Values.googleRedirectUri | quote }}
             {{- end }}
+            # Same trap for HMRC: the shared Vault HMRC_REDIRECT_URI is
+            # diytaxreturn's callback, so another release's "Connect to HMRC"
+            # landed on the diytaxreturn API (its own database) and never
+            # connected. ``hmrcRedirectUri`` sends HMRC back to THIS release; it
+            # must be a redirect URI on the HMRC Developer Hub application.
+            {{- if .Values.hmrcRedirectUri }}
+            - name: HMRC_REDIRECT_URI
+              value: {{ .Values.hmrcRedirectUri | quote }}
+            {{- end }}
             # Facebook sign-in (shop customers only). FACEBOOK_APP_ID and
             # FACEBOOK_APP_SECRET come from Vault; until both are set the shop
             # does not offer Facebook. Must be a Valid OAuth Redirect URI on the app.

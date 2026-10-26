@@ -181,6 +181,10 @@ corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenth
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.
 googleRedirectUri: "https://int-opsapi.workstation.co.uk/auth/google/callback"
+# HMRC "Connect" returns here, not to the diytaxreturn API in the shared Vault
+# secret (a different database, so the connection never showed up). Must be
+# listed under Redirect URIs on the HMRC Developer Hub sandbox application.
+hmrcRedirectUri: "https://int-opsapi.workstation.co.uk/auth/hmrc/callback"
 # Workstation's own Google OAuth client (not diytaxreturn's). Its secret goes in
 # Vault as GOOGLE_CLIENT_SECRET; both redirect URIs must be on this client.
 googleClientId: "331816273930-262h0rp98v6qc55gve0clc3m3b4bp0ha.apps.googleusercontent.com"
