@@ -155,6 +155,19 @@ function CheckItem({ state, label, hint }: { state: 'done' | 'warn' | 'todo'; la
   );
 }
 
+// What went wrong coming back from HMRC, in words anyone can act on (the callback's
+// ?hmrc_error= codes, plus HMRC's own OAuth error names).
+const HMRC_CONNECT_ERRORS: Record<string, string> = {
+  access_denied: 'You didn’t give permission on the HMRC website, so we couldn’t connect. Press the button again and choose “Give permission” (or “Grant authority”) at the end.',
+  invalid_state: 'The HMRC sign-in took too long or was opened in another window. Please press the button again — it only takes a minute.',
+  missing_params: 'We didn’t get an answer back from HMRC. Please press the button again.',
+  token_exchange_failed: 'HMRC didn’t accept the connection just now. Please wait a minute and press the button again.',
+  token_store_failed: 'We couldn’t save your HMRC connection. Please press the button again; if it keeps happening, contact us.',
+  server_misconfigured: 'Connecting to HMRC isn’t switched on here yet. Please contact us, or choose “Our accountant files it”.',
+};
+const hmrcConnectError = (code: string) =>
+  HMRC_CONNECT_ERRORS[code] || 'Something went wrong connecting to HMRC. Please press the button again.';
+
 const bizId = (b: HmrcBusiness) => b.business_id || b.businessId || '';
 const bizType = (b: HmrcBusiness) => b.type_of_business || b.typeOfBusiness || '';
 const bizName = (b: HmrcBusiness) => b.trading_name || b.tradingName || '';
@@ -303,6 +316,13 @@ function FileWizardContent() {
   const [valid, setValid] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  // HMRC's test service (sandbox) — only then do we show test-login help.
+  const [sandbox, setSandbox] = useState(false);
+  // Why the last HMRC connect failed, shown in the step itself (a toast is easy to miss).
+  const [connectError, setConnectError] = useState<string | null>(() => {
+    const e = searchParams.get('hmrc_error');
+    return e ? hmrcConnectError(e) : null;
+  });
 
   // NINO (required by HMRC's business/obligations APIs)
   const [hasNino, setHasNino] = useState<boolean | null>(null);
@@ -395,6 +415,7 @@ function FileWizardContent() {
       const s = await taxService.getHmrcStatus();
       setConnected(!!s.connected);
       setValid(!!s.is_valid);
+      setSandbox(!!s.sandbox);
     } catch {
       // leave as not-connected
     } finally {
@@ -408,15 +429,18 @@ function FileWizardContent() {
 
   useEffect(() => {
     if (searchParams.get('hmrc_connected') === 'true') {
-      toast.success('Connected to HMRC');
+      toast.success('You’re connected to HMRC');
       fetchStatus();
     }
-    const err = searchParams.get('hmrc_error');
-    if (err) toast.error(`HMRC connection failed: ${err.replace(/_/g, ' ')}`);
+    // Back from HMRC either way: bring the HMRC steps into view so nobody is lost.
+    if (searchParams.get('hmrc_connected') || searchParams.get('hmrc_error')) {
+      setTimeout(() => document.getElementById('file-direct')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+    }
   }, [searchParams, fetchStatus]);
 
   const handleConnect = async () => {
     setConnecting(true);
+    setConnectError(null);
     try {
       // Pass the BASE; the backend callback appends "/file" (source=file) and the
       // hmrc_connected flag → .../dashboard/tax/file?...&hmrc_connected=true.
@@ -424,8 +448,8 @@ function FileWizardContent() {
       const authUrl = await taxService.initiateHmrcConnect(redirectUrl, 'file');
       if (!authUrl) throw new Error('No auth URL');
       window.location.href = authUrl;
-    } catch {
-      toast.error('Failed to start HMRC connection');
+    } catch (err: unknown) {
+      setConnectError(extractApiError(err, 'We couldn’t open the HMRC website. Please check your internet connection and try again.'));
       setConnecting(false);
     }
   };
@@ -505,7 +529,7 @@ function FileWizardContent() {
       }
       setBusinesses(list);
       if (list.length === 0) {
-        setBizError('HMRC returned no businesses for this NINO. In the sandbox, set one up under HMRC settings → Set up sandbox business.');
+        setBizError('HMRC has no self-employed business for this National Insurance number. Check the number in step 1 is right, or choose “Our accountant files it”.');
       }
       // Prefer the stored/provisioned business; else the sole self-employment / only one.
       const se = list.filter((b) => /self-employment/i.test(bizType(b)));
@@ -852,7 +876,7 @@ function FileWizardContent() {
 
         <div className="min-w-0 space-y-5 xl:col-start-1 xl:row-start-1">
       {/* Step 1 — NINO (both paths) */}
-      <Card padding="lg">
+      <Card padding="lg" id="step-nino">
         <StepHeader index={1} state={sNino} icon={<Fingerprint className="w-4 h-4" />}
           title="Your National Insurance number"
           subtitle={
@@ -927,11 +951,16 @@ function FileWizardContent() {
                   can be filed with HMRC — by me or by your accountant. I can remove it at any time.
                 </span>
               </label>
-              <p className="text-xs text-amber-700">
-                Filing directly in the HMRC sandbox? It must match the test user you sign in to HMRC with — create one
-                under{' '}
-                <Link href="/dashboard/tax/settings" className="underline font-medium">HMRC settings</Link>.
+              <p className="text-xs text-amber-800">
+                You can find it on your payslip, P60, or letters from HMRC or the DWP.
               </p>
+              {sandbox && (
+                <p className="text-xs text-amber-700">
+                  Testing with HMRC&apos;s test service? It must match the test user you sign in to HMRC with — create
+                  one under{' '}
+                  <Link href="/dashboard/tax/settings" className="underline font-medium">HMRC settings</Link>.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -980,10 +1009,13 @@ function FileWizardContent() {
             />
             <PathOption
               active={path === 'direct'}
-              onClick={() => setPath('direct')}
+              onClick={() => {
+                setPath('direct');
+                setTimeout(() => document.getElementById('file-direct')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+              }}
               icon={<Landmark className="w-4 h-4" />}
               title="File directly with HMRC"
-              text="Connect your HMRC account (Making Tax Digital) and submit the return yourself."
+              text="Sign in to HMRC once to link your account, then send your return yourself. We guide you through every step."
             />
           </div>
         </div>
@@ -993,19 +1025,29 @@ function FileWizardContent() {
         <FileForMe overview={overview} taxYear={taxYear} hasNino={!!hasNino} onChanged={loadOverview} />
       )}
 
-      {path === 'direct' && (<Card padding="lg">
-      {/* Step 2 — Connect */}
+      {path === 'direct' && (<Card padding="lg" id="file-direct" className="scroll-mt-6">
+      {/* Step 3 — Connect */}
       <StepBlock>
         <StepHeader index={3} state={s1} icon={<Link2 className="w-4 h-4" />}
           title="Connect to HMRC"
           subtitle={
             s1 === 'done'
-              ? 'Your HMRC authorisation is active.'
+              ? 'Done — you’re connected to HMRC.'
               : s1 === 'locked'
-                ? 'Add your National Insurance number first.'
-                : 'Authorise access to file via Making Tax Digital.'
+                ? 'First add your National Insurance number (step 1).'
+                : 'Sign in to HMRC once, so we can send your return for you.'
           }
         />
+        {s1 === 'locked' && hasNino === false && (
+          <div className="mt-4 pl-12">
+            <button
+              onClick={() => document.getElementById('step-nino')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="flex items-center gap-2 rounded-lg border border-primary-300 bg-primary-50 px-4 py-2.5 text-sm font-medium text-primary-700 hover:bg-primary-100"
+            >
+              <Fingerprint className="w-4 h-4" /> Add my National Insurance number
+            </button>
+          </div>
+        )}
         {s1 === 'active' && (
           <div className="mt-4 pl-12">
             {loadingStatus ? (
@@ -1013,25 +1055,67 @@ function FileWizardContent() {
                 <Loader2 className="w-4 h-4 animate-spin" /> Checking…
               </span>
             ) : (
-              <div className="space-y-2">
-                {connected && !valid && (
-                  <p className="text-sm text-amber-600">Your authorisation expired — reconnect to continue.</p>
+              <div className="space-y-4">
+                {connectError && (
+                  <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+                    <span>{connectError}</span>
+                  </div>
                 )}
+                {connected && !valid && !connectError && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Your link to HMRC has run out (HMRC asks for this every so often). Please connect again — it only
+                    takes a minute.
+                  </p>
+                )}
+                <div className="rounded-lg border border-secondary-200 bg-secondary-50 p-4">
+                  <p className="text-sm font-semibold text-secondary-900">What happens when you press the button</p>
+                  <ol className="mt-2 space-y-2 text-sm text-secondary-700">
+                    {[
+                      'We open the HMRC website (GOV.UK) for you.',
+                      'Sign in with your Government Gateway user ID and password — the same ones you use for your HMRC online account.',
+                      'HMRC may send a code to your phone. Type it in.',
+                      'At the end, press “Give permission” (it may say “Grant authority”).',
+                      'You come straight back to this page, ready for the next step.',
+                    ].map((line, i) => (
+                      <li key={i} className="flex items-start gap-2.5">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+                          {i + 1}
+                        </span>
+                        <span className="pt-0.5">{line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
                 <button
                   onClick={handleConnect}
                   disabled={connecting}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-5 py-3 text-base font-semibold text-white hover:bg-primary-700 disabled:opacity-50 sm:w-auto"
                 >
-                  {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-                  {connected ? 'Reconnect to HMRC' : 'Connect to HMRC'}
+                  {connecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Link2 className="w-5 h-5" />}
+                  {connecting ? 'Opening the HMRC website…' : connected ? 'Connect to HMRC again' : 'Go to HMRC to connect'}
                 </button>
-                <p className="text-xs text-secondary-400">
-                  Need a sandbox test login first? Use{' '}
-                  <Link href="/dashboard/tax/settings" className="text-primary-600 underline">
-                    Sandbox testing
-                  </Link>
-                  .
+                <p className="text-sm text-secondary-500">
+                  No Government Gateway user ID?{' '}
+                  <a
+                    href="https://www.gov.uk/log-in-register-hmrc-online-services"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-primary-600 underline"
+                  >
+                    Create one on GOV.UK
+                  </a>
+                  , then come back here. Prefer not to? Choose <strong>Our accountant files it</strong> above.
                 </p>
+                {sandbox && (
+                  <p className="text-xs text-secondary-400">
+                    Testing with HMRC&apos;s test service? Get a test login under{' '}
+                    <Link href="/dashboard/tax/settings" className="text-primary-600 underline">
+                      Sandbox testing
+                    </Link>
+                    .
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1041,11 +1125,11 @@ function FileWizardContent() {
       {/* Step 2 — Business */}
       <StepBlock>
         <StepHeader index={4} state={s2} icon={<Building2 className="w-4 h-4" />}
-          title="Select your business"
+          title="Your business"
           subtitle={
             s2 === 'done'
-              ? `Filing for ${selectedBusiness}`
-              : 'Pick the self-employment HMRC holds for you.'
+              ? `Filing for ${bizName(businesses.find((b) => bizId(b) === selectedBusiness) || {}) || 'your self-employed business'}.`
+              : 'We ask HMRC for the self-employed business it holds for you.'
           }
         />
         {s2 === 'active' && (
@@ -1078,9 +1162,10 @@ function FileWizardContent() {
                         : 'border-secondary-200 hover:border-primary-300'
                     }`}
                   >
-                    <p className="font-medium text-secondary-900">{bizName(b) || bizType(b) || 'Business'}</p>
-                    <p className="text-xs text-secondary-500 font-mono">
-                      {bizType(b)} · {bizId(b)}
+                    <p className="font-medium text-secondary-900">{bizName(b) || 'Your business'}</p>
+                    <p className="text-xs text-secondary-500">
+                      {/self-employment/i.test(bizType(b)) ? 'Self-employed' : bizType(b).replace(/-/g, ' ')}
+                      {selectedBusiness === bizId(b) ? ' · ✓ Chosen' : ' · Press to choose'}
                     </p>
                   </button>
                 ))}
@@ -1110,13 +1195,15 @@ function FileWizardContent() {
               </div>
             )}
 
-            <p className="text-xs text-secondary-400">
-              No business yet (sandbox)? Create one under{' '}
-              <Link href="/dashboard/tax/settings" className="text-primary-600 underline">
-                Sandbox testing → Set up sandbox business
-              </Link>
-              .
-            </p>
+            {sandbox && (
+              <p className="text-xs text-secondary-400">
+                No business yet (test service)? Create one under{' '}
+                <Link href="/dashboard/tax/settings" className="text-primary-600 underline">
+                  Sandbox testing → Set up sandbox business
+                </Link>
+                .
+              </p>
+            )}
           </div>
         )}
       </StepBlock>
@@ -1125,7 +1212,7 @@ function FileWizardContent() {
       <StepBlock>
         <StepHeader index={5} state={s3} icon={<CalendarClock className="w-4 h-4" />}
           title="Your filing period"
-          subtitle="We check with HMRC which period is open to file — no action needed."
+          subtitle="We check with HMRC which dates you're filing for — nothing for you to do."
         />
         {s3 !== 'locked' && (
           <div className="mt-4 pl-12 space-y-3">
@@ -1139,7 +1226,7 @@ function FileWizardContent() {
               openObligations.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-xs text-secondary-500">
-                    Pick the period you&apos;re filing for — this sets the tax year for the rest of the flow.
+                    These are the dates HMRC is waiting for. We&apos;ve picked the first one — press another to change it.
                   </p>
                   {openObligations.map((o, i) => {
                     const key = `${o.period_start}|${o.period_end}`;
@@ -1175,7 +1262,7 @@ function FileWizardContent() {
                 </div>
               ) : (
                 <p className="text-sm text-secondary-500">
-                  No open obligations returned. You can still preview figures for tax year{' '}
+                  HMRC isn&apos;t waiting on any dates right now. You can carry on with tax year{' '}
                   <strong>{taxYear}</strong> below.
                 </p>
               )
@@ -1194,7 +1281,7 @@ function FileWizardContent() {
       <StepBlock>
         <StepHeader index={6} state={s4} icon={<ListChecks className="w-4 h-4" />}
           title="Check your figures"
-          subtitle="Aggregate your classified transactions and fix anything that would be rejected."
+          subtitle="We add up your income and expenses, and point out anything HMRC would turn down."
         />
         {s4 !== 'locked' && (
           <div className="mt-4 pl-12 space-y-3">
@@ -1218,10 +1305,10 @@ function FileWizardContent() {
                 {/* counts */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
-                    ['Rows', preview.stats.rows],
-                    ['In return', preview.stats.applied],
-                    ['Need review', preview.stats.excluded_unreviewed],
-                    ['Off-summary', preview.stats.excluded_no_mtd_field],
+                    ['Transactions', preview.stats.rows],
+                    ['In your return', preview.stats.applied],
+                    ['Still to check', preview.stats.excluded_unreviewed],
+                    ['Not needed by HMRC', preview.stats.excluded_no_mtd_field],
                   ].map(([label, v]) => (
                     <div key={label as string} className="rounded-lg border border-secondary-200 bg-surface p-2 text-center">
                       <p className="text-lg font-semibold text-secondary-900">{(v as number) ?? 0}</p>
@@ -1238,7 +1325,7 @@ function FileWizardContent() {
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-3">
                     <p className="text-sm font-medium text-red-800 flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4" />
-                      These credits are filed as expenses and make a field negative — HMRC would reject them. Fix each one:
+                      Some money coming in has been sorted as an expense, so HMRC would turn the return down. Tell us what each one is:
                     </p>
                     {(preview.offending_transactions || []).map((tx) => (
                       <div key={tx.uuid} className="rounded-md bg-surface border border-red-200 p-2.5">
@@ -1246,7 +1333,7 @@ function FileWizardContent() {
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-secondary-900 truncate">{tx.description}</p>
                             <p className="text-xs text-secondary-500">
-                              {tx.transaction_date} · <span className="font-mono">{tx.field}</span> ·{' '}
+                              {tx.transaction_date} ·{' '}
                               <span className="text-green-700">+{gbp(tx.amount)}</span>
                             </p>
                           </div>
@@ -1293,9 +1380,9 @@ function FileWizardContent() {
                   <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>
-                      No classified transactions fall in tax year <strong>{taxYear}</strong>. Your
-                      statements are likely for a different year than this obligation — upload/classify
-                      transactions for {taxYear}, or select the obligation that matches your data.
+                      We have no transactions for tax year <strong>{taxYear}</strong>. Your bank statements may be
+                      for a different year — upload statements for {taxYear}, or pick the dates above that match
+                      your statements.
                     </span>
                   </div>
                 )}
@@ -1320,22 +1407,21 @@ function FileWizardContent() {
       {/* Step 5 — Preview calculation */}
       <StepBlock>
         <StepHeader index={7} state={s5} icon={<Calculator className="w-4 h-4" />}
-          title="Preview your calculation"
-          subtitle="Submit your figures to HMRC and get a non-binding tax calculation. This does not file your return."
+          title="See your tax bill from HMRC"
+          subtitle="We send your figures to HMRC and they work out your tax. This does not file your return yet."
         />
         {s5 !== 'locked' && (
           <div className="mt-4 pl-12 space-y-3">
-            <p className="text-xs text-secondary-500">
-              Submitting tax year <strong>{taxYear}</strong> for business{' '}
-              <span className="font-mono">{selectedBusiness || '—'}</span>.
+            <p className="text-sm text-secondary-500">
+              For tax year <strong>{taxYear}</strong>. You can do this as many times as you like.
             </p>
             <button
               onClick={runCalculation}
               disabled={calculating}
-              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-5 py-3 text-base font-semibold text-white hover:bg-primary-700 disabled:opacity-50 sm:w-auto"
             >
-              {calculating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
-              {calculating ? 'Calculating…' : 'Run preview calculation'}
+              {calculating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Calculator className="w-5 h-5" />}
+              {calculating ? 'HMRC is working it out…' : calc ? 'Ask HMRC again' : 'Ask HMRC to work out my tax'}
             </button>
 
             {calculating && !calc && (
@@ -1353,22 +1439,22 @@ function FileWizardContent() {
                 {calc.sandbox_placeholder && (
                   <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800">
                     <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span>Sandbox returns a fixed placeholder for the total — the breakdown is illustrative.</span>
+                    <span>HMRC&apos;s test service shows a made-up total, so it&apos;s hidden — the other figures are a guide.</span>
                   </div>
                 )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
-                    ['Tax & NICs due', calc.figures.total_income_tax_and_nics_due],
+                    ['Tax & National Insurance due', calc.figures.total_income_tax_and_nics_due],
                     ['Taxable income', calc.figures.total_taxable_income],
                     ['Income tax', calc.figures.income_tax_charged],
                     ['Personal allowance', calc.figures.personal_allowance],
-                    ['Class 2 NIC', calc.figures.class2_nics],
-                    ['Class 4 NIC', calc.figures.class4_nics],
+                    ['Class 2 National Insurance', calc.figures.class2_nics],
+                    ['Class 4 National Insurance', calc.figures.class4_nics],
                   ].map(([label, value]) => (
                     <div key={label as string} className="rounded-lg border border-secondary-200 bg-surface p-2.5">
                       <p className="text-xs text-secondary-500">{label}</p>
                       <p className="text-base font-semibold text-secondary-900">
-                        {calc.sandbox_placeholder && label === 'Tax & NICs due' ? '—' : gbp(value as number | undefined)}
+                        {calc.sandbox_placeholder && label === 'Tax & National Insurance due' ? '—' : gbp(value as number | undefined)}
                       </p>
                     </div>
                   ))}
@@ -1382,8 +1468,8 @@ function FileWizardContent() {
       {/* Step 6 — Finalise */}
       <StepBlock last>
         <StepHeader index={8} state={s6} icon={<FileCheck2 className="w-4 h-4" />}
-          title="Finalise & declare"
-          subtitle="The binding final declaration that files your return with HMRC."
+          title="File your tax return"
+          subtitle="The last step: you confirm everything is right and we send your return to HMRC."
         />
         {s6 !== 'locked' && (
           <div className="mt-4 pl-12 space-y-3">
@@ -1394,8 +1480,8 @@ function FileWizardContent() {
                   <CheckCircle2 className="w-5 h-5" /> Your tax return has been filed with HMRC.
                 </p>
                 <p className="text-sm text-green-700">
-                  Tax year <strong>{filed.tax_year}</strong> · business{' '}
-                  <span className="font-mono">{filed.business_id}</span>
+                  Tax year <strong>{filed.tax_year}</strong>. You don&apos;t need to do anything else for this year
+                  on this page. Keep the reference below for your records.
                 </p>
                 {filed.calculation_id && (
                   <p className="text-xs text-green-700">
@@ -1405,7 +1491,7 @@ function FileWizardContent() {
                 {filed.sandbox && (
                   <p className="flex items-start gap-1.5 text-xs text-green-700">
                     <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    Sandbox test submission — no real return was filed with HMRC.
+                    This was a test using HMRC&apos;s test service — no real return was filed.
                   </p>
                 )}
               </div>
@@ -1414,18 +1500,17 @@ function FileWizardContent() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    This is the <strong>binding final declaration</strong> for tax year <strong>{taxYear}</strong>.
-                    Once submitted, you are confirming the figures are correct and complete — this files your
-                    Self Assessment return with HMRC.
+                    This <strong>files your tax return</strong> for tax year <strong>{taxYear}</strong> with HMRC.
+                    It can&apos;t be undone here, so please check your figures above first.
                   </span>
                 </div>
 
-                <label className="flex items-start gap-2 text-sm text-secondary-700">
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-secondary-200 p-3 text-sm text-secondary-700 hover:bg-secondary-50">
                   <input
                     type="checkbox"
                     checked={declarationAccepted}
                     onChange={(e) => setDeclarationAccepted(e.target.checked)}
-                    className="mt-0.5"
+                    className="mt-0.5 h-5 w-5 shrink-0"
                   />
                   <span>
                     I declare that the information I have given is correct and complete to the best of my
@@ -1436,10 +1521,10 @@ function FileWizardContent() {
                 <button
                   onClick={submitFinalDeclaration}
                   disabled={filing || !declarationAccepted}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-5 py-3 text-base font-semibold text-white hover:bg-primary-700 disabled:opacity-50 sm:w-auto"
                 >
-                  {filing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}
-                  {filing ? 'Filing your return…' : 'Submit final declaration & file'}
+                  {filing ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileCheck2 className="w-5 h-5" />}
+                  {filing ? 'Sending your return to HMRC…' : 'File my tax return now'}
                 </button>
 
                 {filing && (

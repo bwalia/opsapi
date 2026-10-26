@@ -514,6 +514,8 @@ export const taxService = {
   async getHmrcStatus(): Promise<{
     connected: boolean;
     is_valid?: boolean;
+    /** True on HMRC's test service — the page shows test-only help there only. */
+    sandbox?: boolean;
     expires_at?: string;
     scope?: string;
   }> {
