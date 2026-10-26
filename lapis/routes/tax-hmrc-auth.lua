@@ -24,6 +24,20 @@ local HMRCTokenQueries = require("queries.HMRCTokenQueries")
 
 local HMRC_LIMIT = { rate = 10, window = 60, prefix = "auth:hmrc" }
 
+-- Where the callback sends the user when it has no signed state to read the frontend
+-- from (opened without code/state, an invalid state, an HMRC error with no state).
+-- Same shape as the state's rurl: a base the callback appends "/file" or "/settings"
+-- to. HMRC_FRONTEND_URL wins (a consumer such as diy-tax-return-uk sets its own base,
+-- e.g. https://app.example); otherwise this deployment's dashboard tax section
+-- (FRONTEND_URL + /dashboard/tax); localhost only for local dev with neither set.
+local function fallback_frontend()
+    local base = os.getenv("HMRC_FRONTEND_URL")
+    if base and base ~= "" then return (base:gsub("/+$", "")) end
+    local fe = os.getenv("FRONTEND_URL")
+    if fe and fe ~= "" then return (fe:gsub("/+$", "")) .. "/dashboard/tax" end
+    return "http://localhost"
+end
+
 -- ---------------------------------------------------------------------------
 -- State helpers (HMAC-signed, no DB required)
 -- ---------------------------------------------------------------------------
@@ -124,7 +138,7 @@ return function(app)
 
         -- redirect_url: the frontend origin to redirect back to after HMRC auth.
         -- Required for multi-tenant/multi-environment support (SaaS).
-        -- Falls back to Referer header or http://localhost for local dev.
+        -- Falls back to the Referer origin, then fallback_frontend().
         local redirect_url = self.params.redirect_url
         if not redirect_url or redirect_url == "" then
             local referer = ngx.req.get_headers()["referer"]
@@ -134,7 +148,7 @@ return function(app)
             end
         end
         if not redirect_url or redirect_url == "" then
-            redirect_url = "http://localhost"
+            redirect_url = fallback_frontend()
         end
         -- Strip trailing slash
         redirect_url = redirect_url:gsub("/$", "")
@@ -189,7 +203,7 @@ return function(app)
     -- Called by HMRC after user authenticates.
     -- -----------------------------------------------------------------------
     app:get("/auth/hmrc/callback", RateLimit.wrap(HMRC_LIMIT, function(self)
-        local default_frontend = "http://localhost"
+        local default_frontend = fallback_frontend()
         local environment  = Global.getEnvVar("HMRC_ENVIRONMENT") or "sandbox"
 
         if environment ~= "sandbox" and environment ~= "production" then
