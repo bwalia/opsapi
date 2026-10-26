@@ -14,7 +14,7 @@ import {
   aiRunner, aiError, type TaskPr, type TaskWorkBundle, type TerminalSession,
 } from '@/services/ai-runner.service';
 import { StartWithAIDialog } from './StartWithAIDialog';
-import { BASE, RunStatusBadge, duration, useAiRunnerOn, when } from './ui';
+import { BASE, RunStatusBadge, compact, cost, duration, elapsed, useAiRunnerOn, when } from './ui';
 
 const SESSION_STATUS: Record<string, { label: string; className: string }> = {
   launched: { label: 'Waiting to start', className: 'bg-info-500/10 text-info-700' },
@@ -49,6 +49,15 @@ function SessionLine({ s }: { s: TerminalSession }) {
           </>
         )}
       </p>
+      {s.work_log && (
+        <p className="text-secondary-500">
+          {elapsed(s.work_log.active_secs)} active · {s.work_log.prompts} prompt{s.work_log.prompts === 1 ? '' : 's'} ·{' '}
+          {compact(s.work_log.tokens)} tokens · {cost(s.work_log.cost_usd)} ·{' '}
+          <Link href={`${BASE}/work-log/${s.work_log.uuid}`} className="text-primary-600 hover:underline">
+            What happened
+          </Link>
+        </p>
+      )}
     </li>
   );
 }

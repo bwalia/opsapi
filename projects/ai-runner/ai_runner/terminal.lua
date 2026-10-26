@@ -375,6 +375,15 @@ local function remind_expiring(term)
     end
 end
 
+--- The terminal a signed request comes from (§11.2): `X-Opsapi-Terminal` names it and `X-Opsapi-Signature` is its
+-- hex HMAC-SHA256 over `msg`. @return terminal row | nil
+function T.signed_terminal(terminal_uuid, msg, signature)
+    local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
+    local secret = term and secret_of(term)
+    local got = type(signature) == "string" and (signature:match("^[Ss][Hh][Aa]256=(%x+)$") or "") or ""
+    if secret and equal(got:lower(), T.hmac_hex(secret, msg)) then return term end
+end
+
 --- What the terminal fetches (§10): its live keys, signed so it can trust them. The request is signed too:
 -- X-Opsapi-Signature: sha256=hex(HMAC(secret, "keys\n<terminal uuid>\n<X-Opsapi-Timestamp>")).
 -- A terminal switched off in OpsAPI gets an empty list. @return body, signature hex | nil, http status, message
@@ -473,10 +482,15 @@ function T.report_url()
 end
 
 local SESSION_SQL = [[SELECT s.*, ]] .. R.name_sql("u") .. [[ AS opened_by_name, t.name AS terminal_name,
-        (s.status = 'launched' AND s.expires_at < NOW()) AS link_expired
+        (s.status = 'launched' AND s.expires_at < NOW()) AS link_expired, wl.uuid AS work_log_uuid,
+        wl.active_secs AS wl_active_secs, wl.prompts AS wl_prompts, wl.cost_usd AS wl_cost_usd,
+        wl.tokens AS wl_tokens
     FROM ar_terminal_sessions s
     LEFT JOIN users u ON u.uuid = s.opened_by
-    LEFT JOIN ar_terminals t ON t.uuid = s.terminal_uuid]]
+    LEFT JOIN ar_terminals t ON t.uuid = s.terminal_uuid
+    LEFT JOIN LATERAL (SELECT uuid, active_secs, prompts, cost_usd,
+            input_tokens + output_tokens + cache_read_tokens + cache_write_tokens AS tokens
+        FROM ar_terminal_tabs WHERE session_uuid = s.uuid::text ORDER BY id LIMIT 1) wl ON TRUE]]
 
 function T.list_for_task(ns, task_uuid)
     return db.query(SESSION_SQL .. [[ WHERE s.namespace_id = ? AND s.task_uuid = ?
@@ -501,6 +515,10 @@ function T.session_view(s)
         started_at = U.null(s.started_at), ended_at = U.null(s.ended_at), exit_code = U.null(s.exit_code),
         ended_reason = U.null(s.ended_reason), expires_at = U.null(s.expires_at),
         created_at = s.created_at, updated_at = s.updated_at,
+        -- §11: the tab's work log, once the terminal reported it.
+        work_log = s.work_log_uuid and { uuid = s.work_log_uuid, active_secs = tonumber(s.wl_active_secs) or 0,
+            prompts = tonumber(s.wl_prompts) or 0, tokens = tonumber(s.wl_tokens) or 0,
+            cost_usd = tonumber(s.wl_cost_usd) or 0 } or cjson.null,
     }
 end
 
@@ -641,6 +659,12 @@ function T.ensure_poll_timer()
         ngx.timer.every(180, function(premature)
             if premature then return end
             pcall(function() require("ai_runner.pr_poll").tick() end)
+        end)
+        -- Work log retention (§11.3): old prompt/command text blanked, old recordings deleted.
+        ngx.timer.every(3600, function(premature)
+            if premature then return end
+            local swept, err = pcall(function() require("ai_runner.worklog").sweep() end)
+            if not swept then ngx.log(ngx.ERR, "[ai_runner] work log sweep: ", tostring(err)) end
         end)
     end)
     if ok then poll_started = true end
