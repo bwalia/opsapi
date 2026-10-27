@@ -23,10 +23,12 @@ local OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://ollama:11434"
 -- corpus is stored as vector(384) from all-MiniLM-L6-v2, so query embeddings must
 -- land in that same 384-dim space. Ollama's `all-minilm` is that model.
 local OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL") or "all-minilm"
-local DEFAULT_EMBED_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
+local DEFAULT_EMBED_PROVIDER = os.getenv("AI_EMBED_PROVIDER") or os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
 
 local MAX_RETRIES = 3
-local REQUEST_TIMEOUT = 60000 -- 60s for LLM calls
+-- Total time for one model call (AI_REQUEST_TIMEOUT_MS — the same setting lib/agent/llm uses
+-- while serving a request). A slow self-hosted model needs more than the 60s default.
+local REQUEST_TIMEOUT = tonumber(os.getenv("AI_REQUEST_TIMEOUT_MS") or "") or 60000
 
 local OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 local VOYAGE_EMBEDDING_MODEL = "voyage-3-lite"

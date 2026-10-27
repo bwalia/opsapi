@@ -604,7 +604,9 @@ end
 -- @return table Array of classification results (parallel indices)
 function Classifier.classify_batch(transactions, opts)
     opts = opts or {}
-    local max_concurrent = opts.max_concurrent or 5
+    -- AI_CLASSIFY_CONCURRENCY: model calls in flight at once. A single self-hosted
+    -- model serves them one by one, so a lower number stops queued calls timing out.
+    local max_concurrent = opts.max_concurrent or tonumber(os.getenv("AI_CLASSIFY_CONCURRENCY") or "") or 5
     local results = {}
 
     -- Pre-fetch categories once for all transactions (see classify_transaction:

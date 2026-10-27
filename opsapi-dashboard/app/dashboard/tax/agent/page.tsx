@@ -161,12 +161,14 @@ function TaxAgentChat() {
       } else if (wasProcessing.current) {
         wasProcessing.current = false;
         stopPolling();
-        setMessages((prev) => [...prev, {
-          id: newId(), role: 'assistant',
-          text: '✅ Your statement(s) are processed and categorised. Want to see your tax estimate?',
-          quickReplies: ['Show my estimate'],
-        }]);
-        setQuickReplies(['Show my estimate']);
+        // The worker records how it went in the session ("✅ processed" or "⚠️ couldn't be
+        // read") — show that, not an assumed success.
+        const s = await taxAgentService.createSession().catch(() => null);
+        const note = [...(s?.messages || [])].reverse().find((m) => m.role === 'assistant');
+        const text = note?.text || '✅ Your statement(s) are processed and categorised. Want to see your tax estimate?';
+        const replies = note ? (note.quick_replies || []) : ['Show my estimate'];
+        setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text, quickReplies: replies }]);
+        setQuickReplies(replies);
         // Figures just landed — show the estimate panel without waiting for a click.
         if (sessionId) taxAgentService.getEstimate(sessionId).then((est) => { if (est) setEstimate(est); });
       }
