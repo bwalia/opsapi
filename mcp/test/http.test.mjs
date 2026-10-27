@@ -61,7 +61,7 @@ test("requests without a valid Bearer opsk_ key get 401 and never reach OpsAPI",
 test("limits and non-POST methods", async () => {
   assert.equal((await fetch(mcpUrl, { headers: { Authorization: `Bearer ${KEY}` } })).status, 405);
   assert.equal((await fetch(mcpUrl, { method: "DELETE", headers: { Authorization: `Bearer ${KEY}` } })).status, 405);
-  assert.equal((await post({ Authorization: `Bearer ${KEY}` }, "x".repeat(1024 * 1024 + 1))).status, 413);
+  assert.equal((await post({ Authorization: `Bearer ${KEY}` }, "x".repeat(12 * 1024 * 1024 + 1))).status, 413);
   assert.equal((await post({ Authorization: `Bearer ${KEY}` }, "{not json")).status, 400);
   const health = await fetch(mcpUrl.replace("/mcp", "/healthz"));
   assert.equal(health.status, 200);
@@ -135,8 +135,10 @@ test("an MCP client lists tools and calls one; the caller's key and namespace ar
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "add_comment", "complete_task", "create_task", "get_task", "list_boards", "list_my_tasks", "list_projects",
-      "log_time", "move_task", "search_tasks", "set_task_pr", "update_task",
+      "add_comment", "complete_task", "create_category", "create_page", "create_post", "create_task", "get_page",
+      "get_post", "get_task", "list_boards", "list_categories_and_tags", "list_my_tasks", "list_pages", "list_posts",
+      "list_projects", "log_time", "move_task", "notify_website", "search_tasks", "set_task_pr", "update_page",
+      "update_post", "update_task", "upload_image",
     ]);
 
     const r = await client.callTool({ name: "list_my_tasks", arguments: { due: "today" } });

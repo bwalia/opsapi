@@ -30,7 +30,8 @@ const server = createServer(
     apiKey,
     namespace: process.env.OPSAPI_NAMESPACE,
     dashboardUrl: process.env.OPSAPI_DASHBOARD_URL,
-  })
+  }),
+  { localFiles: true } // upload_image may read files on this machine (never in HTTP mode)
 );
 
 try {

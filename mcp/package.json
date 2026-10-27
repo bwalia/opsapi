@@ -1,7 +1,7 @@
 {
   "name": "@opsapi/mcp",
-  "version": "0.2.0",
-  "description": "MCP server for OpsAPI kanban: list, create, update, move and search tasks, log time and attach PRs, acting as you via a personal API key. stdio and Streamable HTTP.",
+  "version": "0.3.0",
+  "description": "MCP server for OpsAPI: kanban tasks (list, create, update, move, search, log time, attach PRs) and website content (posts, pages, categories, images, website updates), acting as you via a personal API key. stdio and Streamable HTTP.",
   "type": "module",
   "bin": {
     "opsapi-mcp": "dist/index.js",

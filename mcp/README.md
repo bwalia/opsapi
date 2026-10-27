@@ -1,9 +1,15 @@
-# @opsapi/mcp — OpsAPI kanban for AI agents
+# @opsapi/mcp — OpsAPI kanban and website content for AI agents
 
 An [MCP](https://modelcontextprotocol.io) server that lets Claude Code, Cursor or
-any MCP-capable agent work with OpsAPI kanban **as you**: list your tasks for
-today, create and update tasks, move them across columns, search, log time and
-attach the PR when the work ships.
+any MCP-capable agent work with OpsAPI **as you**:
+
+- **kanban:** list your tasks for today, create and update tasks, move them
+  across columns, search, log time and attach the PR when the work ships;
+- **website content:** write, edit, publish and unpublish blog posts and pages,
+  manage categories, upload images and tell the website to update.
+
+For building a website that *shows* the content, and for the content workflow,
+see the [opsapi-content skill](../skills/opsapi-content/SKILL.md).
 
 It authenticates with a **personal API key** (`opsk_…`) that is bound to one
 user, so `list_my_tasks` returns *your* tasks and every write is done and
@@ -34,6 +40,28 @@ Two ways to run it, same tools:
 | `complete_task` | `task_uuid`, `pr_url?`, `minutes?`, `note?` | marks completed, optionally attaching the PR and logging time |
 | `add_comment` | `task_uuid`, `content` | comments on a task |
 
+Website content (the workspace the key belongs to):
+
+| tool | arguments | what it does |
+|---|---|---|
+| `list_posts` | `status?` (draft · published · scheduled · archived), `search?`, `category?`, `tag?`, `featured?`, `page?`, `limit?` | blog posts, drafts too, newest first |
+| `get_post` | `post_uuid` | one post with its HTML body, SEO fields, categories and tags |
+| `create_post` | `title`, `content_html?`, `excerpt?`, `slug?`, `status?`, `visibility?`, `featured?`, `categories?[]`, `tags?[]`, `featured_image_url?`, `author_name?`, `scheduled_at?`, `seo_*?` | creates a post (draft unless `status: published`) |
+| `update_post` | `post_uuid` + any `create_post` field | changes only what is given; publish with `status: published`, unpublish with `draft`/`archived`; `categories`/`tags` replace |
+| `list_pages` | `status?`, `search?` | static pages, in navigation order |
+| `get_page` | `page_uuid` | one page with its HTML body |
+| `create_page` | `title`, `content_html?`, `excerpt?`, `slug?`, `status?`, `show_in_nav?`, `menu_order?`, `template?`, `featured_image_url?`, `seo_*?` | creates a page |
+| `update_page` | `page_uuid` + any `create_page` field | changes only what is given |
+| `list_categories_and_tags` | — | categories and tags with post counts |
+| `create_category` | `name`, `description?`, `slug?` | creates a category |
+| `upload_image` | `file_path` (stdio only) or `data_base64` + `filename`; `slug?`, `kind?` | stores a jpg/png/webp/gif/svg (max 8 MB) on the public website storage and returns its URL |
+| `notify_website` | `post_uuid?`, `webhook?`, `event?` | sends the workspace's website webhooks now (OpsAPI never sends them by itself) |
+
+Categories are matched by exact name, slug or uuid and must exist (tags are
+created on the fly); an unknown one fails the call and creates nothing. There is
+no delete tool: to take content down, unpublish it. `upload_image` reads local
+files only in stdio mode; the shared HTTP service accepts `data_base64` only.
+
 `project`, `board`, `column` and `assignees` accept an id/uuid or a name:
 
 - projects, boards, columns: exact name, or a unique part of it (`"redesign"`);
@@ -60,6 +88,15 @@ tools need:
 ```json
 { "kanban": ["read", "create", "update"], "projects": ["read"] }
 ```
+
+and for the website content tools (the **Website content** option on the
+dashboard's My API keys page):
+
+```json
+{ "cms": ["read", "create", "update"] }
+```
+
+One key may carry both.
 
 - `kanban` lets the key reach the kanban routes; `projects: read` is needed for
   `list_my_tasks`, `list_projects`, project-name lookups and assignees.

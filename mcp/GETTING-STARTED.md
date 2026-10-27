@@ -1,8 +1,9 @@
-# Use your OpsAPI tasks from Claude Code (or any AI agent)
+# Use your OpsAPI tasks and website content from Claude Code (or any AI agent)
 
 This lets your AI assistant see **your** OpsAPI kanban tasks, create and update
-tasks, log time and attach a PR link — just by asking in plain English, e.g.
-*"what are my tasks today?"*
+tasks, log time and attach a PR link — and write and publish your workspace's
+blog posts and pages — just by asking in plain English, e.g.
+*"what are my tasks today?"* or *"draft a blog post about our new opening hours"*.
 
 You set this up **once**. It's two parts:
 
@@ -20,8 +21,9 @@ Total time: about 5 minutes.
 
 The quickest way is the self-service page: open your avatar menu → **My API keys**
 (`/dashboard/settings/api-keys`), press **Create key**, keep the **AI agent (MCP)** preset
-(read, create and update tasks — or **Read only** for an agent that may look but not change anything;
-both are limited to what your own role allows), copy the key — it is shown only once — and go
+(read, create and update tasks — or **Read only** for an agent that may look but not change anything,
+or **Website content** to write and publish posts and pages; all are limited to what your own role
+allows), copy the key — it is shown only once — and go
 to Part B. The same page shows your workspace's numeric id for `OPSAPI_NAMESPACE` and
 ready-to-paste setup for Claude Code and Cursor.
 
@@ -126,6 +128,17 @@ when it starts.
 **What it can do:** list your tasks (today, overdue, this week, by priority) ·
 show a task · list projects and boards · create, update, move and search tasks ·
 log time · attach a PR link · complete a task · comment.
+
+With a **Website content** key:
+
+- *"Draft a blog post about our spring opening hours, in the News category."*
+- *"Publish that post and update the website."*
+- *"Take the 'Summer sale' post off the website."*
+- *"Upload ~/Pictures/team.jpg and use it as the About page's image."*
+
+**What it can do:** list, read, create, edit, publish and unpublish blog posts and
+pages · list categories and tags, create a category · upload images · tell the
+website to update. It never deletes content.
 
 ---
 

@@ -18,7 +18,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { OpsApi } from "./opsapi.js";
 import { createServer, VERSION } from "./tools.js";
 
-const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_BODY_BYTES = 12 * 1024 * 1024; // room for an 8 MiB image sent to upload_image as base64
 const KEY_RE = /^Bearer\s+(opsk_[A-Za-z0-9]{16,256})$/i;
 
 export interface HttpConfig {
