@@ -73,7 +73,7 @@ function ForgotPasswordPanel() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-secondary-900">Forgot your password?</h1>
         <p className="mt-1.5 text-sm text-secondary-500">
-          Enter the email for your {brand.name} account and we&apos;ll send you a link to reset it.
+          Enter the email for your {brand.name}{' '}account and we&apos;ll send you a link to reset it.
         </p>
       </div>
 

@@ -626,7 +626,7 @@ function CommentComposer({
     <div>
       <RichTextEditor key={seed} value="" onChange={(h) => setHtml(h)} mentionItems={mentionItems} placeholder="Write a comment…  type @ to mention a teammate" />
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-secondary-400">Type <span className="font-semibold text-secondary-500">@</span> to mention · rich text, links, code &amp; tables supported</span>
+        <span className="text-xs text-secondary-400">Type <span className="font-semibold text-secondary-500">@</span>{' '}to mention · rich text, links, code &amp; tables supported</span>
         <button onClick={submit} disabled={isEmpty || busy}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-700 disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Comment

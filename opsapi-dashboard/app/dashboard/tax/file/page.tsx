@@ -1500,7 +1500,7 @@ function FileWizardContent() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    This <strong>files your tax return</strong> for tax year <strong>{taxYear}</strong> with HMRC.
+                    This <strong>files your tax return</strong> for tax year <strong>{taxYear}</strong>{' '}with HMRC.
                     It can&apos;t be undone here, so please check your figures above first.
                   </span>
                 </div>

@@ -195,6 +195,11 @@ hmrcRedirectUri: "https://int-opsapi.workstation.co.uk/auth/hmrc/callback"
 # shared Vault, so its pair lives in this Secret (created by hand in `int`).
 # Drop this once workstation-opsapi/int/config in Vault holds the same pair.
 hmrcCredentialsSecret: "workstation-opsapi-hmrc-override"
+# Model override for int without Vault access: put AI_PROVIDER, AI_MODEL and the
+# provider's key (e.g. GEMINI_API_KEY) in this Secret; pods restart on change
+# (Reloader). Absent = the Vault/Ollama defaults.
+extraEnvFromSecrets:
+  - "workstation-opsapi-ai-override"
 # PROJECT_CODE is "all" here, which names no tenant: new sign-ups join Workstation.
 signupNamespaceSlug: "workstation"
 # Workstation's own Google OAuth client (not diytaxreturn's). Its secret goes in

@@ -284,7 +284,7 @@ export const ConvertLeadModal: React.FC<ConvertLeadModalProps> = ({ isOpen, onCl
         </div>
 
         <p className="text-sm text-secondary-600">
-          This will create a new <strong>CRM Contact</strong> from this lead&apos;s information.
+          This will create a new <strong>CRM Contact</strong>{' '}from this lead&apos;s information.
         </p>
 
         {/* Optional deal creation */}

@@ -140,7 +140,7 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
               {draft.targets.length > 0 && (
                 <p className="mt-3 text-sm text-secondary-700">Creates: {draft.targets.map((t) => (t.type === 'user' ? 'invitation' : t.type)).join(', ')}</p>
               )}
-              {draft.dropped > 0 && <p className="mt-2 text-xs text-warning-600">{draft.dropped} suggested question(s) were left out because they weren&apos;t valid.</p>}
+              {draft.dropped > 0 && <p className="mt-2 text-xs text-warning-600">{draft.dropped}{' '}suggested question(s) were left out because they weren&apos;t valid.</p>}
               <p className="mt-2 text-xs text-secondary-500">It is created as a draft: you can change anything before publishing.</p>
             </div>
           )}

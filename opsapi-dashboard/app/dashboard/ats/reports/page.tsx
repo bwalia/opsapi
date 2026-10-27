@@ -73,7 +73,7 @@ export default function FairnessPage() {
         </Card>
       )}
       {report && report.suppressed > 0 && (
-        <p className="text-sm text-secondary-500">{report.suppressed} smaller group(s) not shown, to protect people&apos;s privacy.</p>
+        <p className="text-sm text-secondary-500">{report.suppressed}{' '}smaller group(s) not shown, to protect people&apos;s privacy.</p>
       )}
     </AtsShell>
   );
