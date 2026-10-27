@@ -20,8 +20,8 @@ jobs:
       - name: Run lapis/spec/*_spec.lua
         run: |
           docker pull -q bwalia/opsapi-base:latest
-          # Known to fail outside a running Lapis app (they also fail on main); listed so they stay visible.
-          skip=" llm-providers_spec.lua openapi-coverage_spec.lua plugin-platform_spec.lua "
+          # Known to fail outside a running Lapis app (they also fail on main), or needing `resty`; listed so they stay visible.
+          skip=" llm-providers_spec.lua openapi-coverage_spec.lua plugin-platform_spec.lua secret-gcm-tag_spec.lua "
           failed=""
           for f in lapis/spec/*_spec.lua; do
             name=$(basename "$f")

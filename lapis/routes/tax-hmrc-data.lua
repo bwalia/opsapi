@@ -480,6 +480,7 @@ return function(app)
                             db.insert("tax_user_profiles", {
                                 uuid = Global.generateStaticUUID(),
                                 user_id = uid,
+                                user_uuid = user_uuid,
                                 namespace_id = namespace_id,
                                 nino_encrypted = enc,
                                 nino_last4 = last4,

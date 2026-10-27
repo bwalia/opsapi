@@ -185,6 +185,12 @@ googleRedirectUri: "https://int-opsapi.workstation.co.uk/auth/google/callback"
 # secret (a different database, so the connection never showed up). Must be
 # listed under Redirect URIs on the HMRC Developer Hub sandbox application.
 hmrcRedirectUri: "https://int-opsapi.workstation.co.uk/auth/hmrc/callback"
+# The HMRC sandbox app with that redirect URI registered is not the one in the
+# shared Vault, so its pair lives in this Secret (created by hand in `int`).
+# Drop this once workstation-opsapi/int/config in Vault holds the same pair.
+hmrcCredentialsSecret: "workstation-opsapi-hmrc-override"
+# PROJECT_CODE is "all" here, which names no tenant: new sign-ups join Workstation.
+signupNamespaceSlug: "workstation"
 # Workstation's own Google OAuth client (not diytaxreturn's). Its secret goes in
 # Vault as GOOGLE_CLIENT_SECRET; both redirect URIs must be on this client.
 googleClientId: "331816273930-262h0rp98v6qc55gve0clc3m3b4bp0ha.apps.googleusercontent.com"

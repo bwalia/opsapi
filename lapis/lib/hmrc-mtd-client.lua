@@ -157,6 +157,8 @@ function Client.trigger_calculation(token, nino, tax_year, calc_type)
         base_url(), nino, tax_year, calc_type)
     local res, rerr = httpc:request_uri(url, {
         method = "POST",
+        -- lua-resty-http refuses a POST with a nil body; HMRC takes these empty.
+        body = "",
         headers = headers(token, "8.0"),
         ssl_verify = true,
     })
@@ -225,6 +227,8 @@ function Client.submit_final_declaration(token, nino, tax_year, calc_id)
         base_url(), nino, tax_year, calc_id)
     local res, rerr = httpc:request_uri(url, {
         method = "POST",
+        -- lua-resty-http refuses a POST with a nil body; HMRC takes these empty.
+        body = "",
         headers = headers(token, "8.0"),
         ssl_verify = true,
     })

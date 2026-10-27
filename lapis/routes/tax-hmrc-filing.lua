@@ -18,6 +18,7 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -35,6 +36,29 @@ local function getProfile(user_id)
         "nino_encrypted, nino_last4, default_business_id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
         user_id)
     return rows and rows[1]
+end
+
+-- Remember the filing business on the user's profile, creating the profile if this is
+-- the first thing ever stored for them (user_uuid and namespace_id are NOT NULL).
+local function saveDefaultBusiness(user_id, business_id)
+    local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+    if existing and #existing > 0 then
+        db.update("tax_user_profiles",
+            { default_business_id = business_id, updated_at = db.raw("NOW()") },
+            { user_id = user_id })
+        return
+    end
+    local urows = db.query("SELECT uuid FROM users WHERE id = ? LIMIT 1", user_id)
+    local user_uuid = urows and urows[1] and urows[1].uuid
+    db.insert("tax_user_profiles", {
+        uuid = Global.generateStaticUUID(),
+        user_id = user_id,
+        user_uuid = user_uuid,
+        namespace_id = NamespaceResolver.getByUuid(user_uuid) or 0,
+        default_business_id = business_id,
+        created_at = db.raw("NOW()"),
+        updated_at = db.raw("NOW()"),
+    })
 end
 
 -- Resolve the NINO for HMRC calls. Precedence: explicit request param → the user's
@@ -63,6 +87,9 @@ local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_yea
     local biz, berr, bbody = Client.create_test_business(token, nino, {
         typeOfBusiness = "self-employment",
         tradingName = "OpsAPI Test SE",
+        -- HMRC Test Support now rejects a self-employment business without it
+        -- (RULE_MISSING_TRADING_TYPE).
+        tradingType = "Plastering",
         firstAccountingPeriodStartDate = start_date,
         firstAccountingPeriodEndDate = end_date,
         accountingType = "ACCRUALS",
@@ -86,22 +113,7 @@ local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_yea
     })
 
     -- Remember it as the default filing business.
-    pcall(function()
-        local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
-        if existing and #existing > 0 then
-            db.update("tax_user_profiles",
-                { default_business_id = biz, updated_at = db.raw("NOW()") },
-                { user_id = user_id })
-        else
-            db.insert("tax_user_profiles", {
-                uuid = Global.generateStaticUUID(),
-                user_id = user_id,
-                default_business_id = biz,
-                created_at = db.raw("NOW()"),
-                updated_at = db.raw("NOW()"),
-            })
-        end
-    end)
+    pcall(saveDefaultBusiness, user_id, biz)
 
     return biz
 end
@@ -569,20 +581,7 @@ return function(app)
             local user_id = getUserId(self.current_user)
             if not user_id then return { status = 401, json = { error = "User not found" } } end
 
-            local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
-            if existing and #existing > 0 then
-                db.update("tax_user_profiles",
-                    { default_business_id = business_id, updated_at = db.raw("NOW()") },
-                    { user_id = user_id })
-            else
-                db.insert("tax_user_profiles", {
-                    uuid = Global.generateStaticUUID(),
-                    user_id = user_id,
-                    default_business_id = business_id,
-                    created_at = db.raw("NOW()"),
-                    updated_at = db.raw("NOW()"),
-                })
-            end
+            saveDefaultBusiness(user_id, business_id)
             return { status = 200, json = { success = true, data = { business_id = business_id } } }
         end)
     )
@@ -627,6 +626,9 @@ return function(app)
             local biz, berr, bbody = Client.create_test_business(token, nino, {
                 typeOfBusiness = "self-employment",
                 tradingName = "OpsAPI Test SE",
+                -- HMRC Test Support now rejects a self-employment business without it
+                -- (RULE_MISSING_TRADING_TYPE).
+                tradingType = "Plastering",
                 firstAccountingPeriodStartDate = start_date,
                 firstAccountingPeriodEndDate = end_date,
                 accountingType = "ACCRUALS",
@@ -653,22 +655,7 @@ return function(app)
             })
 
             -- Remember the business id on the profile for future calculate-preview calls.
-            pcall(function()
-                local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
-                if existing and #existing > 0 then
-                    db.update("tax_user_profiles",
-                        { default_business_id = biz, updated_at = db.raw("NOW()") },
-                        { user_id = user_id })
-                else
-                    db.insert("tax_user_profiles", {
-                        uuid = Global.generateStaticUUID(),
-                        user_id = user_id,
-                        default_business_id = biz,
-                        created_at = db.raw("NOW()"),
-                        updated_at = db.raw("NOW()"),
-                    })
-                end
-            end)
+            pcall(saveDefaultBusiness, user_id, biz)
 
             return { status = 200, json = { success = true, data = {
                 business_id = biz,
