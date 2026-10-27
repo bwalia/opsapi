@@ -236,7 +236,7 @@ export function PluginPageFrame({ schema }: { schema: PluginPageSchema }) {
           </div>
           <h2 className="text-lg font-semibold text-secondary-900">This page didn&apos;t load</h2>
           <p className="text-sm text-secondary-500 max-w-md">
-            {schema.plugin.name} didn&apos;t respond. If you develop this plugin: the page must load
+            {schema.plugin.name}{' '}didn&apos;t respond. If you develop this plugin: the page must load
             /plugin-ui/_sdk/opsapi-ui.js and call OpsAPI.connect(). Check the browser console for errors.
           </p>
           <Button

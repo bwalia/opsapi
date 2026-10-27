@@ -165,7 +165,7 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
         )}
         {!noFigures && unconfirmed > 0 && (
           <Warn>
-            Confirm your transactions in step 2 first — {unconfirmed} still to confirm. We only send figures you&apos;ve
+            Confirm your transactions in step 2 first — {unconfirmed}{' '}still to confirm. We only send figures you&apos;ve
             checked.
           </Warn>
         )}

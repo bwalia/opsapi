@@ -138,6 +138,14 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
+            # Extra Secrets in this namespace whose keys become env vars, after (so
+            # overriding) the Vault one — e.g. AI_PROVIDER / AI_MODEL / GEMINI_API_KEY
+            # for a release that uses another model. Optional: a missing one is skipped.
+            {{- range .Values.extraEnvFromSecrets }}
+            - secretRef:
+                name: {{ . | quote }}
+                optional: true
+            {{- end }}
           env:
             - name: LAPIS_ENVIRONMENT
               value: "production"

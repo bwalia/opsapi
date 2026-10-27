@@ -157,7 +157,7 @@ export default function AccountPage() {
               <Mail className="mx-auto h-10 w-10" style={{ color: accent }} aria-hidden />
               <h2 className="mt-3 text-lg font-semibold">Check your email</h2>
               <p className="mt-1 text-sm text-gray-600">
-                If {email} has a licence or purchase, we&apos;ve sent a link to open your account. It works once, for 15 minutes.
+                If {email}{' '}has a licence or purchase, we&apos;ve sent a link to open your account. It works once, for 15 minutes.
               </p>
             </div>
           ) : (

@@ -105,7 +105,7 @@ function EstimatePanel({ estimate }: { estimate: TaxEstimate | null }) {
       </div>
       {!!estimate.unreviewed_count && estimate.unreviewed_count > 0 && (
         <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {estimate.unreviewed_count} transaction{estimate.unreviewed_count === 1 ? '' : 's'} still need review — the estimate will firm up once they&apos;re categorised.
+          {estimate.unreviewed_count} transaction{estimate.unreviewed_count === 1 ? '' : 's'}{' '}still need review — the estimate will firm up once they&apos;re categorised.
         </div>
       )}
       {/* Binding filing is done on the dedicated File screen — a deliberate, explicit
@@ -165,7 +165,9 @@ function TaxAgentChat() {
         // read") — show that, not an assumed success.
         const s = await taxAgentService.createSession().catch(() => null);
         const note = [...(s?.messages || [])].reverse().find((m) => m.role === 'assistant');
-        const text = note?.text || '✅ Your statement(s) are processed and categorised. Want to see your tax estimate?';
+        // No note to go on: say it finished, not that it worked.
+        const text = note?.text
+          || 'Processing has finished. Check your transactions on the File screen — or ask me for your estimate.';
         const replies = note ? (note.quick_replies || []) : ['Show my estimate'];
         setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text, quickReplies: replies }]);
         setQuickReplies(replies);

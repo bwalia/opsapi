@@ -382,7 +382,7 @@ export default function TransactionReview({ taxYear, total, confirmed, toCheck, 
           </div>
           {!allDone && toCheck > 0 && (
             <p className="mt-2 text-xs text-amber-800">
-              {toCheck} we weren&apos;t sure about — please look at each one.
+              {toCheck}{' '}we weren&apos;t sure about — please look at each one.
             </p>
           )}
         </div>
@@ -485,8 +485,8 @@ export default function TransactionReview({ taxYear, total, confirmed, toCheck, 
       >
         <div className="space-y-3 text-sm text-secondary-600">
           <p>
-            This confirms the <strong>{rest}</strong> transactions we sorted for {taxYear} that you haven&apos;t
-            confirmed yet. {toCheck > 0 && <>The {toCheck} we weren&apos;t sure about stay for you to check one by one.</>}
+            This confirms the <strong>{rest}</strong> transactions we sorted for {taxYear}{' '}that you haven&apos;t
+            confirmed yet. {toCheck > 0 && <>The {toCheck}{' '}we weren&apos;t sure about stay for you to check one by one.</>}
           </p>
           <label className="flex items-start gap-2 rounded-lg border border-secondary-200 p-3 text-secondary-800">
             <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />

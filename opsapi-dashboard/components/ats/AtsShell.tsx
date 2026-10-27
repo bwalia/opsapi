@@ -69,7 +69,7 @@ export function ActivationBanner({ activation }: { activation?: Activation }) {
   if (!activation || activation.active) return null;
   return (
     <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-      <strong>Snazzy Interview isn&apos;t active for this workspace.</strong> You can read, review and export what&apos;s here,
+      <strong>Snazzy Interview isn&apos;t active for this workspace.</strong>{' '}You can read, review and export what&apos;s here,
       but you can&apos;t invite candidates until it&apos;s activated.{' '}
       <Link href="/dashboard/ats/settings" className="font-semibold underline">Activate it in Settings</Link>.
     </div>
