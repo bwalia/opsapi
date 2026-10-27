@@ -33,6 +33,12 @@ extraEnv:
   # (Speaches' own page needs https for the microphone).
   VOICE_URL: "http://192.168.1.177:8014"
   VOICE_TTS_VOICE: "bf_emma"
+  # AI runs on the self-hosted Ollama (OLLAMA_* in Vault), which takes ~40s per
+  # transaction classification: give each call 5 min and keep only 2 in flight so
+  # queued ones don't time out. Another model = AI_PROVIDER/AI_MODEL/AI_API_KEY here
+  # or in Vault — no code change (lapis/.sample.env).
+  AI_REQUEST_TIMEOUT_MS: "300000"
+  AI_CLASSIFY_CONCURRENCY: "2"
   # CMS featured-image upload → public www S3 (lapis/helper/cms-public-media.lua).
   # Secrets CMS_PUBLIC_S3_ACCESS_KEY + CMS_PUBLIC_S3_SECRET_KEY live in Vault
   # workstation-opsapi/int/config (or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).

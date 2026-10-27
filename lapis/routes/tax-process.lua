@@ -45,7 +45,9 @@ local function plural(n) return n == 1 and "" or "s" end
 -- Authenticated internal call to an existing tax endpoint, AS the user.
 local function internal(method, path, body, auth, port)
     local httpc = http.new()
-    httpc:set_timeout(300000) -- classify runs the LLM per transaction
+    -- classify runs the model per transaction; nobody waits on this background job, so the
+    -- budget follows the model speed (TAX_PROCESS_TIMEOUT_MS, default 30 min per statement step).
+    httpc:set_timeout(tonumber(os.getenv("TAX_PROCESS_TIMEOUT_MS") or "") or 1800000)
     local res = httpc:request_uri("http://127.0.0.1:" .. (port or 80) .. path, {
         method = method,
         headers = { ["Content-Type"] = "application/x-www-form-urlencoded", ["Authorization"] = auth },
