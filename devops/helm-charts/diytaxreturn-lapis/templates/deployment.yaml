@@ -311,6 +311,28 @@ spec:
             - name: HMRC_REDIRECT_URI
               value: {{ .Values.hmrcRedirectUri | quote }}
             {{- end }}
+            # The HMRC application whose Redirect URIs include hmrcRedirectUri
+            # may not be the one in the shared Vault. ``hmrcCredentialsSecret``
+            # names a Secret (keys HMRC_CLIENT_ID, HMRC_CLIENT_SECRET) in this
+            # namespace that overrides the Vault pair for this release.
+            {{- if .Values.hmrcCredentialsSecret }}
+            - name: HMRC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hmrcCredentialsSecret | quote }}
+                  key: HMRC_CLIENT_ID
+            - name: HMRC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hmrcCredentialsSecret | quote }}
+                  key: HMRC_CLIENT_SECRET
+            {{- end }}
+            # Tenant that self sign-ups (Google, /api/v2/register) join when
+            # PROJECT_CODE names no tenant — e.g. "all", which hosts many.
+            {{- if .Values.signupNamespaceSlug }}
+            - name: SIGNUP_NAMESPACE_SLUG
+              value: {{ .Values.signupNamespaceSlug | quote }}
+            {{- end }}
             # Facebook sign-in (shop customers only). FACEBOOK_APP_ID and
             # FACEBOOK_APP_SECRET come from Vault; until both are set the shop
             # does not offer Facebook. Must be a Valid OAuth Redirect URI on the app.

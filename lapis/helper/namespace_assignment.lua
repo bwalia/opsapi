@@ -86,14 +86,16 @@ end
 -- an active namespace. Only codes the deploy explicitly declares are ever
 -- tried — there is deliberately no "first active tenant" fallback, which was
 -- the silent mis-routing this resolution path exists to prevent.
+--
+-- A deploy whose PROJECT_CODE names no tenant (e.g. "all", which hosts many
+-- tenants) can still declare where self sign-ups land: SIGNUP_NAMESPACE_SLUG
+-- names that tenant explicitly. It is consulted only when the request carried
+-- no tenant hint of its own, so a named-but-unknown tenant still fails.
 -- @param project_code string|nil per-request tenant hint
 -- @return integer|nil namespace_id
 -- @return string|nil reason ("no_project_code" / "project_code_not_found:<codes>")
 function M.resolveProjectNamespaceId(project_code)
     local codes = candidateProjectCodes(project_code)
-    if #codes == 0 then
-        return nil, "no_project_code"
-    end
 
     for _, code in ipairs(codes) do
         local ns = db.query([[
@@ -106,6 +108,19 @@ function M.resolveProjectNamespaceId(project_code)
         end
     end
 
+    local hinted = project_code and tostring(project_code):match("^%s*(.-)%s*$") or ""
+    local signup_slug = (os.getenv("SIGNUP_NAMESPACE_SLUG") or ""):match("^%s*(.-)%s*$")
+    if (hinted == "" or hinted == "all") and signup_slug ~= "" then
+        local ns = db.query(
+            "SELECT id FROM namespaces WHERE status = 'active' AND slug = ? LIMIT 1", signup_slug)
+        if ns and #ns > 0 then
+            return ns[1].id
+        end
+    end
+
+    if #codes == 0 then
+        return nil, "no_project_code"
+    end
     return nil, "project_code_not_found:" .. table.concat(codes, ",")
 end
 

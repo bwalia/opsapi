@@ -131,7 +131,14 @@ end
 -- ciphertext decrypt to garbage unnoticed. Legacy values still decrypt.
 -- FastAPI (services/crypto.py) reads both formats.
 -- SECRETS_ENCRYPTION_FORMAT=cbc writes the legacy format again (rollback only).
+--
+-- The tag length must be asked for: get_aead_tag() with no size returns
+-- key_size / 2, i.e. an 8-byte tag under a 16-byte (AES-128) key. Values
+-- written that way before the size was pinned are nonce[12] .. tag[8] ..
+-- ciphertext and still decrypt (AES-128 only — AES-256 always got 16).
 local SECRET_V2 = "v2:"
+local GCM_TAG_LEN = 16
+local GCM_SHORT_TAG_LEN = 8
 
 local function gcmCipher(key)
     local cipher = require("resty.openssl.cipher")
@@ -145,16 +152,25 @@ local function encryptGcm(secret, key)
     if not ciphertext then
         error("Encryption failed - " .. tostring(err))
     end
-    local tag = assert(c:get_aead_tag())
+    local tag = assert(c:get_aead_tag(GCM_TAG_LEN))
     return SECRET_V2 .. ngx.encode_base64(nonce .. tag .. ciphertext)
+end
+
+local function gcmOpen(blob, key, tag_len)
+    if #blob < 12 + tag_len then return nil end
+    return gcmCipher(key):decrypt(key, blob:sub(1, 12), blob:sub(13 + tag_len), false, nil,
+        blob:sub(13, 12 + tag_len))
 end
 
 local function decryptGcm(encoded, key)
     local blob = ngx.decode_base64(encoded:sub(#SECRET_V2 + 1))
-    if not blob or #blob < 28 then
+    if not blob or #blob < 12 + GCM_SHORT_TAG_LEN then
         error("Decryption failed - malformed secret")
     end
-    local plain = gcmCipher(key):decrypt(key, blob:sub(1, 12), blob:sub(29), false, nil, blob:sub(13, 28))
+    local plain = gcmOpen(blob, key, GCM_TAG_LEN)
+    if not plain and #key < 32 then
+        plain = gcmOpen(blob, key, GCM_SHORT_TAG_LEN)
+    end
     if not plain then
         error("Decryption failed - secret was altered or encrypted with a different key")
     end

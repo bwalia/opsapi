@@ -137,6 +137,7 @@ function TaxTransactionQueries.bulkCreate(statement_uuid, transactions, user)
             uuid = uuid,
             statement_id = statement.id,
             bank_account_id = statement.bank_account_id,
+            namespace_id = statement.namespace_id,
             user_id = user_id,
             transaction_date = txn.transaction_date or txn.date,
             description = txn.description,
