@@ -86,17 +86,26 @@ describe('AI Runs: the built-in runner', () => {
     cy.contains('h1', taskTitle, { timeout: 20000 });
     cy.contains('button', 'Start with AI').click();
     cy.get('[role="dialog"]').within(() => {
+      // With a web terminal in the workspace, step 1 asks how first: choose "Let AI do it".
+      cy.get('[data-testid="air-steps"]', { timeout: 30000 }).then(($s) => {
+        if ($s.text().includes('How')) {
+          cy.get('[data-testid="air-how-run"]').click();
+          cy.contains('button', 'Next').click();
+        }
+      });
       cy.get('#air-runner', { timeout: 30000 }).find('option:selected').should('contain', 'OpsAPI built-in (no machine needed)');
-      cy.contains('Runs inside OpsAPI on an AI model');
+      cy.contains('Inside OpsAPI on an AI model');
       cy.get('#air-profile').find('option:selected').should('contain', 'Platform model');
       cy.get('#air-model').should('not.exist');
       cy.get('#air-repo').should('have.value', 'none').find('option:selected').should('contain', 'No repository');
-      cy.contains('Output:').parent().should('contain', 'Comments and subtasks on the task');
-      cy.get('#air-prompt, pre[aria-labelledby="air-prompt-label"]').should(($el) => {
+      cy.contains('button', 'Next').click();
+      cy.get('[data-testid="air-check"]', { timeout: 20000 }).should('contain', 'answer, plan and subtasks on the task');
+      cy.contains('summary', 'The instructions the AI gets').click();
+      cy.get('#air-prompt, pre[aria-label="The instructions the AI gets"]').should(($el) => {
         expect(($el.val() as string) || $el.text()).to.contain('no repository');
       });
       cy.screenshot('ai-runner-builtin-start', { capture: 'viewport' });
-      cy.contains('button', /^Start$/).should('not.be.disabled').click();
+      cy.contains('button', 'Start the AI').should('not.be.disabled').click();
     });
     cy.location('pathname', { timeout: 20000 }).should('match', /^\/dashboard\/ai-runner\/runs\/[0-9a-f-]{36}$/);
     cy.contains('No repository', { timeout: 20000 });

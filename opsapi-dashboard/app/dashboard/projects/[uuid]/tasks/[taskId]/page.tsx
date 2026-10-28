@@ -387,6 +387,7 @@ export default function TaskDetailPage() {
             {/* Status */}
             <Field label="Status" icon={null}>
               <select disabled={!canEdit} value={task.status} onChange={(e) => patch({ status: e.target.value as KanbanTaskStatus })}
+                data-tour="task-status"
                 className={cn('w-full rounded-lg border px-2.5 py-1.5 text-sm capitalize disabled:opacity-70', getTaskStatusColor(task.status))}>
                 {STATUSES.map((s) => <option key={s} value={s}>{formatTaskStatus(s)}</option>)}
               </select>
