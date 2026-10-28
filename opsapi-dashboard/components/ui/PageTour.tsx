@@ -3,9 +3,11 @@
 /**
  * A short guided tour of one page (same look as the Property Deals tour): each step highlights an element marked
  * `data-tour="<target>"` (or shows in the middle when it has no target) and explains it, with Back / Next, Esc to stop.
- * Render it only while the tour is open (it starts at step 1 each time it mounts).
+ * Render it only while the tour is open (it starts at step 1 each time it mounts). It renders on document.body, so a
+ * sticky or stacked parent (e.g. the task page's side column) can't put page content above it.
  */
 import React, { useEffect, useLayoutEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight, X } from 'lucide-react';
 import Button from './Button';
 
@@ -66,7 +68,7 @@ export function PageTour({ steps, onClose }: { steps: TourStep[]; onClose: () =>
       }
     : { top: window.innerHeight / 2 - 110, left: Math.max(12, window.innerWidth / 2 - 180) };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[2000]" aria-live="polite" data-testid="page-tour">
       {rect ? (
         <div
@@ -105,7 +107,8 @@ export function PageTour({ steps, onClose }: { steps: TourStep[]; onClose: () =>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
