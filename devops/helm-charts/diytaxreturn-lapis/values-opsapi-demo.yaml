@@ -76,9 +76,9 @@ corsAllowedDomains: "opsapi.org"
 # Password-reset / sign-in return addresses for the demo apps.
 passwordResetAllowedOrigins: "https://dashboard.demo.opsapi.org,https://hello-java.demo.opsapi.org,https://hello-php.demo.opsapi.org"
 
-# Google OAuth client for the demo. Add the redirect URI below as an
-# Authorised redirect URI on that client in Google Cloud Console.
-googleClientId: "REPLACE_ME.apps.googleusercontent.com"
+# Google sign-in uses Workstation's OAuth client; GOOGLE_CLIENT_ID and
+# GOOGLE_CLIENT_SECRET come from Vault (opsapi-demo/config). The redirect URI
+# below must be an Authorised redirect URI on that client.
 googleRedirectUri: "https://identity.demo.opsapi.org/auth/google/callback"
 
 # PROJECT_CODE names no tenant, so open B2C sign-ups (Google or email) join `demo`.
