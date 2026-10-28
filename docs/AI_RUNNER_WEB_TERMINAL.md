@@ -115,7 +115,7 @@ bad signature → 401. The task id is never taken from the webhook.
 
 | Method & path | Who | Body → answer |
 |---|---|---|
-| `GET /terminals` | `ai_runners.manage` | → `[terminal]` (never the secret) |
+| `GET /terminals` | `ai_runners.manage` | → `[terminal]` (never the secret), each with its `connection` (§12) |
 | `POST /terminals` | `ai_runners.manage` | `{name, url, agents?}` → 201 `{terminal, secret}` |
 | `PUT /terminals/:uuid` | `ai_runners.manage` | `{name?, url?, agents?, is_active?}` → `terminal` |
 | `POST /terminals/:uuid/rotate-secret` | `ai_runners.manage` | → `{terminal, secret}` |
@@ -371,4 +371,31 @@ it reopens if the terminal reports it open again.
 | `GET /work-log/people?from&to` | `ai_terminal_worklogs.read` | per person: tabs, active time, prompts, tokens, cost |
 | `GET /work-log/tabs/:uuid` | same rule | the tab + its events (timeline) + recording parts |
 | `GET /work-log/tabs/:uuid/recording/:part` | same rule | the gzipped asciicast part |
+
+## 12. Is the terminal connected?
+
+Each terminal on **AI Runs → Machines → Web terminals** has a line that says whether it's in touch with OpsAPI,
+in plain words, with **What to do** for anything but green. It updates every 15 seconds.
+
+A terminal calls OpsAPI every 30 seconds for its keys (§10), and also with work-log activity (§11) and session
+webhooks (§4). Every call is signed with the shared secret. OpsAPI notes, at most every 10 seconds per terminal:
+
+- `ar_terminals.last_contact_at`: the last call it accepted;
+- `last_refused_at` + `last_refused_reason`: the last call it refused from a known terminal: `secret` (the
+  signature doesn't match the secret OpsAPI has) or `clock` (right secret, but the timestamp is more than
+  5 minutes off). A refusal for another reason is written straight away.
+
+`GET /terminals` answers each terminal with `connection: {state, seen_secs_ago?, refused_secs_ago?}`:
+
+| `state` | On the card | It means | What to do |
+|---|---|---|---|
+| `connected` | Connected · checked in 12 seconds ago | an accepted call in the last 2 minutes | nothing (if it's switched off, nobody can sign in) |
+| `waiting` | Not connected yet: this terminal hasn't checked in | it has never called | open its address (the sign-in page should load); make sure its settings have this card's terminal id and secret (the `keys` lines); not sure? **New secret** and put the new lines in |
+| `lost` | Lost contact · last checked in 2 hours ago | it was in touch, but not in the last 2 minutes | the machine or the terminal is off or offline: start it. Meanwhile new or blocked keys don't reach it, and after 15 minutes it stops accepting OpsAPI's keys altogether |
+| `secret` | Not connected: the secret on the machine doesn't match | it calls with a different secret (e.g. **New secret** was clicked and the machine wasn't updated); nobody can sign in with a key from People | **New secret**, put the new terminal id and secret into the terminal's settings, restart it. On the Workstation Mac Studio: `sudo /usr/local/libexec/sshweb-admin secret` |
+| `clock` | Not connected: the machine's clock is wrong | right secret, clock more than 5 minutes off | switch on automatic date and time on the machine |
+
+A refusal shows for 10 minutes, and only while it's newer than the last accepted call, so a stray request with
+a wrong signature can't hide a terminal that is working. Terminals connected before §10 (no `keys` in their
+config) only call when a session starts or ends, so they show `waiting` or `lost` between sessions.
 
