@@ -78,19 +78,26 @@ function waitOnline(tries = 30): Cypress.Chainable {
   });
 }
 
-/** Task page → Start with AI → preview → Start; lands on the run page and records its uuid. */
+/** Task page → Start with AI → Next (checks it) → Start the AI; lands on the run page and records its uuid. */
 function startWithAI(key: TaskKey, profile: 'fake' | 'fake-bridge' | 'fake-deny' | 'claude') {
   visit(`/dashboard/projects/${projectUuid}/tasks/${tasks[key].uuid}`);
   cy.contains('h1', tasks[key].title, { timeout: 30000 });
   cy.contains('button', 'Start with AI').click();
   cy.get('[role="dialog"]').within(() => {
+    // With a web terminal in the workspace, step 1 asks how first: choose "Let AI do it".
+    cy.get('[data-testid="air-steps"]', { timeout: 30000 }).then(($s) => {
+      if ($s.text().includes('How')) {
+        cy.get('[data-testid="air-how-run"]').click();
+        cy.contains('button', 'Next').click();
+      }
+    });
     cy.get('#air-runner', { timeout: 20000 }).select(runnerUuid);
     cy.get('#air-profile').select(profile);
     cy.get('#air-repo').clear().type(repo);
-    cy.contains('button', 'Preview').click();
-    cy.contains('Output:', { timeout: 20000 }).parent().should('contain', 'Push a branch');
-    cy.contains("This run can't start yet").should('not.exist');
-    cy.contains('button', /^Start$/).should('not.be.disabled').click();
+    cy.contains('button', 'Next').click();
+    cy.get('[data-testid="air-check"]', { timeout: 20000 }).should('contain', 'pushes its branch');
+    cy.contains("This can't start yet").should('not.exist');
+    cy.contains('button', /^(Start the AI|Ask for approval)$/).should('not.be.disabled').click();
   });
   cy.location('pathname', { timeout: 20000 }).should('match', /^\/dashboard\/ai-runner\/runs\/[0-9a-f-]{36}$/)
     .then((p) => { runs[key] = p.split('/').pop() as string; });

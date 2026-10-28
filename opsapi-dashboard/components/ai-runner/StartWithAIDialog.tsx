@@ -11,16 +11,21 @@
  * since) answers 403 "You can't use this runner", shown as such. Only ai_runs.manage may edit the prompt.
  * §28: the built-in runner runs inside OpsAPI (no machine): it is listed last, so it is picked when no machine is
  * online; its profiles are models and its "folders" are the connected GitHub repositories, or none.
- * Web terminal (docs/AI_RUNNER_WEB_TERMINAL.md): when the workspace has one, the dialog first offers "Work in the web
- * terminal" — a folder on that machine and an agent; OpsAPI signs a short-lived link and the terminal opens the folder
- * in a new tab and starts the agent with the task. The person drives the agent there, so anyone who may start AI work
- * may edit that prompt.
+ * Web terminal (docs/AI_RUNNER_WEB_TERMINAL.md): when the workspace has one, the dialog first asks how — "Let AI do it"
+ * or "Work on it with AI myself" (a folder on that machine and an agent; OpsAPI signs a short-lived link and the terminal
+ * opens the folder in a new tab and starts the agent with the task). The person drives the agent there, so anyone who
+ * may start AI work may edit that prompt.
+ * Guided in steps: 1 How (only when both ways exist) → 2 Set it up (the essentials; executor and project context under
+ * More options) → 3 Check & start ("What happens next", warnings, the prompt to read or edit). Next on step 2 runs the
+ * preview, so there is no separate Preview button.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, CopyCheck, ExternalLink, KeyRound, ShieldCheck, Terminal } from 'lucide-react';
+import {
+  AlertTriangle, ArrowLeft, ArrowRight, Bot, Check, ChevronRight, CopyCheck, ExternalLink, KeyRound, ShieldCheck, Terminal,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -117,6 +122,24 @@ function startConflictText(conflict: unknown): string | null {
 }
 
 type Mode = 'terminal' | 'run';
+type Step = 1 | 2 | 3;
+const MODE_KEY = 'air-start-with-ai-mode';
+/** The way this browser chose last time (step 1 preselects it). */
+function lastMode(): Mode | null {
+  try {
+    const v = localStorage.getItem(MODE_KEY);
+    return v === 'run' || v === 'terminal' ? v : null;
+  } catch {
+    return null;
+  }
+}
+function remember(m: Mode) {
+  try {
+    localStorage.setItem(MODE_KEY, m);
+  } catch {
+    // private mode: nothing to remember
+  }
+}
 /** Unattended Claude Code when offered (it finishes without stopping to ask), else the first agent that runs
  * something (not "just a terminal"), else the first one. */
 const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id === 'claude_auto')?.id
@@ -148,6 +171,9 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedMd, setSelectedMd] = useState<string[]>([]);
   const [mode, setMode] = useState<Mode>(initialMode || 'run');
+  const [step, setStep] = useState<Step>(1);
+  // Step 1's choice; the last one used in this browser is preselected.
+  const [chosen1, setChosen1] = useState<Mode | null>(null);
   const [terminals, setTerminals] = useState<TerminalOffer[]>([]);
   const [termUuid, setTermUuid] = useState('');
   const [folder, setFolder] = useState('');
@@ -231,7 +257,11 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
         setLaunchUrl(null);
         setCodeSent(false);
         setCode('');
-        setMode(initialMode || (offers.length ? 'terminal' : 'run'));
+        const pick = initialMode || (offers.length ? lastMode() : 'run');
+        setChosen1(pick);
+        if (pick) setMode(pick);
+        // One way only (no web terminal), or the caller already chose: straight to setting it up.
+        setStep(offers.length && !initialMode ? 1 : 2);
         if (offers.some((t) => t.autologin)) {
           aiRunner.terminalAutologin().then((a) => { if (id === live.current && a) setAuto(a); }).catch(() => {});
         }
@@ -263,18 +293,6 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   const profileDown = chosen?.available === false;
   const blocked = !runner || !usable(runner) || !profile || profileDown || !repo.trim() || !preview || stale
     || conflicts.length > 0 || (similar.length > 0 && !confirmSimilar) || !prompt.trim();
-
-  async function doPreview() {
-    setBusy('preview');
-    setError(null);
-    try {
-      await runPreview(runnerUuid, profile, repo);
-    } catch (e) {
-      setError(aiError(e).message);
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function doStart() {
     if (blocked) return;
@@ -383,185 +401,209 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
   const reason = (r: Runner) =>
     r.status === 'paused' ? 'paused' : r.status === 'online' ? 'online' : `${r.status}, last seen ${ago(r.last_heartbeat_at)}`;
 
-  return (
-    <Modal
-      isOpen={open}
-      onClose={onClose}
-      size="2xl"
-      title="Start with AI"
-      description={taskLabel}
-      footer={mode === 'terminal' ? (
-        <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={doLaunch} isLoading={busy === 'start'} disabled={loading || launchBlocked || busy !== null}
-            leftIcon={<Terminal className="h-4 w-4" aria-hidden />}>
-            Open terminal
-          </Button>
-        </>
-      ) : (
-        <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="outline" onClick={doPreview} isLoading={busy === 'preview'} disabled={loading || !runnerUuid || busy !== null}>
-            Preview
-          </Button>
-          <Button onClick={doStart} isLoading={busy === 'start'} disabled={loading || blocked || busy !== null} leftIcon={<Bot className="h-4 w-4" aria-hidden />}>
-            Start
-          </Button>
-        </>
+  // The guided steps: 1 How (only when both ways exist) → 2 Set it up → 3 Check & start.
+  const bothWays = terminals.length > 0;
+  const steps = bothWays ? ['How', 'Set it up', 'Check & start'] : ['Set it up', 'Check & start'];
+  const stepIndex = bothWays ? step - 1 : step - 2;
+  const agentLabel = terminal?.agents.find((a) => a.id === agent)?.label || 'the AI';
+  const setupBlocked = mode === 'terminal'
+    ? launchBlocked
+    : !runner || !usable(runner) || !profile || profileDown || !repo.trim();
+
+  async function next() {
+    setError(null);
+    if (step === 1) {
+      if (!chosen1) return;
+      setMode(chosen1);
+      remember(chosen1);
+      setStep(2);
+      return;
+    }
+    if (mode === 'run' && (stale || !preview)) {
+      // Check the runner, folder and limits before showing the summary (what Preview used to do).
+      setBusy('preview');
+      try {
+        await runPreview(runnerUuid, profile, repo);
+      } catch (e) {
+        setError(aiError(e).message);
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
+    setStep(3);
+  }
+
+  const stepper = (
+    <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Steps" data-testid="air-steps">
+      {steps.map((label, i) => (
+        <li key={label} className="flex items-center gap-1.5" aria-current={i === stepIndex ? 'step' : undefined}>
+          {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-secondary-300" aria-hidden />}
+          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium ${i === stepIndex
+            ? 'bg-primary-500 text-white' : i < stepIndex ? 'bg-success-500/10 text-success-600' : 'bg-secondary-100 text-secondary-500'}`}>
+            {i < stepIndex ? <Check className="h-3 w-3" aria-hidden /> : <span aria-hidden>{i + 1}</span>} {label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+
+  const errorNote = error && (
+    <p className="flex items-start gap-2 rounded-lg bg-error-500/10 p-3 text-sm text-error-600" role="alert">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {error}
+    </p>
+  );
+
+  const howStep = (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-secondary-900">How do you want to work on this task?</p>
+      <div role="radiogroup" aria-label="How to work on this task" className="grid gap-3 sm:grid-cols-2">
+        {([
+          ['run', <Bot key="i" className="h-5 w-5" aria-hidden />, 'Let AI do it',
+            'The AI works on its own and opens a pull request for you to review.', 'Best for clear, self-contained tasks.'],
+          ['terminal', <Terminal key="i" className="h-5 w-5" aria-hidden />, 'Work on it with AI myself',
+            `A terminal opens on ${terminals[0]?.name || 'the machine'} in the task's folder, with the AI ready. You talk to it and guide it.`,
+            'Best when you want to stay in control.'],
+        ] as [Mode, React.ReactNode, string, string, string][]).map(([m, icon, title, what, when_]) => (
+          <button key={m} type="button" role="radio" aria-checked={chosen1 === m} onClick={() => setChosen1(m)}
+            data-testid={`air-how-${m}`}
+            className={`rounded-xl border p-4 text-left transition ${chosen1 === m
+              ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500' : 'border-secondary-200 hover:border-secondary-300 hover:bg-secondary-50'}`}>
+            <span className="flex items-center gap-2 font-semibold text-secondary-900">{icon} {title}</span>
+            <span className="mt-1.5 block text-sm text-secondary-600">{what}</span>
+            <span className="mt-1 block text-xs text-secondary-500">{when_}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-secondary-500">Either way, everything the AI does is saved under AI work on this task.</p>
+    </div>
+  );
+
+  const termSetup = (
+    <div className="space-y-4" data-testid="air-terminal">
+      {terminals.length > 1 && (
+        <Select id="air-terminal-pick" label="Which terminal" value={termUuid}
+          onChange={(e) => {
+            const t = terminals.find((x) => x.uuid === e.target.value);
+            setTermUuid(e.target.value); setFolder(t?.default_path || ''); setAgent(firstAgent(t));
+          }}>
+          {terminals.map((t) => <option key={t.uuid} value={t.uuid}>{t.name}</option>)}
+        </Select>
       )}
-    >
-      {loading ? (
-        <p className="py-8 text-center text-sm text-secondary-500" role="status">Loading runners and the prompt…</p>
-      ) : (
-        <div className="space-y-4">
-          {(terminals.length > 0 || initialMode === 'terminal') && (
-            <div role="radiogroup" aria-label="How to work on this task" className="grid gap-2 sm:grid-cols-2">
-              {([
-                ['terminal', 'Work in the web terminal', 'You drive an agent (Claude Code, Codex…) in a folder on the machine.'],
-                ['run', 'Let AI run it here', 'A runner or the built-in AI does the work and reports back.'],
-              ] as [Mode, string, string][]).map(([m, title, hint]) => (
-                <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
-                  className={`rounded-lg border p-3 text-left transition ${mode === m
-                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-secondary-200 hover:bg-secondary-50'}`}>
-                  <span className="flex items-center gap-1.5 text-sm font-semibold text-secondary-900">
-                    {m === 'terminal' ? <Terminal className="h-4 w-4" aria-hidden /> : <Bot className="h-4 w-4" aria-hidden />} {title}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-secondary-500">{hint}</span>
-                </button>
-              ))}
+      <div>
+        <Input id="air-terminal-folder" label={`Folder on ${terminal?.name || 'the machine'}`} value={folder}
+          onChange={(e) => setFolder(e.target.value)} list="air-terminal-folders" placeholder="/Users/you/projects/my-repo"
+          spellCheck={false} autoComplete="off" className="font-mono"
+          error={folder.trim() !== '' && !folderOk ? 'Use the full path, starting with /.' : undefined}
+          helperText="Where the task's code is on that machine. Folders used before for this project are suggested." />
+        <datalist id="air-terminal-folders">
+          {(terminal?.recent_paths || []).map((p) => <option key={p} value={p} />)}
+        </datalist>
+      </div>
+      <Select id="air-terminal-agent" label="AI assistant to start" value={agent} onChange={(e) => setAgent(e.target.value)}>
+        {(terminal?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+      </Select>
+      {autoOffered && (
+        <div className="space-y-2 rounded-lg border border-secondary-200 p-3" data-testid="air-terminal-autologin">
+          <label className="flex items-start gap-2 text-sm text-secondary-800">
+            <input type="checkbox" className="mt-0.5" checked={signMeIn} onChange={(e) => setSignMeIn(e.target.checked)} />
+            <span>
+              Sign me in to {terminal?.name} automatically
+              <span className="block text-xs text-secondary-500">No key file needed.</span>
+            </span>
+          </label>
+          {signMeIn && (stepupLive ? (
+            <p className="flex flex-wrap items-center gap-2 text-xs text-success-600">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Confirmed until {clock(auto.stepup!.expires_at)}.
+              <button type="button" className="text-secondary-500 underline" onClick={forgetCode}>Sign out of this</button>
+            </p>
+          ) : codeSent ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <Input id="air-terminal-code" label="Code from the email" value={code} inputMode="numeric"
+                autoComplete="one-time-code" maxLength={12} onChange={(e) => setCode(e.target.value)} className="w-40 font-mono" />
+              <Button size="sm" onClick={confirmCode} isLoading={codeBusy} disabled={code.trim().length < 6}>Confirm</Button>
+              <button type="button" className="pb-2 text-xs text-secondary-500 underline" onClick={sendCode}
+                disabled={codeBusy}>Send another</button>
             </div>
-          )}
-
-          {mode === 'terminal' ? (
-            terminals.length === 0 ? (
-              <p className="rounded-lg bg-info-500/10 p-3 text-sm text-info-700" role="status">
-                No web terminal is connected to this workspace yet. Someone who manages AI runners can add one under{' '}
-                <Link href={`${BASE}/machines`} className="underline" onClick={onClose}>AI Runs → Machines</Link>.
-              </p>
-            ) : (
-              <div className="space-y-4" data-testid="air-terminal">
-                {terminals.length > 1 && (
-                  <Select id="air-terminal-pick" label="Terminal" value={termUuid}
-                    onChange={(e) => {
-                      const t = terminals.find((x) => x.uuid === e.target.value);
-                      setTermUuid(e.target.value); setFolder(t?.default_path || ''); setAgent(firstAgent(t));
-                    }}>
-                    {terminals.map((t) => <option key={t.uuid} value={t.uuid}>{t.name}</option>)}
-                  </Select>
-                )}
-                <div>
-                  <Input id="air-terminal-folder" label={`Folder on ${terminal?.name || 'the machine'}`} value={folder}
-                    onChange={(e) => setFolder(e.target.value)} list="air-terminal-folders" placeholder="/Users/you/projects/my-repo"
-                    spellCheck={false} autoComplete="off" className="font-mono"
-                    error={folder.trim() !== '' && !folderOk ? 'Use the full path, starting with /.' : undefined}
-                    helperText="The terminal opens in this folder. It must be inside a folder the terminal allows." />
-                  <datalist id="air-terminal-folders">
-                    {(terminal?.recent_paths || []).map((p) => <option key={p} value={p} />)}
-                  </datalist>
-                </div>
-                <Select id="air-terminal-agent" label="Start" value={agent} onChange={(e) => setAgent(e.target.value)}>
-                  {(terminal?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-                </Select>
-                {agent !== 'shell' && (
-                  <Textarea id="air-terminal-prompt" label="First message to the agent" rows={10} value={termPrompt}
-                    onChange={(e) => setTermPromptEdited(e.target.value)} className="font-mono text-xs" spellCheck={false}
-                    helperText="The task, ready for the agent. Change it if you like; you can keep talking to the agent in the terminal." />
-                )}
-                {autoOffered && (
-                  <div className="space-y-2 rounded-lg border border-secondary-200 p-3" data-testid="air-terminal-autologin">
-                    <label className="flex items-start gap-2 text-sm text-secondary-800">
-                      <input type="checkbox" className="mt-0.5" checked={signMeIn} onChange={(e) => setSignMeIn(e.target.checked)} />
-                      <span>
-                        Sign me in to {terminal?.name} automatically
-                        <span className="block text-xs text-secondary-500">
-                          No key file needed.
-                        </span>
-                      </span>
-                    </label>
-                    {signMeIn && (stepupLive ? (
-                      <p className="flex flex-wrap items-center gap-2 text-xs text-success-700">
-                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Confirmed until {clock(auto.stepup!.expires_at)}.
-                        <button type="button" className="text-secondary-500 underline" onClick={forgetCode}>Sign out of this</button>
-                      </p>
-                    ) : codeSent ? (
-                      <div className="flex flex-wrap items-end gap-2">
-                        <Input id="air-terminal-code" label="Code from the email" value={code} inputMode="numeric"
-                          autoComplete="one-time-code" maxLength={12} onChange={(e) => setCode(e.target.value)} className="w-40 font-mono" />
-                        <Button size="sm" onClick={confirmCode} isLoading={codeBusy} disabled={code.trim().length < 6}>Confirm</Button>
-                        <button type="button" className="pb-2 text-xs text-secondary-500 underline" onClick={sendCode}
-                          disabled={codeBusy}>Send another</button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={sendCode} isLoading={codeBusy}
-                          leftIcon={<KeyRound className="h-4 w-4" aria-hidden />}>Email me a code</Button>
-                        <span className="text-xs text-secondary-500">Once every 12 hours, so a stolen password alone can&apos;t open a shell.</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="text-xs text-secondary-500">
-                  {autologin
-                    ? <>Opens {terminal?.url} in a new tab and signs you in; the terminal then opens the folder and starts the agent.
-                      When the agent opens a pull request, the task moves to Review, and to Done when it merges. The link works
-                      once, for 2 minutes.</>
-                    : <>Opens {terminal?.url} in a new tab. If it asks, sign in with your SSH key; the terminal then opens the folder
-                      and starts the agent. The link works once, for 15 minutes.</>}
-                </p>
-                {launchUrl && (
-                  <p className="rounded-lg bg-warning-500/10 p-3 text-sm text-warning-800" role="status">
-                    Your browser didn&apos;t open a new tab.{' '}
-                    <a href={launchUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline"
-                      onClick={() => setTimeout(onClose, 0)}>
-                      Open the terminal <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                    </a>
-                  </p>
-                )}
-              </div>
-            )
           ) : (
-          <>
-          {preview?.context && (
-            <div className="rounded-lg border border-secondary-200 p-3 space-y-2" data-testid="air-context">
-              <p className="text-sm font-medium text-secondary-800">Context before launch</p>
-              <p className="text-xs text-secondary-500">
-                Skills, MD files and the target repo from the project. Toggle what to load into the agent.
-              </p>
-              {preview.context.target_repo_url && (
-                <p className="text-xs text-secondary-600">
-                  <span className="font-medium">Target PR repo:</span> {preview.context.target_repo_url}
-                  {preview.context.vault_configured ? ' · vault credentials configured' : ''}
-                </p>
-              )}
-              {(preview.context.skills_git_urls || []).map((s) => (
-                <label key={s.url} className="flex items-start gap-2 text-xs text-secondary-700">
-                  <input type="checkbox" className="mt-0.5" checked={selectedSkills.includes(s.url)}
-                    onChange={(e) => setSelectedSkills((prev) => e.target.checked
-                      ? [...prev, s.url] : prev.filter((u) => u !== s.url))} />
-                  <span><span className="font-medium">{s.label || 'Skill'}</span> — {s.url}{s.ref ? ` @${s.ref}` : ''}</span>
-                </label>
-              ))}
-              {(preview.context.md_refs || []).map((m) => {
-                const key = m.path || m.url || '';
-                return (
-                  <label key={key} className="flex items-start gap-2 text-xs text-secondary-700">
-                    <input type="checkbox" className="mt-0.5" checked={selectedMd.includes(key)}
-                      onChange={(e) => setSelectedMd((prev) => e.target.checked
-                        ? [...prev, key] : prev.filter((u) => u !== key))} />
-                    <span><span className="font-medium">{m.label || 'MD'}</span> — {key}</span>
-                  </label>
-                );
-              })}
-              {!preview.context.target_repo_url && !(preview.context.skills_git_urls?.length)
-                && !(preview.context.md_refs?.length) && (
-                <p className="text-xs text-secondary-400">
-                  No project skills/MD/target repo yet. Set them under Project settings → AI.
-                </p>
-              )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={sendCode} isLoading={codeBusy}
+                leftIcon={<KeyRound className="h-4 w-4" aria-hidden />}>Email me a code</Button>
+              <span className="text-xs text-secondary-500">Once every 12 hours, so a stolen password alone can&apos;t open a shell.</span>
             </div>
-          )}
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
-          {preview && (
+  const runSetup = (
+    <div className="space-y-4">
+      <Select id="air-runner" label="Where the AI works" value={runnerUuid}
+        onChange={(e) => {
+          const r = runners.find((x) => x.uuid === e.target.value);
+          // The built-in runner's "folders" are repositories (or none); a machine's are its own paths.
+          if (isBuiltin(r) !== builtin) setRepo(isBuiltin(r) ? 'none' : '');
+          setRunnerUuid(e.target.value); setProfile(firstProfile(r)); setModel('');
+        }}
+        helperText={builtin ? 'Inside OpsAPI on an AI model: no machine needed. It can’t run code or tests.'
+          : runners.some(usable) ? 'A machine of yours that runs the AI (a "runner").'
+          : 'No runner is online. Start PromptPilot on a machine registered under Runners.'}
+        error={!runners.some(usable)}>
+        {!runnerUuid && <option value="">Choose where</option>}
+        {runners.map((r) => (
+          <option key={r.uuid} value={r.uuid} disabled={!usable(r)}>
+            {r.name}{isBuiltin(r) ? ' (no machine needed)' : r.host ? ` (${r.host})` : ''} — {reason(r)}
+          </option>
+        ))}
+      </Select>
+
+      <div className={builtin ? '' : 'grid gap-4 sm:grid-cols-2'}>
+        <Select id="air-profile" label={builtin ? 'AI model' : 'AI agent'} value={profile} onChange={(e) => { setProfile(e.target.value); setModel(''); }} disabled={!profiles.length}
+          error={profileDown}
+          helperText={runner && !profiles.length ? 'This runner reports no AI agents.'
+            : profileDown ? `Unavailable on this runner${chosen?.unavailable_reason ? `: ${chosen.unavailable_reason}` : ''}. Choose another.`
+            : profiles.length && profiles.every((p) => p.available === false) ? 'No agent on this runner can take work right now.' : undefined}>
+          {!profile && <option value="">Choose an agent</option>}
+          {profiles.map((p) => (
+            <option key={p.key} value={p.key} disabled={p.available === false}>
+              {p.label || p.key}{p.available === false ? ` — unavailable${p.unavailable_reason ? `: ${p.unavailable_reason}` : ''}` : ''}
+            </option>
+          ))}
+        </Select>
+        {!builtin && (
+          <Select id="air-model" label="Model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>
+            <option value="">{models.length ? "The agent's default" : 'No choice for this agent'}</option>
+            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          </Select>
+        )}
+      </div>
+
+      {builtin ? (
+        <Select id="air-repo" label="Repository" value={repo} onChange={(e) => setRepo(e.target.value)}
+          helperText={repo === 'none' ? 'It plans, answers and writes on the task (comments and subtasks); no code changes.'
+            : repoInfo ? `It reads the code and commits to its own branch from ${repoInfo.branch || 'the default branch'}, then opens a pull request. Nothing is merged.`
+            : undefined}>
+          {repos.map((r) => <option key={r.path} value={r.path}>{r.label || r.path}</option>)}
+          {!githubRepos.length && <option value="" disabled>Connect GitHub under Runners &amp; sources to work in a repository</option>}
+        </Select>
+      ) : (
+        <div>
+          <Input id="air-repo" label="Code folder on that machine" value={repo} onChange={(e) => setRepo(e.target.value)} list="air-repos"
+            placeholder="/Users/you/projects/my-repo" spellCheck={false} autoComplete="off" className="font-mono"
+            helperText={repoInfo?.dirty
+              ? 'This folder has uncommitted changes: the runner will refuse it until they are committed or stashed.'
+              : repoInfo?.branch ? `Currently on ${repoInfo.branch}. The AI works on a new branch, never on main.` : 'Pick one the runner found, or type a path. The AI works on a new branch, never on main.'} />
+          <datalist id="air-repos">
+            {repos.map((r) => <option key={r.path} value={r.path}>{r.branch ? `on ${r.branch}` : ''}</option>)}
+          </datalist>
+        </div>
+      )}
+
+      {preview && (
+        <details className="rounded-lg border border-secondary-200 p-3" data-testid="air-more">
+          <summary className="cursor-pointer text-sm font-medium text-secondary-700">More options</summary>
+          <div className="mt-3 space-y-4">
             <Select id="air-executor" label="Executor" value={executorKind}
               disabled={preview.executor_locked && !preview.can_change_executor}
               onChange={(e) => setExecutorKind(e.target.value)}
@@ -576,154 +618,214 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
                 </option>
               ))}
             </Select>
-          )}
-
-          <Select id="air-runner" label="Runner" value={runnerUuid}
-            onChange={(e) => {
-              const r = runners.find((x) => x.uuid === e.target.value);
-              // The built-in runner's "folders" are repositories (or none); a machine's are its own paths.
-              if (isBuiltin(r) !== builtin) setRepo(isBuiltin(r) ? 'none' : '');
-              setRunnerUuid(e.target.value); setProfile(firstProfile(r)); setModel('');
-            }}
-            helperText={builtin ? 'Runs inside OpsAPI on an AI model: no machine needed. It can’t run code or tests.'
-              : runners.some(usable) ? undefined : 'No runner is online. Start PromptPilot on a machine registered under Runners.'}
-            error={!runners.some(usable)}>
-            {!runnerUuid && <option value="">Choose a runner</option>}
-            {runners.map((r) => (
-              <option key={r.uuid} value={r.uuid} disabled={!usable(r)}>
-                {r.name}{isBuiltin(r) ? ' (no machine needed)' : r.host ? ` (${r.host})` : ''} — {reason(r)}
-              </option>
-            ))}
-          </Select>
-
-          <div className={builtin ? '' : 'grid gap-4 sm:grid-cols-2'}>
-            <Select id="air-profile" label={builtin ? 'AI model' : 'Agent profile'} value={profile} onChange={(e) => { setProfile(e.target.value); setModel(''); }} disabled={!profiles.length}
-              error={profileDown}
-              helperText={runner && !profiles.length ? 'This runner reports no agent profiles.'
-                : profileDown ? `Unavailable on this runner${chosen?.unavailable_reason ? `: ${chosen.unavailable_reason}` : ''}. Choose another profile.`
-                : profiles.length && profiles.every((p) => p.available === false) ? 'No profile on this runner can take work right now.' : undefined}>
-              {!profile && <option value="">Choose a profile</option>}
-              {profiles.map((p) => (
-                <option key={p.key} value={p.key} disabled={p.available === false}>
-                  {p.label || p.key}{p.available === false ? ` — unavailable${p.unavailable_reason ? `: ${p.unavailable_reason}` : ''}` : ''}
-                </option>
-              ))}
-            </Select>
-            {!builtin && (
-              <Select id="air-model" label="Model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>
-                <option value="">{models.length ? "The profile's default" : 'No choice for this profile'}</option>
-                {models.map((m) => <option key={m} value={m}>{m}</option>)}
-              </Select>
+            {preview.context && (
+              <div className="space-y-2" data-testid="air-context">
+                <p className="text-sm font-medium text-secondary-800">Project context for the AI</p>
+                <p className="text-xs text-secondary-500">Skills, notes (MD files) and the target repo from the project. Untick what it shouldn&apos;t load.</p>
+                {preview.context.target_repo_url && (
+                  <p className="text-xs text-secondary-600">
+                    <span className="font-medium">Target PR repo:</span> {preview.context.target_repo_url}
+                    {preview.context.vault_configured ? ' · vault credentials configured' : ''}
+                  </p>
+                )}
+                {(preview.context.skills_git_urls || []).map((sk) => (
+                  <label key={sk.url} className="flex items-start gap-2 text-xs text-secondary-700">
+                    <input type="checkbox" className="mt-0.5" checked={selectedSkills.includes(sk.url)}
+                      onChange={(e) => setSelectedSkills((prev) => e.target.checked
+                        ? [...prev, sk.url] : prev.filter((u) => u !== sk.url))} />
+                    <span><span className="font-medium">{sk.label || 'Skill'}</span> — {sk.url}{sk.ref ? ` @${sk.ref}` : ''}</span>
+                  </label>
+                ))}
+                {(preview.context.md_refs || []).map((m) => {
+                  const key = m.path || m.url || '';
+                  return (
+                    <label key={key} className="flex items-start gap-2 text-xs text-secondary-700">
+                      <input type="checkbox" className="mt-0.5" checked={selectedMd.includes(key)}
+                        onChange={(e) => setSelectedMd((prev) => e.target.checked
+                          ? [...prev, key] : prev.filter((u) => u !== key))} />
+                      <span><span className="font-medium">{m.label || 'MD'}</span> — {key}</span>
+                    </label>
+                  );
+                })}
+                {!preview.context.target_repo_url && !(preview.context.skills_git_urls?.length)
+                  && !(preview.context.md_refs?.length) && (
+                  <p className="text-xs text-secondary-400">No project skills, notes or target repo yet. Set them under Project settings → AI.</p>
+                )}
+              </div>
             )}
           </div>
+        </details>
+      )}
+    </div>
+  );
 
-          {builtin ? (
-            <Select id="air-repo" label="Repository" value={repo} onChange={(e) => setRepo(e.target.value)}
-              helperText={repo === 'none' ? 'It plans, answers and writes on the task (comments and subtasks); no code changes.'
-                : repoInfo ? `It reads the code and commits to its own branch from ${repoInfo.branch || 'the default branch'}, then opens a pull request. Nothing is merged.`
-                : undefined}>
-              {repos.map((r) => <option key={r.path} value={r.path}>{r.label || r.path}</option>)}
-              {!githubRepos.length && <option value="" disabled>Connect GitHub under Runners &amp; sources to work in a repository</option>}
-            </Select>
-          ) : (
-          <div>
-            <Input id="air-repo" label="Repo folder on that machine" value={repo} onChange={(e) => setRepo(e.target.value)} list="air-repos"
-              placeholder="/Users/you/projects/my-repo" spellCheck={false} autoComplete="off" className="font-mono"
-              helperText={repoInfo?.dirty
-                ? 'This folder has uncommitted changes: the runner will refuse it until they are committed or stashed.'
-                : repoInfo?.branch ? `Currently on ${repoInfo.branch}. The run works on a new branch, never on main.` : 'Pick one the runner found, or type a path. The run works on a new branch, never on main.'} />
-            <datalist id="air-repos">
-              {repos.map((r) => <option key={r.path} value={r.path}>{r.branch ? `on ${r.branch}` : ''}</option>)}
-            </datalist>
+  const outputLine = builtin && repo === 'none' ? 'It writes its answer, plan and subtasks on the task.'
+    : preview?.output_mode === 'pull_request' ? 'When it’s done it opens a pull request for you to review. Nothing is merged without you.'
+    : preview?.output_mode === 'branch' ? 'When it’s done it pushes its branch for you to review.'
+    : preview?.output_mode === 'local' ? 'When it’s done its commit stays on that machine.'
+    : `When it’s done: ${outputModeLabel(preview?.output_mode)}.`;
+
+  const runCheck = (
+    <div className="space-y-4" data-testid="air-check">
+      <div className="rounded-lg bg-secondary-50 p-3">
+        <p className="mb-1.5 text-sm font-semibold text-secondary-900">What happens next</p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary-700">
+          <li>
+            {builtin ? 'The AI works inside OpsAPI' : `The AI works on ${runner?.name || 'your machine'}`}
+            {builtin && repo === 'none' ? '.' : ` in ${repoInfo?.label || repo}, on a new branch (never on main).`}
+          </li>
+          {!builtin && <li>Before anything risky it asks first; you get a notification to Allow or Deny.</li>}
+          <li>{outputLine}</li>
+          <li>The run page opens next, so you can follow it live.</li>
+        </ol>
+      </div>
+
+      {conflicts.length > 0 && (
+        <div className="space-y-2 rounded-lg bg-error-500/10 p-3 text-sm text-error-600" role="alert">
+          <p className="font-semibold">This can&apos;t start yet:</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {conflicts.map((c) => (
+              <li key={c.text}>
+                {c.text}{' '}
+                {c.href && <Link className="underline" href={c.href} onClick={onClose}>Open that run</Link>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {similar.length > 0 && (
+        <div className="space-y-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-600" role="status" data-testid="air-similar">
+          <p className="flex items-start gap-2 font-semibold">
+            <CopyCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Similar work is already open
+          </p>
+          <p>These open runs are on tasks with a similar title. Make sure this isn&apos;t the same work.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {similar.map((w) => (
+              <li key={w.run_uuid}>
+                <Link className="font-medium underline" href={`${BASE}/runs/${w.run_uuid}`} onClick={onClose}>
+                  {w.task_number != null ? `#${w.task_number} ` : ''}{w.task_title || 'Task'}
+                </Link>
+                {' '}— {runStatusLabel(w.status || 'queued')}{w.requested_by_name ? `, started by ${w.requested_by_name}` : ''}
+              </li>
+            ))}
+          </ul>
+          <label className="flex items-center gap-2 font-medium">
+            <input type="checkbox" checked={confirmSimilar} onChange={(e) => setConfirmSimilar(e.target.checked)} /> Start anyway
+          </label>
+        </div>
+      )}
+
+      {preview?.needs_approval && (
+        <p className="flex items-start gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-600" role="status">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> A manager must approve this before the AI starts.
+        </p>
+      )}
+      {limits.info.length > 0 && <p className="text-xs text-secondary-500" data-testid="air-limits">{limits.info.join(' ')}</p>}
+
+      {preview && (
+        <details className="rounded-lg border border-secondary-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-secondary-700">
+            The instructions the AI gets{canEditPrompt ? ' (you can edit them)' : ''}
+          </summary>
+          <div className="mt-3">
+            {canEditPrompt ? (
+              <Textarea id="air-prompt" label={`Prompt${preview.template_version ? ` (template v${preview.template_version})` : ''}`} rows={12}
+                value={prompt} onChange={(e) => setPrompt(e.target.value)} className="font-mono text-xs" spellCheck={false}
+                helperText={prompt !== preview.prompt ? 'Edited: the AI gets your text.' : 'Edit them if you like.'} />
+            ) : (
+              <pre aria-label="The instructions the AI gets" tabIndex={0}
+                className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-secondary-200 bg-secondary-50 p-3 font-mono text-xs text-secondary-800">
+                {preview.prompt}
+              </pre>
+            )}
           </div>
-          )}
+        </details>
+      )}
+    </div>
+  );
 
-          {stale && (
-            <p className="rounded-lg bg-info-500/10 p-3 text-sm text-info-700" role="status">
-              You changed the runner, profile or folder. Press Preview to check them before starting.
-            </p>
-          )}
+  const termCheck = (
+    <div className="space-y-4" data-testid="air-check">
+      <div className="rounded-lg bg-secondary-50 p-3">
+        <p className="mb-1.5 text-sm font-semibold text-secondary-900">What happens next</p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary-700">
+          <li>
+            A new tab opens the terminal on {terminal?.name || 'the machine'}
+            {autologin ? ' and signs you in.' : '. If it asks, sign in with your key.'}
+          </li>
+          <li>
+            It opens <span className="font-mono text-xs">{folder.trim()}</span>
+            {agent === 'shell' ? ' with an empty terminal.' : ` and starts ${agentLabel} with this task.`}
+          </li>
+          <li>You work with it there. When it opens a pull request, this task moves to Review, and to Done when it merges.</li>
+          <li>Your session (what you asked, its cost and a replay) is saved under AI work on this task.</li>
+        </ol>
+        <p className="mt-2 text-xs text-secondary-500">The link works once, for {autologin ? '2' : '15'} minutes.</p>
+      </div>
+      {agent !== 'shell' && (
+        <details className="rounded-lg border border-secondary-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-secondary-700">The first message to the AI (you can edit it)</summary>
+          <div className="mt-3">
+            <Textarea id="air-terminal-prompt" label="First message" rows={10} value={termPrompt}
+              onChange={(e) => setTermPromptEdited(e.target.value)} className="font-mono text-xs" spellCheck={false}
+              helperText="The task, ready for the AI. You can keep talking to it in the terminal." />
+          </div>
+        </details>
+      )}
+      {launchUrl && (
+        <p className="rounded-lg bg-warning-500/10 p-3 text-sm text-warning-600" role="status">
+          Your browser didn&apos;t open a new tab.{' '}
+          <a href={launchUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline"
+            onClick={() => setTimeout(onClose, 0)}>
+            Open the terminal <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+          </a>
+        </p>
+      )}
+    </div>
+  );
 
-          {conflicts.length > 0 && (
-            <div className="space-y-2 rounded-lg bg-error-500/10 p-3 text-sm text-error-700" role="alert">
-              <p className="font-semibold">This run can&apos;t start yet:</p>
-              <ul className="list-disc space-y-1 pl-5">
-                {conflicts.map((c) => (
-                  <li key={c.text}>
-                    {c.text}{' '}
-                    {c.href && <Link className="underline" href={c.href} onClick={onClose}>Open that run</Link>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+  const back = step > (bothWays ? 1 : 2) && (
+    <Button variant="ghost" onClick={() => { setError(null); setStep((x) => (x - 1) as Step); }}
+      leftIcon={<ArrowLeft className="h-4 w-4" aria-hidden />}>Back</Button>
+  );
 
-          {similar.length > 0 && (
-            <div className="space-y-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-800" role="status" data-testid="air-similar">
-              <p className="flex items-start gap-2 font-semibold">
-                <CopyCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Similar work is already open
-              </p>
-              <p>These open runs are on tasks with a similar title. Make sure this isn&apos;t the same work.</p>
-              <ul className="list-disc space-y-1 pl-5">
-                {similar.map((w) => (
-                  <li key={w.run_uuid}>
-                    <Link className="font-medium underline" href={`${BASE}/runs/${w.run_uuid}`} onClick={onClose}>
-                      {w.task_number != null ? `#${w.task_number} ` : ''}{w.task_title || 'Task'}
-                    </Link>
-                    {' '}— {runStatusLabel(w.status || 'queued')}{w.requested_by_name ? `, started by ${w.requested_by_name}` : ''}
-                  </li>
-                ))}
-              </ul>
-              <label className="flex items-center gap-2 font-medium">
-                <input type="checkbox" checked={confirmSimilar} onChange={(e) => setConfirmSimilar(e.target.checked)} /> Start anyway
-              </label>
-            </div>
+  return (
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      size="2xl"
+      title="Start with AI"
+      description={taskLabel}
+      footer={
+        <>
+          {back || <Button variant="ghost" onClick={onClose}>Cancel</Button>}
+          {step < 3 ? (
+            <Button onClick={next} isLoading={busy === 'preview'} rightIcon={<ArrowRight className="h-4 w-4" aria-hidden />}
+              disabled={loading || busy !== null || (step === 1 ? !chosen1 : setupBlocked)}>
+              Next
+            </Button>
+          ) : mode === 'terminal' ? (
+            <Button onClick={doLaunch} isLoading={busy === 'start'} disabled={loading || launchBlocked || busy !== null}
+              leftIcon={<Terminal className="h-4 w-4" aria-hidden />}>
+              Open the terminal
+            </Button>
+          ) : (
+            <Button onClick={doStart} isLoading={busy === 'start'} disabled={loading || blocked || busy !== null}
+              leftIcon={<Bot className="h-4 w-4" aria-hidden />}>
+              {preview?.needs_approval ? 'Ask for approval' : 'Start the AI'}
+            </Button>
           )}
-
-          {preview?.needs_approval && !stale && (
-            <p className="flex items-start gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700" role="status">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> A manager must approve this run before it starts.
-            </p>
-          )}
-
-          {preview && (
-            <>
-              <p className="text-sm text-secondary-600">
-                <span className="font-medium text-secondary-800">Output:</span>{' '}
-                {builtin && repo === 'none' ? 'Comments and subtasks on the task; its summary is posted there too.' : (
-                  <>
-                    {outputModeLabel(preview.output_mode)}
-                    {preview.output_mode === 'pull_request' && ' — the agent commits on its branch and opens a pull request; nothing is merged.'}
-                  </>
-                )}
-              </p>
-              {limits.info.length > 0 && <p className="text-sm text-secondary-600" data-testid="air-limits">{limits.info.join(' ')}</p>}
-              {canEditPrompt ? (
-                <Textarea id="air-prompt" label={`Prompt${preview.template_version ? ` (template v${preview.template_version})` : ''}`} rows={12}
-                  value={prompt} onChange={(e) => setPrompt(e.target.value)} className="font-mono text-xs" spellCheck={false}
-                  helperText={prompt !== preview.prompt ? 'Edited: the run uses your text.' : 'You may edit it before starting.'} />
-              ) : (
-                <div>
-                  <p className="mb-1.5 text-sm font-medium text-secondary-700" id="air-prompt-label">
-                    Prompt{preview.template_version ? ` (template v${preview.template_version})` : ''}
-                  </p>
-                  <pre aria-labelledby="air-prompt-label" tabIndex={0}
-                    className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-secondary-200 bg-secondary-50 p-3 font-mono text-xs text-secondary-800">
-                    {preview.prompt}
-                  </pre>
-                </div>
-              )}
-            </>
-          )}
-
-          </>
-          )}
-
-          {error && (
-            <p className="flex items-start gap-2 rounded-lg bg-error-500/10 p-3 text-sm text-error-700" role="alert">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {error}
-            </p>
-          )}
+        </>
+      }
+    >
+      {loading ? (
+        <p className="py-8 text-center text-sm text-secondary-500" role="status">Getting things ready…</p>
+      ) : (
+        <div className="space-y-4">
+          {stepper}
+          {step === 1 ? howStep : step === 2 ? (mode === 'terminal' ? termSetup : runSetup) : mode === 'terminal' ? termCheck : runCheck}
+          {errorNote}
         </div>
       )}
     </Modal>
@@ -745,12 +847,13 @@ export function StartWithAIButton({ compact, ...task }: TaskRef & { compact?: bo
   return (
     <>
       {compact ? (
-        <button ref={ref} type="button" onClick={() => setOpen(true)} aria-label={`Start ${task.taskLabel} with AI`}
+        <button ref={ref} type="button" onClick={() => setOpen(true)} aria-label={`Start ${task.taskLabel} with AI`} data-tour="start-ai"
           className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-primary-600 transition hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
           <Bot className="h-3 w-3" aria-hidden /> Start with AI
         </button>
       ) : (
-        <Button ref={ref} size="sm" variant="outline" onClick={() => setOpen(true)} leftIcon={<Bot className="h-4 w-4" aria-hidden />}>
+        <Button ref={ref} size="sm" variant="outline" onClick={() => setOpen(true)} leftIcon={<Bot className="h-4 w-4" aria-hidden />}
+          data-tour="start-ai">
           Start with AI
         </Button>
       )}

@@ -1,18 +1,21 @@
 'use client';
 
 /**
- * AI work panel on a task: latest prompt/context, conversation summary, PRs with manager sign-off,
- * and "Work in the web terminal" (Start with AI in terminal mode, docs/AI_RUNNER_WEB_TERMINAL.md) with its sessions.
+ * AI work panel on a task: latest prompt/context, conversation summary, PRs with manager sign-off, and its web terminal
+ * sessions (docs/AI_RUNNER_WEB_TERMINAL.md). With nothing yet it explains the two ways (Let AI do it / Work on it with AI
+ * myself) and offers Start with AI — the one way in, which asks how — plus "Show me how", a short tour of the page.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { Bot, Check, ExternalLink, GitPullRequest, MessageSquare, Terminal, X } from 'lucide-react';
+import { Bot, Check, Compass, ExternalLink, GitPullRequest, MessageSquare, Terminal, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
   aiRunner, aiError, type TaskPr, type TaskWorkBundle, type TerminalSession,
 } from '@/services/ai-runner.service';
+import { Button } from '@/components/ui';
+import { PageTour, type TourStep } from '@/components/ui/PageTour';
 import { StartWithAIDialog } from './StartWithAIDialog';
 import { BASE, RunStatusBadge, compact, cost, duration, elapsed, useAiRunnerOn, when } from './ui';
 
@@ -62,14 +65,41 @@ function SessionLine({ s }: { s: TerminalSession }) {
   );
 }
 
+/** "Show me how": where to start, the two ways, how the task moves, where it's all kept. */
+const TOUR: TourStep[] = [
+  {
+    target: 'start-ai', title: 'Step 1 · Start here',
+    body: 'Click Start with AI whenever you want AI help with this task. It guides you through the rest, one step at a time.',
+  },
+  {
+    title: 'Step 2 · Choose how',
+    body: (
+      <ul className="list-disc space-y-1 pl-4">
+        <li><strong>Let AI do it</strong>: the AI works on its own and opens a pull request for you to review.</li>
+        <li><strong>Work on it with AI myself</strong>: a terminal opens on the machine, in the task&apos;s folder, with the AI
+          ready for you to guide.</li>
+      </ul>
+    ),
+  },
+  {
+    target: 'task-status', title: 'Step 3 · The task moves by itself',
+    body: 'When the AI opens a pull request, the task moves to Review, and to Done when the pull request is merged.',
+  },
+  {
+    target: 'ai-work', title: 'Step 4 · Follow it here',
+    body: 'Every AI run, terminal session and pull request for this task shows here: what was asked, the cost and a replay.',
+  },
+];
+
 export default function TaskWork({ taskUuid, taskLabel }: { taskUuid: string; taskLabel?: string }) {
   const on = useAiRunnerOn();
   const { hasPermission } = usePermissions();
   const canReview = hasPermission('ai_runs', 'manage') || hasPermission('ai_runs_approvals', 'manage');
-  const canTerminal = hasPermission('ai_runs', 'create') || hasPermission('ai_runs', 'manage');
+  const canStart = hasPermission('ai_runs', 'create') || hasPermission('ai_runs', 'manage');
   const [bundle, setBundle] = useState<TaskWorkBundle | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [tour, setTour] = useState(false);
 
   const load = useCallback(() => {
     if (!on) return;
@@ -99,28 +129,45 @@ export default function TaskWork({ taskUuid, taskLabel }: { taskUuid: string; ta
   const empty = !work && prs.length === 0 && sessions.length === 0;
 
   return (
-    <section className="rounded-xl border border-secondary-200 bg-surface p-4 space-y-3" aria-labelledby="task-ai-work">
+    <section className="rounded-xl border border-secondary-200 bg-surface p-4 space-y-3" aria-labelledby="task-ai-work"
+      data-tour="ai-work">
       <div className="flex items-center gap-2">
         <h2 id="task-ai-work" className="flex items-center gap-1.5 text-xs font-medium text-secondary-500">
           <Bot size={14} aria-hidden /> AI work
         </h2>
-        {canTerminal && (
-          <button type="button" onClick={() => setTerminalOpen(true)}
-            className="ml-auto inline-flex items-center gap-1 rounded-md bg-secondary-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-secondary-800">
-            <Terminal size={12} aria-hidden /> Work in the web terminal
-          </button>
-        )}
+        <button type="button" onClick={() => setTour(true)}
+          className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline">
+          <Compass size={12} aria-hidden /> Show me how
+        </button>
       </div>
-      {terminalOpen && createPortal(
-        <StartWithAIDialog open initialMode="terminal" taskUuid={taskUuid} taskLabel={taskLabel || 'This task'}
-          onClose={() => { setTerminalOpen(false); load(); }} />,
+      {startOpen && createPortal(
+        <StartWithAIDialog open taskUuid={taskUuid} taskLabel={taskLabel || 'This task'}
+          onClose={() => { setStartOpen(false); load(); }} />,
         document.body,
       )}
+      {tour && <PageTour steps={TOUR} onClose={() => setTour(false)} />}
 
       {empty && (
-        <p className="text-sm text-secondary-400">
-          No AI work recorded yet. Use Start with AI, or work on it yourself in the web terminal.
-        </p>
+        <div className="space-y-3" data-testid="ai-work-empty">
+          <p className="text-sm text-secondary-600">Get this task done with AI, in one of two ways:</p>
+          <ul className="space-y-2 text-sm">
+            <li className="flex gap-2">
+              <Bot size={16} className="mt-0.5 shrink-0 text-primary-600" aria-hidden />
+              <span><strong className="text-secondary-900">Let AI do it.</strong>{' '}
+                <span className="text-secondary-600">It works on its own and opens a pull request for you to review.</span></span>
+            </li>
+            <li className="flex gap-2">
+              <Terminal size={16} className="mt-0.5 shrink-0 text-primary-600" aria-hidden />
+              <span><strong className="text-secondary-900">Work on it with AI yourself.</strong>{' '}
+                <span className="text-secondary-600">A terminal opens with the AI ready in the task&apos;s folder; you guide it.</span></span>
+            </li>
+          </ul>
+          {canStart && (
+            <Button size="sm" onClick={() => setStartOpen(true)} leftIcon={<Bot className="h-4 w-4" aria-hidden />}>
+              Start with AI
+            </Button>
+          )}
+        </div>
       )}
 
       {work && (

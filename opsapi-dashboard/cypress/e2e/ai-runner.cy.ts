@@ -268,7 +268,7 @@ describe('AI Runs', () => {
     asSource('/claim', { wait_s: 0 }).its('status').should('eq', 403);
   });
 
-  it('starts the task with AI from the task page, after a preview', () => {
+  it('starts the task with AI from the task page, after the check step', () => {
     heartbeat(); // stay online (< 45 s)
     visit(`/dashboard/projects/${projectUuid}/tasks/${taskUuid}`);
     cy.contains('h1', taskTitle, { timeout: 20000 });
@@ -276,19 +276,27 @@ describe('AI Runs', () => {
 
     cy.get('[role="dialog"]').within(() => {
       cy.contains('Start with AI');
+      // With a web terminal in the workspace, step 1 asks how first: choose "Let AI do it".
+      cy.get('[data-testid="air-steps"]', { timeout: 30000 }).then(($s) => {
+        if ($s.text().includes('How')) {
+          cy.get('[data-testid="air-how-run"]').click();
+          cy.contains('button', 'Next').click();
+        }
+      });
       cy.get('#air-runner', { timeout: 20000 }).select(runnerUuid);
       cy.get('#air-profile').should('have.value', 'fake');
       cy.get('#air-repo').clear().type(repo);
-      cy.contains('Press Preview');
-      cy.contains('button', 'Preview').click();
-      cy.contains('Output:', { timeout: 20000 }).parent().should('contain', 'Pull request');
-      cy.get('#air-prompt, pre[aria-labelledby="air-prompt-label"]').should(($el) => {
+      // Next checks the runner, folder and limits (the old Preview), then shows what happens.
+      cy.contains('button', 'Next').click();
+      cy.get('[data-testid="air-check"]', { timeout: 20000 }).should('contain', 'opens a pull request');
+      cy.contains('summary', 'The instructions the AI gets').click();
+      cy.get('#air-prompt, pre[aria-label="The instructions the AI gets"]').should(($el) => {
         const text = ($el.val() as string) || $el.text();
         expect(text).to.contain(taskTitle).and.to.contain(repo);
       });
-      cy.contains("This run can't start yet").should('not.exist');
+      cy.contains("This can't start yet").should('not.exist');
       cy.screenshot('ai-runner-start-dialog', { capture: 'viewport' });
-      cy.contains('button', /^Start$/).should('not.be.disabled').click();
+      cy.contains('button', 'Start the AI').should('not.be.disabled').click();
     });
 
     cy.location('pathname', { timeout: 20000 }).should('match', /^\/dashboard\/ai-runner\/runs\/[0-9a-f-]{36}$/).then((p) => {

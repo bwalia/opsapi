@@ -1,6 +1,6 @@
 # Web terminal for task work (OpsAPI ↔ workstation-terminal)
 
-**Start with AI → "Work in the web terminal"**: the person picks a folder on the Mac and an agent, and
+**Start with AI → "Work on it with AI myself"**: the person picks a folder on the Mac and an agent, and
 OpsAPI opens the terminal ([bwalia/workstation-terminal](https://github.com/bwalia/workstation-terminal),
 `sshweb`) in a new browser tab. The terminal opens a tab in that folder and starts the agent with the
 task as its first message. OpsAPI shows the session on the task until it ends.
@@ -152,8 +152,10 @@ revoked_at, revoked_by_name, status: active|expired|blocked|replaced|left}`.
 
 `ar_terminal_sessions.status`: `launched` → `active` → `ended`; `launched` rows older than the link
 lifetime show as `expired`. The task's AI work panel lists sessions (who, terminal, folder, agent,
-started, ended, duration) and its **Work in the web terminal** button opens Start with AI in terminal
-mode.
+started, ended, duration). Start with AI is the one way in: it guides in steps — **How** ("Let AI do it" or
+"Work on it with AI myself", the second only when a terminal is connected), **Set it up**, **Check & start**
+("What happens next") — and the AI work panel explains both ways when a task has none yet, with **Show me
+how**, a four-step tour of the task page.
 
 ## 7. Security notes
 
