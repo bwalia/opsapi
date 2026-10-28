@@ -76,9 +76,9 @@ export default function DemoPage() {
                         sign-in. Look around the dashboard with a read-only account, then sign in to the apps.
                     </p>
                     <div className="hero__actions">
-                        <a className="btn-x btn-x--primary" href={DEMO.dashboard}>Open the dashboard</a>
-                        <a className="btn-x btn-x--ghost" href={DEMO.java}>Java app</a>
-                        <a className="btn-x btn-x--ghost" href={DEMO.php}>PHP app</a>
+                        <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--primary" href={DEMO.dashboard}>Open the dashboard</a>
+                        <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={DEMO.java}>Java app</a>
+                        <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={DEMO.php}>PHP app</a>
                     </div>
                 </div>
             </section>
@@ -105,10 +105,10 @@ export default function DemoPage() {
                         <Table
                             head={['Host', 'What it is']}
                             rows={[
-                                [<a key="d" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a>, 'OpsAPI admin dashboard'],
-                                [<a key="i" href={`${DEMO.identity}/health`}>identity.demo.opsapi.org</a>, 'OpsAPI API and sign-in page'],
-                                [<a key="j" href={DEMO.java}>hello-java.demo.opsapi.org</a>, 'Spring Boot demo app'],
-                                [<a key="p" href={DEMO.php}>hello-php.demo.opsapi.org</a>, 'PHP demo app'],
+                                [<a target="_blank" rel="noopener noreferrer" key="d" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a>, 'OpsAPI admin dashboard'],
+                                [<a target="_blank" rel="noopener noreferrer" key="i" href={`${DEMO.identity}/health`}>identity.demo.opsapi.org</a>, 'OpsAPI API and sign-in page'],
+                                [<a target="_blank" rel="noopener noreferrer" key="j" href={DEMO.java}>hello-java.demo.opsapi.org</a>, 'Spring Boot demo app'],
+                                [<a target="_blank" rel="noopener noreferrer" key="p" href={DEMO.php}>hello-php.demo.opsapi.org</a>, 'PHP demo app'],
                             ]}
                         />
                     </div>
@@ -129,7 +129,7 @@ export default function DemoPage() {
                     <div>
                         <h2>Tour the admin dashboard</h2>
                         <ol className="steps">
-                            <li>Open <a href={DEMO.dashboard}>dashboard.demo.opsapi.org</a> and sign in with the demo login. No emailed code is needed in this workspace.</li>
+                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a> and sign in with the demo login. No emailed code is needed in this workspace.</li>
                             <li><strong>Users:</strong> see the sample team and each person's role: owner, admin, developer, member.</li>
                             <li><strong>Roles:</strong> open a role to see its <code>module.action</code> permissions, and the read-only <em>viewer</em> role you're signed in with.</li>
                             <li><strong>Workspace and settings:</strong> see how a tenant is configured, including whether members need an emailed code.</li>
@@ -139,10 +139,10 @@ export default function DemoPage() {
                     <div>
                         <h2>Sign in to the apps</h2>
                         <ol className="steps">
-                            <li>Open <a href={DEMO.java}>hello-java</a> and choose “Login with OpsAPI”. The app sends you to OpsAPI's sign-in page.</li>
+                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.java}>hello-java</a> and choose “Login with OpsAPI”. The app sends you to OpsAPI's sign-in page.</li>
                             <li>Sign in with the demo login, or with your own Google account. Google sign-ins join the private <em>demo</em> workspace as a member.</li>
                             <li>You come back signed in. The app asked OpsAPI who you are with one call to <code>/auth/me</code> and shows your workspace and role.</li>
-                            <li>Open <a href={DEMO.php}>hello-php</a> and log in there too: same account, a different language and framework.</li>
+                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.php}>hello-php</a> and log in there too: same account, a different language and framework.</li>
                             <li>Sign out everywhere from either app; the next sign-in asks again.</li>
                         </ol>
                     </div>
@@ -160,7 +160,7 @@ export default function DemoPage() {
                             ['Signed-in pages', <code key="3">/api/secure/me, /api/secure/resource</code>, <code key="4">/dashboard</code>],
                             ['Checks the token by', <code key="5">GET /auth/me</code>, <code key="6">GET /auth/me</code>],
                             ['Forged callback', '400', '400'],
-                            ['Code', <a key="7" href="https://github.com/bwalia/workflow-examples/tree/main/hello-java">workflow-examples/hello-java</a>, <a key="8" href="https://github.com/bwalia/workflow-examples/tree/main/php-ringpromoter-cve-patching">workflow-examples/php-…</a>],
+                            ['Code', <a target="_blank" rel="noopener noreferrer" key="7" href="https://github.com/bwalia/workflow-examples/tree/main/hello-java">workflow-examples/hello-java</a>, <a target="_blank" rel="noopener noreferrer" key="8" href="https://github.com/bwalia/workflow-examples/tree/main/php-ringpromoter-cve-patching">workflow-examples/php-…</a>],
                         ]}
                     />
                     <p>
