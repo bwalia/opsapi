@@ -325,7 +325,7 @@ export function opsapiUrl(): string {
   return /^https?:\/\//.test(base) ? base.replace(/\/$/, '') : `${window.location.origin}${base}`.replace(/\/$/, '');
 }
 
-function copy(text: string, what: string) {
+export function copy(text: string, what: string) {
   navigator.clipboard.writeText(text).then(() => toast.success(`${what} copied`), () => toast.error('Could not copy'));
 }
 

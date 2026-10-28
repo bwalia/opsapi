@@ -2665,7 +2665,8 @@ local _migrations = {
     ['zzua5_activity_daily_rollup'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 5),
     ['zzua6_activity_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 6),
     ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
-    -- "developer" roles were seeded with no access at all, so a new developer signed in to an empty dashboard.
+    -- "developer" roles were seeded with no access at all, so a new developer signed in to an empty dashboard:
+    -- seed the developer preset into every existing developer role (adds, never removes).
     ['zzemp5_developer_role_preset'] = conditional(ProjectConfig.FEATURES.CORE, function()
         require("queries.NamespaceRoleQueries").backfillDeveloperPreset()
     end),

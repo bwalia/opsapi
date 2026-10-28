@@ -741,25 +741,32 @@ NamespaceRoleQueries.DEVELOPER_PERMISSIONS = {
 }
 local DEVELOPER_LANDING = "/dashboard/my-tasks"
 
---- Give every "developer" role that still has no access at all the developer preset
---- (roles a workspace already set up are left alone). Used by a one-off migration.
+--- Seed the developer preset into every existing "developer" role: adds the preset's actions to what the
+--- role already has (never removes any) and sets My tasks as its landing page when it has none.
+--- Used by a one-off migration; safe to run again.
 function NamespaceRoleQueries.backfillDeveloperPreset()
-    local perms = cjson.encode(knownModulesOnly(NamespaceRoleQueries.DEVELOPER_PERMISSIONS))
+    local preset = knownModulesOnly(NamespaceRoleQueries.DEVELOPER_PERMISSIONS)
     for _, r in ipairs(db.select("id, permissions FROM namespace_roles WHERE role_name = 'developer'")) do
-        local ok, p = pcall(cjson.decode, r.permissions or "{}")
-        local empty = true
-        if ok and type(p) == "table" then
-            for _, actions in pairs(p) do
-                if type(actions) == "table" and #actions > 0 then empty = false break end
+        local ok, perms = pcall(cjson.decode, r.permissions or "{}")
+        if not ok or type(perms) ~= "table" then perms = {} end
+        local changed = false
+        for mod, actions in pairs(preset) do
+            local have = type(perms[mod]) == "table" and perms[mod] or {}
+            local seen = {}
+            for _, a in ipairs(have) do seen[a] = true end
+            for _, a in ipairs(actions) do
+                if not seen[a] and not seen.manage then
+                    table.insert(have, a)
+                    changed = true
+                end
             end
+            perms[mod] = have
         end
-        if empty then
-            db.update("namespace_roles", {
-                permissions = perms,
-                landing_path = db.raw("COALESCE(landing_path, " .. db.escape_literal(DEVELOPER_LANDING) .. ")"),
-                updated_at = db.raw("NOW()"),
-            }, { id = r.id })
-        end
+        db.update("namespace_roles", {
+            permissions = changed and cjson.encode(perms) or nil,
+            landing_path = db.raw("COALESCE(NULLIF(landing_path, ''), " .. db.escape_literal(DEVELOPER_LANDING) .. ")"),
+            updated_at = db.raw("NOW()"),
+        }, { id = r.id })
     end
 end
 

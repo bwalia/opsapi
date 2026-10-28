@@ -386,6 +386,15 @@ function T.keys(ns, term)
     return U.array(out)
 end
 
+--- The switched-on terminals this person has a live key for, with what they need to sign in: the address,
+--- their terminal user name, when the key stops working, and whether tasks can sign them in by email code.
+function T.mine(ns, user_uuid)
+    return U.array(db.query([[SELECT t.uuid, t.name, t.url, t.autologin, k.terminal_user, k.expires_at
+        FROM ar_terminal_keys k JOIN ar_terminals t ON t.id = k.terminal_id
+        WHERE k.namespace_id = ? AND k.user_uuid = ? AND t.is_active AND ]] .. LIVE_KEY .. [[
+        ORDER BY lower(t.name) LIMIT 20]], ns, user_uuid))
+end
+
 --- Active members a key can be issued to.
 function T.key_candidates(ns)
     return U.array(db.query([[SELECT u.uuid, ]] .. R.name_sql("u") .. [[ AS name, u.email FROM namespace_members m

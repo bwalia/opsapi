@@ -36,8 +36,8 @@ end
 local dev = nrq:match('role_name = "developer",(.-)}%)')
 check("new developer roles get the preset", dev and dev:find("DEVELOPER_PERMISSIONS", 1, true) ~= nil)
 check("new developer roles land on My tasks", dev and dev:find("DEVELOPER_LANDING", 1, true) ~= nil)
-check("backfill only touches developer roles with no access",
-    nrq:find("if empty then", 1, true) ~= nil and nrq:find("role_name = 'developer'", 1, true) ~= nil)
+check("backfill seeds every developer role and only adds",
+    nrq:find("role_name = 'developer'", 1, true) ~= nil and nrq:find("table.insert(have, a)", 1, true) ~= nil)
 
 print("\nmigrations:")
 local mig = read("lapis/migrations.lua")
