@@ -341,6 +341,8 @@ app:before_filter(function(self)
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
         ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
         ["/auth/logout"] = true,         -- Logout (revokes refresh token)
+        ["/auth/signin"] = true,         -- Hosted "Login with OpsAPI" page for trusted apps
+        ["/auth/signout"] = true,        -- Hosted sign-out, back to a trusted app
     }
 
     -- /api/v2/<code>/public/... is public only for a registered plugin whose
@@ -454,6 +456,7 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+safe_load_routes("routes.auth-signin") -- hosted "Login with OpsAPI" (lib/hosted-signin.lua)
 -- TEST-ONLY: E2E OTP peek endpoint (POST /auth/e2e/peek-otp). Registered ONLY
 -- when E2E_OTP_PEEK_ENABLED=true (acc), so the route is physically absent in
 -- real production. The handler additionally enforces a shared secret, a valid
