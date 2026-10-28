@@ -110,7 +110,12 @@ function EmployeeQueries.getEmployee(namespace_id, uuid)
     return rows and rows[1] and shape_employee(rows[1]) or nil
 end
 
-local TEXT_FIELDS = { "employee_code", "job_title", "phone", "email", "region", "fgas_certificate_no" }
+local TEXT_FIELDS = { "employee_code", "job_title", "phone", "email", "region" }
+-- The F-Gas column only exists where field service is deployed (field-service-fgas.lua).
+local ProjectConfig = require("helper.project-config")
+if ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.FIELD_SERVICE) then
+    table.insert(TEXT_FIELDS, "fgas_certificate_no")
+end
 
 function EmployeeQueries.createEmployee(namespace_id, actor_uuid, data)
     local user_uuid = nilify(data.user_uuid)
@@ -201,12 +206,16 @@ function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
     -- page straight away (with no job title it used to be skipped, and the page
     -- said "No employees yet"). Failing it must not undo the login. is_engineer
     -- is an explicit opt-in (a field-service concept), not inferred from the role.
-    local employee = EmployeeQueries.createEmployee(namespace_id, actor_uuid, {
+    local ok_emp, employee = pcall(EmployeeQueries.createEmployee, namespace_id, actor_uuid, {
         user_uuid = user.uuid, is_engineer = to_bool(data.is_engineer, false), is_active = true,
-        job_title = data.job_title, phone = data.phone, region = data.region,
+        job_title = data.job_title, phone = data.phone, region = data.region, email = email,
         skills = data.skills, fgas_certificate_no = data.fgas_certificate_no,
         hourly_cost_rate = data.hourly_cost_rate,
     })
+    if not ok_emp then
+        ngx.log(ngx.ERR, "[employees] profile for new team member failed: ", tostring(employee))
+        employee = nil
+    end
 
     local name = ((first or "") .. " " .. (last or "")):gsub("^%s+", ""):gsub("%s+$", "")
     return {

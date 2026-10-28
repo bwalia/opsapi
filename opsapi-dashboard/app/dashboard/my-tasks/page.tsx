@@ -10,6 +10,7 @@ import { Button, Card, Pagination } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { TaskLinkRow } from '@/components/tasks/TaskBits';
+import MyTerminalAccess from '@/components/ai-runner/MyTerminalAccess';
 import { useDataFetch } from '@/hooks';
 import { formatPriority, kanbanService, localDate, type MyTask, type MyTasksDue } from '@/services/kanban.service';
 import type { KanbanTaskPriority } from '@/types';
@@ -70,6 +71,8 @@ function MyTasksContent() {
           </Button>
         }
       />
+
+      <MyTerminalAccess />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="group" aria-label="Which tasks" className="inline-flex rounded-lg border border-secondary-200 bg-surface p-1">

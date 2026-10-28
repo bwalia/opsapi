@@ -2667,6 +2667,16 @@ local _migrations = {
     ['zzua5_activity_daily_rollup'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 5),
     ['zzua6_activity_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 6),
     ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
+    -- "developer" roles were seeded with no access at all, so a new developer signed in to an empty dashboard:
+    -- seed the developer preset into every existing developer role (adds, never removes).
+    ['zzemp5_developer_role_preset'] = conditional(ProjectConfig.FEATURES.CORE, function()
+        require("queries.NamespaceRoleQueries").backfillDeveloperPreset()
+    end),
+    -- Task/project notification links were stored without /dashboard (the page 404'd).
+    ['zzkb1_notification_dashboard_links'] = conditional(ProjectConfig.FEATURES.KANBAN, function()
+        db.query([[UPDATE kanban_notifications SET action_url = '/dashboard' || action_url
+            WHERE action_url LIKE '/projects/%']])
+    end),
     -- Auth hardening: per-account throttles, hashed OTP codes (migrations/auth-hardening.lua)
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),

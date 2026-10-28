@@ -119,6 +119,11 @@ return function(app)
     end)))
 
     -- §10: keys managers issue to people for a terminal.
+    -- Anyone in the workspace: the terminals they hold a key for (their own "how to sign in" card).
+    app:get("/my-terminals", sdk.handler({}, U.guard(function(self)
+        return sdk.ok(T.mine(sdk.namespace_id(self), sdk.user(self).uuid))
+    end)))
+
     app:get("/terminals/:uuid/keys", sdk.handler({ permission = "ai_runners.manage" }, U.guard(function(self)
         local ns = sdk.namespace_id(self)
         return sdk.ok({ keys = T.keys(ns, terminal_or_404(ns, self.params.uuid)), people = T.key_candidates(ns) })

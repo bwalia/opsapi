@@ -415,6 +415,17 @@ export interface TerminalConnection {
   refused_secs_ago?: number;
 }
 /** §10: a key a manager issued someone for a terminal (only its public half is kept). */
+/** A terminal the signed-in person holds a live key for: what they need to sign in to it. */
+export interface MyTerminal {
+  uuid: string;
+  name: string;
+  url: string;
+  /** Start with AI can sign them in from a task after an emailed code. */
+  autologin: boolean;
+  terminal_user: string;
+  expires_at: string;
+}
+
 export interface TerminalAccessKey {
   uuid: string;
   user_uuid: string;
@@ -996,6 +1007,8 @@ export const aiRunner = {
     send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys`, body),
   blockTerminalKey: (uuid: string, keyUuid: string) =>
     send<{ blocked: boolean }>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/block`),
+  /** Anyone in the workspace: the terminals they hold a key for. */
+  myTerminals: async () => (await get<MyTerminal[]>('/my-terminals')).data,
 
   // Work log (§11): everyone's with ai_terminal_worklogs.read, else only your own.
   workLog: async (f: WorkLogFilters = {}) => {

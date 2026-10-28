@@ -5,7 +5,7 @@
  * them to the workspace with one of the workspace's own roles, and (optionally)
  * a staff/engineer profile. On success it shows a temporary password to hand
  * over; they also get a welcome email. Generic (not field-service-specific): the
- * roles come from this workspace, and the engineer fields are an explicit opt-in.
+ * roles come from this workspace, and the engineer fields only show where field service is on.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -15,6 +15,7 @@ import { Modal, Button, Input, Select } from '@/components/ui';
 import { employeeService } from '@/services/employees.service';
 import { namespaceService } from '@/services/namespace.service';
 import { apiError, optional, CheckboxField } from '@/components/field-service/shared';
+import { useFieldServiceOn } from './EmployeeFormModal';
 import type { NamespaceRole } from '@/types';
 
 interface Props {
@@ -55,6 +56,7 @@ function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated
   const [rolesLoaded, setRolesLoaded] = useState(false);
   const [isEngineer, setIsEngineer] = useState(false);
   const [saving, setSaving] = useState(false);
+  const fieldService = useFieldServiceOn();
   const [done, setDone] = useState<{ name: string; email: string; temp_password: string } | null>(null);
 
   // The role choices are this workspace's own roles (never a hardcoded set).
@@ -197,14 +199,16 @@ function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated
         <Input label="Job title" value={form.job_title} onChange={set('job_title')} placeholder="Optional" />
       </div>
 
-      <CheckboxField
-        label="Field engineer"
-        hint="Can be assigned to site visits (adds an engineer profile)"
-        checked={isEngineer}
-        onChange={setIsEngineer}
-      />
+      {fieldService && (
+        <CheckboxField
+          label="Field engineer"
+          hint="Can be sent on site visits (adds an engineer profile)"
+          checked={isEngineer}
+          onChange={setIsEngineer}
+        />
+      )}
 
-      {isEngineer && (
+      {fieldService && isEngineer && (
         <div className="rounded-xl border border-secondary-200 p-3 space-y-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary-400">Engineer details (optional)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

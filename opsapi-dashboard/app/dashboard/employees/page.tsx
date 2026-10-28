@@ -4,8 +4,8 @@
  * Employees — /dashboard/employees
  *
  * A generic staff directory (a CORE module: available to any workspace, not tied
- * to field service). Staff are linked to their workspace logins; an "engineer" is
- * an active employee flagged Engineer (used by field service when it's enabled).
+ * to field service). Staff are linked to their workspace logins; the engineer flag
+ * and its filter only show where the workspace has field service.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { employeeService, type Employee } from '@/services/employees.service';
 import { Pill, FilterSelect, apiError } from '@/components/field-service/shared';
-import EmployeeFormModal from '@/components/employees/EmployeeFormModal';
+import EmployeeFormModal, { useFieldServiceOn } from '@/components/employees/EmployeeFormModal';
 import TeamMemberModal from '@/components/employees/TeamMemberModal';
 import type { TableColumn } from '@/types';
 
@@ -51,6 +51,7 @@ function EmployeesPageContent() {
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fetchIdRef = useRef(0);
+  const fieldService = useFieldServiceOn();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -134,7 +135,7 @@ function EmployeesPageContent() {
       },
       {
         key: 'roles',
-        header: 'Role',
+        header: 'Status',
         render: (emp) => (
           <div className="flex flex-wrap items-center gap-1.5">
             {emp.is_engineer && (
@@ -245,15 +246,17 @@ function EmployeesPageContent() {
               leftIcon={<Search className="w-4 h-4" />}
             />
           </div>
-          <FilterSelect
-            value={roleFilter}
-            onChange={(v) => {
-              setRoleFilter(v);
-              setCurrentPage(1);
-            }}
-            options={ROLE_OPTIONS}
-            ariaLabel="Filter by role"
-          />
+          {fieldService && (
+            <FilterSelect
+              value={roleFilter}
+              onChange={(v) => {
+                setRoleFilter(v);
+                setCurrentPage(1);
+              }}
+              options={ROLE_OPTIONS}
+              ariaLabel="Filter by role"
+            />
+          )}
           <FilterSelect
             value={statusFilter}
             onChange={(v) => {
