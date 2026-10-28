@@ -1,0 +1,70 @@
+# Puts the public demo account (demo@opsapi.org, published on opsapi.org/demo)
+# back every 30 minutes: its password, active flag and read-only role in the
+# showcase workspace. A visitor can change the password or deactivate the
+# account from inside the dashboard; this undoes it. The hash is of the
+# published password, so it isn't a secret.
+#
+#   kubectl apply -f devops/demo/demo-account-reset.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-account-reset
+  namespace: demo
+data:
+  reset.sql: |
+    BEGIN;
+    UPDATE users SET password = '$2b$10$j3Ou29ZVSJhRsAKK0M6nI.MATBGAwMXNOU3OWi6qWogO7Yhw9DfHy', active = true, updated_at = NOW()
+     WHERE email = 'demo@opsapi.org';
+    DELETE FROM namespace_user_roles WHERE namespace_member_id IN (
+      SELECT m.id FROM namespace_members m JOIN users u ON u.id = m.user_id
+       JOIN namespaces n ON n.id = m.namespace_id
+       WHERE u.email = 'demo@opsapi.org' AND n.slug = 'showcase');
+    UPDATE namespace_members SET status = 'active', is_owner = false
+     WHERE user_id = (SELECT id FROM users WHERE email = 'demo@opsapi.org')
+       AND namespace_id = (SELECT id FROM namespaces WHERE slug = 'showcase');
+    INSERT INTO namespace_user_roles (uuid, namespace_member_id, namespace_role_id, created_at, updated_at)
+    SELECT gen_random_uuid()::text, m.id, r.id, NOW(), NOW()
+      FROM namespace_members m JOIN users u ON u.id = m.user_id
+      JOIN namespaces n ON n.id = m.namespace_id
+      JOIN namespace_roles r ON r.namespace_id = n.id AND r.role_name = 'viewer'
+     WHERE u.email = 'demo@opsapi.org' AND n.slug = 'showcase';
+    UPDATE namespaces SET mfa_required = false WHERE slug = 'showcase';
+    COMMIT;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: demo-account-reset
+  namespace: demo
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            net-region: home
+            kubernetes.io/arch: amd64
+          containers:
+            - name: reset
+              image: pgvector/pgvector:pg16
+              command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "opsapi-demo-db", "-U", "pguser", "-d", "opsapi_demo", "-f", "/sql/reset.sql"]
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: opsapi-demo-db-auth
+                      key: POSTGRES_PASSWORD
+              volumeMounts:
+                - name: sql
+                  mountPath: /sql
+          volumes:
+            - name: sql
+              configMap:
+                name: demo-account-reset

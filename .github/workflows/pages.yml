@@ -1,0 +1,91 @@
+# Publishes the opsapi.org website (website/, a Next.js static export) to
+# GitHub Pages. The site is served to the public through the wslproxy edge:
+#
+#   browser -> opsapi.org --(Cloudflare CNAME, DNS only)--> edge PoP
+#   (wslproxy; TLS with Let's Encrypt) -> rule opsapi-website-pages:
+#   305 to https://bwalia.github.io/opsapi with Host bwalia.github.io -> Pages
+#
+# GitHub Pages therefore has NO custom domain (no CNAME file): the edge owns the
+# hostname and Pages only serves bwalia.github.io/opsapi/. A custom domain on
+# Pages would redirect back to opsapi.org, a loop. www.opsapi.org 301s to the
+# apex at the edge. The site has no basePath: the edge prefixes /opsapi.
+name: Deploy website (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and publish website/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (static export to website/out)
+        run: npm run build
+
+      - name: Check internal links resolve
+        run: |
+          set -euo pipefail
+          missing=0
+          while read -r ref; do
+            path="out${ref%/}"
+            if [ ! -e "$path" ] && [ ! -e "$path/index.html" ] && [ ! -e "$path.html" ]; then
+              echo "::error::missing $ref"; missing=1
+            fi
+          done < <(grep -rhoE 'href="/[^"#?]*' out --include=*.html | sed 's/^href="//' | sort -u)
+          exit "$missing"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/out
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Check the live site through the edge
+        run: |
+          for path in / /features/ /demo/ /technotes/ /blog/; do
+            for i in $(seq 1 12); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "https://opsapi.org${path}?v=${GITHUB_SHA}" || echo 000)
+              [ "$code" = 200 ] && break; sleep 10
+            done
+            echo "https://opsapi.org${path} -> ${code}"
+          done

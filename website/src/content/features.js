@@ -1,0 +1,109 @@
+// Every feature listed here exists in bwalia/opsapi (lapis/helper/project-config.lua
+// FEATURES, lapis/routes/*). `flag` is the feature switch a deployment's
+// PROJECT_CODE turns on; `core` is always on.
+
+export const FEATURE_GROUPS = [
+    {
+        id: 'identity',
+        title: 'Sign-in and security',
+        blurb: 'One sign-in for every app, with the protections each app would otherwise rebuild.',
+        items: [
+            { name: 'Email and password', flag: 'core', text: 'bcrypt passwords, lockout after failed attempts, per-IP rate limits, reset links only to trusted origins.' },
+            { name: 'Two-factor codes', flag: 'core', text: 'Six-digit codes by email; each workspace owner decides whether members need one. Platform admins always do.' },
+            { name: 'Google and Apple', flag: 'core', text: 'Google OAuth and Sign in with Apple, on the web and from native apps (ID token validation).' },
+            { name: 'Hosted sign-in page', flag: 'core', text: '“Sign in with OpsAPI” at /auth/signin: apps redirect there and get a token back, with silent sign-in when a session exists.' },
+            { name: 'Refresh tokens and PIN', flag: 'core', text: 'Rotating refresh tokens in an HttpOnly cookie or body, plus an optional PIN for quick unlock.' },
+            { name: 'API keys', flag: 'core', text: 'Long-lived keys for servers and scripts, scoped to a workspace.' },
+            { name: 'Audit trail and activity', flag: 'core', text: 'Sign-in events, user activity and an audit trail of changes, per workspace.' },
+        ],
+    },
+    {
+        id: 'tenancy',
+        title: 'Workspaces and roles',
+        blurb: 'Multi-tenant from the first table: every business row carries its workspace.',
+        items: [
+            { name: 'Workspaces (namespaces)', flag: 'core', text: 'Resolved per request from a header, the JWT or the subdomain; members, owners and invitations.' },
+            { name: 'Roles and permissions', flag: 'core', text: 'module.action permissions (manage = everything) on roles per workspace; owner, admin, member seeded.' },
+            { name: 'Groups and invitations', flag: 'core', text: 'Invite by email, accept by link, group people for assignment.' },
+            { name: 'Backend-driven menu', flag: 'menu', text: 'The dashboard sidebar comes from the API, per workspace and role.' },
+            { name: 'Workspace mail and AI providers', flag: 'core', text: 'Each workspace can bring its own outgoing mail settings and AI model provider.' },
+            { name: 'Employees', flag: 'core', text: 'People records that other modules (timesheets, field service) build on.' },
+        ],
+    },
+    {
+        id: 'platform',
+        title: 'Platform and extension',
+        blurb: 'Grow the API without forking it.',
+        items: [
+            { name: 'Feature presets', flag: 'core', text: 'PROJECT_CODE picks which modules a deployment loads; disabled modules have no routes and no tables.' },
+            { name: 'Plugins', flag: 'core', text: 'A folder of Lua gets auth, tenancy, RBAC, migrations, dashboard pages, event listeners and scheduled jobs.' },
+            { name: 'Outbound webhooks', flag: 'core', text: 'Workspaces send their events to their own URLs, signed and retried.' },
+            { name: 'OpenAPI and Swagger', flag: 'core', text: 'The spec at /openapi.json and an explorer at /swagger, generated from the routes.' },
+            { name: 'TypeScript SDK', flag: 'core', text: '@opsapi/client: typed calls for every endpoint, sign-in with 2FA, pagination, retries and webhook checks.' },
+            { name: 'Error catalog', flag: 'core', text: 'Every error has a code, a human message and a correlation id, recorded for support.' },
+            { name: 'Themes', flag: 'themes', text: 'WordPress-style themes per workspace for public pages.' },
+            { name: 'Secret vault', flag: 'vault', text: 'Encrypted secrets per workspace with pluggable vault providers.' },
+            { name: 'GitHub services', flag: 'services', text: 'Trigger and track GitHub workflows, plus domain management.' },
+        ],
+    },
+    {
+        id: 'business',
+        title: 'Business modules',
+        blurb: 'Switch on the ones a product needs.',
+        items: [
+            { name: 'CRM', flag: 'crm', text: 'Accounts, contacts, deals, pipelines, activities and public lead capture.' },
+            { name: 'Invoicing', flag: 'invoicing', text: 'Invoices, PDFs, payments and templates.' },
+            { name: 'Accounting', flag: 'accounting', text: 'Bookkeeping, VAT returns and trial balance, with AI-assisted categorisation.' },
+            { name: 'UK tax filing (HMRC MTD)', flag: 'tax_copilot', text: 'Bank statement extraction, AI classification and Making Tax Digital submission with anti-fraud headers.' },
+            { name: 'Bank transactions', flag: 'bank_transactions', text: 'Import and track bank transactions.' },
+            { name: 'Timesheets', flag: 'timesheets', text: 'Time entry and approval.' },
+            { name: 'Kanban', flag: 'kanban', text: 'Projects, boards, sprints, epics, tasks, labels and time tracking.' },
+            { name: 'Chat', flag: 'chat', text: 'Channels, messages, mentions and reactions, with an AI agent.' },
+            { name: 'Push notifications', flag: 'notifications', text: 'Device tokens with FCM and APNs delivery.' },
+            { name: 'E-commerce', flag: 'ecommerce', text: 'Stores, products, variants, carts, orders and Stripe payments.' },
+            { name: 'Delivery', flag: 'delivery', text: 'Delivery partners, verification, pricing, requests and assignments.' },
+            { name: 'Reviews', flag: 'reviews', text: 'Product and store reviews.' },
+            { name: 'AI hardware shop', flag: 'shop', text: 'Configurable catalogue, quotes, carts, Stripe checkout and RAG-backed chat.' },
+            { name: 'Billing and entitlements', flag: 'billing', text: 'Apps, plans, subscriptions, entitlements and signed licences.' },
+            { name: 'Hospital and care', flag: 'hospital', text: 'Hospitals, wards, patients, care plans, medications, care logs and access controls.' },
+            { name: 'Field service', flag: 'field_service', text: 'Service requests, jobs, site visits, assets, parts, contracts and reports.' },
+            { name: 'Academy (LMS)', flag: 'academy', text: 'Courses and lessons with rich content, instructors and paid enrolment.' },
+            { name: 'CMS', flag: 'cms', text: 'Website pages and blog posts with media, taxonomy and rebuild webhooks.' },
+            { name: 'Forms', flag: 'forms', text: 'Public forms, responses and records created from them.' },
+            { name: 'Hiring (ATS)', flag: 'ats', text: 'Jobs, candidates and AI first-round interviews.' },
+        ],
+    },
+    {
+        id: 'ops',
+        title: 'Running it',
+        blurb: 'Built to be operated, not just installed.',
+        items: [
+            { name: 'One container', flag: 'core', text: 'bwalia/opsapi on Docker Hub: OpenResty with Lua in the Nginx workers, no separate app server.' },
+            { name: 'Local stack in one command', flag: 'core', text: 'start.sh brings up the API, dashboard, PostgreSQL, Redis, MinIO, Kafka, Grafana and Prometheus.' },
+            { name: 'Kubernetes chart', flag: 'core', text: 'Helm chart with a pre-upgrade migrate job, secrets from a vault, rolling updates and graceful drain.' },
+            { name: 'Health and metrics', flag: 'core', text: '/health, /ready, /live and Prometheus /metrics with Grafana dashboards.' },
+            { name: 'Admin dashboard', flag: 'core', text: 'A Next.js dashboard for every module, driven by the API’s menu and permissions.' },
+        ],
+    },
+];
+
+// PROJECT_CODE presets and the modules each loads (from ProjectConfig.PROJECT_FEATURES;
+// core, menu and themes are left out where present). Codes combine with commas.
+export const PRESETS = [
+    { code: 'all', modules: ['every module'] },
+    { code: 'core_only', modules: ['sign-in, workspaces and roles only'] },
+    { code: 'business', modules: ['crm', 'timesheets', 'invoicing', 'accounting', 'kanban', 'notifications', 'forms'] },
+    { code: 'tax_copilot', modules: ['tax_copilot', 'notifications'] },
+    { code: 'ecommerce', modules: ['ecommerce', 'delivery', 'reviews', 'shop', 'notifications', 'forms'] },
+    { code: 'ecommerce_chat', modules: ['ecommerce', 'delivery', 'chat', 'reviews', 'notifications', 'forms'] },
+    { code: 'collaboration', modules: ['chat', 'kanban', 'vault', 'services', 'notifications', 'forms'] },
+    { code: 'field_service', modules: ['field_service', 'ecommerce', 'timesheets', 'invoicing', 'notifications', 'forms'] },
+    { code: 'property', modules: ['crm', 'kanban', 'invoicing', 'notifications', 'forms'] },
+    { code: 'hospital', modules: ['hospital', 'notifications', 'forms'] },
+    { code: 'cms', modules: ['cms', 'forms'] },
+    { code: 'academy', modules: ['academy', 'forms'] },
+    { code: 'billing', modules: ['billing', 'notifications', 'forms'] },
+    { code: 'services', modules: ['services'] },
+    { code: 'forms', modules: ['forms'] },
+    { code: 'ats', modules: ['ats'] },
+];

@@ -1,0 +1,18 @@
+{
+  "name": "opsapi-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "opsapi.org: the OpsAPI website (static export, served by GitHub Pages behind the wslproxy edge)",
+  "scripts": {
+    "dev": "next dev -p 3110",
+    "build": "next build",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.3",
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "sass": "^1.72.0"
+  }
+}
