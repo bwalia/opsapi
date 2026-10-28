@@ -26,7 +26,10 @@ SET name                     = 'Demo',
     allowed_redirect_origins = ARRAY[
         'https://dashboard.demo.opsapi.org',
         'https://hello-java.demo.opsapi.org',
-        'https://hello-php.demo.opsapi.org'
+        'https://hello-php.demo.opsapi.org',
+        'https://hello-python.demo.opsapi.org',
+        'https://hello-rust.demo.opsapi.org',
+        'https://hello-go.demo.opsapi.org'
     ],
     updated_at               = NOW()
 WHERE slug = 'demo';

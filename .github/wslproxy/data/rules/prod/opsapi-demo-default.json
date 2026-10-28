@@ -33,6 +33,9 @@
     "host:identity.demo.opsapi.org",
     "host:dashboard.demo.opsapi.org",
     "host:hello-java.demo.opsapi.org",
-    "host:hello-php.demo.opsapi.org"
+    "host:hello-php.demo.opsapi.org",
+    "host:hello-python.demo.opsapi.org",
+    "host:hello-rust.demo.opsapi.org",
+    "host:hello-go.demo.opsapi.org"
   ]
 }
