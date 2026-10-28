@@ -149,6 +149,19 @@ local SCRIPT = [[
       });
     });
   }
+  // /auth/login reads form fields only (self.params); a JSON body is ignored
+  // there, which reads as "identifier required". The others decode JSON.
+  function postForm(path, fields) {
+    return fetch(path, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams(fields).toString()
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (b) {
+        return { ok: r.ok, status: r.status, body: b };
+      });
+    });
+  }
   function back(token) {
     location.replace(cfg.frontend + '/auth/callback?token=' + encodeURIComponent(token) +
       '&redirect=' + encodeURIComponent(cfg.from));
@@ -178,7 +191,7 @@ local SCRIPT = [[
     ev.preventDefault();
     fail('');
     $('signin-submit').disabled = true;
-    post('/auth/login', { username: $('email').value.trim(), password: $('password').value }).then(function (r) {
+    postForm('/auth/login', { username: $('email').value.trim(), password: $('password').value }).then(function (r) {
       $('signin-submit').disabled = false;
       if (r.ok && r.body.token) return back(r.body.token);
       if (r.ok && r.body.requires_2fa) {

@@ -70,6 +70,9 @@ check("Google carries the same frontend_url and from",
 check("script and style carry the nonce", html:find('<script nonce="n0nce">', 1, true)
     and html:find('<style nonce="n0nce">', 1, true))
 check("script tries silent SSO first", html:find("'/auth/refresh'", 1, true))
+-- /auth/login reads form fields only: a JSON body fails as "identifier required".
+check("password sign-in is posted form-encoded", html:find("postForm('/auth/login'", 1, true)
+    and html:find("application/x-www-form-urlencoded", 1, true))
 check("script returns to <app>/auth/callback?token=&redirect=",
     html:find("cfg.frontend + '/auth/callback?token='", 1, true) and html:find("'&redirect='", 1, true))
 check("no Google button when Google isn't configured",
