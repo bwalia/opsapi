@@ -243,7 +243,7 @@ end
 -- Fallback for namespaces with no active theme.
 --
 -- A preset whose slug equals the project_code is that project's own look, so it
--- wins; otherwise the first-seeded preset (OpsAPI Bright) does. That is how a
+-- wins; otherwise the first-seeded preset (OpsAPI, slug "light") does. That is how a
 -- white-labelled tenant gets its palette out of the box with no activation
 -- step: project_code "academy" resolves the "academy" preset. An explicitly
 -- activated theme still takes precedence: callers try getActive() first.

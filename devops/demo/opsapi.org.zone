@@ -16,3 +16,6 @@ identity.demo     300  IN  CNAME  lon1.pop0.uk.   ; OpsAPI API (opsapi-demo)
 dashboard.demo    300  IN  CNAME  lon1.pop0.uk.   ; OpsAPI admin UI (opsapi-demo-dashboard)
 hello-java.demo   300  IN  CNAME  lon1.pop0.uk.   ; demo Spring Boot client
 hello-php.demo    300  IN  CNAME  lon1.pop0.uk.   ; demo PHP client
+hello-python.demo  300  IN  CNAME  lon1.pop0.uk.   ; demo Python client
+hello-rust.demo    300  IN  CNAME  lon1.pop0.uk.   ; demo Rust client
+hello-go.demo      300  IN  CNAME  lon1.pop0.uk.   ; demo Go client

@@ -74,7 +74,7 @@ setup:
 # return address (the token is only ever sent to a trusted origin).
 corsAllowedDomains: "opsapi.org"
 # Password-reset / sign-in return addresses for the demo apps.
-passwordResetAllowedOrigins: "https://dashboard.demo.opsapi.org,https://hello-java.demo.opsapi.org,https://hello-php.demo.opsapi.org"
+passwordResetAllowedOrigins: "https://dashboard.demo.opsapi.org,https://hello-java.demo.opsapi.org,https://hello-php.demo.opsapi.org,https://hello-python.demo.opsapi.org,https://hello-rust.demo.opsapi.org,https://hello-go.demo.opsapi.org"
 
 # Google sign-in uses Workstation's OAuth client; GOOGLE_CLIENT_ID and
 # GOOGLE_CLIENT_SECRET come from Vault (opsapi-demo/config). The redirect URI

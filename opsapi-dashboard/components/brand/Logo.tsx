@@ -68,8 +68,8 @@ function OpsApiMark({ size, className }: { size: number; className: string }) {
     >
       <defs>
         <linearGradient id="opsapi-mark-grad" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#ff3d74" />
-          <stop offset="1" stopColor="#c20035" />
+          <stop stopColor="#2fd3b5" />
+          <stop offset="1" stopColor="#00806b" />
         </linearGradient>
       </defs>
       {/* squircle badge */}

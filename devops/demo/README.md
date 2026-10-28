@@ -8,8 +8,11 @@ Google or email; every new user joins the `demo` namespace.
 |---|---|---|
 | `identity.demo.opsapi.org` | OpsAPI API | Helm release `opsapi-demo` |
 | `dashboard.demo.opsapi.org` | Admin UI | Helm release `opsapi-demo-dashboard` |
-| `hello-java.demo.opsapi.org` | Spring Boot client | Service `hello-java` → :8080 |
-| `hello-php.demo.opsapi.org` | PHP client | Service `hello-php` → :80 |
+| `hello-java.demo.opsapi.org` | Spring Boot client | Helm release `hello-java` |
+| `hello-php.demo.opsapi.org` | PHP client | Helm release `hello-php` |
+| `hello-python.demo.opsapi.org` | Python client | Helm release `hello-python` |
+| `hello-rust.demo.opsapi.org` | Rust client | Helm release `hello-rust` |
+| `hello-go.demo.opsapi.org` | Go client | Helm release `hello-go` |
 
 Traffic: browser → Cloudflare CNAME (DNS-only) → wslproxy edge `lon1.pop0.uk`
 (TLS) → k3s1 traefik-edge `193.237.176.232:8888` → pods, routed by Host header.
