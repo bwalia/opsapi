@@ -1,0 +1,73 @@
+# Services + Ingresses for the two demo client apps in namespace `demo`.
+#
+# The workloads themselves are yours: deploy a Deployment labelled
+# app=hello-java (listening on 8080) and one labelled app=hello-php (on 80)
+# into `demo`, and these route hello-{java,php}.demo.opsapi.org to them.
+#
+#   kubectl apply -f devops/demo/hello-apps.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-java
+  namespace: demo
+spec:
+  type: ClusterIP
+  selector:
+    app: hello-java
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-php
+  namespace: demo
+spec:
+  type: ClusterIP
+  selector:
+    app: hello-php
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-java
+  namespace: demo
+spec:
+  ingressClassName: traefik-edge
+  rules:
+    - host: hello-java.demo.opsapi.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-java
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-php
+  namespace: demo
+spec:
+  ingressClassName: traefik-edge
+  rules:
+    - host: hello-php.demo.opsapi.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-php
+                port:
+                  number: 80

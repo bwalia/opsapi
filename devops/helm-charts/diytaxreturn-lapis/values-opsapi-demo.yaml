@@ -1,0 +1,88 @@
+# ── OpsAPI identity engine — DEMO ──────────────────────────────────────────
+# Helm RELEASE: opsapi-demo   Namespace: demo   Cluster: k3s1
+# Public host: https://identity.demo.opsapi.org
+#
+# An isolated OpsAPI used as a B2C identity provider (Google sign-in, open
+# registration) for the demo apps on *.demo.opsapi.org. Own database
+# (devops/k8s/opsapi-demo-db.yaml), own Vault path, own tenant `demo`.
+# Run order: devops/demo/README.md.
+env: prod
+app: opsapi-demo
+
+# Read by the DNS + wslproxy steps. MUST equal ingress.hosts[0].host below.
+host: identity.demo.opsapi.org
+
+# Identity only: auth, users, namespaces, RBAC. No business modules, so no
+# business tables are created and their routes 404.
+projectCode: core_only
+
+frontendUrl: "https://dashboard.demo.opsapi.org"
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+redis:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Edge (wslproxy) terminates TLS and proxies plain HTTP to the shared k3s
+# ingress entry, which routes by Host header — no cert-manager, no tls block.
+ingress:
+  enabled: true
+  className: traefik-edge
+  annotations: {}
+  hosts:
+    - host: identity.demo.opsapi.org
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64
+
+database:
+  name: opsapi_demo
+  host: opsapi-demo-db.demo.svc.cluster.local
+
+# opsapi-demo-db is plain Postgres with no TLS.
+postgresSsl: "false"
+
+# POSTGRES_USER/PASSWORD/PORT, JWT_SECRET_KEY, OPENSSL_SECRET_KEY/IV and
+# GOOGLE_CLIENT_SECRET live here (seeded by devops/demo/seed-vault-demo.sh).
+externalSecret:
+  enabled: true
+  secretStore: wslvault-backend
+  vaultPath: opsapi-demo/config
+
+# Creates the `demo` namespace on first boot and makes this user its owner
+# and platform admin. Password is NOT committed — set ADMIN_PASSWORD in Vault
+# or rotate after first login.
+setup:
+  adminEmail: "tenthmatrix.mailer@gmail.com"
+  adminPassword: ""
+  namespaceSlug: "demo"
+
+# Every *.opsapi.org origin is trusted for CORS AND as a Google sign-in
+# return address (the token is only ever sent to a trusted origin).
+corsAllowedDomains: "opsapi.org"
+# Password-reset / sign-in return addresses for the demo apps.
+passwordResetAllowedOrigins: "https://dashboard.demo.opsapi.org,https://hello-java.demo.opsapi.org,https://hello-php.demo.opsapi.org"
+
+# Google OAuth client for the demo. Add the redirect URI below as an
+# Authorised redirect URI on that client in Google Cloud Console.
+googleClientId: "REPLACE_ME.apps.googleusercontent.com"
+googleRedirectUri: "https://identity.demo.opsapi.org/auth/google/callback"
+
+# PROJECT_CODE names no tenant, so open B2C sign-ups (Google or email) join `demo`.
+signupNamespaceSlug: "demo"
+
+autoscaling:
+  enabled: false

@@ -1,0 +1,28 @@
+# ── OpsAPI Dashboard — DEMO ────────────────────────────────────────────────
+# Helm RELEASE: opsapi-demo-dashboard   Namespace: demo   Cluster: k3s1
+# Public host: https://dashboard.demo.opsapi.org
+#   → calls the API at https://identity.demo.opsapi.org (opsapi-demo)
+env: prod
+
+# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so the
+# image must be built for this URL — see devops/demo/README.md step 5.
+apiUrl: https://identity.demo.opsapi.org
+
+image:
+  repository: bwalia/opsapi-dashboard
+  tag: demo
+  pullPolicy: Always
+
+# MUST equal ingress.hostname below.
+host: dashboard.demo.opsapi.org
+
+ingress:
+  enabled: true
+  className: traefik-edge
+  hostname: dashboard.demo.opsapi.org
+  annotations: {}
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64

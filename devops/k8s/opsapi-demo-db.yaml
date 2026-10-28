@@ -1,0 +1,146 @@
+# opsapi-demo-db — dedicated Postgres for the `demo` OpsAPI identity instance.
+#
+# Same pattern as workstation-db.yaml: a plain pgvector Postgres on the LAN,
+# owned by ONE release (`opsapi-demo`, k8s namespace `demo`, cluster k3s1), so
+# nothing it stores is shared with workstation or diytaxreturn.
+#
+# Image: pgvector/pgvector:pg16 — the tax-classifier migration uses the
+# `vector(384)` type; the initdb ConfigMap enables the extension on a fresh
+# volume so the app's first `lapis migrate` never fails on it.
+#
+# Credentials: POSTGRES_PASSWORD comes from the same WSL Vault path the app
+# reads (opsapi-demo/config, seeded by devops/demo/seed-vault-demo.sh) — no
+# plaintext in git (this repo is public).
+#
+# Apply (one-time; the PVC persists across app redeploys):
+#   kubectl create namespace demo
+#   kubectl apply -f devops/k8s/opsapi-demo-db.yaml
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: opsapi-demo-db-auth
+  namespace: demo
+  labels:
+    app: opsapi-demo-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: wslvault-backend
+    kind: ClusterSecretStore
+  target:
+    name: opsapi-demo-db-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: POSTGRES_PASSWORD
+      remoteRef:
+        key: opsapi-demo/config
+        property: POSTGRES_PASSWORD
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opsapi-demo-db-initdb
+  namespace: demo
+  labels:
+    app: opsapi-demo-db
+data:
+  # Runs ONLY on a fresh (empty) data volume, against POSTGRES_DB.
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opsapi-demo-db
+  namespace: demo
+  labels:
+    app: opsapi-demo-db
+spec:
+  type: ClusterIP
+  selector:
+    app: opsapi-demo-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opsapi-demo-db
+  namespace: demo
+  labels:
+    app: opsapi-demo-db
+spec:
+  serviceName: opsapi-demo-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opsapi-demo-db
+  template:
+    metadata:
+      labels:
+        app: opsapi-demo-db
+    spec:
+      # LAN amd64 pool, same as the app (see values-opsapi-demo.yaml). local-path
+      # binds the PVC to whichever node first schedules it, so the pod stays there.
+      nodeSelector:
+        net-region: home
+        kubernetes.io/arch: amd64
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: pguser
+            - name: POSTGRES_DB
+              value: opsapi_demo
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-demo-db-auth
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d opsapi_demo -h 127.0.0.1"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d opsapi_demo -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: initdb
+          configMap:
+            name: opsapi-demo-db-initdb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
