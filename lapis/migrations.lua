@@ -188,6 +188,10 @@ local namespace_system_migrations = require("migrations.namespace-system")
 
 -- Tax Copilot (new)
 local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-system") or {}
+-- The error catalog (entries 50-52 of the same file) is core, not tax: every
+-- error response goes through it (lib/errors.lua), so a deploy without
+-- tax_copilot answered every error, even a wrong password, with a bare 500.
+local error_catalog_migrations = require("migrations.tax-copilot-system")
 
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
@@ -1601,10 +1605,10 @@ local _migrations = {
     ['462_tax_add_profile_profession'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 48),
     ['463_tax_add_classification_fields'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
 
-    -- Error catalog + i18n notification system (from main)
-    ['464_create_error_catalog_schema'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 50),
-    ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
-    ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
+    -- Error catalog + i18n notification system (core: see error_catalog_migrations)
+    ['464_create_error_catalog_schema'] = conditional_array(ProjectConfig.FEATURES.CORE, error_catalog_migrations, 50),
+    ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.CORE, error_catalog_migrations, 51),
+    ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.CORE, error_catalog_migrations, 52),
     ['467_seed_classify_partial_code'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
 
     -- Tax Copilot menu items (468-471, from main)
