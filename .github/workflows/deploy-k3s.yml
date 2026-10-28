@@ -21,6 +21,11 @@ on:
   push:
     branches:
       - main
+    # The opsapi.org website has its own workflow (pages.yml); a website-only
+    # merge must not rebuild and redeploy the API.
+    paths-ignore:
+      - "website/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
     inputs:
       TARGET_ENV:
