@@ -107,11 +107,29 @@ as a provider. The flow it does support:
 So the callback paths are `https://hello-java.demo.opsapi.org/auth/callback`
 and `https://hello-php.demo.opsapi.org/auth/callback`.
 
+## Public demo account (opsapi.org/demo)
+
+`demo@opsapi.org` is published on the website so anyone can look around the
+dashboard. It lives in its own workspace, `showcase`, which holds only
+fictional `example.com` users owned by a fictional "Ava Patel". Real people who
+sign in to the demo apps land in `demo`, which the demo account can't see.
+
+- `viewer` role: `read` on every module, so every page opens and every change
+  is refused with 403.
+- `showcase` has the emailed sign-in code switched off, so the published
+  password works on its own. `demo` keeps it on.
+- `demo-account-reset.yaml`: a CronJob that every 30 minutes restores the
+  account's password, active flag and viewer role, undoing anything a visitor
+  changed from inside.
+- `seed-showcase.lua` creates or repairs all of it (safe to re-run; see its
+  header for the command). The reset job's hash is of the published password:
+  if you change the password, re-run the seed and update the hash.
+
 ## Notes
 
-- `X-Namespace-Slug: demo` is injected by the edge on `identity.demo.opsapi.org`
-  only; the API is the only service that reads it. That pins every API call to
-  `demo`, including the dashboard's, which is what a single-tenant demo wants.
+- The edge doesn't set `X-Namespace-Slug`. It used to inject `demo` on the
+  identity host, which pinned every call to `demo` and broke any other
+  workspace (`showcase`); the dashboard and apps send their own.
 - `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto` are already set by the
   edge's proxy location for every vhost; the vhost JSON has no field for them.
 - Proxy buffers: wslproxy's server/rule JSON has no buffer-size fields. None

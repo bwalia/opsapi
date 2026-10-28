@@ -21,10 +21,5 @@
   "ssl_email": "admin@opsapi.org",
   "cache_enabled": false,
   "match_cases": {},
-  "custom_headers": [
-    {
-      "header_key": "X-Namespace-Slug",
-      "header_value": "demo"
-    }
-  ]
+  "custom_headers": []
 }
