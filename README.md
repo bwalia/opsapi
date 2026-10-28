@@ -279,6 +279,14 @@ Its [README](sdk/typescript/README.md) covers running your own server, sign-in, 
 
 Tenants who just need integrations don't need a plugin. Under **Dashboard → Webhooks** each workspace can send its events (invoice paid, lead created, …) to its own URLs, signed and retried. See [WEBHOOKS.md](WEBHOOKS.md).
 
+## Single sign-on (SSO) for your apps
+
+**For technical managers:** OpsAPI gives every app you run one shared sign-in (email and password with 2FA, Google or Apple) and one user directory with roles per workspace, on infrastructure you host yourself, so there's no per-user identity bill and no separate login system to build for each app.
+
+To sign users in, your app sends the browser to `https://<opsapi-host>/auth/google?frontend_url=https://<your-app>&from=/<path>` (or `/auth/apple`). OpsAPI handles the Google or Apple round trip, creates the user on first sign-in and adds them to a workspace (the `project_code` query parameter, else `SIGNUP_NAMESPACE_SLUG`), then redirects to `https://<your-app>/auth/callback?token=<JWT>&redirect=/<path>`. Your `/auth/callback` reads `token`, calls `GET /auth/me` with `Authorization: Bearer <token>` to get the user, and starts its own session. Don't verify the JWT yourself: it's signed with the server's `JWT_SECRET_KEY`, which must never leave OpsAPI. Mobile apps skip the redirect and post the Google or Apple ID token to `POST /auth/oauth/validate`; email-and-password sign-in is `POST /auth/login`, then `POST /auth/2fa/verify` when the account has 2FA.
+
+The token is only sent to origins the server trusts. `frontend_url` must match `CORS_ALLOWED_DOMAINS` (a domain and all its subdomains), `CORS_ALLOWED_ORIGINS` or `PASSWORD_RESET_ALLOWED_ORIGINS`; any other value falls back to `FRONTEND_URL`. Register `https://<opsapi-host>/auth/google/callback` as a redirect URI on your Google OAuth client and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI`. Calls back to the API carry the user's token plus an `X-Namespace-Slug` header, so roles and data stay scoped to that workspace. OpsAPI is not an OpenID Connect provider: there are no client registrations or `/authorize` and `/token` endpoints, so a stock OIDC client such as Spring Security's `oauth2Login()` can't use it directly. A worked example on Kubernetes is in [devops/demo/README.md](devops/demo/README.md).
+
 ## Environment Variables
 
 All environment variables are in `lapis/.env`. The `.sample.env` file has working defaults for local dev.
