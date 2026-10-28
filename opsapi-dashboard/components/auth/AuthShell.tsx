@@ -44,8 +44,8 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
           (secondary-950 -> #fff) and the tenant theme also overrides it, which
           turned the gradient into a washed-out pale smear. Hard-coded hexes keep
           it correct in light AND dark mode and under any namespace theme. */}
-      <div className="relative hidden overflow-hidden lg:flex lg:w-[56%] bg-[#0b1120]">
-        <div className="absolute inset-0 bg-linear-to-br from-[#0b1120] via-[#12182b] to-[#2a0a18]" />
+      <div className="relative hidden overflow-hidden lg:flex lg:w-[56%] bg-[#0a2226]">
+        <div className="absolute inset-0 bg-linear-to-br from-[#0a2226] via-[#0b2a2d] to-[#063a32]" />
         <motion.div
           aria-hidden
           className="absolute -left-40 top-[-10%] h-[36rem] w-[36rem] rounded-full bg-primary-500/25 blur-[120px]"
@@ -54,12 +54,12 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
         />
         <motion.div
           aria-hidden
-          className="absolute -right-32 bottom-[-15%] h-[32rem] w-[32rem] rounded-full bg-[#7c1d3a]/30 blur-[120px]"
+          className="absolute -right-32 bottom-[-15%] h-[32rem] w-[32rem] rounded-full bg-[#a85f00]/20 blur-[120px]"
           animate={reduce ? undefined : { x: [0, -30, 0], y: [0, -20, 0] }}
           transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
         />
         <ParticleField className="absolute inset-0 h-full w-full" />
-        <div className="absolute inset-0 bg-linear-to-t from-[#0b1120]/70 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-linear-to-t from-[#0a2226]/70 via-transparent to-transparent" />
 
         <motion.div
           variants={container}
@@ -122,7 +122,7 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
 /** Full-screen dark loader used by auth pages while they hydrate/read session. */
 export function AuthLoader() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-[#0b1120]">
+    <div className="flex min-h-dvh items-center justify-center bg-[#0a2226]">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-primary-500" />
     </div>
   );
