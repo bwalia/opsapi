@@ -718,6 +718,51 @@ function NamespaceRoleQueries.getEmptyPermissions(project_code)
     return permissions
 end
 
+-- Keep only the modules this deployment has, so create() never rejects a preset.
+local function knownModulesOnly(perms)
+    local valid = {}
+    for _, m in ipairs(db.query("SELECT machine_name FROM modules WHERE is_active = true") or {}) do
+        valid[m.machine_name] = true
+    end
+    local out = {}
+    for mod, actions in pairs(perms) do
+        if valid[mod] then out[mod] = actions end
+    end
+    return out
+end
+
+-- What a developer needs on day one: their tasks (project membership does the rest),
+-- their timesheets, chat, and starting AI work on their tasks (when that plugin is on).
+NamespaceRoleQueries.DEVELOPER_PERMISSIONS = {
+    projects = { "read" },
+    timesheets = { "read", "create", "update" },
+    chat = { "read", "create" },
+    ai_runs = { "read", "create" },
+}
+local DEVELOPER_LANDING = "/dashboard/my-tasks"
+
+--- Give every "developer" role that still has no access at all the developer preset
+--- (roles a workspace already set up are left alone). Used by a one-off migration.
+function NamespaceRoleQueries.backfillDeveloperPreset()
+    local perms = cjson.encode(knownModulesOnly(NamespaceRoleQueries.DEVELOPER_PERMISSIONS))
+    for _, r in ipairs(db.select("id, permissions FROM namespace_roles WHERE role_name = 'developer'")) do
+        local ok, p = pcall(cjson.decode, r.permissions or "{}")
+        local empty = true
+        if ok and type(p) == "table" then
+            for _, actions in pairs(p) do
+                if type(actions) == "table" and #actions > 0 then empty = false break end
+            end
+        end
+        if empty then
+            db.update("namespace_roles", {
+                permissions = perms,
+                landing_path = db.raw("COALESCE(landing_path, " .. db.escape_literal(DEVELOPER_LANDING) .. ")"),
+                updated_at = db.raw("NOW()"),
+            }, { id = r.id })
+        end
+    end
+end
+
 --- Create default roles for a new namespace
 -- Creates 3 DB-driven roles: owner (full), admin (full except namespace), member (empty)
 -- When project_code is provided, permissions are scoped to that project's modules only
@@ -766,16 +811,17 @@ function NamespaceRoleQueries.createDefaultRoles(namespace_id, project_code)
     })
     table.insert(created_roles, member_role)
 
-    -- Developer role: an employee who is assigned project/kanban tasks. Seeded
-    -- with empty permissions so each namespace configures what a developer may
-    -- do (dynamic RBAC); task-level edit also comes from kanban project roles /
-    -- task assignment. Not a system role, so it can be renamed/tuned per tenant.
+    -- Developer role: an employee who is assigned project/kanban tasks. Starts
+    -- with what that work needs (DEVELOPER_PERMISSIONS) and lands on My tasks;
+    -- task-level edit still comes from project membership / task assignment.
+    -- Not a system role, so each workspace can rename or tune it.
     local developer_role = NamespaceRoleQueries.create({
         namespace_id = namespace_id,
         role_name = "developer",
         display_name = "Developer",
         description = "Works on assigned project tasks",
-        permissions = NamespaceRoleQueries.getEmptyPermissions(project_code),
+        permissions = knownModulesOnly(NamespaceRoleQueries.DEVELOPER_PERMISSIONS),
+        landing_path = DEVELOPER_LANDING,
         is_system = false,
         is_default = false,
         priority = 20
@@ -863,25 +909,15 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
         },
     }
 
-    -- Drop any module the deployment doesn't have, so create() never rejects.
-    local valid = {}
-    for _, m in ipairs(db.query("SELECT machine_name FROM modules WHERE is_active = true") or {}) do
-        valid[m.machine_name] = true
-    end
-
     local created = {}
     for _, def in ipairs(FS_ROLES) do
         local existing = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?",
             namespace_id, def.role_name)
         if #existing == 0 then
-            local perms = {}
-            for mod, actions in pairs(def.permissions) do
-                if valid[mod] then perms[mod] = actions end
-            end
             local ok, role = pcall(NamespaceRoleQueries.create, {
                 namespace_id = namespace_id,
                 role_name = def.role_name, display_name = def.display_name,
-                description = def.description, permissions = perms,
+                description = def.description, permissions = knownModulesOnly(def.permissions),
                 is_system = true, is_default = false, priority = def.priority,
                 landing_path = def.landing_path,
             })

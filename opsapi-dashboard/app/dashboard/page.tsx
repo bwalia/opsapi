@@ -194,6 +194,18 @@ export default function DashboardPage() {
         </RevealItem>
       )}
 
+      {widgets.length === 0 && (
+        <RevealItem>
+          <div className="rounded-2xl border border-secondary-200 bg-surface-elevated p-6 text-center" data-testid="dashboard-no-access">
+            <p className="font-semibold text-secondary-900">Nothing to show here yet</p>
+            <p className="mt-1 text-sm text-secondary-600 max-w-lg mx-auto">
+              If the menu on the left is empty too, your role doesn&apos;t give you access to anything yet. Ask the
+              person who manages this workspace to give you a role with access, for example Developer.
+            </p>
+          </div>
+        </RevealItem>
+      )}
+
       {widgets.filter((id) => WIDGETS[id].size === 'full').map((id) => (
         <RevealItem key={id}>
           {id === 'recent_orders' && <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />}
