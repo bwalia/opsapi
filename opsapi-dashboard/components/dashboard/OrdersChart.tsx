@@ -99,8 +99,8 @@ const OrdersChart: React.FC<OrdersChartProps> = memo(function OrdersChart({
             <AreaChart data={data} margin={chartMargin}>
               <defs>
                 <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ff004e" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#ff004e" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#00806b" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#00806b" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -120,7 +120,7 @@ const OrdersChart: React.FC<OrdersChartProps> = memo(function OrdersChart({
               <Area
                 type="monotone"
                 dataKey="revenue"
-                stroke="#ff004e"
+                stroke="#00806b"
                 strokeWidth={3}
                 fillOpacity={1}
                 fill="url(#colorRevenue)"

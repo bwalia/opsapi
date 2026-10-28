@@ -135,16 +135,16 @@ export default function Home() {
                         <p className="eyebrow">Live demo</p>
                         <h2>Click around a real deployment</h2>
                         <p className="lead-x">
-                            Sign in to the admin dashboard with a read-only demo login, then log in to a Java app and a PHP
-                            app that share one OpsAPI sign-in.
+                            Sign in to the admin dashboard with a read-only demo login, then log in to five apps in Java,
+                            PHP, Python, Rust and Go that share one OpsAPI sign-in.
                         </p>
                         <div className="hero__actions">
                             <Link href="/demo/" className="btn-x btn-x--primary">Open the demo guide</Link>
                         </div>
                     </div>
                     <div className="stat-row">
-                        <div className="stat"><div className="stat__n">3</div><div className="stat__l">front ends on one sign-in</div></div>
-                        <div className="stat"><div className="stat__n">2</div><div className="stat__l">languages: Java and PHP</div></div>
+                        <div className="stat"><div className="stat__n">6</div><div className="stat__l">front ends on one sign-in</div></div>
+                        <div className="stat"><div className="stat__n">5</div><div className="stat__l">languages: Java, PHP, Python, Rust, Go</div></div>
                         <div className="stat"><div className="stat__n">1</div><div className="stat__l">call to check a token: /auth/me</div></div>
                     </div>
                 </div>

@@ -5,9 +5,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Professional Dashboard Color Scheme
- * Primary: #ff004e (Vibrant Pink/Red)
- * Secondary: Slate tones for professional contrast
+ * OpsAPI colour scheme, matching opsapi.org
+ * Primary: #00806b teal (white text passes WCAG AA on 500 and darker)
+ * Secondary: teal-biased greys
  *
  * Accessibility: WCAG 2.1 AA compliant color contrast ratios
  * Font: Inter (Google Fonts) with system-ui fallback
@@ -21,31 +21,31 @@
  * palette when no active theme is set.
  */
 @theme {
-  /* Primary Color Scale - #ff004e base */
-  --color-primary-50: #fff0f3;
-  --color-primary-100: #ffe0e8;
-  --color-primary-200: #ffc6d5;
-  --color-primary-300: #ff9fb5;
-  --color-primary-400: #ff6088;
-  --color-primary-500: #ff004e;
-  --color-primary-600: #e6003f;
-  --color-primary-700: #c20035;
-  --color-primary-800: #a00030;
-  --color-primary-900: #84002c;
-  --color-primary-950: #4a0016;
+  /* Primary Color Scale - OpsAPI teal, #00806b base */
+  --color-primary-50: #e9f7f3;
+  --color-primary-100: #ddf1ec;
+  --color-primary-200: #b7e5d9;
+  --color-primary-300: #7fd0bd;
+  --color-primary-400: #2fb89c;
+  --color-primary-500: #00806b;
+  --color-primary-600: #006e5c;
+  --color-primary-700: #005a4b;
+  --color-primary-800: #04473c;
+  --color-primary-900: #063a32;
+  --color-primary-950: #032420;
 
-  /* Secondary Color Scale - Slate for professional look */
-  --color-secondary-50: #f8fafc;
-  --color-secondary-100: #f1f5f9;
-  --color-secondary-200: #e2e8f0;
-  --color-secondary-300: #cbd5e1;
-  --color-secondary-400: #94a3b8;
-  --color-secondary-500: #64748b;
-  --color-secondary-600: #475569;
-  --color-secondary-700: #334155;
-  --color-secondary-800: #1e293b;
-  --color-secondary-900: #0f172a;
-  --color-secondary-950: #020617;
+  /* Secondary Color Scale - teal-biased greys, as on opsapi.org */
+  --color-secondary-50: #f4f7f6;
+  --color-secondary-100: #eaf0ee;
+  --color-secondary-200: #d3dedb;
+  --color-secondary-300: #b6c5c1;
+  --color-secondary-400: #8a9e99;
+  --color-secondary-500: #6b7d82;
+  --color-secondary-600: #44565b;
+  --color-secondary-700: #2f3f43;
+  --color-secondary-800: #1a2a2e;
+  --color-secondary-900: #0d1d21;
+  --color-secondary-950: #061114;
 
   /* Accent Color - Emerald for success states */
   --color-accent-50: #ecfdf5;
@@ -70,10 +70,10 @@
   --color-info-600: #2563eb;
 
   /* Background Colors */
-  --color-background: #ffffff;
-  --color-foreground: #0f172a;
+  --color-background: #f4f7f6;
+  --color-foreground: #0d1d21;
   --color-surface: #ffffff;
-  --color-surface-elevated: #f8fafc;
+  --color-surface-elevated: #f4f7f6;
 
   /* Fonts — same stacks as workstation-website's ws-theme.css */
   --font-sans: var(--ws-font-body), 'Poppins', 'Helvetica Neue', Arial, sans-serif;
@@ -97,27 +97,31 @@
 /* ── Dark / night theme ───────────────────────────────────────────────────
  * Overrides the token values the whole UI already consumes (semantic surface
  * tokens + the secondary/slate scale), so components flip to dark with no
- * per-file changes. The primary #ff004e accent is kept — it pops on dark. */
+ * per-file changes. Values match opsapi.org's dark theme; the lighter teal
+ * steps (300/400, used for text on dark) are brightened to stay readable. */
 .dark {
   color-scheme: dark;
 
-  --color-background: #0b1120;
-  --color-foreground: #e8edf5;
-  --color-surface: #131a2b;
-  --color-surface-elevated: #1b2439;
+  --color-background: #0b1619;
+  --color-foreground: #e4efec;
+  --color-surface: #11211f;
+  --color-surface-elevated: #162a29;
+
+  --color-primary-300: #5fe3c7;
+  --color-primary-400: #38d1b2;
 
   /* Secondary scale remapped: text-secondary-900 -> light, bg-secondary-50 ->
    * deep page background, borders subtle-but-visible on dark surfaces. */
-  --color-secondary-50: #0b1120;
-  --color-secondary-100: #151d2f;
-  --color-secondary-200: #243044;
-  --color-secondary-300: #313d54;
-  --color-secondary-400: #64748b;
-  --color-secondary-500: #93a2b8;
-  --color-secondary-600: #cbd5e1;
-  --color-secondary-700: #dbe3ee;
-  --color-secondary-800: #eef2f7;
-  --color-secondary-900: #f8fafc;
+  --color-secondary-50: #0b1619;
+  --color-secondary-100: #11211f;
+  --color-secondary-200: #1f3533;
+  --color-secondary-300: #27403d;
+  --color-secondary-400: #5c7470;
+  --color-secondary-500: #7f9792;
+  --color-secondary-600: #a8bcb7;
+  --color-secondary-700: #c4d4d0;
+  --color-secondary-800: #e4efec;
+  --color-secondary-900: #f1f7f5;
   --color-secondary-950: #ffffff;
 }
 

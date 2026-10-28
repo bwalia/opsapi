@@ -9,7 +9,7 @@ import { useEffect } from 'react';
  * Unlike <ThemeStyles/>, this does NOT depend on NamespaceContext (which only
  * exists inside DashboardLayout). It resolves the tenant from an explicit
  * `?namespace=` query param or the host subdomain; with neither it falls back
- * to the platform default theme (the pink #ff004e "OpsAPI Bright" preset).
+ * to the platform default theme (the teal #00806b "OpsAPI" preset).
  *
  * It targets the same <link id> as ThemeStyles, so once the dashboard mounts
  * its namespace-aware loader, that takes over seamlessly.

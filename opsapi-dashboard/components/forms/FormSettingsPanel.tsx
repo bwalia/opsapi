@@ -238,7 +238,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
   );
 }
 
-function ColorInput({ label, value, onChange, fallback = '#ff004e' }: {
+function ColorInput({ label, value, onChange, fallback = '#00806b' }: {
   label: string; value?: string; onChange: (v?: string) => void; fallback?: string;
 }) {
   return (

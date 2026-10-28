@@ -100,11 +100,43 @@ end
 ThemePresets.LIST = {
     {
         slug         = "light",
-        name         = "OpsAPI Bright",
-        description  = "The signature OpsAPI look — vivid #ff004e on clean white. The platform default.",
+        name         = "OpsAPI",
+        description  = "The OpsAPI look, matching opsapi.org: teal on clean white with teal-grey neutrals. The platform default.",
         project_code = "*",
         tokens = build_tokens({
-            -- Brand pink scale (must mirror opsapi-dashboard/app/globals.css :root)
+            -- OpsAPI teal scale (must mirror opsapi-dashboard/app/globals.css @theme
+            -- and the opsapi.org website's --accent tokens)
+            primary = {
+                ["50"]  = "#e9f7f3", ["100"] = "#ddf1ec", ["200"] = "#b7e5d9",
+                ["300"] = "#7fd0bd", ["400"] = "#2fb89c", ["500"] = "#00806b",
+                ["600"] = "#006e5c", ["700"] = "#005a4b", ["800"] = "#04473c",
+                ["900"] = "#063a32",
+            },
+            -- Teal-biased neutrals, as on opsapi.org
+            secondary = {
+                ["50"]  = "#f4f7f6", ["100"] = "#eaf0ee", ["200"] = "#d3dedb",
+                ["300"] = "#b6c5c1", ["400"] = "#8a9e99", ["500"] = "#6b7d82",
+                ["600"] = "#44565b", ["700"] = "#2f3f43", ["800"] = "#1a2a2e",
+                ["900"] = "#0d1d21",
+            },
+            accent           = "#00a386",
+            background       = "#f4f7f6",
+            foreground       = "#0d1d21",
+            surface          = "#ffffff",
+            surface_elevated = "#ffffff",
+            success          = "#10b981",
+            warning          = "#f59e0b",
+            danger           = "#ef4444",
+            info             = "#0ea5e9",
+        }),
+    },
+
+    {
+        slug         = "workstation-pink",
+        name         = "Workstation Pink",
+        description  = "The earlier OpsAPI default: vivid #ff004e on clean white with slate neutrals, matching workstation.co.uk.",
+        project_code = "*",
+        tokens = build_tokens({
             primary = {
                 ["50"]  = "#fff0f3", ["100"] = "#ffe0e8", ["200"] = "#ffc6d5",
                 ["300"] = "#ff9fb5", ["400"] = "#ff6088", ["500"] = "#ff004e",
@@ -313,7 +345,7 @@ ThemePresets.LIST = {
         description  = "The Workstation Academy look — opsapi #ff004e red, matching the platform and the learner site.",
         project_code = "academy",
         tokens = build_tokens({
-            -- Brand red scale (mirrors the `light`/OpsAPI Bright preset and the
+            -- Brand red scale (mirrors the `workstation-pink` preset and the
             -- learner site's --color-primary-* scale in globals.css).
             primary = {
                 ["50"]  = "#fff0f3", ["100"] = "#ffe0e8", ["200"] = "#ffc6d5",

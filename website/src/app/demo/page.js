@@ -4,7 +4,7 @@ import CopyButton from '@/components/CopyButton';
 
 export const metadata = {
     title: 'Live demo',
-    description: 'Try OpsAPI end to end: a read-only admin dashboard login, and a Java app and a PHP app that share one sign-in.',
+    description: 'Try OpsAPI end to end: a read-only admin dashboard login, and five apps in Java, PHP, Python, Rust and Go that share one sign-in.',
 };
 
 const DEMO = {
@@ -16,20 +16,34 @@ const DEMO = {
     php: 'https://hello-php.demo.opsapi.org',
 };
 
+// The five demo apps: same sign-in flow, five languages.
+const APPS = [
+    { name: 'hello-java', label: 'Java', stack: 'Spring Boot', pages: '/api/secure/me, /api/secure/resource',
+      code: 'https://github.com/bwalia/workflow-examples/tree/main/hello-java' },
+    { name: 'hello-php', label: 'PHP', stack: 'PHP 8.3', pages: '/dashboard',
+      code: 'https://github.com/bwalia/workflow-examples/tree/main/php-ringpromoter-cve-patching' },
+    { name: 'hello-python', label: 'Python', stack: 'Python 3.13, standard library', pages: '/dashboard',
+      code: 'https://github.com/bwalia/workflow-examples/tree/main/hello-sso-demos/python' },
+    { name: 'hello-rust', label: 'Rust', stack: 'Rust, tiny_http + ureq', pages: '/dashboard',
+      code: 'https://github.com/bwalia/workflow-examples/tree/main/hello-sso-demos/rust' },
+    { name: 'hello-go', label: 'Go', stack: 'Go, standard library', pages: '/dashboard',
+      code: 'https://github.com/bwalia/workflow-examples/tree/main/hello-sso-demos/go' },
+].map((a) => ({ ...a, url: `https://${a.name}.demo.opsapi.org` }));
+
 function DemoMap() {
     return (
         <svg viewBox="0 0 940 400" role="img" aria-labelledby="demo-map-t">
-            <title id="demo-map-t">The live demo: two apps and a dashboard sharing one OpsAPI identity service and two workspaces</title>
+            <title id="demo-map-t">The live demo: five apps and a dashboard sharing one OpsAPI identity service and two workspaces</title>
             <Markers />
-            <Box x={20} y={40} w={200} h={64} title="hello-java" lines={['Spring Boot app']} variant="violet" />
-            <Box x={20} y={140} w={200} h={64} title="hello-php" lines={['PHP app']} variant="violet" />
-            <Box x={20} y={260} w={200} h={64} title="Admin dashboard" lines={['Next.js']} variant="violet" />
-
-            <line x1="220" y1="72" x2="358" y2="170" className="dg-line" markerEnd="url(#ah)" />
-            <line x1="220" y1="172" x2="358" y2="186" className="dg-line" markerEnd="url(#ah)" />
-            <line x1="220" y1="292" x2="358" y2="204" className="dg-line" markerEnd="url(#ah)" />
-            <text x="250" y="110" className="dg-small">/auth/signin</text>
-            <text x="250" y="270" className="dg-small">/auth/login</text>
+            {APPS.map((a, i) => (
+                <g key={a.name}>
+                    <Box x={20} y={14 + i * 54} w={200} h={44} title={a.name} variant="violet" />
+                    <line x1="220" y1={36 + i * 54} x2="358" y2={160 + i * 10} className="dg-line" markerEnd="url(#ah)" />
+                </g>
+            ))}
+            <Box x={20} y={300} w={200} h={56} title="Admin dashboard" lines={['Next.js']} variant="violet" />
+            <line x1="220" y1="328" x2="358" y2="232" className="dg-line" markerEnd="url(#ah)" />
+            <text x="262" y="326" className="dg-small">/auth/login</text>
 
             <Box x={360} y={140} w={220} h={110} title="OpsAPI identity" lines={['sign-in, 2FA, Google', 'users, roles, workspaces', 'core_only build']} variant="accent" />
             <line x1="580" y1="170" x2="688" y2="96" className="dg-line" markerEnd="url(#ah)" />
@@ -72,13 +86,15 @@ export default function DemoPage() {
                     <p className="eyebrow">Live demo</p>
                     <h1 className="display-x">See OpsAPI working end to end</h1>
                     <p className="lead-x">
-                        A real OpsAPI deployment with its admin dashboard and two apps in two languages that share one
-                        sign-in. Look around the dashboard with a read-only account, then sign in to the apps.
+                        A real OpsAPI deployment with its admin dashboard and five apps in five languages (Java, PHP,
+                        Python, Rust and Go) that share one sign-in. Look around the dashboard with a read-only account,
+                        then sign in to the apps.
                     </p>
                     <div className="hero__actions">
                         <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--primary" href={DEMO.dashboard}>Open the dashboard</a>
-                        <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={DEMO.java}>Java app</a>
-                        <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={DEMO.php}>PHP app</a>
+                        {APPS.map((a) => (
+                            <a key={a.name} target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={a.url}>{a.label} app</a>
+                        ))}
                     </div>
                 </div>
             </section>
@@ -107,8 +123,7 @@ export default function DemoPage() {
                             rows={[
                                 [<a target="_blank" rel="noopener noreferrer" key="d" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a>, 'OpsAPI admin dashboard'],
                                 [<a target="_blank" rel="noopener noreferrer" key="i" href={`${DEMO.identity}/health`}>identity.demo.opsapi.org</a>, 'OpsAPI API and sign-in page'],
-                                [<a target="_blank" rel="noopener noreferrer" key="j" href={DEMO.java}>hello-java.demo.opsapi.org</a>, 'Spring Boot demo app'],
-                                [<a target="_blank" rel="noopener noreferrer" key="p" href={DEMO.php}>hello-php.demo.opsapi.org</a>, 'PHP demo app'],
+                                ...APPS.map((a) => [<a target="_blank" rel="noopener noreferrer" key={a.name} href={a.url}>{a.name}.demo.opsapi.org</a>, `${a.label} demo app`]),
                             ]}
                         />
                     </div>
@@ -142,7 +157,7 @@ export default function DemoPage() {
                             <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.java}>hello-java</a> and choose “Login with OpsAPI”. The app sends you to OpsAPI's sign-in page.</li>
                             <li>Sign in with the demo login, or with your own Google account. Google sign-ins join the private <em>demo</em> workspace as a member.</li>
                             <li>You come back signed in. The app asked OpsAPI who you are with one call to <code>/auth/me</code> and shows your workspace and role.</li>
-                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.php}>hello-php</a> and log in there too: same account, a different language and framework.</li>
+                            <li>Open any of the others (<a target="_blank" rel="noopener noreferrer" href={DEMO.php}>PHP</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-python.demo.opsapi.org">Python</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-rust.demo.opsapi.org">Rust</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-go.demo.opsapi.org">Go</a>) and log in there too: same account, no second prompt.</li>
                             <li>Sign out everywhere from either app; the next sign-in asks again.</li>
                         </ol>
                     </div>
@@ -151,18 +166,20 @@ export default function DemoPage() {
 
             <section className="section section--tint">
                 <div className="container-x">
-                    <h2>The two apps</h2>
+                    <h2>The five apps</h2>
                     <Table
-                        head={['', 'hello-java', 'hello-php']}
-                        rows={[
-                            ['Stack', 'Spring Boot', 'PHP'],
-                            ['Sign-in routes', <code key="1">/login, /auth/callback, /logout</code>, <code key="2">/login, /auth/callback, /logout</code>],
-                            ['Signed-in pages', <code key="3">/api/secure/me, /api/secure/resource</code>, <code key="4">/dashboard</code>],
-                            ['Checks the token by', <code key="5">GET /auth/me</code>, <code key="6">GET /auth/me</code>],
-                            ['Forged callback', '400', '400'],
-                            ['Code', <a target="_blank" rel="noopener noreferrer" key="7" href="https://github.com/bwalia/workflow-examples/tree/main/hello-java">workflow-examples/hello-java</a>, <a target="_blank" rel="noopener noreferrer" key="8" href="https://github.com/bwalia/workflow-examples/tree/main/php-ringpromoter-cve-patching">workflow-examples/php-…</a>],
-                        ]}
+                        head={['App', 'Stack', 'Signed-in pages', 'Code']}
+                        rows={APPS.map((a) => [
+                            <a key="u" target="_blank" rel="noopener noreferrer" href={a.url}>{a.name}</a>,
+                            a.stack,
+                            <code key="p">{a.pages}</code>,
+                            <a key="c" target="_blank" rel="noopener noreferrer" href={a.code}>source</a>,
+                        ])}
                     />
+                    <p>
+                        All five use the same routes (<code>/login</code>, <code>/auth/callback</code>, <code>/logout</code>),
+                        check the token with <code>GET /auth/me</code>, and refuse a forged callback with 400.
+                    </p>
                     <p>
                         Each app keeps a random nonce in its session when you click log in and only accepts the token back
                         if the nonce matches, so a link carrying someone else's token can't sign you in. The full sequence

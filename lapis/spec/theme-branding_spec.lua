@@ -13,7 +13,7 @@
          name, but the platform's colour — matching the red learner site);
       2. ThemeQueries.getDefaultPreset prefers a preset whose slug equals the
          project_code — without that ORDER BY, a namespace with no explicitly
-         activated theme falls back to "OpsAPI Bright" instead.
+         activated theme falls back to "OpsAPI" (the light preset) instead.
 ]]
 
 package.path = "lapis/?.lua;lapis/?/init.lua;" .. package.path

@@ -48,8 +48,8 @@ export default function AvatarFace({ mood = 'idle', level = 0, size = 64, label 
       <svg viewBox="0 0 64 64" width={size} height={size} className="relative" aria-hidden>
         <defs>
           <linearGradient id="pa-skin" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#ff4d7d" />
-            <stop offset="1" stopColor="#c20035" />
+            <stop offset="0" stopColor="#2fd3b5" />
+            <stop offset="1" stopColor="#00806b" />
           </linearGradient>
         </defs>
         <circle cx="32" cy="32" r="30" fill="url(#pa-skin)" />
