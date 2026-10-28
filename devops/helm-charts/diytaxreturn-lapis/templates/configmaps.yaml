@@ -41,6 +41,17 @@ data:
         chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
         cp /app/api-docs/swagger.json /tmp/swagger.json
 
+        # postStart runs alongside the container's nginx, not before it: on a fast
+        # node nginx starts before config.lua is copied above, its workers keep
+        # the image's default DB host, and /ready fails "connection refused"
+        # forever. A graceful reload makes the workers read the config we just
+        # wrote. Non-fatal: a node that denies the signal (see the AppArmor note
+        # in deployment.yaml) keeps the old behaviour instead of crash-looping.
+        if [ -s /app/logs/nginx.pid ]; then
+          /usr/local/openresty/nginx/sbin/nginx -p /app/ -c nginx.conf.compiled -s reload \
+            || echo "[bootstrap] WARN: nginx reload failed; workers may hold a stale config"
+        fi
+
     # ONE-SHOT migrate + seed, run by the pre-upgrade/pre-install Helm hook Job
     # (migrate-job.yaml) exactly ONCE per deploy, BEFORE the new pods roll. This
     # is what makes replicaCount > 1 safe: no per-pod migration races.

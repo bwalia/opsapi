@@ -45,6 +45,7 @@ done
 # 3. Secrets → WSL Vault (fresh random DB/JWT/encryption keys + Google secret)
 export WSLVAULT_API_KEY='wslv_…' GOOGLE_CLIENT_SECRET='GOCSPX-…'
 ./devops/demo/seed-vault-demo.sh
+# then add GOOGLE_CLIENT_ID and the SMTP_* keys to the same path (see Notes)
 
 # 4. Database, then the API (the pre-upgrade hook runs `lapis migrate` and
 #    setup-namespace, which creates the `demo` namespace and its admin)
@@ -118,5 +119,9 @@ and `https://hello-php.demo.opsapi.org/auth/callback`.
   in the flow is the `Location: …/auth/callback?token=<JWT>` redirect (~1–2 KB),
   well under nginx's 4–8 KB default `proxy_buffer_size`.
 - `projectCode: core_only` = auth, users, namespaces and RBAC only.
+- Vault `opsapi-demo/config` also holds `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (a dedicated
+  OAuth client with the demo redirect URI) and `SMTP_*` (copied from `workstation-opsapi/prod/config`;
+  without them 2FA codes can't be emailed and the admin can't finish logging in).
+- `backup.enabled: false`: the chart's DB backup CronJobs upload to MinIO, which this release doesn't have.
 - An ESO `PushSecret` can't seed the Vault path: WSL Vault returns 404 on the
   `kv/metadata/...` write ESO makes first. Use `seed-vault-demo.sh`.

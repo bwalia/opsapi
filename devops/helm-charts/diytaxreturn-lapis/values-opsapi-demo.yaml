@@ -86,3 +86,8 @@ signupNamespaceSlug: "demo"
 
 autoscaling:
   enabled: false
+
+# No MinIO in this release, so the hourly/daily DB backup CronJobs (which upload
+# to MinIO) are off.
+backup:
+  enabled: false

@@ -1,3 +1,6 @@
+{{- /* DB backups to MinIO. On unless backup.enabled is explicitly false
+       (a release with no MinIO, e.g. values-opsapi-demo.yaml). */}}
+{{- if not (and .Values.backup (eq (toString .Values.backup.enabled) "false")) }}
 ---
 # Source: opsapi/templates/cronjob.yaml
 apiVersion: batch/v1
@@ -365,3 +368,4 @@ spec:
             - name: {{ .Release.Name }}-backup-storage
               emptyDir: {}
       backoffLimit: 0
+{{- end }}
