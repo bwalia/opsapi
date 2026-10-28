@@ -1,0 +1,18 @@
+; opsapi.org — records for the `demo` identity stack on k3s1.
+; Import into Cloudflare (DNS > Records > Import) or apply one by one with
+; devops/scripts/cloudflare-dns.sh (see README.md step 2).
+;
+; Each name is a CNAME to the wslproxy edge (lon1.pop0.uk), DNS-only (NOT
+; proxied / grey cloud): the edge requests its own Let's Encrypt cert per
+; host and terminates TLS, then proxies to k3s1 traefik-edge by Host header.
+; Same layout as the *-opsapi.workstation.co.uk hosts.
+;
+;   browser -> <host>.demo.opsapi.org --CNAME--> lon1.pop0.uk (edge, TLS)
+;           -> 193.237.176.232:8888 (k3s1 traefik-edge) -> pods in ns `demo`
+$ORIGIN opsapi.org.
+$TTL 300
+
+identity.demo     300  IN  CNAME  lon1.pop0.uk.   ; OpsAPI API (opsapi-demo)
+dashboard.demo    300  IN  CNAME  lon1.pop0.uk.   ; OpsAPI admin UI (opsapi-demo-dashboard)
+hello-java.demo   300  IN  CNAME  lon1.pop0.uk.   ; demo Spring Boot client
+hello-php.demo    300  IN  CNAME  lon1.pop0.uk.   ; demo PHP client

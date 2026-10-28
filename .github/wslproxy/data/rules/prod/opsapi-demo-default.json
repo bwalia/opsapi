@@ -1,0 +1,38 @@
+{
+  "id": "opsapi-demo-default",
+  "name": "opsapi-demo-default",
+  "profile_id": "prod",
+  "priority": 1,
+  "rules_tags": [
+    "opsapi",
+    "demo",
+    "prod"
+  ],
+  "match": {
+    "rules": {
+      "path": "/",
+      "path_key": "starts_with"
+    },
+    "response": {
+      "code": 305,
+      "redirect_uri": "193.237.176.232:8888",
+      "strip_path": false,
+      "backends": [
+        {
+          "address": "193.237.176.232:8888",
+          "weight": 100,
+          "label": "193.237.176.232:8888 k3s1 traefik-edge entry; routes *.demo.opsapi.org by Host header"
+        }
+      ],
+      "routing": {
+        "mode": "least_conn"
+      }
+    }
+  },
+  "servers": [
+    "host:identity.demo.opsapi.org",
+    "host:dashboard.demo.opsapi.org",
+    "host:hello-java.demo.opsapi.org",
+    "host:hello-php.demo.opsapi.org"
+  ]
+}
