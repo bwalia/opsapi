@@ -70,7 +70,7 @@ export default function ParticleField({ className = '' }: { className?: string }
           const dist = Math.hypot(dx, dy);
           if (dist < LINK_DIST) {
             const alpha = (1 - dist / LINK_DIST) * 0.35;
-            ctx!.strokeStyle = `rgba(255, 61, 116, ${alpha})`;
+            ctx!.strokeStyle = `rgba(47, 211, 181, ${alpha})`;
             ctx!.lineWidth = 1;
             ctx!.beginPath();
             ctx!.moveTo(a.x, a.y);
@@ -83,7 +83,7 @@ export default function ParticleField({ className = '' }: { className?: string }
       // nodes
       for (const n of nodes) {
         ctx!.beginPath();
-        ctx!.fillStyle = 'rgba(255, 138, 170, 0.85)';
+        ctx!.fillStyle = 'rgba(127, 230, 208, 0.85)';
         ctx!.arc(n.x, n.y, n.r, 0, Math.PI * 2);
         ctx!.fill();
       }
