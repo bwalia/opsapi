@@ -4,14 +4,18 @@
  * Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md, ai_runners.manage): connect a workstation-terminal so people can
  * open a task's folder there from Start with AI. Add (the shared secret and the terminal's config block are shown
  * once), edit the name, address and agents, switch off, rotate the secret, remove, and People: the keys managers
- * issue (§10).
+ * issue (§10). Each card says whether the terminal is in touch, and what to do when it isn't (§12).
  */
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { KeyRound, Pencil, Plus, Terminal, Trash2, Users, X } from 'lucide-react';
+import {
+  CheckCircle2, ChevronDown, Clock, KeyRound, Pencil, Plus, ShieldAlert, Terminal, Trash2, Users, WifiOff, X,
+} from 'lucide-react';
 import { Badge, Button, Card, Input, Modal, confirmDialog } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
-import { aiRunner, aiErrorText, type TerminalAgent, type WebTerminal } from '@/services/ai-runner.service';
+import {
+  aiRunner, aiErrorText, type TerminalAgent, type TerminalConnection, type WebTerminal,
+} from '@/services/ai-runner.service';
 import { TerminalPeople } from './TerminalPeople';
 import { CopyBlock, PRODUCT, opsapiUrl, useAiData } from './ui';
 
@@ -235,8 +239,122 @@ function EditModal({
   );
 }
 
+/** 7 → "just now", 75 → "1 minute ago", 7200 → "2 hours ago". */
+function agoWords(secs?: number | null): string {
+  const s = Math.max(0, Math.round(secs ?? 0));
+  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? '' : 's'} ago`;
+  if (s < 10) return 'just now';
+  if (s < 60) return n(s, 'second');
+  if (s < 3600) return n(Math.round(s / 60), 'minute');
+  if (s < 86400) return n(Math.round(s / 3600), 'hour');
+  return n(Math.round(s / 86400), 'day');
+}
+
+/** One line on the card: is the terminal in touch (§12)? When not, "What to do" opens the steps. */
+function ConnectionStatus({ terminal }: { terminal: WebTerminal }) {
+  const [open, setOpen] = useState(false);
+  const c: TerminalConnection = terminal.connection ?? { state: 'waiting' };
+  const address = <span className="font-mono">{terminal.url}</span>;
+  const info = {
+    connected: {
+      icon: <CheckCircle2 className="h-4 w-4 text-success-600" aria-hidden />,
+      tone: 'text-success-600',
+      text: terminal.is_active
+        ? `Connected · checked in ${agoWords(c.seen_secs_ago)}`
+        : `Connected · checked in ${agoWords(c.seen_secs_ago)}, but switched off: nobody can sign in`,
+      steps: null,
+    },
+    waiting: {
+      icon: <Clock className="h-4 w-4 text-secondary-500" aria-hidden />,
+      tone: 'text-secondary-700',
+      text: 'Not connected yet: this terminal hasn’t checked in',
+      steps: (
+        <>
+          <li>Open {address}. Its sign-in page should load; if it doesn’t, the machine or the terminal isn’t running.</li>
+          <li>
+            The terminal’s settings need this card’s terminal id and secret (the <em>keys</em> lines of its config). Not
+            sure they’re there? Click <strong>New secret</strong> and put the lines it shows into its settings.
+          </li>
+          <li>Once it runs with the right settings it checks in every 30 seconds, and this line turns green by itself.</li>
+        </>
+      ),
+    },
+    lost: {
+      icon: <WifiOff className="h-4 w-4 text-warning-600" aria-hidden />,
+      tone: 'text-warning-600',
+      text: `Lost contact · last checked in ${agoWords(c.seen_secs_ago)}`,
+      steps: (
+        <>
+          <li>Open {address}. If the sign-in page doesn’t load, the machine is off or offline, or the terminal stopped: start it again.</li>
+          <li>
+            Until it’s back, keys you add or block in <strong>People</strong> don’t reach it. After 15 minutes it stops
+            accepting keys from here altogether, so a blocked key can’t keep working.
+          </li>
+          <li>When it checks in again, this line turns green by itself.</li>
+        </>
+      ),
+    },
+    secret: {
+      icon: <ShieldAlert className="h-4 w-4 text-error-600" aria-hidden />,
+      tone: 'text-error-600',
+      text: 'Not connected: the secret on the machine doesn’t match',
+      steps: (
+        <>
+          <li>
+            The terminal calls in with a different secret than OpsAPI has (for example after <strong>New secret</strong>
+            {' '}was clicked and the machine wasn’t updated). Until they match, nobody can sign in with a key from People.
+          </li>
+          <li>Click <strong>New secret</strong> on this card and keep the window that opens.</li>
+          <li>On the terminal’s machine, put the new terminal id and secret into its settings and restart it.</li>
+          <li>Within a minute this line turns green.</li>
+        </>
+      ),
+    },
+    clock: {
+      icon: <Clock className="h-4 w-4 text-error-600" aria-hidden />,
+      tone: 'text-error-600',
+      text: 'Not connected: the machine’s clock is wrong',
+      steps: (
+        <>
+          <li>Its secret is right, but its clock is more than 5 minutes off, so OpsAPI can’t trust its requests.</li>
+          <li>
+            On the terminal’s machine, switch on automatic date and time (on a Mac: System Settings → General → Date &amp;
+            Time → <em>Set time and date automatically</em>).
+          </li>
+          <li>Within a minute this line turns green.</li>
+        </>
+      ),
+    },
+  }[c.state];
+  if (!info) return null;
+  return (
+    <div className="space-y-1" data-testid="air-terminal-connection" data-state={c.state}>
+      <p className={`flex flex-wrap items-center gap-1.5 text-sm ${info.tone}`}>
+        {info.icon}
+        <span>{info.text}</span>
+        {info.steps && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="inline-flex items-center gap-0.5 font-medium text-primary-600 hover:underline"
+          >
+            What to do <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
+          </button>
+        )}
+      </p>
+      {open && info.steps && (
+        <ol className="ml-6 list-decimal space-y-1 rounded-lg bg-secondary-50 p-3 pl-7 text-sm text-secondary-700">
+          {info.steps}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 export function WebTerminals() {
-  const terminals = useAiData(() => aiRunner.listTerminals(), []);
+  // Every 15 seconds, like the rest of the page, so the connection line stays current.
+  const terminals = useAiData(() => aiRunner.listTerminals(), [], 15_000);
   const [editing, setEditing] = useState<WebTerminal | 'new' | null>(null);
   const [shown, setShown] = useState<Shown | null>(null);
   const [people, setPeople] = useState<WebTerminal | null>(null);
@@ -367,6 +485,9 @@ export function WebTerminals() {
               >
                 Remove
               </Button>
+            </div>
+            <div className="w-full border-t border-secondary-100 pt-2">
+              <ConnectionStatus terminal={t} />
             </div>
           </li>
         ))}

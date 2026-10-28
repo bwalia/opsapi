@@ -92,22 +92,58 @@ local function agents(row)
 end
 T.agents = agents
 
+-- §12: a terminal fetches its keys every 30 s, so two minutes without a call means it's out of touch. A refused
+-- call shows for ten minutes, unless the terminal has been in touch since.
+T.IN_TOUCH_SECS = 120
+T.REFUSED_SHOWN_SECS = 600
+
+--- How the terminal is doing (§12): connected, refused (secret or clock), lost (was in touch), or waiting (never
+-- called). Needs the row's contact_age / refused_age in seconds (TERMINAL_SQL).
+function T.connection(row)
+    local seen, refused = tonumber(row.contact_age), tonumber(row.refused_age)
+    if refused and refused <= T.REFUSED_SHOWN_SECS and (not seen or refused < seen) then
+        return { state = row.last_refused_reason == "clock" and "clock" or "secret", refused_secs_ago = refused,
+            seen_secs_ago = U.null(seen) }
+    end
+    if not seen then return { state = "waiting" } end
+    return { state = seen <= T.IN_TOUCH_SECS and "connected" or "lost", seen_secs_ago = seen }
+end
+
 function T.view(row)
     return {
         uuid = row.uuid, name = row.name, url = row.url, agents = U.array(agents(row)),
         is_active = row.is_active == true, autologin = row.autologin == true, secret_hint = U.null(row.secret_hint),
         created_by = U.null(row.created_by), created_at = row.created_at, updated_at = row.updated_at,
+        connection = T.connection(row),
     }
 end
 
+local TERMINAL_SQL = [[SELECT *, EXTRACT(EPOCH FROM NOW() - last_contact_at)::int AS contact_age,
+    EXTRACT(EPOCH FROM NOW() - last_refused_at)::int AS refused_age FROM ar_terminals]]
+
 function T.find(ns, uuid)
     if not U.is_uuid(uuid) then return nil end
-    return U.one("SELECT * FROM ar_terminals WHERE namespace_id = ? AND uuid = ?", ns, uuid:lower())
+    return U.one(TERMINAL_SQL .. " WHERE namespace_id = ? AND uuid = ?", ns, uuid:lower())
 end
 
 function T.list(ns, active_only)
-    return db.query("SELECT * FROM ar_terminals WHERE namespace_id = ?" .. (active_only and " AND is_active" or "")
+    return db.query(TERMINAL_SQL .. " WHERE namespace_id = ?" .. (active_only and " AND is_active" or "")
         .. " ORDER BY lower(name), id LIMIT 50", ns)
+end
+
+--- Note a call from a terminal (§12): in touch, or refused and why ("secret" | "clock"). At most one write per
+-- terminal every 10 seconds; never fails the call.
+local function note_contact(term, refused)
+    local ok, err
+    if refused then
+        ok, err = pcall(db.query, [[UPDATE ar_terminals SET last_refused_at = NOW(), last_refused_reason = ?
+            WHERE id = ? AND (last_refused_at IS NULL OR last_refused_at < NOW() - interval '10 seconds'
+                OR last_refused_reason IS DISTINCT FROM ?)]], refused, term.id, refused)
+    else
+        ok, err = pcall(db.query, [[UPDATE ar_terminals SET last_contact_at = NOW()
+            WHERE id = ? AND (last_contact_at IS NULL OR last_contact_at < NOW() - interval '10 seconds')]], term.id)
+    end
+    if not ok then ngx.log(ngx.WARN, "[ai_runner] terminal contact not noted: ", tostring(err)) end
 end
 
 --- A new shared secret: 64 hex characters (32 bytes from the OS CSPRNG). @return plain, sealed, hint
@@ -380,8 +416,14 @@ end
 function T.signed_terminal(terminal_uuid, msg, signature)
     local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
     local secret = term and secret_of(term)
+    if not secret then return nil end
     local got = type(signature) == "string" and (signature:match("^[Ss][Hh][Aa]256=(%x+)$") or "") or ""
-    if secret and equal(got:lower(), T.hmac_hex(secret, msg)) then return term end
+    if not equal(got:lower(), T.hmac_hex(secret, msg)) then
+        note_contact(term, "secret")
+        return nil
+    end
+    note_contact(term)
+    return term
 end
 
 --- What the terminal fetches (§10): its live keys, signed so it can trust them. The request is signed too:
@@ -394,9 +436,14 @@ function T.keys_for_terminal(terminal_uuid, ts, signature)
     ts = type(ts) == "string" and ts:match("^%d+$")
     local got = type(signature) == "string" and (signature:match("^[Ss][Hh][Aa]256=(%x+)$") or "") or ""
     if not secret or not ts or not equal(got:lower(), T.hmac_hex(secret, "keys\n" .. term.uuid .. "\n" .. ts)) then
+        if secret then note_contact(term, "secret") end
         return nil, 401, "Unauthorized"
     end
-    if math.abs(tonumber(ts) - ngx.time()) > T.CLOCK_SKEW then return nil, 400, "Timestamp too far from now" end
+    if math.abs(tonumber(ts) - ngx.time()) > T.CLOCK_SKEW then
+        note_contact(term, "clock")
+        return nil, 400, "Timestamp too far from now"
+    end
+    note_contact(term)
     local keys = {}
     retire_leavers(term.id)
     if term.is_active then
@@ -555,9 +602,17 @@ function T.webhook(raw, signature)
     if not term then return nil, 404, "Unknown launch" end
     local secret = secret_of(term)
     local got = type(signature) == "string" and (signature:match("^[Ss][Hh][Aa]256=(%x+)$") or "") or ""
-    if not secret or not equal(got:lower(), T.hmac_hex(secret, raw)) then return nil, 401, "Invalid signature" end
+    if not secret then return nil, 401, "Invalid signature" end
+    if not equal(got:lower(), T.hmac_hex(secret, raw)) then
+        note_contact(term, "secret")
+        return nil, 401, "Invalid signature"
+    end
     local ts = tonumber(payload.ts)
-    if not ts or math.abs(ts - ngx.time()) > T.CLOCK_SKEW then return nil, 400, "ts is missing or too far from now" end
+    if not ts or math.abs(ts - ngx.time()) > T.CLOCK_SKEW then
+        note_contact(term, "clock")
+        return nil, 400, "ts is missing or too far from now"
+    end
+    note_contact(term)
     local event = payload.event
     if event ~= "session_start" and event ~= "session_end" then return nil, 400, "Unknown event" end
     local sid = type(payload.session_id) == "string" and payload.session_id:match("^%x+$") and #payload.session_id <= 64

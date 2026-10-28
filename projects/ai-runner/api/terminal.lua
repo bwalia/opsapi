@@ -1,5 +1,6 @@
 -- Web terminals (docs/AI_RUNNER_WEB_TERMINAL.md).
---   GET    /terminals                       ai_runners.manage: this workspace's terminals (never their secrets)
+--   GET    /terminals                       ai_runners.manage: this workspace's terminals (never their secrets),
+--                                           each with its connection status (§12)
 --   POST   /terminals { name, url, agents?, autologin? }   ai_runners.manage -> 201 { terminal, secret } (once)
 --   PUT    /terminals/:uuid { name?, url?, agents?, is_active?, autologin? }   ai_runners.manage
 --   POST   /terminals/:uuid/rotate-secret   ai_runners.manage -> { terminal, secret }; old links and webhooks stop

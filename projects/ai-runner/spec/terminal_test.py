@@ -465,12 +465,36 @@ st_ = {k["uuid"]: k["status"] for k in expect("list again", call("GET", K, "mgr"
 check("the old one is replaced; same terminal user", st_ == {k1["uuid"]: "replaced", k2["uuid"]: "active"}
       and k2["terminal_user"] == "dev.a", st_)
 
-# The terminal fetching its keys.
+# The terminal fetching its keys, and the card's connection status (§12) following along.
+def connection():
+    terms = expect("manager lists terminals", call("GET", P + "/terminals", "mgr", W), 200)
+    return next(t for t in terms if t["uuid"] == TERM["uuid"])["connection"]
+
+
+sql(f"UPDATE ar_terminals SET last_contact_at = NULL, last_refused_at = NULL, last_refused_reason = NULL "
+    f"WHERE uuid = '{TERM['uuid']}'")
+check("status: waiting until the terminal first calls", connection() == {"state": "waiting"}, connection())
 check("unknown terminal: 401", fetch_keys(term_uuid=str(uuidlib.uuid4()))[0] == 401)
 check("wrong signature: 401", fetch_keys(sig="sha256=" + "0" * 64)[0] == 401)
+c = connection()
+check("status: the secret doesn't match", c["state"] == "secret" and c["refused_secs_ago"] <= 5, c)
 check("signed with the old secret: 401", fetch_keys(secret=SEC)[0] == 401)
 check("an old request can't be replayed", fetch_keys(ts=int(time.time()) - 3600)[0] == 400)
+c = connection()
+check("status: the right secret but the clock is off", c["state"] == "clock", c)
 lk = live_keys()
+c = connection()
+check("status: connected once a good call comes in", c["state"] == "connected" and c["seen_secs_ago"] <= 5, c)
+sql(f"UPDATE ar_terminals SET last_contact_at = NOW() - interval '5 minutes', last_refused_at = NULL "
+    f"WHERE uuid = '{TERM['uuid']}'")
+c = connection()
+check("status: lost after two minutes without a call", c["state"] == "lost" and 290 <= c["seen_secs_ago"] <= 320, c)
+sql(f"UPDATE ar_terminals SET last_refused_at = NOW() - interval '20 minutes', last_refused_reason = 'secret' "
+    f"WHERE uuid = '{TERM['uuid']}'")
+check("an old refusal no longer shows", connection()["state"] == "lost", connection())
+lk = live_keys()
+check("the card's list never shows the secret", "secret_sealed" not in json.dumps(
+    expect("list", call("GET", P + "/terminals", "mgr", W), 200)))
 check("the terminal gets dev's live key, signed", lk is not None and len(lk) == 1 and lk[0]["user"] == "dev.a"
       and lk[0]["public_key"] == k2_line.rsplit(" ", 1)[0] and lk[0]["email"] == USERS["dev"][1]
       and lk[0]["expires_unix"] > time.time() + 89 * 86400, lk)
@@ -718,7 +742,8 @@ check("its work log stays", "tab0a" in [r["tab_id"] for r in page("owner_a", W, 
 for MIG, table in (("20261023120000_ai_runner_web_terminals", "ar_terminals"),
                    ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups"),
                    ("20261026120000_ai_runner_terminal_keys", "ar_terminal_keys"),
-                   ("20261026130000_ai_runner_work_log", "ar_terminal_tabs")):
+                   ("20261026130000_ai_runner_work_log", "ar_terminal_tabs"),
+                   ("20261028120000_ai_runner_terminal_contact", "ar_terminals")):
     if not MIGRATE:
         break
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG}'")

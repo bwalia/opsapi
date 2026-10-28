@@ -402,6 +402,17 @@ export interface WebTerminal {
   secret_hint?: string | null;
   created_at?: string;
   updated_at?: string;
+  /** §12: is the terminal in touch with OpsAPI? */
+  connection?: TerminalConnection;
+}
+/**
+ * §12: connected (called within 2 minutes) · lost (was in touch, not lately) · waiting (never called) · secret (it
+ * calls with a different secret) · clock (right secret, clock more than 5 minutes off).
+ */
+export interface TerminalConnection {
+  state: 'connected' | 'lost' | 'waiting' | 'secret' | 'clock';
+  seen_secs_ago?: number | null;
+  refused_secs_ago?: number;
 }
 /** §10: a key a manager issued someone for a terminal (only its public half is kept). */
 export interface TerminalAccessKey {
