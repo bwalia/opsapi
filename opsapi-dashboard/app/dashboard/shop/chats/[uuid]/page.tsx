@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { shopService } from '@/services/shop.service';
-import { KeyValue, SectionTitle, ShopError, ShopLoading } from '@/components/shop/shared';
+import { formatCountry, KeyValue, SectionTitle, ShopError, ShopLoading } from '@/components/shop/shared';
 import { cn, extractApiError, formatDateTime } from '@/lib/utils';
 import type { ShopChatMessage, ShopChatSession } from '@/types/shop';
 
@@ -112,9 +112,27 @@ function ChatDetail() {
         </Card>
         <div className="space-y-6">
           <Card>
-            <SectionTitle>Linked</SectionTitle>
+            <SectionTitle>Visitor</SectionTitle>
             <dl className="divide-y divide-secondary-100">
               <KeyValue label="Email">{chat.email ? <a href={`mailto:${chat.email}`} className="text-primary-600 hover:underline">{chat.email}</a> : '—'}</KeyValue>
+              <KeyValue label="Name">{chat.contact_name || '—'}</KeyValue>
+              <KeyValue label="Phone">
+                {chat.contact_phone ? (
+                  <a href={`tel:${chat.contact_phone.replace(/[^\d+]/g, '')}`} className="text-primary-600 hover:underline">
+                    {chat.contact_phone}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </KeyValue>
+              <KeyValue label="Signed in">{chat.is_member ? 'Yes, member' : 'No'}</KeyValue>
+              <KeyValue label="IP address">{chat.client_ip ? <span className="font-mono text-xs">{chat.client_ip}</span> : '—'}</KeyValue>
+              <KeyValue label="Country">{formatCountry(chat.country)}</KeyValue>
+            </dl>
+          </Card>
+          <Card>
+            <SectionTitle>Linked</SectionTitle>
+            <dl className="divide-y divide-secondary-100">
               <KeyValue label="Cart">{cartUuid ? <span className="font-mono text-xs">{cartUuid}</span> : '—'}</KeyValue>
               <KeyValue label="Quote">
                 {quoteUuid ? (

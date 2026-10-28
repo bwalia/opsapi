@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Card, Input, Pagination, Table } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { shopService } from '@/services/shop.service';
+import { formatCountry } from '@/components/shop/shared';
 import { extractApiError, formatDateTime, truncate } from '@/lib/utils';
 import type { ShopChatSession, TableColumn } from '@/types';
 
@@ -61,6 +62,16 @@ function ChatsContent() {
         </div>
       ),
     },
+    {
+      key: 'visitor',
+      header: 'Visitor',
+      render: (c) => (
+        <div className="text-sm">
+          <p className="whitespace-nowrap text-secondary-700">{formatCountry(c.country)}</p>
+          {c.client_ip && <p className="font-mono text-xs text-secondary-500">{c.client_ip}</p>}
+        </div>
+      ),
+    },
     { key: 'message_count', header: 'Messages', render: (c) => <span className="tabular-nums">{c.message_count ?? c.messages?.length ?? 0}</span> },
     {
       key: 'outcome',
@@ -81,7 +92,7 @@ function ChatsContent() {
       <PageHeader title="AI assistant chats" description="Transcripts from the shop's AI sales assistant" icon={<MessageSquare className="h-5 w-5" />} />
       <Card padding="md">
         <div className="max-w-sm">
-          <Input placeholder="Search email or text…" aria-label="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search className="h-4 w-4" />} />
+          <Input placeholder="Search email, phone or text…" aria-label="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search className="h-4 w-4" />} />
         </div>
       </Card>
       <div>

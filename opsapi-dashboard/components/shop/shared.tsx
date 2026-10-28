@@ -428,6 +428,20 @@ export function MovementsDrawer({ target, onClose }: { target: StockTarget | nul
 // Small layout helpers
 // ============================================================
 
+/** "GB" → "🇬🇧 United Kingdom"; unknown or missing codes fall back to the code or "—". */
+export function formatCountry(code?: string | null): string {
+  if (!code || !/^[A-Za-z]{2}$/.test(code)) return '—';
+  const cc = code.toUpperCase();
+  const flag = String.fromCodePoint(...[...cc].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+  let name = cc;
+  try {
+    name = new Intl.DisplayNames(['en'], { type: 'region' }).of(cc) ?? cc;
+  } catch {
+    // Older runtimes without Intl.DisplayNames: show the code.
+  }
+  return `${flag} ${name}`;
+}
+
 export function SectionTitle({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-3">

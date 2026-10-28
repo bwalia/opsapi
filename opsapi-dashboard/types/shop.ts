@@ -657,6 +657,15 @@ export interface ShopPriceChange {
 export interface ShopChatSession {
   uuid: string;
   email?: string | null;
+  /** Given by the visitor at chat start, else from their CRM lead. */
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  /** Visitor address as seen by the edge (wslproxy X-WSL-Client-IP). */
+  client_ip?: string | null;
+  /** ISO 3166-1 alpha-2 from the edge's geo lookup. */
+  country?: string | null;
+  /** Started by a signed-in shop member. */
+  is_member?: boolean;
   cart_uuid?: string | null;
   cart?: ShopRef | null;
   quote_uuid?: string | null;

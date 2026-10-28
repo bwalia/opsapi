@@ -2616,6 +2616,8 @@ local _migrations = {
     -- Membership v2: lower tier, yearly cap, refunds with clawback, 48-hour join credits, gap claims
     ['zzs28_shop_membership_v2'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 7),
     ['zzs29_shop_price_lock_60'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 8),
+    -- AI advisor: visitor IP / country / contact and member flag on chat sessions
+    ['zzs30_shop_advisor_chat_visitor'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_advisor_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

@@ -26,14 +26,55 @@ local MAX_PER_CALL = 50
 local MAX_MESSAGES = 1000
 local ROLES = { user = true, assistant = true, system = true, tool = true }
 
-function ShopChatQueries.create(ns_id, body)
+local function short(v, max)
+    v = U.nz(v)
+    return v and tostring(v):gsub("^%s+", ""):gsub("%s+$", ""):sub(1, max) or nil
+end
+
+-- Name and phone from the customer's most recent CRM lead, when they didn't give them.
+local function lead_contact(ns_id, email)
+    local r = db.query([[
+        SELECT TRIM(CONCAT_WS(' ', NULLIF(first_name, 'Shop customer'), last_name)) AS name, phone FROM crm_leads
+         WHERE namespace_id = ? AND lower(email) = ? AND deleted_at IS NULL
+         ORDER BY updated_at DESC NULLS LAST, id DESC LIMIT 1
+    ]], ns_id, email)[1]
+    if not r then return nil, nil end
+    return short(r.name, 200), short(r.phone, 64)
+end
+
+--- Start a transcript.
+-- body:    { cart_token?, email?, name?, phone? }
+-- visitor: set by the route, never from the body: { client_ip?, country?, is_member? }
+function ShopChatQueries.create(ns_id, body, visitor)
     body = body or {}
+    visitor = visitor or {}
     local cart
     if U.nz(body.cart_token) then cart = Cart.byToken(ns_id, body.cart_token) end
+    local email = L.email(body.email)
+    local name, phone = short(body.name, 200), short(body.phone, 64)
+    if email and (not name or not phone) then
+        local lead_name, lead_phone = lead_contact(ns_id, email)
+        name, phone = name or lead_name, phone or lead_phone
+    end
+    local country = type(visitor.country) == "string" and visitor.country:upper() or nil
+    if country and not country:match("^%u%u$") then country = nil end
+    -- The transcript opens with who started it, so it reads correctly wherever it is shown.
+    local opening = {}
+    if email then
+        local who = { email }
+        if name then who[#who + 1] = name end
+        if phone then who[#who + 1] = phone end
+        if visitor.is_member then who[#who + 1] = "signed-in member" end
+        opening[1] = { role = "system", content = "Chat started by " .. table.concat(who, " · "),
+            at = os.date("!%Y-%m-%dT%H:%M:%SZ") }
+    end
     local row = db.query([[
-        INSERT INTO shop_chat_sessions (uuid, namespace_id, cart_id, email, messages, message_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, '[]'::jsonb, 0, NOW(), NOW()) RETURNING id, uuid
-    ]], Global.generateUUID(), ns_id, cart and cart.id or db.NULL, U.nz(body.email) or db.NULL)[1]
+        INSERT INTO shop_chat_sessions (uuid, namespace_id, cart_id, email, contact_name, contact_phone, client_ip,
+                                        country, is_member, messages, message_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, NOW(), NOW()) RETURNING id, uuid
+    ]], Global.generateUUID(), ns_id, cart and cart.id or db.NULL, email or db.NULL, name or db.NULL,
+        phone or db.NULL, short(visitor.client_ip, 64) or db.NULL, country or db.NULL, visitor.is_member == true,
+        U.enc(U.arr(opening)), #opening)[1]
     if cart then
         db.query("UPDATE shop_carts SET chat_session_id = ? WHERE id = ? AND chat_session_id IS NULL", row.id, cart.id)
     end
@@ -131,6 +172,7 @@ end
 
 local LIST_COLS = [[
     s.uuid, s.email, s.summary, s.message_count, s.created_at, s.updated_at,
+    s.contact_name, s.contact_phone, s.client_ip, s.country, s.is_member,
     s.requirements::text AS requirements, s.improve_consent, s.consent_at, l.uuid AS crm_lead_uuid,
     c.uuid AS cart_uuid, q.uuid AS quote_uuid, q.quote_number, o.uuid AS order_uuid, o.order_number
 ]]
@@ -141,8 +183,9 @@ function ShopChatQueries.adminList(ns_id, params)
     local offset = math.max(0, U.int(params.offset, 0))
     local where, vals = { "s.namespace_id = ?" }, { ns_id }
     if U.nz(params.q) then
-        where[#where + 1] = "(s.email ILIKE ? OR s.messages::text ILIKE ?)"
+        where[#where + 1] = "(s.email ILIKE ? OR s.contact_phone ILIKE ? OR s.messages::text ILIKE ?)"
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
+        vals[#vals + 1] = like
         vals[#vals + 1] = like
         vals[#vals + 1] = like
     end
@@ -168,8 +211,10 @@ function ShopChatQueries.adminList(ns_id, params)
         if r.first_user_message then r.first_user_message = r.first_user_message:sub(1, 200) end
         r.requirements = U.dec(r.requirements, {})
         r.improve_consent = r.improve_consent == true
+        r.is_member = r.is_member == true
         for _, k in ipairs({ "email", "summary", "cart_uuid", "quote_uuid", "quote_number", "order_uuid",
-                             "order_number", "first_user_message", "consent_at", "crm_lead_uuid" }) do
+                             "order_number", "first_user_message", "consent_at", "crm_lead_uuid",
+                             "contact_name", "contact_phone", "client_ip", "country" }) do
             if r[k] == nil then r[k] = U.null end
         end
     end
@@ -188,8 +233,9 @@ function ShopChatQueries.adminGet(ns_id, uuid)
     r.messages = U.arr(U.dec(r.messages, {}))
     r.requirements = U.dec(r.requirements, {})
     r.improve_consent = r.improve_consent == true
+    r.is_member = r.is_member == true
     for _, k in ipairs({ "email", "summary", "cart_uuid", "quote_uuid", "quote_number", "order_uuid", "order_number",
-                         "consent_at", "crm_lead_uuid" }) do
+                         "consent_at", "crm_lead_uuid", "contact_name", "contact_phone", "client_ip", "country" }) do
         if r[k] == nil then r[k] = U.null end
     end
     return r

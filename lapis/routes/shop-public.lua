@@ -26,7 +26,7 @@
       GET    /quotes/:uuid?t=
       POST   /checkout                           { …, membership?: { interval, accept_terms, terms_version } } joins Trade in the same payment
       GET    /orders/:uuid?t=
-      POST   /chat-sessions
+      POST   /chat-sessions                      { cart_token?, email?, name?, phone? } (+ BFF X-Visitor-Country)
       POST   /chat-sessions/:uuid/messages
       POST   /chat-sessions/:uuid/requirements   { requirements: {goal, models, budget_gbp, …} } (AI advisor)
       POST   /chat-sessions/:uuid/contact        { email, name?, company?, phone?, improve_consent } → CRM lead
@@ -62,6 +62,7 @@ local Quote = require("queries.ShopQuoteQueries")
 local Orders = require("queries.ShopOrderQueries")
 local Search = require("queries.ShopSearchQueries")
 local Chat = require("queries.ShopChatQueries")
+local ClientIP = require("helper.client-ip")
 local Market = require("queries.ShopMarketQueries")
 local Insights = require("queries.ShopInsightsQueries")
 local Membership = require("queries.ShopMembershipQueries")
@@ -267,10 +268,18 @@ return function(app)
     end))
 
     -- chat transcripts --------------------------------------------------------------
-    app:post(BASE .. "/chat-sessions", public(function(_, ns_id)
+    app:post(BASE .. "/chat-sessions", public(function(self, ns_id)
         local body, bad = body_or_400()
         if not body then return bad end
-        return U.ok(Chat.create(ns_id, body), 201)
+        -- Who started it, for the back office. A signed-in member's email comes from their
+        -- session, not the body; the country is the edge's geo lookup and only the BFF may pass it.
+        local member = ngx.ctx.shop_member
+        if member and U.nz(member.email) then body.email = member.email end
+        return U.ok(Chat.create(ns_id, body, {
+            client_ip = ClientIP.get(),
+            country = is_bff(self) and self.req.headers["x-visitor-country"] or nil,
+            is_member = member ~= nil,
+        }), 201)
     end))
 
     app:post(BASE .. "/chat-sessions/:uuid/messages", public(function(self, ns_id)
