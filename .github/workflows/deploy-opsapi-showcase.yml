@@ -166,6 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           sleep 20
-          curl -fsS --max-time 20 "https://$API_HOST/health" | head -c 300; echo
-          curl -fsS --max-time 20 "https://$API_HOST/api/v2/system/info" | head -c 300; echo
+          # Save then print: `curl | head` fails under pipefail once head closes the pipe.
+          curl -fsS --max-time 20 -o health.json "https://$API_HOST/health" && head -c 300 health.json; echo
+          curl -fsS --max-time 20 -o info.json "https://$API_HOST/api/v2/system/info" && head -c 300 info.json; echo
           curl -fsS --max-time 20 -o /dev/null -w "dashboard HTTP %{http_code}\n" "https://$DASHBOARD_HOST/login"
