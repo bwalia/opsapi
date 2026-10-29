@@ -4,7 +4,7 @@
 #
 # Every module (PROJECT_CODE=all) with sample data, behind the public
 # read-only login demo@opsapi.org. Own database
-# (devops/k8s/opsapi-showcase-db.yaml) and Vault path. The identity demo
+# (devops/k8s/opsapi-showcase-db.yaml); secrets shared with the identity demo. The identity demo
 # (values-opsapi-demo.yaml) stays core_only; nothing is shared with it.
 # Run order: devops/demo/README.md, "Full demo (showcase)".
 env: prod
@@ -55,13 +55,14 @@ database:
 # opsapi-showcase-db is plain Postgres with no TLS.
 postgresSsl: "false"
 
-# POSTGRES_USER/PASSWORD/PORT, JWT_SECRET_KEY, OPENSSL_SECRET_KEY/IV and
-# ADMIN_PASSWORD live here (seeded by devops/demo/seed-vault-demo.sh with
-# VAULT_PATH=opsapi-showcase/config).
+# Shares the identity demo's Vault path (opsapi-demo/config): DB user/password
+# (for its OWN database below), JWT and encryption keys, ADMIN_PASSWORD and
+# SMTP_*. The chart writes config.lua from this file's database.host, so
+# nothing in it points at the identity demo's database.
 externalSecret:
   enabled: true
   secretStore: wslvault-backend
-  vaultPath: opsapi-showcase/config
+  vaultPath: opsapi-demo/config
 
 # Creates the `showcase` namespace on first boot and makes this user its
 # owner and platform admin; seed-showcase.lua then hands ownership to a

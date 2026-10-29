@@ -148,10 +148,9 @@ The identity demo above stays `core_only`; the two share nothing.
 | `devops/demo/seed-showcase.lua` | The `showcase` workspace, viewer role, demo login, fictional users |
 | `devops/demo/seed-showcase-data.lua` | Sample records: CRM, leads, invoices, projects, timesheets, shop, care home, CMS, academy, forms, hiring, field service |
 | `devops/demo/demo-account-reset.yaml` | Restores the demo login every 30 minutes (points at `opsapi-showcase-db`) |
-| `.github/workflows/deploy-opsapi-showcase.yml` | Does steps 1 and 3–7 below; runs weekly so the demo stays up and current |
+| `.github/workflows/deploy-opsapi-showcase.yml` | Does all the steps below; runs weekly so the demo stays up and current |
 
-**Automated:** after the one-time Vault step (2), run
-`gh workflow run deploy-opsapi-showcase.yml`. It also runs every Monday. The
+**Automated:** run `gh workflow run deploy-opsapi-showcase.yml`. It also runs every Monday. The
 manual steps below are the same thing by hand.
 
 ```bash
@@ -163,9 +162,8 @@ for h in showcase showcase-api; do
     --name "$h.demo.opsapi.org" --content lon1.pop0.uk --proxied false
 done
 
-# 2. Secrets (no Google sign-in here) — then copy the SMTP_* keys from
-#    opsapi-demo/config into opsapi-showcase/config
-VAULT_PATH=opsapi-showcase/config ./devops/demo/seed-vault-demo.sh
+# 2. Secrets: nothing to do. The showcase reads the identity demo's Vault
+#    path (opsapi-demo/config) for its DB password, JWT/encryption keys and SMTP.
 
 # 3. Database, then the API (run the upgrade twice on a fresh install, as above)
 kubectl apply -f devops/k8s/opsapi-showcase-db.yaml

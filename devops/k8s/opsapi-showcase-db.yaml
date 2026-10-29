@@ -9,8 +9,8 @@
 # volume so the app's first `lapis migrate` never fails on it.
 #
 # Credentials: POSTGRES_PASSWORD comes from the WSL Vault path the app reads
-# (opsapi-showcase/config, seeded by devops/demo/seed-vault-demo.sh with
-# VAULT_PATH=opsapi-showcase/config) — no plaintext in git (this repo is public).
+# (opsapi-demo/config, shared with the identity demo; it's only the password
+# for this database's own user) — no plaintext in git (this repo is public).
 #
 # Apply (one-time; the PVC persists across app redeploys):
 #   kubectl apply -f devops/k8s/opsapi-showcase-db.yaml
@@ -34,7 +34,7 @@ spec:
   data:
     - secretKey: POSTGRES_PASSWORD
       remoteRef:
-        key: opsapi-showcase/config
+        key: opsapi-demo/config
         property: POSTGRES_PASSWORD
 ---
 apiVersion: v1

@@ -7,9 +7,8 @@
 # alive and on the latest main: it re-creates anything missing and never
 # deletes data. See devops/demo/README.md "Full demo (showcase)".
 #
-# One-time prerequisite (needs a WSL Vault key, which this repo doesn't hold):
-#   VAULT_PATH=opsapi-showcase/config WSLVAULT_API_KEY=wslv_... ./devops/demo/seed-vault-demo.sh
-# then copy the SMTP_* keys from opsapi-demo/config into opsapi-showcase/config.
+# Secrets come from the identity demo's Vault path (opsapi-demo/config), which
+# already exists, so there is no manual prerequisite.
 name: Deploy OpsAPI showcase demo
 
 on:
@@ -115,7 +114,7 @@ jobs:
           # The DB password comes from Vault through ESO; no Vault entry = no DB.
           for i in $(seq 1 30); do
             kubectl -n "$NS" get secret opsapi-showcase-db-auth >/dev/null 2>&1 && break
-            [ "$i" = 30 ] && { echo "::error::Vault path opsapi-showcase/config is missing or unreadable. Run once: VAULT_PATH=opsapi-showcase/config ./devops/demo/seed-vault-demo.sh"; exit 1; }
+            [ "$i" = 30 ] && { echo "::error::ExternalSecret opsapi-showcase-db-auth didn't sync from Vault opsapi-demo/config"; exit 1; }
             sleep 10
           done
           kubectl -n "$NS" rollout status statefulset/opsapi-showcase-db --timeout=10m
