@@ -44,7 +44,9 @@ function userFromUserinfo(info: Record<string, unknown>): User {
     created_at: '',
     updated_at: '',
     role: typeof info.role === 'string' ? info.role : undefined,
-  };
+    // The token's workspace: NamespaceContext adopts it, as after a password login.
+    ...(info.namespace && typeof info.namespace === 'object' ? { namespace: info.namespace } : {}),
+  } as User;
 }
 
 export default function GoogleCallbackPage(): React.ReactElement {
