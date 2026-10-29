@@ -6,7 +6,8 @@ Start dialog's offer (terminals, remembered folders, the prompt); launching (who
 the signed ticket and its claims, the folder remembered, no comment); the webhook (unknown launch, bad signature,
 stale time, start and end once each, another workspace's secret, a rotated secret); expired links; isolation between
 workspaces; auto sign-in (§8: the permission, the terminal switch, the emailed-code step-up, the login claim and the
-2-minute link); agents reporting their pull request (§9: the token, the task moved to Review, once per URL); the
+2-minute link); agents reporting their pull request (§9: the token, the task moved to Review only for a PR in the
+project's repository, once per URL); the
 migrations run again.
 """
 import base64
@@ -373,10 +374,12 @@ TS = lambda: one(f"SELECT status FROM kanban_tasks WHERE uuid = '{T1['uuid']}'")
 check("task not in review yet", TS() != "review", TS())
 r1 = expect("agent reports its PR", report({"pr_url": "https://github.com/acme/web/pull/7/", "note": "Sticky header."}),
             200)
-check("PR attached to the task: repo, number, open", (r1.get("pr") or {}).get("repo") == "acme/web"
-      and r1["pr"].get("pr_number") == 7 and r1["pr"].get("state") == "open"
-      and r1["pr"].get("pr_url") == "https://github.com/acme/web/pull/7" and r1.get("task_uuid") == T1["uuid"], r1)
-check("task moved to review (on_pr_open default)", TS() == "review", TS())
+check("no repository to check it against: recorded on the task, not followed (no number)",
+      (r1.get("pr") or {}).get("repo") == "acme/web" and r1["pr"].get("pr_number") is None
+      and r1["pr"].get("state") == "open" and r1["pr"].get("pr_url") == "https://github.com/acme/web/pull/7"
+      and r1.get("task_uuid") == T1["uuid"] and r1.get("tracked") is False
+      and "doesn't move by itself" in (r1.get("message") or ""), r1)
+check("…so the task doesn't move", TS() != "review", TS())
 check("one comment with the PR and the note",
       comments(T1["uuid"], "%opened a pull request from the web terminal: https://github.com/acme/web/pull/7%"
                "Sticky header.%") == 1)
@@ -393,8 +396,10 @@ expect("the project names its repository", call("PUT", P + f"/projects/{proj['uu
                                                 {"target_repo_url": "https://github.com/acme/web.git"}), 200)
 expect("a PR in another repository is refused (it could finish the task when it merges)",
        report({"pr_url": "https://github.com/someone/else/pull/1"}), 422)
-expect("a PR in the project's repository (any case) is fine", report({"pr_url": "https://github.com/Acme/Web/pull/8"}),
-       200)
+r8 = expect("a PR in the project's repository (any case) is fine",
+            report({"pr_url": "https://github.com/Acme/Web/pull/8"}), 200)
+check("…followed: its number kept, the task moved to review (on_pr_open default)", r8.get("tracked") is True
+      and (r8.get("pr") or {}).get("pr_number") == 8 and TS() == "review", (r8, TS()))
 sql(f"UPDATE ar_terminal_sessions SET created_at = NOW() - interval '8 days' WHERE uuid = '{auto['session']['uuid']}'")
 expect("a week-old token stops working", report({"note": "late"}), 401)
 s_ = expect("settings", call("GET", P + "/settings", "owner_a", W), 200)["task_automation"]

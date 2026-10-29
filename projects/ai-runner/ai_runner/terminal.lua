@@ -721,7 +721,8 @@ local function pr_parts(url)
     if url:match("^https://[%w%.%-]+/.+/%-/merge_requests/%d+/?$") then return "", nil end
 end
 
---- Apply an agent's report: body = { pr_url?, note? }. @return { task_uuid, pr? } | nil, http status, message
+--- Apply an agent's report: body = { pr_url?, note? }.
+-- @return { task_uuid, pr?, tracked?, message? } | nil, http status, message
 function T.report(token, body)
     if type(token) ~= "string" or not token:match("^[%w_%-]+$") or #token < 32 or #token > 128 then
         return nil, 401, "Unauthorized"
@@ -733,23 +734,31 @@ function T.report(token, body)
         s.terminal_uuid, s.namespace_id))
     if type(body) ~= "table" then return nil, 400, "Invalid JSON" end
     local pr_url = body.pr_url
+    -- tracked: the PR is in the project's own GitHub repository, so OpsAPI follows it and moves the task (on_pr_open,
+    -- then on_pr_merged from the poll). Without a repository to check it against (or for a GitLab merge request) a
+    -- token holder could name any PR, even one already merged elsewhere, and finish the task: such a PR is only
+    -- recorded on the task, and a manager moves it. `why` says why it isn't followed.
+    local tracked, why = false, nil
     if pr_url ~= nil and pr_url ~= cjson.null then
         if type(pr_url) ~= "string" or #pr_url > 500 or not pr_parts(pr_url) then
             return nil, 422, "pr_url must be a GitHub pull request (or GitLab merge request) URL"
         end
         pr_url = pr_url:gsub("/$", "")
-        -- Only a PR in the project's repository (or the folder's): the poll moves the task to Done when the reported
-        -- PR merges, so an unrelated, already-merged PR would otherwise finish the task.
         local V = require("ai_runner.vault_pr")
         local repo, known = (pr_parts(pr_url) or ""):lower(), {}
         for _, u in ipairs({ R.project_settings(s.namespace_id, s.project_uuid).target_repo_url, s.repo_url }) do
             local r = V.parse_repo(u)
             if r then known[#known + 1] = r end
         end
-        local ok = repo == "" or #known == 0
-        for _, r in ipairs(known) do ok = ok or r:lower() == repo end
-        if not ok then
-            return nil, 422, "pr_url must be a pull request in " .. table.concat(known, " or ")
+        if #known == 0 then
+            why = "the project has no GitHub repository set in its AI run settings"
+        elseif repo == "" then
+            why = "OpsAPI only follows GitHub pull requests"
+        else
+            for _, r in ipairs(known) do tracked = tracked or r:lower() == repo end
+            if not tracked then
+                return nil, 422, "pr_url must be a pull request in " .. table.concat(known, " or ")
+            end
         end
     else
         pr_url = nil
@@ -762,6 +771,9 @@ function T.report(token, body)
     local out = { task_uuid = s.task_uuid }
     if pr_url then
         local repo, num = pr_parts(pr_url)
+        -- Not followed: no number, so the poll never looks at it (and never moves the task); still listed on the
+        -- task's AI work panel for a manager's sign-off.
+        if not tracked then num = nil end
         local row = U.one([[INSERT INTO ar_task_prs (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
             VALUES (?, ?, ?, ?, ?, ?, 'open')
             ON CONFLICT (namespace_id, task_uuid, pr_url) WHERE run_uuid IS NULL DO NOTHING RETURNING *]],
@@ -769,14 +781,21 @@ function T.report(token, body)
         if row then
             comment(s.task_uuid, s.namespace_id, s.opened_by, who .. " opened a pull request from the web terminal: "
                 .. pr_url .. (note and ("\n" .. note) or "")
+                .. (tracked and "" or ("\nOpsAPI can't follow it (" .. why .. "), so the task doesn't move by "
+                    .. "itself: a manager moves it."))
                 .. "\nManagers: approve or request changes on the task's AI work panel.")
-            R.automate_task(s.namespace_id, s.task_uuid, "on_pr_open")
+            if tracked then R.automate_task(s.namespace_id, s.task_uuid, "on_pr_open") end
         else
             row = U.one([[SELECT * FROM ar_task_prs WHERE namespace_id = ? AND task_uuid = ? AND pr_url = ?
                 AND run_uuid IS NULL]], s.namespace_id, s.task_uuid, pr_url)
             if note then comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note) end
         end
         out.pr = row and require("ai_runner.vault_pr").view(row) or nil
+        out.tracked = tracked
+        if not tracked then
+            out.message = "Recorded on the task. OpsAPI can't follow this pull request (" .. why .. "), so the task "
+                .. "doesn't move by itself: a manager moves it."
+        end
     else
         comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note)
     end
