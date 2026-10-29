@@ -613,7 +613,9 @@ function FileWizardContent() {
         const o = open[0];
         setSelectedObligation(`${o.period_start}|${o.period_end}`);
         const derived = taxYearOf(o.period_start);
-        if (derived) {
+        // Only reset on a real year change: the auto-check re-runs per year, so clearing
+        // the figures for the same year would leave "Check your figures" empty.
+        if (derived && derived !== taxYear) {
           setTaxYear(derived);
           setPreview(null);
           setCalc(null);
@@ -1260,7 +1262,7 @@ function FileWizardContent() {
                         onClick={() => {
                           setSelectedObligation(key);
                           const derived = taxYearOf(o.period_start);
-                          if (derived) { setTaxYear(derived); setPreview(null); setCalc(null); }
+                          if (derived && derived !== taxYear) { setTaxYear(derived); setPreview(null); setCalc(null); }
                         }}
                         className={`w-full text-left rounded-lg border p-3 text-sm transition-colors ${
                           selected ? 'border-primary-400 bg-primary-50' : 'border-amber-200 bg-amber-50 hover:border-primary-300'
