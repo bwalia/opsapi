@@ -74,7 +74,6 @@ package.loaded["helper.global"] = {
     end,
 }
 
-local U = require("ai_runner.util")
 local R = require("ai_runner.runs")
 local T = require("ai_runner.terminal")
 T.hmac_hex = function(secret, msg) return hex(secret .. "|" .. msg) end -- stands in for HMAC-SHA256
@@ -106,8 +105,8 @@ local mgr = T.agents_for(row, true)
 check("offered to a manager, marked unattended", #mgr == 2 and mgr[2].unattended == true and mgr[1].unattended == nil)
 check("agents_of keeps unattended = true", T.agents_of({ { id = "x", label = "X", unattended = true } })[1].unattended
     == true)
-check("agents_of refuses a non-boolean unattended", failure(T.agents_of, { { id = "x", label = "X", unattended = "yes" } })
-    ~= nil)
+check("agents_of refuses a non-boolean unattended",
+    failure(T.agents_of, { { id = "x", label = "X", unattended = "yes" } }) ~= nil)
 check("a prompt starting with - gets a word in front", T.safe_prompt("-rf /") == "Task: -rf /")
 check("…also after spaces", T.safe_prompt("  --help me") == "Task: --help me")
 check("other prompts stay as they are", T.safe_prompt("Fix the header\n-- detail") == "Fix the header\n-- detail")
@@ -140,7 +139,8 @@ local function feed()
         if sql:find("FROM ar_terminals WHERE uuid", 1, true) then return { term } end
         if sql:find("FROM namespaces", 1, true) then return { { status = ns_status } } end
         if sql:find("JOIN users pu", 1, true) then
-            return { { user = "dev", public_key = "ssh-ed25519 AAAA", expires_unix = 1, email = "d@x.io", name = "Dev" } }
+            return { { user = "dev", public_key = "ssh-ed25519 AAAA", expires_unix = 1, email = "d@x.io",
+                name = "Dev" } }
         end
         return {}
     end
@@ -240,8 +240,8 @@ check("the terminal step-up passes the option", read("projects/ai-runner/ai_runn
 
 print("S5: PR sign-off is scoped to the task")
 local vsrc = read("projects/ai-runner/ai_runner/vault_pr.lua")
-check("the UPDATE has the task in its WHERE", vsrc:find("WHERE namespace_id = ? AND task_uuid = ? AND uuid = ?", 1, true)
-    ~= nil)
+check("the UPDATE has the task in its WHERE",
+    vsrc:find("WHERE namespace_id = ? AND task_uuid = ? AND uuid = ?", 1, true) ~= nil)
 check("the route passes the task", read("projects/ai-runner/api/runs.lua")
     :find("V.review(ns, task.uuid, self.params.pr_uuid", 1, true) ~= nil)
 
@@ -263,7 +263,8 @@ local pattern
 for _, a in ipairs(list_q.args) do if type(a) == "string" and a:find("DROP", 1, true) then pattern = a end end
 check("…with its own % and _ matched literally", pattern == "%50\\%\\_off'; DROP TABLE users; --%", pattern)
 check("terminal, state and agent filters, scoped to the workspace", list_q.sql:find("t.closed_at IS NULL", 1, true)
-    and list_q.sql:find("t.agent = ?", 1, true) and list_q.sql:find("FROM ar_terminals WHERE namespace_id = ?", 1, true))
+    and list_q.sql:find("t.agent = ?", 1, true)
+    and list_q.sql:find("FROM ar_terminals WHERE namespace_id = ?", 1, true))
 check("one row more than a page, for has_more", list_q.args[#list_q.args - 1] == 51)
 
 log = {}
