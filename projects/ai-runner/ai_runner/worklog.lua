@@ -12,6 +12,8 @@ W.PERMISSION = { "ai_terminal_worklogs", "read" } -- see everyone's; without it,
 W.TEXT_DAYS = 90                                  -- prompt and command text is blanked after this
 W.RECORDING_DAYS = 30                             -- recordings are deleted after this
 W.STALE_HOURS = 12                                -- an open tab with no news this long is closed (terminal lost it)
+W.LOST_SECS = 600                                 -- …or this long, from a terminal that reports open tabs each minute
+W.LIVE_SECS = 180                                 -- "working now": the terminal reported the open tab this recently
 W.STALE_REASON = "the terminal stopped reporting"
 W.MAX_TABS, W.MAX_EVENTS = 500, 2000              -- per activity request
 W.MAX_PART = 4 * 1024 * 1024                      -- bytes per recording part
@@ -57,14 +59,16 @@ local function owner(term, tab)
     end
 end
 
-local function upsert_tab(term, tab)
+-- A tab entry from the terminal (state = true: it described the tab; seen_at becomes now, §11.2) or a bare row for
+-- a tab an event names. last_input_at (unix seconds or null) and attached (a browser shows it) are optional.
+local function upsert_tab(term, tab, state)
     local id = str(tab.id, 64)
     if not id or not id:match("^[%w_%-]+$") then return nil end
     local user_uuid, task_uuid, session_uuid = owner(term, tab)
     return U.one([[INSERT INTO ar_terminal_tabs (namespace_id, terminal_id, tab_id, session_uuid, task_uuid, user_uuid,
             terminal_user, key_fingerprint, via, ip, kind, cwd, agent, opened_at, closed_at, end_reason, exit_code,
-            active_secs, input_bytes, output_bytes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            active_secs, input_bytes, output_bytes, last_input_at, seen_at, attached)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (terminal_id, tab_id) DO UPDATE SET
             session_uuid = COALESCE(ar_terminal_tabs.session_uuid, EXCLUDED.session_uuid),
             task_uuid = COALESCE(ar_terminal_tabs.task_uuid, EXCLUDED.task_uuid),
@@ -84,6 +88,9 @@ local function upsert_tab(term, tab)
             active_secs = GREATEST(ar_terminal_tabs.active_secs, EXCLUDED.active_secs),
             input_bytes = GREATEST(ar_terminal_tabs.input_bytes, EXCLUDED.input_bytes),
             output_bytes = GREATEST(ar_terminal_tabs.output_bytes, EXCLUDED.output_bytes),
+            last_input_at = GREATEST(ar_terminal_tabs.last_input_at, EXCLUDED.last_input_at),
+            seen_at = COALESCE(EXCLUDED.seen_at, ar_terminal_tabs.seen_at),
+            attached = COALESCE(EXCLUDED.attached, ar_terminal_tabs.attached),
             updated_at = NOW()
         RETURNING id, user_uuid]],
         term.namespace_id, term.id, id, session_uuid or db.NULL, task_uuid or db.NULL, user_uuid or db.NULL,
@@ -91,7 +98,8 @@ local function upsert_tab(term, tab)
         str(tab.ip, 64) or db.NULL, str(tab.kind, 16) or db.NULL, str(tab.cwd, 1024) or db.NULL,
         str(tab.agent, 64) or db.NULL, ts(tab.opened_at), ts(tab.closed_at), str(tab.end_reason, 200) or db.NULL,
         int(tab.exit_code) or db.NULL, math.max(int(tab.active_secs) or 0, 0), math.max(int(tab.input_bytes) or 0, 0),
-        math.max(int(tab.output_bytes) or 0, 0))
+        math.max(int(tab.output_bytes) or 0, 0), ts(tab.last_input_at), state and db.raw("NOW()") or db.NULL,
+        type(tab.attached) == "boolean" and tab.attached or db.NULL)
 end
 
 -- A tab an event names but no tab entry described yet (or ever: a tab the terminal lost): a bare row.
@@ -196,7 +204,7 @@ function W.ingest(term, body)
     local cache, n_tabs, n_events = {}, 0, 0
     for _, tab in ipairs(tabs) do
         if type(tab) == "table" then
-            local row = upsert_tab(term, tab)
+            local row = upsert_tab(term, tab, true)
             if row then
                 n_tabs = n_tabs + 1
                 cache[tab.id] = row
@@ -240,14 +248,23 @@ function W.store_recording(term, tab_id, part, final, bytes)
     return { stored = row ~= nil }
 end
 
---- Blank old text, close tabs the terminal lost and delete old recordings (W.TEXT_DAYS, W.STALE_HOURS,
+--- Close the open tabs a terminal stopped reporting (it lost them: a crash, a restart). A terminal that reports
+-- every open tab at least once a minute (it sends `attached`) after W.LOST_SECS without news; an older one, which
+-- reports only changes, after W.STALE_HOURS (its own idle limits close real tabs long before). Cheap: open tabs only
+-- (partial indexes). A tab reported open again reopens (upsert_tab).
+function W.close_stale()
+    db.query([[UPDATE ar_terminal_tabs SET closed_at = GREATEST(seen_at, updated_at), end_reason = ?,
+            updated_at = NOW()
+        WHERE closed_at IS NULL AND ((attached IS NOT NULL AND seen_at < NOW() - interval ']] .. W.LOST_SECS
+        .. [[ seconds') OR updated_at < NOW() - interval ']] .. W.STALE_HOURS .. [[ hours')]], W.STALE_REASON)
+end
+
+--- Blank old text, close tabs the terminal lost and delete old recordings (W.TEXT_DAYS, W.close_stale,
 -- W.RECORDING_DAYS). Safe to run in several workers at once: each recording row is claimed by the DELETE returning it.
 function W.sweep()
     db.query([[UPDATE ar_terminal_events SET text = NULL WHERE text IS NOT NULL
         AND created_at < NOW() - interval ']] .. W.TEXT_DAYS .. [[ days']])
-    -- The terminal's own idle limits close real tabs long before this: no news means it lost them (a crash).
-    db.query([[UPDATE ar_terminal_tabs SET closed_at = updated_at, end_reason = ?, updated_at = NOW()
-        WHERE closed_at IS NULL AND updated_at < NOW() - interval ']] .. W.STALE_HOURS .. [[ hours']], W.STALE_REASON)
+    W.close_stale()
     local gone = db.query([[DELETE FROM ar_terminal_recordings WHERE created_at < NOW() - interval ']]
         .. W.RECORDING_DAYS .. [[ days' RETURNING tab_ref, object_key, bucket, bytes]])
     if #gone == 0 then return 0 end
@@ -293,6 +310,8 @@ function W.tab_view(t)
         cost_usd = cost, lines_added = t.lines_added, lines_removed = t.lines_removed, commits = t.commits,
         pull_requests = t.pull_requests, recording_parts = t.recording_parts,
         recording_bytes = tonumber(t.recording_bytes) or 0,
+        -- §11.2: when someone last typed, when the terminal last reported the tab, whether a browser shows it.
+        last_input_at = U.null(t.last_input_at), seen_at = U.null(t.seen_at), attached = U.null(t.attached),
     }
 end
 
@@ -345,6 +364,45 @@ function W.people(ns, f)
             cost_usd = tonumber(p.cost_usd) or 0, lines_added = tonumber(p.lines_added) or 0,
             lines_removed = tonumber(p.lines_removed) or 0, commits = tonumber(p.commits) or 0,
             pull_requests = tonumber(p.pull_requests) or 0, last_seen = U.null(p.last_seen) }
+    end
+    return U.array(out)
+end
+
+--- Who is working right now (§11.4): open tabs the terminal reported in the last W.LIVE_SECS, by person.
+-- user_uuid: only that person's (callers without ai_terminal_worklogs.read). with_keys: add the person's live key
+-- on that terminal (key_uuid), for Suspend.
+function W.live(ns, user_uuid, with_keys)
+    local args, mine = { ns }, ""
+    if user_uuid then mine, args[2] = " AND t.user_uuid = ?", user_uuid end
+    local rows = db.query([[SELECT t.uuid, t.user_uuid, t.terminal_user, t.cwd, t.agent, t.via, t.opened_at,
+            t.last_input_at, t.seen_at, t.attached, t.task_uuid, ]] .. R.name_sql("u") .. [[ AS person_name,
+            u.email AS person_email, term.uuid AS terminal_uuid, term.name AS terminal_name, kt.task_number,
+            kt.title AS task_title, kp.uuid AS project_uuid, lk.uuid AS key_uuid,
+            GREATEST(EXTRACT(EPOCH FROM (NOW() - t.last_input_at)), 0)::bigint AS idle_secs
+        FROM ar_terminal_tabs t
+        LEFT JOIN ar_terminals term ON term.id = t.terminal_id
+        LEFT JOIN users u ON u.uuid = t.user_uuid
+        LEFT JOIN kanban_tasks kt ON kt.uuid = t.task_uuid
+        LEFT JOIN kanban_boards kb ON kb.id = kt.board_id
+        LEFT JOIN kanban_projects kp ON kp.id = kb.project_id AND kp.namespace_id = t.namespace_id
+        LEFT JOIN LATERAL (SELECT k.uuid FROM ar_terminal_keys k WHERE k.namespace_id = t.namespace_id
+            AND k.terminal_id = t.terminal_id AND k.user_uuid = t.user_uuid AND k.revoked_at IS NULL
+            AND k.suspended_at IS NULL AND k.expires_at > NOW() ORDER BY k.id DESC LIMIT 1) lk ON TRUE
+        WHERE t.namespace_id = ? AND t.closed_at IS NULL
+            AND t.seen_at > NOW() - interval ']] .. W.LIVE_SECS .. [[ seconds']] .. mine .. [[
+        ORDER BY lower(COALESCE(]] .. R.name_sql("u") .. [[, t.terminal_user, '')), t.opened_at DESC, t.id DESC
+        LIMIT 500]], unpack(args))
+    local out = {}
+    for i, t in ipairs(rows) do
+        out[i] = { uuid = t.uuid, user_uuid = U.null(t.user_uuid), person_name = U.null(t.person_name),
+            person_email = U.null(t.person_email), terminal_user = U.null(t.terminal_user),
+            terminal_uuid = U.null(t.terminal_uuid), terminal_name = U.null(t.terminal_name),
+            task_uuid = U.null(t.task_uuid), task_number = U.null(tonumber(t.task_number)),
+            task_title = U.null(t.task_title), project_uuid = U.null(t.project_uuid), cwd = U.null(t.cwd),
+            agent = U.null(t.agent), via = U.null(t.via), opened_at = U.null(t.opened_at),
+            last_input_at = U.null(t.last_input_at), idle_secs = U.null(tonumber(t.idle_secs)),
+            seen_at = U.null(t.seen_at), attached = U.null(t.attached),
+            key_uuid = with_keys and U.null(t.key_uuid) or nil }
     end
     return U.array(out)
 end

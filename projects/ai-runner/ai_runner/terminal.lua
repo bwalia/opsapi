@@ -837,6 +837,12 @@ function T.ensure_poll_timer()
         ngx.timer.every(180, function(premature)
             if premature then return end
             pcall(function() require("ai_runner.pr_poll").tick() end)
+            -- Close tabs a terminal stopped reporting (W.LOST_SECS): one worker at a time, at most every 2 minutes.
+            local dict = ngx.shared and ngx.shared.cache
+            if not dict or dict:add("ar:worklog:close_stale", true, 120) then
+                local closed, err = pcall(function() require("ai_runner.worklog").close_stale() end)
+                if not closed then ngx.log(ngx.ERR, "[ai_runner] work log close_stale: ", tostring(err)) end
+            end
         end)
         -- Work log retention (§11.3): old prompt/command text blanked, old recordings deleted.
         ngx.timer.every(3600, function(premature)

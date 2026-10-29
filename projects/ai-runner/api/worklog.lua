@@ -4,6 +4,9 @@
 --                                           Both: 403 TERMINAL_OFF when the terminal is switched off, 404
 --                                           PLUGIN_DISABLED when its workspace is inactive or has AI Runs off.
 --   GET  /work-log?user_uuid&task_uuid&from&to&page&per_page   your tabs; everyone's with ai_terminal_worklogs.read
+--   GET  /work-log/live                     who is working now: open tabs the terminal reported in the last 3 min
+--                                           (yours; everyone's with ai_terminal_worklogs.read), key_uuid for
+--                                           ai_runners.manage (Suspend)
 --   GET  /work-log/people?from&to           ai_terminal_worklogs.read: totals per person
 --   GET  /work-log/tabs/:uuid               one tab: totals, timeline (prompts, AI requests, actions), recording parts
 --   GET  /work-log/tabs/:uuid/recording/:part   the gzipped asciicast part
@@ -84,6 +87,13 @@ return function(app)
         local rows, meta = W.list(sdk.namespace_id(self), f, page, per_page)
         meta.sees_everyone = sees_everyone(self)
         return sdk.ok(rows, meta)
+    end)))
+
+    app:get("/work-log/live", sdk.handler(U.guard(function(self)
+        local everyone = sees_everyone(self)
+        local can_suspend = sdk.can(self, "ai_runners", "manage")
+        return sdk.ok(W.live(sdk.namespace_id(self), not everyone and sdk.user(self).uuid or nil, can_suspend),
+            { sees_everyone = everyone, can_suspend = can_suspend, live_secs = W.LIVE_SECS })
     end)))
 
     app:get("/work-log/people", sdk.handler({ permission = "ai_terminal_worklogs.read" }, U.guard(function(self)
