@@ -153,3 +153,7 @@ export {
 // Workstation AI Shop (back office: catalogue, stock, orders, quotes, chats, knowledge)
 export { shopService } from './shop.service';
 export type { ShopOrderListParams, ShopQuoteListParams, ShopPageParams } from './shop.service';
+
+// Deployment info and the app catalog (/dashboard/apps)
+export { systemService } from './system.service';
+export type { SystemInfo, AppFeature, AppModule } from './system.service';

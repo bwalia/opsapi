@@ -195,6 +195,8 @@ app:get("/api/v2/system/info", function(self)
             project_code = info_or_err.project_code,
             parsed_codes = info_or_err.project_codes,
             enabled_features = info_or_err.enabled_features,
+            -- Every feature, deployed or not, with its modules (dashboard Apps page)
+            apps = ProjectConfig.getAppCatalog(),
             environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
             -- Same git-derived version everything else reports (see module-
             -- level APP_VERSION). Keeps this endpoint in sync with `/`

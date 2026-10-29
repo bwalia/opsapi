@@ -1,0 +1,172 @@
+# Deploy the FULL OpsAPI demo (showcase) to k3s1, namespace `demo`:
+#   https://showcase.demo.opsapi.org      dashboard  (opsapi-showcase-dashboard)
+#   https://showcase-api.demo.opsapi.org  API, PROJECT_CODE=all (opsapi-showcase)
+#
+# DNS -> wslproxy edge -> Postgres -> API -> dashboard -> sample data -> demo
+# login reset job. Every step is idempotent, and the weekly run keeps the demo
+# alive and on the latest main: it re-creates anything missing and never
+# deletes data. See devops/demo/README.md "Full demo (showcase)".
+#
+# One-time prerequisite (needs a WSL Vault key, which this repo doesn't hold):
+#   VAULT_PATH=opsapi-showcase/config WSLVAULT_API_KEY=wslv_... ./devops/demo/seed-vault-demo.sh
+# then copy the SMTP_* keys from opsapi-demo/config into opsapi-showcase/config.
+name: Deploy OpsAPI showcase demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      SKIP_DASHBOARD_BUILD:
+        description: "Reuse the existing bwalia/opsapi-dashboard:showcase image"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 4 * * 1" # Mondays 04:17 UTC
+
+concurrency:
+  group: deploy-opsapi-showcase
+  cancel-in-progress: false
+
+env:
+  NS: demo
+  API_HOST: showcase-api.demo.opsapi.org
+  DASHBOARD_HOST: showcase.demo.opsapi.org
+  API_VALUES: devops/helm-charts/diytaxreturn-lapis/values-opsapi-showcase.yaml
+  DASHBOARD_VALUES: devops/helm-charts/opsapi-dashboard/values-opsapi-showcase.yaml
+
+jobs:
+  dns:
+    name: Cloudflare DNS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CNAME both hosts to the edge (DNS-only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: opsapi.org
+        run: |
+          set -euo pipefail
+          chmod +x devops/scripts/cloudflare-dns.sh
+          for h in "$API_HOST" "$DASHBOARD_HOST"; do
+            ./devops/scripts/cloudflare-dns.sh --name "$h" --content lon1.pop0.uk --proxied false
+          done
+
+  wslproxy:
+    name: wslproxy edge
+    needs: [dns]
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  dashboard-image:
+    name: Build dashboard image
+    runs-on: [self-hosted, Linux, X64]
+    if: ${{ !inputs.SKIP_DASHBOARD_BUILD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+      - uses: docker/setup-buildx-action@v3
+      # NEXT_PUBLIC_API_URL is baked into the bundle at build time.
+      - uses: docker/build-push-action@v6
+        with:
+          context: opsapi-dashboard
+          platforms: linux/amd64
+          push: true
+          tags: bwalia/opsapi-dashboard:showcase
+          build-args: NEXT_PUBLIC_API_URL=https://${{ env.API_HOST }}
+
+  deploy:
+    name: Deploy to k3s1
+    needs: [wslproxy, dashboard-image]
+    if: ${{ always() && needs.wslproxy.result == 'success'
+            && (needs.dashboard-image.result == 'success' || needs.dashboard-image.result == 'skipped') }}
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Postgres
+        run: |
+          set -euo pipefail
+          kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
+          kubectl apply -f devops/k8s/opsapi-showcase-db.yaml
+          # The DB password comes from Vault through ESO; no Vault entry = no DB.
+          for i in $(seq 1 30); do
+            kubectl -n "$NS" get secret opsapi-showcase-db-auth >/dev/null 2>&1 && break
+            [ "$i" = 30 ] && { echo "::error::Vault path opsapi-showcase/config is missing or unreadable. Run once: VAULT_PATH=opsapi-showcase/config ./devops/demo/seed-vault-demo.sh"; exit 1; }
+            sleep 10
+          done
+          kubectl -n "$NS" rollout status statefulset/opsapi-showcase-db --timeout=10m
+
+      - name: API (opsapi-showcase)
+        run: |
+          set -euo pipefail
+          # The migrate hook is pre-UPGRADE only, so a fresh install needs a
+          # second upgrade to migrate. On an existing release this is one upgrade
+          # plus a no-op one. No --wait: before the first migrate the pods
+          # aren't ready (empty DB); the rollout below is the real check.
+          for _ in 1 2; do
+            helm upgrade --install opsapi-showcase devops/helm-charts/diytaxreturn-lapis \
+              -f "$API_VALUES" --namespace "$NS" --timeout 20m
+          done
+          kubectl -n "$NS" rollout restart deploy/opsapi-showcase
+          kubectl -n "$NS" rollout status deploy/opsapi-showcase --timeout=10m
+
+      - name: Dashboard (opsapi-showcase-dashboard)
+        run: |
+          set -euo pipefail
+          helm upgrade --install opsapi-showcase-dashboard devops/helm-charts/opsapi-dashboard \
+            -f "$DASHBOARD_VALUES" --namespace "$NS" --timeout 10m --wait
+          kubectl -n "$NS" rollout restart deploy/opsapi-showcase-dashboard
+          kubectl -n "$NS" rollout status deploy/opsapi-showcase-dashboard --timeout=10m
+
+      - name: Workspace, demo login and sample data
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n "$NS" get pod -l app=opsapi-showcase --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n "$NS" cp devops/demo/seed-showcase.lua "$POD:/tmp/seed-showcase.lua"
+          kubectl -n "$NS" cp devops/demo/seed-showcase-data.lua "$POD:/tmp/seed-showcase-data.lua"
+          # A throwaway password: the reset job below puts the published one back.
+          PW=$(openssl rand -base64 24)
+          kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && printf %s '$PW' > /tmp/demo-password && \
+            lapis exec 'assert(loadfile(\"/tmp/seed-showcase.lua\"))()'; rm -f /tmp/demo-password"
+          kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && lapis exec 'assert(loadfile(\"/tmp/seed-showcase-data.lua\"))()'"
+
+      - name: Demo login reset job (and run it now)
+        run: |
+          set -euo pipefail
+          kubectl apply -f devops/demo/demo-account-reset.yaml
+          JOB="demo-account-reset-$(date +%s)"
+          kubectl -n "$NS" create job "$JOB" --from=cronjob/demo-account-reset
+          kubectl -n "$NS" wait --for=condition=complete "job/$JOB" --timeout=5m
+
+      - name: Check
+        run: |
+          set -euo pipefail
+          sleep 20
+          curl -fsS --max-time 20 "https://$API_HOST/health" | head -c 300; echo
+          curl -fsS --max-time 20 "https://$API_HOST/api/v2/system/info" | head -c 300; echo
+          curl -fsS --max-time 20 -o /dev/null -w "dashboard HTTP %{http_code}\n" "https://$DASHBOARD_HOST/login"

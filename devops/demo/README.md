@@ -125,8 +125,87 @@ sign in to the demo apps land in `demo`, which the demo account can't see.
   account's password, active flag and viewer role, undoing anything a visitor
   changed from inside.
 - `seed-showcase.lua` creates or repairs all of it (safe to re-run; see its
-  header for the command). The reset job's hash is of the published password:
+  header for the command). It now runs on the full demo (next section). The reset job's hash is of the published password:
   if you change the password, re-run the seed and update the hash.
+
+## Full demo (showcase): every app, with sample data
+
+A second, separate OpsAPI in the same k8s namespace, running **every** module
+(`PROJECT_CODE=all`) on its own database. The `showcase` workspace and the
+public `demo@opsapi.org` login live here, with made-up records in each app.
+The identity demo above stays `core_only`; the two share nothing.
+
+| Host | What | Helm release |
+|---|---|---|
+| `showcase.demo.opsapi.org` | Admin UI (open **Apps** in the sidebar for the catalog) | `opsapi-showcase-dashboard` |
+| `showcase-api.demo.opsapi.org` | OpsAPI API, `PROJECT_CODE=all` | `opsapi-showcase` |
+
+| File | Purpose |
+|---|---|
+| `devops/k8s/opsapi-showcase-db.yaml` | Its own pgvector Postgres 16 (`opsapi-showcase-db`) |
+| `devops/helm-charts/diytaxreturn-lapis/values-opsapi-showcase.yaml` | API release values |
+| `devops/helm-charts/opsapi-dashboard/values-opsapi-showcase.yaml` | Dashboard release values |
+| `devops/demo/seed-showcase.lua` | The `showcase` workspace, viewer role, demo login, fictional users |
+| `devops/demo/seed-showcase-data.lua` | Sample records: CRM, leads, invoices, projects, timesheets, shop, care home, CMS, academy, forms, hiring, field service |
+| `devops/demo/demo-account-reset.yaml` | Restores the demo login every 30 minutes (points at `opsapi-showcase-db`) |
+| `.github/workflows/deploy-opsapi-showcase.yml` | Does steps 1 and 3–7 below; runs weekly so the demo stays up and current |
+
+**Automated:** after the one-time Vault step (2), run
+`gh workflow run deploy-opsapi-showcase.yml`. It also runs every Monday. The
+manual steps below are the same thing by hand.
+
+```bash
+export KUBECONFIG=~/.kube/k3s1.yaml
+
+# 1. DNS
+for h in showcase showcase-api; do
+  CLOUDFLARE_ZONE=opsapi.org ./devops/scripts/cloudflare-dns.sh \
+    --name "$h.demo.opsapi.org" --content lon1.pop0.uk --proxied false
+done
+
+# 2. Secrets (no Google sign-in here) — then copy the SMTP_* keys from
+#    opsapi-demo/config into opsapi-showcase/config
+VAULT_PATH=opsapi-showcase/config ./devops/demo/seed-vault-demo.sh
+
+# 3. Database, then the API (run the upgrade twice on a fresh install, as above)
+kubectl apply -f devops/k8s/opsapi-showcase-db.yaml
+kubectl -n demo rollout status statefulset/opsapi-showcase-db
+for i in 1 2; do
+  helm upgrade --install opsapi-showcase ./devops/helm-charts/diytaxreturn-lapis \
+    -f ./devops/helm-charts/diytaxreturn-lapis/values-opsapi-showcase.yaml \
+    --namespace demo --timeout 20m
+done
+kubectl -n demo rollout restart deploy/opsapi-showcase
+
+# 4. Dashboard (NEXT_PUBLIC_API_URL is baked in at build time)
+docker build -t bwalia/opsapi-dashboard:showcase \
+  --build-arg NEXT_PUBLIC_API_URL=https://showcase-api.demo.opsapi.org opsapi-dashboard
+docker push bwalia/opsapi-dashboard:showcase
+helm upgrade --install opsapi-showcase-dashboard ./devops/helm-charts/opsapi-dashboard \
+  -f ./devops/helm-charts/opsapi-dashboard/values-opsapi-showcase.yaml --namespace demo
+
+# 5. Workspace + demo login, then the sample data
+POD=$(kubectl -n demo get pod -l app=opsapi-showcase -o jsonpath='{.items[0].metadata.name}')
+kubectl -n demo cp devops/demo/seed-showcase.lua $POD:/tmp/seed-showcase.lua
+kubectl -n demo cp devops/demo/seed-showcase-data.lua $POD:/tmp/seed-showcase-data.lua
+kubectl -n demo exec $POD -- sh -c 'cd /app && printf %s "$PASSWORD" > /tmp/demo-password && \
+  lapis exec "assert(loadfile(\"/tmp/seed-showcase.lua\"))()"; rm -f /tmp/demo-password'
+kubectl -n demo exec $POD -- sh -c 'cd /app && lapis exec "assert(loadfile(\"/tmp/seed-showcase-data.lua\"))()"'
+
+# 6. Demo-login reset job now targets the showcase DB
+kubectl apply -f devops/demo/demo-account-reset.yaml
+
+# 7. Edge, then check
+gh workflow run wslproxy-register-domains.yml -f TARGET_ENV=prod -f ACTIVATE_CONFIG=true
+curl -s https://showcase-api.demo.opsapi.org/api/v2/system/info | head -c 300
+```
+
+Then point the opsapi.org/demo link at `https://showcase.demo.opsapi.org`.
+
+Both demos are permanent: don't uninstall either release or delete their
+databases or workspaces (including the old `showcase` workspace in
+`opsapi-demo`). The demo login is read-only, so visitors can't wipe the
+sample data; if it's ever lost, re-run the two seed scripts (step 5).
 
 ## Notes
 

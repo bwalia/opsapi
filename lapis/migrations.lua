@@ -2470,6 +2470,19 @@ local _migrations = {
             ON chat_agent_runs (user_uuid, namespace_id, id DESC) WHERE NOT archived
         ]])
     end),
+    -- Apps catalog (/dashboard/apps): every module, deployed or not. Top level,
+    -- under Dashboard; always_show so read-only roles see it too.
+    ['2001_seed_apps_menu_item'] = function()
+        if #db.select("1 FROM menu_items WHERE key = 'apps'") > 0 then return end
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+        db.insert("menu_items", {
+            uuid = MigrationUtils.generateUUID(), key = "apps", name = "Apps", icon = "LayoutGrid",
+            path = "/dashboard/apps", required_action = "read", priority = 2,
+            is_active = true, is_admin_only = false, always_show = true, settings = "{}",
+            created_at = timestamp, updated_at = timestamp,
+        })
+    end,
     -- Page-aware AI assistant (core): the runs table everywhere (deployments
     -- without chat never got 2000_*), plus the page scope that keys each
     -- thread, the page it was asked on, and a delete awaiting confirmation.

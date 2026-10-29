@@ -1,4 +1,6 @@
 -- Public demo workspace for opsapi.org/demo. Safe to re-run.
+-- Runs on the full demo (opsapi-showcase, PROJECT_CODE=all); follow it with
+-- seed-showcase-data.lua for the sample records.
 --
 -- `showcase` holds ONLY fictional sample users (example.com) and the public
 -- read-only account demo@opsapi.org, so the published demo login never shows
@@ -27,12 +29,14 @@ assert(owner, "owner user not found")
 local ns = db.select("* FROM namespaces WHERE slug = 'showcase'")[1]
 if not ns then
     NamespaceQueries.createWithOwner(owner.id, {
-        name = "OpsAPI Showcase", slug = "showcase", project_code = "core_only",
+        name = "OpsAPI Showcase", slug = "showcase", project_code = "all",
         description = "Public read-only demo workspace with fictional sample users",
     })
     ns = db.select("* FROM namespaces WHERE slug = 'showcase'")[1]
 end
-db.update("namespaces", { mfa_required = false }, { id = ns.id })
+-- project_code "all" so the menu lists every module (setup-namespace may have
+-- created the workspace first, with the deployment's default).
+db.update("namespaces", { mfa_required = false, project_code = "all" }, { id = ns.id })
 
 -- viewer: "read" on every module the owner role knows about
 local owner_role = db.select("permissions FROM namespace_roles WHERE namespace_id = ? AND role_name = 'owner'", ns.id)[1]

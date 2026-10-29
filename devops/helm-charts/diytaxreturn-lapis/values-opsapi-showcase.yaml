@@ -1,0 +1,88 @@
+# ── OpsAPI — FULL DEMO (showcase) ──────────────────────────────────────────
+# Helm RELEASE: opsapi-showcase   Namespace: demo   Cluster: k3s1
+# Public host: https://showcase-api.demo.opsapi.org
+#
+# Every module (PROJECT_CODE=all) with sample data, behind the public
+# read-only login demo@opsapi.org. Own database
+# (devops/k8s/opsapi-showcase-db.yaml) and Vault path. The identity demo
+# (values-opsapi-demo.yaml) stays core_only; nothing is shared with it.
+# Run order: devops/demo/README.md, "Full demo (showcase)".
+env: prod
+app: opsapi-showcase
+
+# Read by the DNS + wslproxy steps. MUST equal ingress.hosts[0].host below.
+host: showcase-api.demo.opsapi.org
+
+# Every module: all tables are created and every route is served.
+projectCode: all
+
+frontendUrl: "https://showcase.demo.opsapi.org"
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+redis:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Edge (wslproxy) terminates TLS and proxies plain HTTP to the shared k3s
+# ingress entry, which routes by Host header — no cert-manager, no tls block.
+ingress:
+  enabled: true
+  className: traefik-edge
+  annotations: {}
+  hosts:
+    - host: showcase-api.demo.opsapi.org
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64
+
+database:
+  name: opsapi_showcase
+  host: opsapi-showcase-db.demo.svc.cluster.local
+
+# opsapi-showcase-db is plain Postgres with no TLS.
+postgresSsl: "false"
+
+# POSTGRES_USER/PASSWORD/PORT, JWT_SECRET_KEY, OPENSSL_SECRET_KEY/IV and
+# ADMIN_PASSWORD live here (seeded by devops/demo/seed-vault-demo.sh with
+# VAULT_PATH=opsapi-showcase/config).
+externalSecret:
+  enabled: true
+  secretStore: wslvault-backend
+  vaultPath: opsapi-showcase/config
+
+# Creates the `showcase` namespace on first boot and makes this user its
+# owner and platform admin; seed-showcase.lua then hands ownership to a
+# fictional user so the public member list shows no real address.
+setup:
+  adminEmail: "tenthmatrix.mailer@gmail.com"
+  adminPassword: ""
+  namespaceSlug: "showcase"
+
+corsAllowedDomains: "opsapi.org"
+passwordResetAllowedOrigins: "https://showcase.demo.opsapi.org"
+
+# A demo, not a product: visitors use the shared read-only login and can't
+# create workspaces of their own here.
+extraEnv:
+  ALLOW_SELF_SERVICE_WORKSPACES: "false"
+
+autoscaling:
+  enabled: false
+
+# No MinIO in this release, so the hourly/daily DB backup CronJobs (which upload
+# to MinIO) are off. The data is sample data: re-seed rather than restore.
+backup:
+  enabled: false

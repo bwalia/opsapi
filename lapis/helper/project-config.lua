@@ -661,7 +661,12 @@ ProjectConfig.PROJECT_MODULES = {
 -- @param code string Project code (e.g. "hospital_patient_manager")
 -- @param feature_list table List of feature strings this project includes
 -- @param modules table|nil RBAC module definitions for this project
+ProjectConfig.PLUGIN_FEATURES = {}
+
 function ProjectConfig.registerFeature(code, feature_list, modules)
+    -- Plugin routes mount whatever PROJECT_CODE says (project-loader.lua)
+    ProjectConfig.PLUGIN_FEATURES[code] = true
+
     -- Add to FEATURES enum if not already present
     local upper = code:upper()
     if not ProjectConfig.FEATURES[upper] then
@@ -711,6 +716,38 @@ function ProjectConfig.getProjectModules()
     end
 
     return modules
+end
+
+--- Every feature this codebase knows (built-in and plugin-registered), whether
+-- this deployment serves its routes, and its RBAC modules. Feeds the dashboard's Apps page.
+-- @return table List of { feature, enabled, plugin, modules = { {machine_name, name, description, category} } }
+function ProjectConfig.getAppCatalog()
+    local enabled = {}
+    for _, f in ipairs(ProjectConfig.getEnabledFeatures()) do enabled[f] = true end
+
+    local codes = {}
+    for _, code in pairs(ProjectConfig.FEATURES) do table.insert(codes, code) end
+    table.sort(codes)
+
+    local array_mt = require("cjson").array_mt
+    local catalog = {}
+    for _, code in ipairs(codes) do
+        local modules = setmetatable({}, array_mt)
+        for _, m in ipairs(ProjectConfig.PROJECT_MODULES[code] or {}) do
+            table.insert(modules, {
+                machine_name = m.machine_name, name = m.name,
+                description = m.description, category = m.category,
+            })
+        end
+        table.insert(catalog, {
+            feature = code,
+            enabled = code == ProjectConfig.FEATURES.CORE or enabled[code] == true
+                or ProjectConfig.PLUGIN_FEATURES[code] == true,
+            plugin = ProjectConfig.PLUGIN_FEATURES[code] == true,
+            modules = modules,
+        })
+    end
+    return catalog
 end
 
 return ProjectConfig

@@ -35,6 +35,7 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
   const icons = await import('lucide-react');
   ICON_MAP = {
     LayoutDashboard: icons.LayoutDashboard,
+    LayoutGrid: icons.LayoutGrid,
     Users: icons.Users,
     ShoppingCart: icons.ShoppingCart,
     Package: icons.Package,
