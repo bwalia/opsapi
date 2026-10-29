@@ -17,7 +17,7 @@ export const metadata = {
     openGraph: { title: 'OpsAPI', description: SITE.description, url: SITE.url, siteName: 'OpsAPI', type: 'website' },
 };
 
-// Sets the saved theme before paint so a dark-mode reader never sees a light flash.
+// Light unless the reader chose dark with the toggle; applied before paint so there's no flash.
 const themeScript = `try{var t=localStorage.getItem('opsapi-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}`;
 
 export default function RootLayout({ children }) {
