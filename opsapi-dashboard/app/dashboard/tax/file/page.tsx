@@ -88,6 +88,9 @@ function taxYearOf(dateStr: string): string {
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
+// sessionStorage key holding the tax year while the user is away signing in to HMRC.
+const HMRC_YEAR_KEY = 'tax.file.hmrcTaxYear';
+
 // The tax year people file now: the last COMPLETED one (years start 6 April).
 // On 22 Oct 2026 that's "2025-26".
 function currentFilingYear(now = new Date()): string {
@@ -298,8 +301,19 @@ function StepHeader({
 function FileWizardContent() {
   const searchParams = useSearchParams();
 
-  // "Ready to file?" in File with AI passes ?tax_year=; else the year people file now.
-  const [taxYear, setTaxYear] = useState(() => searchParams.get('tax_year') || currentFilingYear());
+  // "Ready to file?" in File with AI passes ?tax_year=; coming back from HMRC sign-in
+  // restores the year the user picked before leaving; else the year people file now.
+  const [taxYear, setTaxYear] = useState(() => {
+    const fromUrl = searchParams.get('tax_year');
+    if (fromUrl) return fromUrl;
+    if (searchParams.get('hmrc_connected') || searchParams.get('hmrc_error')) {
+      try {
+        const saved = typeof window !== 'undefined' ? sessionStorage.getItem(HMRC_YEAR_KEY) : null;
+        if (saved && taxYearBounds(saved)) return saved;
+      } catch { /* storage blocked — fall back to the default */ }
+    }
+    return currentFilingYear();
+  });
 
   // Your figures + the downloadable tax sheet + any accountant request (routes/tax-filing).
   const [overview, setOverview] = useState<FilingOverview | null>(null);
@@ -445,6 +459,8 @@ function FileWizardContent() {
       // Pass the BASE; the backend callback appends "/file" (source=file) and the
       // hmrc_connected flag → .../dashboard/tax/file?...&hmrc_connected=true.
       const redirectUrl = `${window.location.origin}/dashboard/tax`;
+      // The callback URL carries no tax year, so remember the one being filed.
+      try { sessionStorage.setItem(HMRC_YEAR_KEY, taxYear); } catch { /* storage blocked */ }
       const authUrl = await taxService.initiateHmrcConnect(redirectUrl, 'file');
       if (!authUrl) throw new Error('No auth URL');
       window.location.href = authUrl;
@@ -733,8 +749,11 @@ function FileWizardContent() {
     setPreview(null);
     setCalc(null);
   };
-  const yearOptions = Array.from({ length: 4 }, (_, i) => {
-    const y = parseInt(currentFilingYear().slice(0, 4), 10) - i;
+  // The tax year in progress first (people file in-year with MTD, and statements for it
+  // can already be uploaded), then the last four completed years.
+  const inProgressYear = parseInt(currentFilingYear().slice(0, 4), 10) + 1;
+  const yearOptions = Array.from({ length: 5 }, (_, i) => {
+    const y = inProgressYear - i;
     return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
   });
   if (!yearOptions.includes(taxYear)) yearOptions.unshift(taxYear);
@@ -763,7 +782,11 @@ function FileWizardContent() {
             onChange={(e) => changeYear(e.target.value)}
             className="rounded-lg border border-secondary-300 bg-surface px-3 py-2 text-sm font-medium text-secondary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
-            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y.startsWith(String(inProgressYear)) ? `${y} (current year)` : y}
+              </option>
+            ))}
           </select>
         </label>
       </div>
