@@ -363,6 +363,7 @@ app:before_filter(function(self)
         uri == "/swagger/swagger.json" or uri == "/metrics" or
         uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
+        uri:match("^/auth/saml/") or -- SAML SSO: discover, SP metadata, login, ACS (routes/saml.lua)
         uri:match("^/api/v2/themes/active/styles%.css$") or
         plugin_public(uri) or
         uri:match("^/plugin%-ui/") or -- plugin pages' static files (routes/plugins.lua)
@@ -459,6 +460,7 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- ============================================
 safe_load_routes("routes.auth")
 safe_load_routes("routes.auth-signin") -- hosted "Login with OpsAPI" (lib/hosted-signin.lua)
+safe_load_routes("routes.saml") -- SAML single sign-on per workspace (lib/saml/*)
 -- TEST-ONLY: E2E OTP peek endpoint (POST /auth/e2e/peek-otp). Registered ONLY
 -- when E2E_OTP_PEEK_ENABLED=true (acc), so the route is physically absent in
 -- real production. The handler additionally enforces a shared secret, a valid

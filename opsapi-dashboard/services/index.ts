@@ -157,3 +157,5 @@ export type { ShopOrderListParams, ShopQuoteListParams, ShopPageParams } from '.
 // Deployment info and the app catalog (/dashboard/apps)
 export { systemService } from './system.service';
 export type { SystemInfo, AppFeature, AppModule } from './system.service';
+export { ssoService } from './sso.service';
+export type { SamlProvider, SamlProviderInput } from './sso.service';

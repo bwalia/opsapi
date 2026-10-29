@@ -38,6 +38,7 @@
     "host:hello-rust.demo.opsapi.org",
     "host:hello-go.demo.opsapi.org",
     "host:showcase.demo.opsapi.org",
-    "host:showcase-api.demo.opsapi.org"
+    "host:showcase-api.demo.opsapi.org",
+    "host:saml-idp.demo.opsapi.org"
   ]
 }

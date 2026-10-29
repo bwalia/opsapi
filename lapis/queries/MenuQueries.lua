@@ -176,7 +176,7 @@ MenuQueries.GROUP_OF = {
     tax = "tax",
     cms = "content", academy = "content",
     namespace = "admin", users = "admin", roles = "admin", activity = "admin", reports = "admin",
-    plugins = "admin", namespaces = "admin",
+    plugins = "admin", namespaces = "admin", sso = "admin",
     ["api-keys"] = "developer", webhooks = "developer", vault = "developer", domains = "developer",
     services = "developer",
 }

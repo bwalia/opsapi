@@ -12,7 +12,7 @@ const PILLARS = [
     {
         k: 'Sign-in',
         t: 'One sign-in for every app',
-        p: 'Passwords with emailed codes, Google and Apple, a hosted sign-in page and tokens your apps check with one call.',
+        p: 'Passwords with emailed codes, Google and Apple, SAML single sign-on per workspace, a hosted sign-in page and tokens your apps check with one call.',
         href: '/technotes/sso-sign-in-flow/',
     },
     {
@@ -135,8 +135,9 @@ export default function Home() {
                         <p className="eyebrow">Live demo</p>
                         <h2>Click around a real deployment</h2>
                         <p className="lead-x">
-                            Sign in to the admin dashboard with a read-only demo login, then log in to five apps in Java,
-                            PHP, Python, Rust and Go that share one OpsAPI sign-in.
+                            Sign in to the full admin dashboard, with every app and sample data, using a read-only demo
+                            login or SAML single sign-on, then log in to five apps in Java, PHP, Python, Rust and Go that
+                            share one OpsAPI sign-in.
                         </p>
                         <div className="hero__actions">
                             <Link href="/demo/" className="btn-x btn-x--primary">Open the demo guide</Link>

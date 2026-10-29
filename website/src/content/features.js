@@ -11,6 +11,7 @@ export const FEATURE_GROUPS = [
             { name: 'Email and password', flag: 'core', text: 'bcrypt passwords, lockout after failed attempts, per-IP rate limits, reset links only to trusted origins.' },
             { name: 'Two-factor codes', flag: 'core', text: 'Six-digit codes by email; each workspace owner decides whether members need one. Platform admins always do.' },
             { name: 'Google and Apple', flag: 'core', text: 'Google OAuth and Sign in with Apple, on the web and from native apps (ID token validation).' },
+            { name: 'SAML single sign-on', flag: 'core', text: 'Each workspace connects its own SAML 2.0 identity provider (Okta, Entra ID, Google Workspace, OneLogin, Keycloak…): metadata import, signed-response checks, sign-in by email domain and accounts created on first sign-in.' },
             { name: 'Hosted sign-in page', flag: 'core', text: '“Sign in with OpsAPI” at /auth/signin: apps redirect there and get a token back, with silent sign-in when a session exists.' },
             { name: 'Refresh tokens and PIN', flag: 'core', text: 'Rotating refresh tokens in an HttpOnly cookie or body, plus an optional PIN for quick unlock.' },
             { name: 'API keys', flag: 'core', text: 'Long-lived keys for servers and scripts, scoped to a workspace.' },

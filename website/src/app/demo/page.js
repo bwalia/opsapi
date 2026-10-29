@@ -4,13 +4,16 @@ import CopyButton from '@/components/CopyButton';
 
 export const metadata = {
     title: 'Live demo',
-    description: 'Try OpsAPI end to end: a read-only admin dashboard login, and five apps in Java, PHP, Python, Rust and Go that share one sign-in.',
+    description: 'Try OpsAPI end to end: the full admin dashboard with every app and sample data, SAML single sign-on, and five apps in Java, PHP, Python, Rust and Go that share one sign-in.',
 };
 
 const DEMO = {
     email: 'demo@opsapi.org',
     password: 'OpsAPI-Demo-2026!',
-    dashboard: 'https://dashboard.demo.opsapi.org',
+    dashboard: 'https://showcase.demo.opsapi.org',
+    showcaseApi: 'https://showcase-api.demo.opsapi.org',
+    idp: 'https://saml-idp.demo.opsapi.org',
+    identityDashboard: 'https://dashboard.demo.opsapi.org',
     identity: 'https://identity.demo.opsapi.org',
     java: 'https://hello-java.demo.opsapi.org',
     php: 'https://hello-php.demo.opsapi.org',
@@ -86,12 +89,14 @@ export default function DemoPage() {
                     <p className="eyebrow">Live demo</p>
                     <h1 className="display-x">See OpsAPI working end to end</h1>
                     <p className="lead-x">
-                        A real OpsAPI deployment with its admin dashboard and five apps in five languages (Java, PHP,
-                        Python, Rust and Go) that share one sign-in. Look around the dashboard with a read-only account,
-                        then sign in to the apps.
+                        A real OpsAPI deployment with every app switched on and filled with sample data, single sign-on
+                        through a SAML identity provider, and five apps in five languages (Java, PHP, Python, Rust and Go)
+                        that share one sign-in. Look around the dashboard with a read-only account or SSO, then sign in to
+                        the apps.
                     </p>
                     <div className="hero__actions">
                         <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--primary" href={DEMO.dashboard}>Open the dashboard</a>
+                        <a className="btn-x btn-x--ghost" href="#saml">Try SAML sign-in</a>
                         {APPS.map((a) => (
                             <a key={a.name} target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={a.url}>{a.label} app</a>
                         ))}
@@ -121,8 +126,10 @@ export default function DemoPage() {
                         <Table
                             head={['Host', 'What it is']}
                             rows={[
-                                [<a target="_blank" rel="noopener noreferrer" key="d" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a>, 'OpsAPI admin dashboard'],
-                                [<a target="_blank" rel="noopener noreferrer" key="i" href={`${DEMO.identity}/health`}>identity.demo.opsapi.org</a>, 'OpsAPI API and sign-in page'],
+                                [<a target="_blank" rel="noopener noreferrer" key="d" href={DEMO.dashboard}>showcase.demo.opsapi.org</a>, 'Admin dashboard: every app, with sample data'],
+                                [<a target="_blank" rel="noopener noreferrer" key="s" href={`${DEMO.showcaseApi}/api/v2/system/info`}>showcase-api.demo.opsapi.org</a>, 'OpsAPI API behind it (every module on)'],
+                                [<a target="_blank" rel="noopener noreferrer" key="p" href={`${DEMO.idp}/api/saml/metadata`}>saml-idp.demo.opsapi.org</a>, 'Demo SAML identity provider (Mock SAML)'],
+                                [<a target="_blank" rel="noopener noreferrer" key="i" href={`${DEMO.identity}/health`}>identity.demo.opsapi.org</a>, 'OpsAPI sign-in for the five apps'],
                                 ...APPS.map((a) => [<a target="_blank" rel="noopener noreferrer" key={a.name} href={a.url}>{a.name}.demo.opsapi.org</a>, `${a.label} demo app`]),
                             ]}
                         />
@@ -144,10 +151,11 @@ export default function DemoPage() {
                     <div>
                         <h2>Tour the admin dashboard</h2>
                         <ol className="steps">
-                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.dashboard}>dashboard.demo.opsapi.org</a> and sign in with the demo login. No emailed code is needed in this workspace.</li>
+                            <li>Open <a target="_blank" rel="noopener noreferrer" href={DEMO.dashboard}>showcase.demo.opsapi.org</a> and sign in with the demo login. No emailed code is needed in this workspace.</li>
+                            <li><strong>Apps:</strong> the catalog of every module this deployment runs; open CRM, invoices, projects, the shop, care home, hiring and more, each with sample records.</li>
                             <li><strong>Users:</strong> see the sample team and each person's role: owner, admin, developer, member.</li>
                             <li><strong>Roles:</strong> open a role to see its <code>module.action</code> permissions, and the read-only <em>viewer</em> role you're signed in with.</li>
-                            <li><strong>Workspace and settings:</strong> see how a tenant is configured, including whether members need an emailed code.</li>
+                            <li><strong>Workspace and settings:</strong> see how a tenant is configured, including whether members need an emailed code, and the <strong>Single sign-on</strong> page with the workspace's SAML identity provider.</li>
                             <li>Try to change something. The API refuses it with 403, which is what a viewer should get.</li>
                         </ol>
                     </div>
@@ -160,6 +168,56 @@ export default function DemoPage() {
                             <li>Open any of the others (<a target="_blank" rel="noopener noreferrer" href={DEMO.php}>PHP</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-python.demo.opsapi.org">Python</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-rust.demo.opsapi.org">Rust</a>, <a target="_blank" rel="noopener noreferrer" href="https://hello-go.demo.opsapi.org">Go</a>) and log in there too: same account, no second prompt.</li>
                             <li>Sign out everywhere from either app; the next sign-in asks again.</li>
                         </ol>
+                    </div>
+                </div>
+            </section>
+
+            <section className="section" id="saml">
+                <div className="container-x grid-2" style={{ alignItems: 'start' }}>
+                    <div>
+                        <h2>Sign in with SAML single sign-on</h2>
+                        <p>
+                            The showcase workspace is connected to a demo SAML 2.0 identity provider. It stands in for
+                            your company's Okta, Entra ID or Google Workspace, but asks for no password: any address at{' '}
+                            <code>example.com</code> or <code>example.org</code> works.
+                        </p>
+                        <ol className="steps">
+                            <li>Open the <a target="_blank" rel="noopener noreferrer" href={`${DEMO.dashboard}/login`}>dashboard sign-in page</a> and choose <strong>Sign in with SSO</strong>.</li>
+                            <li>Enter a work email such as <code>visitor@example.com</code> and press <strong>Continue</strong>. OpsAPI finds the workspace's provider from the domain.</li>
+                            <li>You land on the demo IdP at <code>saml-idp.demo.opsapi.org</code>. Press <strong>Sign In</strong>.</li>
+                            <li>The IdP posts a signed SAML response back to OpsAPI, which checks the signature, audience, time window and request, then signs you in.</li>
+                            <li>You are in the showcase as a read-only <em>viewer</em>, under the address you typed. Open <strong>Single sign-on</strong> in the sidebar to see how the provider is set up.</li>
+                        </ol>
+                        <div className="callout">
+                            <p>
+                                <strong>Same rules as production.</strong> The demo IdP is trusted by the showcase workspace
+                                only, for its two domains only. A tampered, replayed, unsigned or misaddressed response is
+                                refused, and so is an account that belongs to another workspace. Details in the{' '}
+                                <Link href="/technotes/saml-single-sign-on/">SAML technote</Link>.
+                            </p>
+                        </div>
+                    </div>
+                    <div>
+                        <h2>SAML endpoints</h2>
+                        <Table
+                            head={['Endpoint', 'What it does']}
+                            rows={[
+                                [<code key="d">GET /auth/saml/discover?email=</code>, 'Finds the provider for an email domain'],
+                                [<code key="m">GET /auth/saml/:id/metadata</code>, 'Service-provider metadata to give your IdP'],
+                                [<code key="l">GET /auth/saml/:id/login</code>, 'Starts sign-in: redirects to the IdP'],
+                                [<code key="a">POST /auth/saml/:id/acs</code>, 'Receives the signed response, signs you in'],
+                                [<code key="p">/api/v2/sso/saml/providers</code>, 'Workspace owners add and edit providers'],
+                            ]}
+                        />
+                        <pre><code>{`# which provider handles example.com?
+curl -s "${DEMO.showcaseApi}/auth/saml/discover?email=visitor@example.com"
+
+# the demo IdP's metadata (entity ID, sign-in URL, certificate)
+curl -s ${DEMO.idp}/api/saml/metadata`}</code></pre>
+                        <p className="muted" style={{ fontSize: 'var(--font-sm)' }}>
+                            To connect your own IdP, sign in to your workspace, open <strong>Workspace → Single sign-on</strong>,
+                            paste the IdP metadata, then give the IdP the Entity ID and ACS URL shown there.
+                        </p>
                     </div>
                 </div>
             </section>
@@ -204,8 +262,10 @@ curl -s ${DEMO.identity}/api/v2/namespace/members \\
 curl -s -X POST ${DEMO.identity}/api/v2/users -H "Authorization: Bearer $TOKEN" \\
   -H "X-Namespace-Slug: showcase" --data-urlencode email=new@example.com`}</code></pre>
                     <p className="muted" style={{ fontSize: 'var(--font-sm)' }}>
-                        The demo runs a minimal <code>core_only</code> build: sign-in, users, workspaces and roles. Business
-                        modules are switched off here.
+                        <code>identity.demo.opsapi.org</code> runs a minimal <code>core_only</code> build (sign-in, users,
+                        workspaces and roles) for the five apps; it has its own dashboard at{' '}
+                        <a target="_blank" rel="noopener noreferrer" href={DEMO.identityDashboard}>dashboard.demo.opsapi.org</a>.
+                        Every business module, with sample data, is on the showcase.
                     </p>
                 </div>
             </section>
