@@ -1,9 +1,20 @@
 -- Work log (docs/AI_RUNNER_WEB_TERMINAL.md §11).
 --   POST /public/terminal/activity          the terminal: tab states + events (signed body) -> { tabs, events }
 --   POST /public/terminal/recordings        the terminal: one gzipped asciicast part (X-Opsapi-Tab/Part/Final)
---   GET  /work-log?user_uuid&task_uuid&from&to&page&per_page   your tabs; everyone's with ai_terminal_worklogs.read
+--                                           Both: 403 TERMINAL_OFF when the terminal is switched off, 404
+--                                           PLUGIN_DISABLED when its workspace is inactive or has AI Runs off.
+--   GET  /work-log?user_uuid&task_uuid&from&to&terminal_uuid&state=open|closed&agent&q&page&per_page
+--                                           your tabs; everyone's with ai_terminal_worklogs.read. q searches the
+--                                           person's name or email, folder and task title. meta: total (counted up
+--                                           to 1000; total_capped beyond), total_pages, has_more
+--   GET  /work-log/options                  the filters' choices: { terminals: [{ uuid, name }], agents }
+--   GET  /work-log/live                     who is working now: open tabs the terminal reported in the last 3 min
+--                                           (yours; everyone's with ai_terminal_worklogs.read), key_uuid for
+--                                           ai_runners.manage (Suspend)
 --   GET  /work-log/people?from&to           ai_terminal_worklogs.read: totals per person
---   GET  /work-log/tabs/:uuid               one tab: totals, timeline (prompts, AI requests, actions), recording parts
+--   GET  /work-log/tabs/:uuid               one tab: totals, the timeline's first page (events, events_next),
+--                                           recording parts
+--   GET  /work-log/tabs/:uuid/events?type&q&after&per_page   the timeline, oldest first; meta.next continues it
 --   GET  /work-log/tabs/:uuid/recording/:part   the gzipped asciicast part
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -76,12 +87,24 @@ return function(app)
 
     app:get("/work-log", sdk.handler(U.guard(function(self)
         local p = self.params
-        local f = { user_uuid = p.user_uuid, task_uuid = p.task_uuid, from = p.from, to = p.to }
+        local f = { user_uuid = p.user_uuid, task_uuid = p.task_uuid, from = p.from, to = p.to,
+            terminal_uuid = p.terminal_uuid, state = p.state, agent = p.agent, q = p.q }
         if not sees_everyone(self) then f.user_uuid = sdk.user(self).uuid end
         local page, per_page = sdk.page(p)
         local rows, meta = W.list(sdk.namespace_id(self), f, page, per_page)
         meta.sees_everyone = sees_everyone(self)
         return sdk.ok(rows, meta)
+    end)))
+
+    app:get("/work-log/options", sdk.handler(U.guard(function(self)
+        return sdk.ok(W.options(sdk.namespace_id(self)))
+    end)))
+
+    app:get("/work-log/live", sdk.handler(U.guard(function(self)
+        local everyone = sees_everyone(self)
+        local can_suspend = sdk.can(self, "ai_runners", "manage")
+        return sdk.ok(W.live(sdk.namespace_id(self), not everyone and sdk.user(self).uuid or nil, can_suspend),
+            { sees_everyone = everyone, can_suspend = can_suspend, live_secs = W.LIVE_SECS })
     end)))
 
     app:get("/work-log/people", sdk.handler({ permission = "ai_terminal_worklogs.read" }, U.guard(function(self)
@@ -91,6 +114,13 @@ return function(app)
 
     app:get("/work-log/tabs/:uuid", sdk.handler(U.guard(function(self)
         return sdk.ok(W.detail(visible_tab(self)))
+    end)))
+
+    app:get("/work-log/tabs/:uuid/events", sdk.handler(U.guard(function(self)
+        local p = self.params
+        local events, next_page = W.events(visible_tab(self), { type = p.type, q = p.q, after = p.after,
+            per_page = p.per_page })
+        return sdk.ok(events, { next = next_page or require("cjson").null })
     end)))
 
     app:get("/work-log/tabs/:uuid/recording/:part", sdk.handler(U.guard(function(self)

@@ -19,13 +19,14 @@ import {
 import { TerminalPeople } from './TerminalPeople';
 import { CopyBlock, PRODUCT, opsapiUrl, useAiData } from './ui';
 
-// What the terminal runs for the default agents; the terminal's own config decides (shown in the config block).
+// What the terminal runs for each agent; the terminal's own config decides (shown in the config block). `--` ends
+// the options, so the task text can never be taken for one (OpsAPI's prompts never start with "-" either).
 const RUN_LINES: Record<string, string> = {
-  claude: 'claude "$OPSAPI_TASK_PROMPT"',
-  // Never stops to ask: only acceptable because the terminal runs under its own macOS account.
-  claude_auto: 'claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"',
-  codex: 'codex "$OPSAPI_TASK_PROMPT"',
-  cursor: 'cursor-agent "$OPSAPI_TASK_PROMPT"',
+  claude: 'claude -- "$OPSAPI_TASK_PROMPT"',
+  // Never stops to ask: no longer a default, and only AI runs managers can start it.
+  claude_auto: 'claude --dangerously-skip-permissions -- "$OPSAPI_TASK_PROMPT"',
+  codex: 'codex -- "$OPSAPI_TASK_PROMPT"',
+  cursor: 'cursor-agent -- "$OPSAPI_TASK_PROMPT"',
 };
 
 /** The block to paste into the terminal's config.yaml. */
@@ -46,7 +47,7 @@ function configBlock(terminal: WebTerminal, secret: string): string {
     lines.push(
       `    - id: ${a.id}`,
       `      name: ${JSON.stringify(a.label)}`,
-      `      run: ${JSON.stringify(RUN_LINES[a.id] || `${a.id} "$OPSAPI_TASK_PROMPT"`)}`,
+      `      run: ${JSON.stringify(RUN_LINES[a.id] || `${a.id} -- "$OPSAPI_TASK_PROMPT"`)}`,
     );
   }
   if (autologin) {
@@ -188,7 +189,9 @@ function EditModal({
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-secondary-700">Agents people can start</legend>
             <p className="text-xs text-secondary-500">
-              The ids must match the agents in the terminal&apos;s config. &quot;shell&quot; is just a terminal.
+              The ids must match the agents in the terminal&apos;s config. &quot;shell&quot; is just a terminal. An id
+              ending in <code className="font-mono">_auto</code> is an agent that works without stopping to ask: only
+              AI runs managers can start it.
             </p>
             {agents.map((a, i) => (
               <div key={i} className="flex items-end gap-2">

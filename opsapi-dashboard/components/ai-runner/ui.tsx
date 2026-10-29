@@ -106,9 +106,14 @@ export function NoAccess({ what = 'this page' }: { what?: string }) {
   );
 }
 
-/** Wraps every AI Runs page: the plugin must be on here and, when `module` is given, the user must hold it. */
+type AiModule = 'ai_runs' | 'ai_runners' | 'ai_runs_settings' | 'ai_terminal_worklogs';
+
+/**
+ * Wraps every AI Runs page: the plugin must be on here and, when `module` is given, the user must hold it (any one
+ * of them, for a list).
+ */
 export function AiRunnerPage({ module, action, children }: {
-  module?: 'ai_runs' | 'ai_runners' | 'ai_runs_settings';
+  module?: AiModule | AiModule[];
   action?: 'read' | 'create' | 'manage';
   children: React.ReactNode;
 }) {
@@ -130,7 +135,8 @@ export function AiRunnerPage({ module, action, children }: {
       </Card>
     );
   }
-  if (module && !(action ? hasPermission(module, action) : canAccess(module))) return <NoAccess />;
+  const modules = module === undefined ? [] : Array.isArray(module) ? module : [module];
+  if (modules.length && !modules.some((m) => (action ? hasPermission(m, action) : canAccess(m)))) return <NoAccess />;
   return <>{children}</>;
 }
 

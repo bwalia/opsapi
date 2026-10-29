@@ -7,9 +7,12 @@
 --   DELETE /terminals/:uuid                 ai_runners.manage (its sessions stay on their tasks)
 --   POST   /tasks/:task_uuid/terminal-sessions { terminal_uuid, path, agent, prompt?, autologin? }
 --                                           ai_runs.create + who may start AI work on the task -> 201
---                                           { session, launch_url }
+--                                           { session, launch_url }; an unattended agent (id *_auto or
+--                                           unattended = true) needs ai_runs.manage, else 403
 --   GET    /tasks/:task_uuid/terminal-sessions   ai_runs.read
---   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>)
+--   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>); webhook and
+--                                           report: 403 TERMINAL_OFF (terminal switched off or removed), 404
+--                                           PLUGIN_DISABLED (workspace inactive or AI Runs off)
 --   GET    /terminal-autologin              ai_runs.read: may I be signed in automatically, and my step-up (§8)
 --   POST   /terminal-autologin/code         ai_terminal_autologin.create or a live key: email me a code
 --   POST   /terminal-autologin/verify { code }   same -> the step-up (12 h)
@@ -18,7 +21,10 @@
 --   GET    /terminals/:uuid/keys            ai_runners.manage: { keys, people } (§10)
 --   POST   /terminals/:uuid/keys { user_uuid, public_key }   ai_runners.manage -> 201 key (blocks their old one)
 --   POST   /terminals/:uuid/keys/:key_uuid/block   ai_runners.manage
---   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer)
+--   POST   /terminals/:uuid/keys/:key_uuid/suspend | /resume   ai_runners.manage -> the key (status suspended |
+--                                           active): suspended keys aren't sent to the terminal until resumed
+--   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer);
+--                                           an empty list when the terminal is off or AI Runs is off there
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 
@@ -53,8 +59,11 @@ local function stepup_view(st)
 end
 
 local function url_of(v)
-    local u = R.base_url(v)
-    if not u then U.invalid({ url = "must be the terminal's address, like https://dev.example.com" }) end
+    local u = R.secure_base_url(v)
+    if not u then
+        U.invalid({ url = "must be the terminal's https address, like https://dev.example.com (http only on this "
+            .. "machine: localhost or 127.0.0.1)" })
+    end
     return u
 end
 
@@ -153,6 +162,22 @@ return function(app)
             return sdk.ok({ blocked = true })
         end)))
 
+    -- Suspend (sign out now, until resumed) and Resume: the same key, nothing to hand over again.
+    for action, on in pairs({ suspend = true, resume = false }) do
+        app:post("/terminals/:uuid/keys/:key_uuid/" .. action, sdk.handler({ permission = "ai_runners.manage" },
+            U.guard(function(self)
+                local ns = sdk.namespace_id(self)
+                local t = terminal_or_404(ns, self.params.uuid)
+                if not T.suspend_key(ns, t, self.params.key_uuid, sdk.user(self).uuid, on) then
+                    U.fail(404, "No key with that id on this terminal (a blocked key can't be suspended or resumed)")
+                end
+                for _, k in ipairs(T.keys(ns, t)) do
+                    if k.uuid == self.params.key_uuid:lower() then return sdk.ok(k) end
+                end
+                return sdk.ok({ uuid = self.params.key_uuid:lower(), suspended = on })
+            end)))
+    end
+
     app:get("/public/terminal/keys", sdk.handler({ namespace = false }, U.guard(function()
         local h = ngx.req.get_headers()
         local function one(v) return type(v) == "table" and v[1] or v end
@@ -181,6 +206,11 @@ return function(app)
         if not d then U.invalid(errors) end
         local term = T.find(ns, d.terminal_uuid)
         if not term or not term.is_active then U.fail(404, "Web terminal not found") end
+        -- Connected before addresses had to be https: the link would carry the ticket in clear.
+        if not R.secure_base_url(term.url) then
+            U.fail(409, "This web terminal's address doesn't start with https://, so it can't be opened from a task. "
+                .. "Ask an AI runners manager to change it under Machines → Web terminals.")
+        end
         local path = U.path(d.path)
         if not path or path:find("[%c]") then
             U.invalid({ path = "must be a full folder path, like /Users/you/projects/app" })
@@ -188,8 +218,12 @@ return function(app)
         local agent
         for _, a in ipairs(T.agents(term)) do if a.id == d.agent then agent = a end end
         if not agent then U.invalid({ agent = "isn't one of this terminal's agents" }) end
+        if T.is_unattended(agent) and not sdk.can(self, "ai_runs", "manage") then
+            return sdk.error(403, agent.label .. " works without stopping to ask before it changes things, so only an "
+                .. "AI runs manager can start it. Pick another agent.")
+        end
         local prompt = type(d.prompt) == "string" and d.prompt ~= "" and U.clean(d.prompt) or T.prompt(ns, task)
-        prompt = T.with_folder(prompt, path)
+        prompt = T.safe_prompt(T.with_folder(prompt, path))
         if #prompt > T.MAX_PROMPT then U.invalid({ prompt = "is too long (at most " .. T.MAX_PROMPT .. " bytes)" }) end
         local me = U.one("SELECT " .. R.name_sql("u") .. " AS name, u.email FROM users u WHERE u.uuid = ?",
             sdk.user(self).uuid)

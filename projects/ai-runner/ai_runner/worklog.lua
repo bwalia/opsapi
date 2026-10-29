@@ -12,8 +12,11 @@ W.PERMISSION = { "ai_terminal_worklogs", "read" } -- see everyone's; without it,
 W.TEXT_DAYS = 90                                  -- prompt and command text is blanked after this
 W.RECORDING_DAYS = 30                             -- recordings are deleted after this
 W.STALE_HOURS = 12                                -- an open tab with no news this long is closed (terminal lost it)
+W.LOST_SECS = 600                                 -- …or this long, from a terminal that reports open tabs each minute
+W.LIVE_SECS = 180                                 -- "working now": the terminal reported the open tab this recently
 W.STALE_REASON = "the terminal stopped reporting"
 W.MAX_TABS, W.MAX_EVENTS = 500, 2000              -- per activity request
+W.COUNT_CAP = 1000                                -- the list counts matching tabs up to this many ("1000+")
 W.MAX_PART = 4 * 1024 * 1024                      -- bytes per recording part
 
 local EVENT_TYPES = { user_prompt = true, api_request = true, api_error = true, tool_result = true,
@@ -57,14 +60,16 @@ local function owner(term, tab)
     end
 end
 
-local function upsert_tab(term, tab)
+-- A tab entry from the terminal (state = true: it described the tab; seen_at becomes now, §11.2) or a bare row for
+-- a tab an event names. last_input_at (unix seconds or null) and attached (a browser shows it) are optional.
+local function upsert_tab(term, tab, state)
     local id = str(tab.id, 64)
     if not id or not id:match("^[%w_%-]+$") then return nil end
     local user_uuid, task_uuid, session_uuid = owner(term, tab)
     return U.one([[INSERT INTO ar_terminal_tabs (namespace_id, terminal_id, tab_id, session_uuid, task_uuid, user_uuid,
             terminal_user, key_fingerprint, via, ip, kind, cwd, agent, opened_at, closed_at, end_reason, exit_code,
-            active_secs, input_bytes, output_bytes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            active_secs, input_bytes, output_bytes, last_input_at, seen_at, attached)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (terminal_id, tab_id) DO UPDATE SET
             session_uuid = COALESCE(ar_terminal_tabs.session_uuid, EXCLUDED.session_uuid),
             task_uuid = COALESCE(ar_terminal_tabs.task_uuid, EXCLUDED.task_uuid),
@@ -84,6 +89,9 @@ local function upsert_tab(term, tab)
             active_secs = GREATEST(ar_terminal_tabs.active_secs, EXCLUDED.active_secs),
             input_bytes = GREATEST(ar_terminal_tabs.input_bytes, EXCLUDED.input_bytes),
             output_bytes = GREATEST(ar_terminal_tabs.output_bytes, EXCLUDED.output_bytes),
+            last_input_at = GREATEST(ar_terminal_tabs.last_input_at, EXCLUDED.last_input_at),
+            seen_at = COALESCE(EXCLUDED.seen_at, ar_terminal_tabs.seen_at),
+            attached = COALESCE(EXCLUDED.attached, ar_terminal_tabs.attached),
             updated_at = NOW()
         RETURNING id, user_uuid]],
         term.namespace_id, term.id, id, session_uuid or db.NULL, task_uuid or db.NULL, user_uuid or db.NULL,
@@ -91,7 +99,8 @@ local function upsert_tab(term, tab)
         str(tab.ip, 64) or db.NULL, str(tab.kind, 16) or db.NULL, str(tab.cwd, 1024) or db.NULL,
         str(tab.agent, 64) or db.NULL, ts(tab.opened_at), ts(tab.closed_at), str(tab.end_reason, 200) or db.NULL,
         int(tab.exit_code) or db.NULL, math.max(int(tab.active_secs) or 0, 0), math.max(int(tab.input_bytes) or 0, 0),
-        math.max(int(tab.output_bytes) or 0, 0))
+        math.max(int(tab.output_bytes) or 0, 0), ts(tab.last_input_at), state and db.raw("NOW()") or db.NULL,
+        type(tab.attached) == "boolean" and tab.attached or db.NULL)
 end
 
 -- A tab an event names but no tab entry described yet (or ever: a tab the terminal lost): a bare row.
@@ -196,7 +205,7 @@ function W.ingest(term, body)
     local cache, n_tabs, n_events = {}, 0, 0
     for _, tab in ipairs(tabs) do
         if type(tab) == "table" then
-            local row = upsert_tab(term, tab)
+            local row = upsert_tab(term, tab, true)
             if row then
                 n_tabs = n_tabs + 1
                 cache[tab.id] = row
@@ -240,14 +249,23 @@ function W.store_recording(term, tab_id, part, final, bytes)
     return { stored = row ~= nil }
 end
 
---- Blank old text, close tabs the terminal lost and delete old recordings (W.TEXT_DAYS, W.STALE_HOURS,
+--- Close the open tabs a terminal stopped reporting (it lost them: a crash, a restart). A terminal that reports
+-- every open tab at least once a minute (it sends `attached`) after W.LOST_SECS without news; an older one, which
+-- reports only changes, after W.STALE_HOURS (its own idle limits close real tabs long before). Cheap: open tabs only
+-- (partial indexes). A tab reported open again reopens (upsert_tab).
+function W.close_stale()
+    db.query([[UPDATE ar_terminal_tabs SET closed_at = GREATEST(seen_at, updated_at), end_reason = ?,
+            updated_at = NOW()
+        WHERE closed_at IS NULL AND ((attached IS NOT NULL AND seen_at < NOW() - interval ']] .. W.LOST_SECS
+        .. [[ seconds') OR updated_at < NOW() - interval ']] .. W.STALE_HOURS .. [[ hours')]], W.STALE_REASON)
+end
+
+--- Blank old text, close tabs the terminal lost and delete old recordings (W.TEXT_DAYS, W.close_stale,
 -- W.RECORDING_DAYS). Safe to run in several workers at once: each recording row is claimed by the DELETE returning it.
 function W.sweep()
     db.query([[UPDATE ar_terminal_events SET text = NULL WHERE text IS NOT NULL
         AND created_at < NOW() - interval ']] .. W.TEXT_DAYS .. [[ days']])
-    -- The terminal's own idle limits close real tabs long before this: no news means it lost them (a crash).
-    db.query([[UPDATE ar_terminal_tabs SET closed_at = updated_at, end_reason = ?, updated_at = NOW()
-        WHERE closed_at IS NULL AND updated_at < NOW() - interval ']] .. W.STALE_HOURS .. [[ hours']], W.STALE_REASON)
+    W.close_stale()
     local gone = db.query([[DELETE FROM ar_terminal_recordings WHERE created_at < NOW() - interval ']]
         .. W.RECORDING_DAYS .. [[ days' RETURNING tab_ref, object_key, bucket, bytes]])
     if #gone == 0 then return 0 end
@@ -293,34 +311,85 @@ function W.tab_view(t)
         cost_usd = cost, lines_added = t.lines_added, lines_removed = t.lines_removed, commits = t.commits,
         pull_requests = t.pull_requests, recording_parts = t.recording_parts,
         recording_bytes = tonumber(t.recording_bytes) or 0,
+        -- §11.2: when someone last typed, when the terminal last reported the tab, whether a browser shows it.
+        last_input_at = U.null(t.last_input_at), seen_at = U.null(t.seen_at), attached = U.null(t.attached),
     }
 end
 
--- WHERE clauses shared by the list and the per-person summary. f = { user_uuid, task_uuid, from, to }
-local function filters(ns, f)
-    local where, args = { "t.namespace_id = ?" }, { ns }
-    if U.is_uuid(f.user_uuid) then where[#where + 1] = "t.user_uuid = ?"; args[#args + 1] = f.user_uuid:lower() end
-    if U.is_uuid(f.task_uuid) then where[#where + 1] = "t.task_uuid = ?"; args[#args + 1] = f.task_uuid:lower() end
-    if type(f.from) == "string" and f.from:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        where[#where + 1] = "t.opened_at >= ?::date"; args[#args + 1] = f.from
-    end
-    if type(f.to) == "string" and f.to:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        where[#where + 1] = "t.opened_at < ?::date + 1"; args[#args + 1] = f.to
-    end
-    return table.concat(where, " AND "), args
+-- A search as an ILIKE pattern: its own %, _ and \ match themselves.
+local function like(q)
+    return "%" .. q:gsub("[%%_\\]", "\\%0") .. "%"
 end
 
-function W.list(ns, f, page, per_page)
-    local where, args = filters(ns, f)
-    local total = tonumber(U.one("SELECT COUNT(*) AS n FROM ar_terminal_tabs t WHERE " .. where, unpack(args)).n)
-    args[#args + 1] = per_page
-    args[#args + 1] = (page - 1) * per_page
-    local out = {}
-    for i, t in ipairs(db.query(TAB_SQL .. " WHERE " .. where
-        .. " ORDER BY t.opened_at DESC NULLS LAST, t.id DESC LIMIT ? OFFSET ?", unpack(args))) do
-        out[i] = W.tab_view(t)
+-- WHERE clauses shared by the list and the per-person summary; every value is a parameter.
+-- f = { user_uuid, task_uuid, from, to, terminal_uuid, state = open|closed, agent, q }. q (person name or email,
+-- terminal user, folder, task title) needs the users u and kanban_tasks kt joins: the third result says so.
+local function filters(ns, f)
+    local where, args = { "t.namespace_id = ?" }, { ns }
+    local function add(sql, ...)
+        where[#where + 1] = sql
+        for _, v in ipairs({ ... }) do args[#args + 1] = v end
     end
-    return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
+    if U.is_uuid(f.user_uuid) then add("t.user_uuid = ?", f.user_uuid:lower()) end
+    if U.is_uuid(f.task_uuid) then add("t.task_uuid = ?", f.task_uuid:lower()) end
+    local function day(v) return type(v) == "string" and v:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil end
+    if day(f.from) then add("t.opened_at >= ?::date", f.from) end
+    if day(f.to) then add("t.opened_at < ?::date + 1", f.to) end
+    if U.is_uuid(f.terminal_uuid) then
+        add("t.terminal_id = (SELECT id FROM ar_terminals WHERE namespace_id = ? AND uuid = ?)", ns,
+            f.terminal_uuid:lower())
+    end
+    if f.state == "open" then
+        add("t.closed_at IS NULL")
+    elseif f.state == "closed" then
+        add("t.closed_at IS NOT NULL")
+    end
+    if type(f.agent) == "string" and f.agent ~= "" and #f.agent <= 64 then add("t.agent = ?", f.agent) end
+    local q = type(f.q) == "string" and U.clean(f.q:match("^%s*(.-)%s*$"), 100) or ""
+    if q ~= "" then
+        local p = like(q)
+        add("(" .. R.name_sql("u") .. " ILIKE ? OR u.email ILIKE ? OR t.terminal_user ILIKE ? OR t.cwd ILIKE ? "
+            .. "OR kt.title ILIKE ?)", p, p, p, p, p)
+    end
+    return table.concat(where, " AND "), args, q ~= ""
+end
+
+--- A page of tabs, newest first. Counting stops at W.COUNT_CAP + 1 matches, so no page pays for counting a long
+-- history: meta.total_capped says there are more than total, and has_more whether a next page exists.
+function W.list(ns, f, page, per_page)
+    local where, args, joins = filters(ns, f)
+    local from = joins and [[ FROM ar_terminal_tabs t LEFT JOIN users u ON u.uuid = t.user_uuid
+        LEFT JOIN kanban_tasks kt ON kt.uuid = t.task_uuid]] or " FROM ar_terminal_tabs t"
+    local n = tonumber(U.one("SELECT COUNT(*) AS n FROM (SELECT 1" .. from .. " WHERE " .. where .. " LIMIT "
+        .. (W.COUNT_CAP + 1) .. ") c", unpack(args)).n)
+    local capped = n > W.COUNT_CAP
+    local total = capped and W.COUNT_CAP or n
+    args[#args + 1] = per_page + 1
+    args[#args + 1] = (page - 1) * per_page
+    local rows = db.query(TAB_SQL .. " WHERE " .. where
+        .. " ORDER BY t.opened_at DESC NULLS LAST, t.id DESC LIMIT ? OFFSET ?", unpack(args))
+    local out = {}
+    for i = 1, math.min(#rows, per_page) do out[i] = W.tab_view(rows[i]) end
+    local has_more = #rows > per_page
+    local pages = math.ceil(total / per_page)
+    if has_more then pages = math.max(pages, page + 1) end
+    return U.array(out), { page = page, per_page = per_page, total = total, total_pages = pages,
+        total_capped = capped, has_more = has_more }
+end
+
+--- What the work log's filters offer: the workspace's terminals and the agents they list.
+function W.options(ns)
+    local terminals, agents, seen = {}, {}, {}
+    for i, t in ipairs(T.list(ns)) do
+        terminals[i] = { uuid = t.uuid, name = t.name }
+        for _, a in ipairs(T.agents(t)) do
+            if not seen[a.id] then
+                seen[a.id] = true
+                agents[#agents + 1] = { id = a.id, label = a.label }
+            end
+        end
+    end
+    return { terminals = U.array(terminals), agents = U.array(agents) }
 end
 
 function W.people(ns, f)
@@ -349,28 +418,106 @@ function W.people(ns, f)
     return U.array(out)
 end
 
+--- Who is working right now (§11.4): open tabs the terminal reported in the last W.LIVE_SECS, by person.
+-- user_uuid: only that person's (callers without ai_terminal_worklogs.read). with_keys: add the person's live key
+-- on that terminal (key_uuid), for Suspend.
+function W.live(ns, user_uuid, with_keys)
+    local args, mine = { ns }, ""
+    if user_uuid then mine, args[2] = " AND t.user_uuid = ?", user_uuid end
+    local rows = db.query([[SELECT t.uuid, t.user_uuid, t.terminal_user, t.cwd, t.agent, t.via, t.opened_at,
+            t.last_input_at, t.seen_at, t.attached, t.task_uuid, ]] .. R.name_sql("u") .. [[ AS person_name,
+            u.email AS person_email, term.uuid AS terminal_uuid, term.name AS terminal_name, kt.task_number,
+            kt.title AS task_title, kp.uuid AS project_uuid, lk.uuid AS key_uuid,
+            GREATEST(EXTRACT(EPOCH FROM (NOW() - t.last_input_at)), 0)::bigint AS idle_secs
+        FROM ar_terminal_tabs t
+        LEFT JOIN ar_terminals term ON term.id = t.terminal_id
+        LEFT JOIN users u ON u.uuid = t.user_uuid
+        LEFT JOIN kanban_tasks kt ON kt.uuid = t.task_uuid
+        LEFT JOIN kanban_boards kb ON kb.id = kt.board_id
+        LEFT JOIN kanban_projects kp ON kp.id = kb.project_id AND kp.namespace_id = t.namespace_id
+        LEFT JOIN LATERAL (SELECT k.uuid FROM ar_terminal_keys k WHERE k.namespace_id = t.namespace_id
+            AND k.terminal_id = t.terminal_id AND k.user_uuid = t.user_uuid AND k.revoked_at IS NULL
+            AND k.suspended_at IS NULL AND k.expires_at > NOW() ORDER BY k.id DESC LIMIT 1) lk ON TRUE
+        WHERE t.namespace_id = ? AND t.closed_at IS NULL
+            AND t.seen_at > NOW() - interval ']] .. W.LIVE_SECS .. [[ seconds']] .. mine .. [[
+        ORDER BY lower(COALESCE(]] .. R.name_sql("u") .. [[, t.terminal_user, '')), t.opened_at DESC, t.id DESC
+        LIMIT 500]], unpack(args))
+    local out = {}
+    for i, t in ipairs(rows) do
+        out[i] = { uuid = t.uuid, user_uuid = U.null(t.user_uuid), person_name = U.null(t.person_name),
+            person_email = U.null(t.person_email), terminal_user = U.null(t.terminal_user),
+            terminal_uuid = U.null(t.terminal_uuid), terminal_name = U.null(t.terminal_name),
+            task_uuid = U.null(t.task_uuid), task_number = U.null(tonumber(t.task_number)),
+            task_title = U.null(t.task_title), project_uuid = U.null(t.project_uuid), cwd = U.null(t.cwd),
+            agent = U.null(t.agent), via = U.null(t.via), opened_at = U.null(t.opened_at),
+            last_input_at = U.null(t.last_input_at), idle_secs = U.null(tonumber(t.idle_secs)),
+            seen_at = U.null(t.seen_at), attached = U.null(t.attached),
+            key_uuid = with_keys and U.null(t.key_uuid) or nil }
+    end
+    return U.array(out)
+end
+
 function W.find(ns, uuid)
     if not U.is_uuid(uuid) then return nil end
     return U.one(TAB_SQL .. " WHERE t.namespace_id = ? AND t.uuid = ?", ns, uuid:lower())
 end
 
---- A tab with its timeline (events, oldest first) and recording parts.
-function W.detail(t)
-    local events = {}
-    for i, e in ipairs(db.query([[SELECT event_id, at, type, claude_session, prompt_id, model, tool_name, success,
-            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, text, attrs
-        FROM ar_terminal_events WHERE tab_ref = ? ORDER BY at, id LIMIT 5000]], t.id)) do
-        events[i] = { id = e.event_id, at = e.at, type = e.type, session = U.null(e.claude_session),
-            prompt_id = U.null(e.prompt_id), model = U.null(e.model), tool_name = U.null(e.tool_name),
-            success = U.null(e.success), input_tokens = U.null(e.input_tokens), output_tokens = U.null(e.output_tokens),
-            cache_read_tokens = U.null(e.cache_read_tokens), cache_write_tokens = U.null(e.cache_write_tokens),
-            cost_usd = U.null(tonumber(e.cost_usd)), duration_ms = U.null(e.duration_ms), text = U.null(e.text),
-            attrs = U.json(e.attrs) or {} }
+W.EVENTS_PAGE, W.EVENTS_MAX = 200, 500            -- timeline events per page: default, most
+
+local function event_view(e)
+    return { id = e.event_id, at = e.at, type = e.type, session = U.null(e.claude_session),
+        prompt_id = U.null(e.prompt_id), model = U.null(e.model), tool_name = U.null(e.tool_name),
+        success = U.null(e.success), input_tokens = U.null(e.input_tokens), output_tokens = U.null(e.output_tokens),
+        cache_read_tokens = U.null(e.cache_read_tokens), cache_write_tokens = U.null(e.cache_write_tokens),
+        cost_usd = U.null(tonumber(e.cost_usd)), duration_ms = U.null(e.duration_ms), text = U.null(e.text),
+        attrs = U.json(e.attrs) or {} }
+end
+
+--- A page of a tab's timeline, oldest first. f = { type (one kind), q (in the words kept: prompt, command, error;
+-- and the tool and model), after (the previous page's `next`), per_page }. Every value is a parameter.
+-- @return events, next (a cursor for the following page) | nil
+function W.events(t, f)
+    f = f or {}
+    local where, args = { "e.tab_ref = ?" }, { t.id }
+    if EVENT_TYPES[f.type] then
+        where[#where + 1] = "e.type = ?"
+        args[#args + 1] = f.type
     end
+    local q = type(f.q) == "string" and U.clean(f.q:match("^%s*(.-)%s*$"), 100) or ""
+    if q ~= "" then
+        local p = like(q)
+        where[#where + 1] = "(e.text ILIKE ? OR e.tool_name ILIKE ? OR e.model ILIKE ?)"
+        for _ = 1, 3 do args[#args + 1] = p end
+    end
+    -- The cursor is the last event's row id; the page goes on after its (at, id), in this tab only.
+    local after = type(f.after) == "string" and f.after:match("^%d+$") and #f.after <= 18 and tonumber(f.after)
+    if after then
+        where[#where + 1] = [[(e.at, e.id) > (SELECT c.at, c.id FROM ar_terminal_events c
+            WHERE c.id = ? AND c.tab_ref = ?)]]
+        args[#args + 1] = after
+        args[#args + 1] = t.id
+    end
+    local limit = require("helper.global").perPageParam(f.per_page, W.EVENTS_PAGE, W.EVENTS_MAX)
+    args[#args + 1] = limit + 1
+    local rows = db.query([[SELECT e.id AS ref, e.event_id, e.at, e.type, e.claude_session, e.prompt_id, e.model,
+            e.tool_name, e.success, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+            e.cost_usd, e.duration_ms, e.text, e.attrs
+        FROM ar_terminal_events e WHERE ]] .. table.concat(where, " AND ") .. [[ ORDER BY e.at, e.id LIMIT ?]],
+        unpack(args))
+    local out = {}
+    for i = 1, math.min(#rows, limit) do out[i] = event_view(rows[i]) end
+    return U.array(out), #rows > limit and tostring(rows[limit].ref) or nil
+end
+
+--- A tab with the first page of its timeline (events, oldest first; events_next continues it: W.events) and its
+-- recording parts.
+function W.detail(t)
+    local events, next_page = W.events(t, {})
     local parts = db.query([[SELECT part, final, bytes, created_at FROM ar_terminal_recordings WHERE tab_ref = ?
         ORDER BY part]], t.id)
     local view = W.tab_view(t)
-    view.events = U.array(events)
+    view.events = events
+    view.events_next = U.null(next_page)
     view.recording = U.array(parts)
     view.text_days, view.recording_days = W.TEXT_DAYS, W.RECORDING_DAYS
     return view

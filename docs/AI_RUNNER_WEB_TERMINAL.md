@@ -25,12 +25,16 @@ link as plain query parameters and had no folder.
 
 ## 1. Connecting a terminal (per workspace)
 
-Dashboard: AI Runs → Machines → **Web terminals** → Add. Name + address (e.g. `https://dev.workstation.co.uk`).
+Dashboard: AI Runs → Machines → **Web terminals** → Add. Name + address (e.g. `https://dev.workstation.co.uk`; it must
+be https, plain http only on this machine: `localhost`, `127.0.0.1`, `[::1]`. A terminal saved with http before can't
+be launched until its address is changed).
 OpsAPI generates a random 32-byte shared secret (sealed with `secret-box`, purpose `ai_runner_terminal`),
 shows it **once** with a ready-to-paste `opsapi:` block for the terminal's `config.yaml` (built by the dashboard, which
 knows the API address the browser uses), and can rotate it.
 The workspace also lists the agents people may pick (id + label; default `claude` Claude Code,
-`codex` Codex, `cursor` Cursor, `shell` Just a terminal) — the ids must match the terminal's config.
+`codex` Codex, `cursor` Cursor, `shell` Just a terminal) — the ids must match the terminal's config. An agent whose id
+ends in `_auto` (or with `"unattended": true`) works without stopping to ask: only `ai_runs.manage` may start it
+(others get 403 and aren't offered it), and it is never a default.
 
 ## 2. Launch link (OpsAPI → browser → terminal)
 
@@ -85,8 +89,9 @@ Terminals ignore claims they don't know, so a newer OpsAPI works with an older t
 4. The page opens a tab named `#<num> <title>` in that folder. The shell gets
    `OPSAPI_LAUNCH`, `OPSAPI_TASK`, `OPSAPI_TASK_NUMBER`, `OPSAPI_TASK_TITLE`, `OPSAPI_TASK_URL` and
    `OPSAPI_TASK_PROMPT` in its environment, and then runs the agent's configured command line, e.g.
-   `claude "$OPSAPI_TASK_PROMPT"`. The prompt only ever reaches the shell inside a variable, so its text is
-   never parsed as shell syntax.
+   `claude -- "$OPSAPI_TASK_PROMPT"`. The prompt only ever reaches the shell inside a variable, so its text is
+   never parsed as shell syntax, and `--` ends the agent's options so it can't be read as one. OpsAPI never sends a
+   prompt that starts with `-` (it puts "Task: " in front); the terminal refuses one that does.
 5. The tab shows a banner (plain text, no HTML from the link): task number and title, who launched it,
    and **Back to task**.
 6. The fragment is removed from the address bar once used.
@@ -213,9 +218,18 @@ then applies `task_automation.on_pr_merged` (default: status `completed`, column
 merged. Both are workspace AI run settings and can be switched off. The token can only attach PRs and notes to
 its own task.
 
-**Unattended agents.** The default agents include `claude_auto` ("Claude Code, unattended"):
-`claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"`. It never stops to ask; this is only acceptable
-because the terminal runs under its own macOS account (W1). Leave it out of a terminal's config to forbid it.
+Only a PR in the project's GitHub repository (`target_repo_url`) is followed like that (`"tracked": true` in the
+answer); one in another repository is refused (422). When the project names no GitHub repository, or for a GitLab
+merge request, OpsAPI can't check the PR belongs to the task: it is recorded (comment, listed for sign-off, no
+number so the poll never follows it), the task doesn't move by itself, and the answer says so (`"tracked": false`,
+`"message"`).
+
+The webhook, activity, recordings and reports are refused once signed when the terminal is switched off or removed
+(`403`, `code: TERMINAL_OFF`) or its workspace is inactive or has AI Runs off (`404`, `code: PLUGIN_DISABLED`).
+
+**Unattended agents.** `claude_auto` ("Claude Code, unattended",
+`claude --dangerously-skip-permissions -- "$OPSAPI_TASK_PROMPT"`) is no longer a default; terminals that list it keep
+it. It never stops to ask; only AI runs managers can start it (any id ending in `_auto`, or marked unattended).
 
 ## 10. Keys managers issue (W9)
 
@@ -230,9 +244,15 @@ by/at, `expires_at` (90 days), blocked by/at/reason (`blocked`, `replaced`, `lef
 from the email's local part, numbered if taken; a name is never given to a different person, so a new starter can't
 inherit a leaver's saved tabs.
 
-**When a key stops.** It is sent to the terminal only while it isn't blocked or expired **and** its person is an
-active user and an active member of the workspace. Someone who leaves or is deactivated has their keys blocked for
-good (reason `left`); coming back later needs a new key. A terminal switched off in OpsAPI gets an empty list.
+**When a key stops.** It is sent to the terminal only while it isn't blocked, suspended or expired **and** its person
+is an active user and an active member of the workspace. Someone who leaves or is deactivated has their keys blocked
+for good (reason `left`); coming back later needs a new key. A terminal switched off in OpsAPI, or in a workspace that
+is inactive or has AI Runs off, gets an empty (still signed) list.
+
+**Suspend.** `POST /terminals/:uuid/keys/:key_uuid/suspend` and `/resume` (`ai_runners.manage`; People, or Suspend on
+the Work log's "Now"): a suspended key (`suspended_at`, `suspended_by`) is left out of the list, so the terminal signs
+the person out and closes their sessions within about 30 seconds; Resume gives the same key back. Status
+`suspended`.
 
 **Reminder.** Fourteen days before a key expires, whoever issued it gets a notification (once per key).
 
@@ -256,8 +276,10 @@ X-Opsapi-Signature: sha256=<hex HMAC-SHA256(secret, "keys\n<terminal id>\n<times
 200  X-Opsapi-Signature: sha256=<hex HMAC-SHA256(secret, body)>
 { "terminal": "<id>", "generated_at": 1792828054,
   "keys": [ { "user": "priya", "public_key": "ssh-ed25519 AAAA…", "expires_unix": 1800604054,
-              "email": "priya@example.com" } ] }
+              "email": "priya@example.com", "name": "Priya Shah" } ] }
 ```
+
+`name` (the person's display name, optional) may be shown by the terminal; older terminals ignore it.
 
 The terminal trusts a list only when its signature checks out, it names this terminal, `generated_at` is within 5
 minutes and not older than the last list it took. OpsAPI keys get `local` access only and can't use a user name (or
@@ -331,7 +353,8 @@ Both requests carry `X-Opsapi-Terminal: <terminal id>` and `X-Opsapi-Signature: 
   "tabs": [ { "id": "<sshweb session id>", "user": "priya", "key": "SHA256:…", "via": "key",
               "ip": "203.0.113.4", "launch": "<launch uuid or null>", "kind": "local", "cwd": "/Users/…",
               "agent": "claude", "opened_at": 1792828000, "closed_at": null, "end_reason": null,
-              "exit_code": null, "active_secs": 420, "input_bytes": 1200, "output_bytes": 88000 } ],
+              "exit_code": null, "active_secs": 420, "input_bytes": 1200, "output_bytes": 88000,
+              "last_input_at": 1792828040, "attached": true } ],
   "events": [ { "id": "<tab id>:<seq>", "tab": "<tab id>", "at": 1792828050.123,
                 "type": "user_prompt", "session": "<claude session.id>", "prompt_id": "<prompt.id>",
                 "attrs": { "prompt": "…", "prompt_length": 30 } },
@@ -343,11 +366,13 @@ Both requests carry `X-Opsapi-Terminal: <terminal id>` and `X-Opsapi-Signature: 
                 "attrs": { "name": "claude_code.lines_of_code.count", "type": "added", "value": 12 } } ] }
 ```
 
-A tab entry is the tab's whole current state (upsert by terminal + id): sent at open, at close, and every 60 s
-while it changes. Events are append-only; `id` is unique per terminal, so a retry is harmless. `attrs` carries the
+A tab entry is the tab's whole current state (upsert by terminal + id): sent at open, at close, and at least every
+60 s for every open tab (a heartbeat; OpsAPI sets `seen_at`). Optional: `last_input_at` (unix seconds of the last
+keystroke, or null) and `attached` (a browser shows the tab). Events are append-only; `id` is unique per terminal, so a retry is harmless. `attrs` carries the
 OTel attributes as given (Claude sends many numbers as strings), minus `user.email`, `user.account_uuid`,
 `organization.id`, `event.name`, `session.id`, `prompt.id`; `session`/`prompt_id` are left out when Claude sent none.
-Answer `200 {"tabs": n, "events": n}`; `401` bad signature/terminal; `400` bad body. Max body 5 MiB.
+Answer `200 {"tabs": n, "events": n}`; `401` bad signature/terminal; `400` bad body; `403 TERMINAL_OFF` /
+`404 PLUGIN_DISABLED` as for the webhook. Max body 5 MiB.
 
 **`POST {url}/recordings`** — headers also `X-Opsapi-Tab: <tab id>`, `X-Opsapi-Part: <n>` (0, 1, …),
 `X-Opsapi-Final: 0|1`; body = the gzipped part; signature over `"<tab id>\n<part>\n" .. body`. Max 4 MiB per part.
@@ -363,15 +388,19 @@ events: tokens, cost, prompts, tool calls, lines, commits, PRs), `ar_terminal_ev
 Who: a tab's person = the opener of its launch, else the holder of the OpsAPI key with that fingerprint on that
 terminal. Unknown (a key added on the terminal itself) shows the terminal user.
 
-Retention: prompt and tool text are blanked after 90 days, recordings deleted after 30 (hourly sweep). The sweep also
-closes a tab still open after 12 hours without news (`end_reason` "the terminal stopped reporting", e.g. after a crash);
-it reopens if the terminal reports it open again.
+Retention: prompt and tool text are blanked after 90 days, recordings deleted after 30 (hourly sweep). Open tabs a
+terminal stopped reporting are closed (`end_reason` "the terminal stopped reporting", e.g. after a crash): after 10
+minutes without news from a terminal that sends heartbeats (`attached`), else after 12 hours (checked every few
+minutes, migration `20261029120000_ai_runner_terminal_live`); a tab reopens if the terminal reports it open again.
 
 | Method & path | Who | → |
 |---|---|---|
-| `GET /work-log?user_uuid&task_uuid&from&to&page&per_page` | `ai_terminal_worklogs.read`, else only your own | tabs, newest first, with totals |
+| `GET /work-log?user_uuid&task_uuid&from&to&terminal_uuid&state=open\|closed&agent&q&page&per_page` | `ai_terminal_worklogs.read`, else only your own | tabs, newest first, with totals; `q` searches person, folder, task title; `meta.total` counts up to 1000 (`total_capped`), `has_more` |
+| `GET /work-log/options` | any member | the filters' terminals and agents |
+| `GET /work-log/live` | same rule | who is working now: open tabs reported in the last 3 minutes, with `last_input_at` / `idle_secs`, `attached`, and `key_uuid` for `ai_runners.manage` |
 | `GET /work-log/people?from&to` | `ai_terminal_worklogs.read` | per person: tabs, active time, prompts, tokens, cost |
-| `GET /work-log/tabs/:uuid` | same rule | the tab + its events (timeline) + recording parts |
+| `GET /work-log/tabs/:uuid` | same rule | the tab + the first page of its timeline (`events`, `events_next`) + recording parts |
+| `GET /work-log/tabs/:uuid/events?type&q&after&per_page` | same rule | the timeline, oldest first, 200 a page; `meta.next` continues it |
 | `GET /work-log/tabs/:uuid/recording/:part` | same rule | the gzipped asciicast part |
 
 ## 12. Is the terminal connected?

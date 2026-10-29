@@ -209,7 +209,8 @@ return function(app)
             and ps.default_executor ~= cjson.null and ps.default_executor)
             or (builtin and "builtin") or "machine"
         local terminals = Term.offer(ns, task, ps, { user_uuid = sdk.user(self).uuid,
-            can_autologin = sdk.can(self, Term.AUTOLOGIN_PERMISSION[1], Term.AUTOLOGIN_PERMISSION[2]) })
+            can_autologin = sdk.can(self, Term.AUTOLOGIN_PERMISSION[1], Term.AUTOLOGIN_PERMISSION[2]),
+            can_unattended = sdk.can(self, "ai_runs", "manage") })
         return sdk.ok({
             prompt = R.render(tpl.body, task, render_opts(builtin, repo_path, defaults, defaults.output_mode, snap)),
             template_version = tpl.version, template_uuid = U.null(tpl.uuid), can_edit_prompt = privileged,
@@ -552,9 +553,8 @@ return function(app)
         })
         if not d then U.invalid(errors) end
         local V = require("ai_runner.vault_pr")
-        local row = V.review(ns, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
+        local row = V.review(ns, task.uuid, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
             type(d.note) == "string" and d.note or nil)
-        if row.task_uuid ~= task.uuid then return sdk.not_found("Pull request") end
         local label = d.decision == "approved" and "Manager approved PR (OpsAPI sign-off; not merged)"
             or "Manager requested changes on PR"
         pcall(function()

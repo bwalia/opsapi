@@ -6,7 +6,8 @@ Start dialog's offer (terminals, remembered folders, the prompt); launching (who
 the signed ticket and its claims, the folder remembered, no comment); the webhook (unknown launch, bad signature,
 stale time, start and end once each, another workspace's secret, a rotated secret); expired links; isolation between
 workspaces; auto sign-in (§8: the permission, the terminal switch, the emailed-code step-up, the login claim and the
-2-minute link); agents reporting their pull request (§9: the token, the task moved to Review, once per URL); the
+2-minute link); agents reporting their pull request (§9: the token, the task moved to Review only for a PR in the
+project's repository, once per URL); the
 migrations run again.
 """
 import base64
@@ -154,7 +155,7 @@ expect("assign dev", call("POST", API + f"/api/v2/kanban/tasks/{T1['uuid']}/assi
 # --- Connecting a terminal ------------------------------------------------------------------------------------
 expect("dev can't list terminals", call("GET", P + "/terminals", "dev", W), 403)
 expect("dev can't add one", call("POST", P + "/terminals", "dev", W, {"name": "x", "url": "https://x.invalid"}), 403)
-for bad in ("ftp://term.invalid", "https://term.invalid/some/path", "term.invalid", ""):
+for bad in ("ftp://term.invalid", "https://term.invalid/some/path", "term.invalid", "", "http://term.invalid"):
     expect(f"address {bad!r} refused", call("POST", P + "/terminals", "mgr", W, {"name": "Mac", "url": bad}), 422)
 expect("duplicate agent ids refused", call("POST", P + "/terminals", "mgr", W, {
     "name": "Mac", "url": "https://term.invalid", "agents": [{"id": "a", "label": "A"}, {"id": "a", "label": "B"}]}), 422)
@@ -165,8 +166,8 @@ created = expect("manager adds a terminal", call("POST", P + "/terminals", "mgr"
 TERM, SEC = created["terminal"], created["secret"]
 check("secret: 64 hex characters, shown once", len(SEC) == 64 and all(c in "0123456789abcdef" for c in SEC), SEC[:6])
 check("address stored without the trailing slash", TERM["url"] == "https://term.example.invalid", TERM)
-check("default agents: Claude Code, unattended, Codex, Cursor, Just a terminal",
-      [a["id"] for a in TERM["agents"]] == ["claude", "claude_auto", "codex", "cursor", "shell"], TERM["agents"])
+check("default agents: Claude Code, Codex, Cursor, Just a terminal (no unattended one)",
+      [a["id"] for a in TERM["agents"]] == ["claude", "codex", "cursor", "shell"], TERM["agents"])
 check("auto sign-in is off for a new terminal", TERM["autologin"] is False, TERM)
 check("hint is the secret's last 4", TERM["secret_hint"] == "…" + SEC[-4:], TERM)
 listed = expect("manager lists terminals", call("GET", P + "/terminals", "mgr", W), 200)
@@ -373,10 +374,12 @@ TS = lambda: one(f"SELECT status FROM kanban_tasks WHERE uuid = '{T1['uuid']}'")
 check("task not in review yet", TS() != "review", TS())
 r1 = expect("agent reports its PR", report({"pr_url": "https://github.com/acme/web/pull/7/", "note": "Sticky header."}),
             200)
-check("PR attached to the task: repo, number, open", (r1.get("pr") or {}).get("repo") == "acme/web"
-      and r1["pr"].get("pr_number") == 7 and r1["pr"].get("state") == "open"
-      and r1["pr"].get("pr_url") == "https://github.com/acme/web/pull/7" and r1.get("task_uuid") == T1["uuid"], r1)
-check("task moved to review (on_pr_open default)", TS() == "review", TS())
+check("no repository to check it against: recorded on the task, not followed (no number)",
+      (r1.get("pr") or {}).get("repo") == "acme/web" and r1["pr"].get("pr_number") is None
+      and r1["pr"].get("state") == "open" and r1["pr"].get("pr_url") == "https://github.com/acme/web/pull/7"
+      and r1.get("task_uuid") == T1["uuid"] and r1.get("tracked") is False
+      and "doesn't move by itself" in (r1.get("message") or ""), r1)
+check("…so the task doesn't move", TS() != "review", TS())
 check("one comment with the PR and the note",
       comments(T1["uuid"], "%opened a pull request from the web terminal: https://github.com/acme/web/pull/7%"
                "Sticky header.%") == 1)
@@ -393,8 +396,10 @@ expect("the project names its repository", call("PUT", P + f"/projects/{proj['uu
                                                 {"target_repo_url": "https://github.com/acme/web.git"}), 200)
 expect("a PR in another repository is refused (it could finish the task when it merges)",
        report({"pr_url": "https://github.com/someone/else/pull/1"}), 422)
-expect("a PR in the project's repository (any case) is fine", report({"pr_url": "https://github.com/Acme/Web/pull/8"}),
-       200)
+r8 = expect("a PR in the project's repository (any case) is fine",
+            report({"pr_url": "https://github.com/Acme/Web/pull/8"}), 200)
+check("…followed: its number kept, the task moved to review (on_pr_open default)", r8.get("tracked") is True
+      and (r8.get("pr") or {}).get("pr_number") == 8 and TS() == "review", (r8, TS()))
 sql(f"UPDATE ar_terminal_sessions SET created_at = NOW() - interval '8 days' WHERE uuid = '{auto['session']['uuid']}'")
 expect("a week-old token stops working", report({"note": "late"}), 401)
 s_ = expect("settings", call("GET", P + "/settings", "owner_a", W), 200)["task_automation"]
@@ -652,6 +657,18 @@ check("…and can't widen it", sorted(r["tab_id"] for r in page("dev", W, f"?use
 check("dev2 sees nothing of theirs", page("dev2", W)[1] == [])
 check("another workspace sees none", page("owner_b", X)[1] == [])
 check("filter by task", [r["tab_id"] for r in page("owner_a", W, f"?task_uuid={T1['uuid']}")[1]] == ["tab0a"])
+open_ = {r["tab_id"] for r in page("owner_a", W, "?state=open")[1]}
+check("filter: still open", {"tab0a", "tab0c"} <= open_ and "tab0b" not in open_, open_)
+check("filter: ended", "tab0b" in {r["tab_id"] for r in page("owner_a", W, "?state=closed")[1]}
+      and "tab0a" not in {r["tab_id"] for r in page("owner_a", W, "?state=closed")[1]})
+check("filter: assistant", [r["tab_id"] for r in page("owner_a", W, "?agent=claude")[1]] == ["tab0a"])
+check("filter: terminal", "tab0a" in {r["tab_id"] for r in page("owner_a", W, f"?terminal_uuid={TERM['uuid']}")[1]}
+      and page("owner_a", W, f"?terminal_uuid={uuidlib.uuid4()}")[1] == [])
+check("search: the folder", "tab0a" in {r["tab_id"] for r in page("owner_a", W, "?q=projects/site")[1]})
+check("search: a % in it matches only a %", page("owner_a", W, "?q=%25")[1] == [])
+_, two, two_meta = page("owner_a", W, "?per_page=2")
+check("paging: two a page, a next page, the total counted", len(two) == 2 and two_meta.get("has_more") is True
+      and two_meta.get("total", 0) >= 3 and two_meta.get("total_capped") is False, two_meta)
 expect("totals per person need the permission", call("GET", P + "/work-log/people", "dev", W), 403)
 people = expect("owner: totals per person", call("GET", P + "/work-log/people", "owner_a", W), 200)
 dp = [x for x in people if x["user_uuid"] == USERS["dev"][0]]
@@ -701,6 +718,55 @@ st0, raw0 = get_raw(PART0, "dev", W)
 check("the recording comes back as recorded", st0 == 200 and gzip.decompress(raw0) == CAST, st0)
 check("dev2 can't fetch it", get_raw(PART0, "dev2", W)[0] == 404)
 
+# The timeline a page at a time (§11.4), filtered by the server.
+EV = P + f"/work-log/tabs/{a.get('uuid')}/events"
+e1 = call("GET", EV + "?per_page=2", "dev", W)
+e1_body = e1[1] if isinstance(e1[1], dict) else {}
+check("timeline: two events and a cursor", e1[0] == 200 and len(e1_body.get("data") or []) == 2
+      and (e1_body.get("meta") or {}).get("next"), e1)
+e2 = expect("…the next page", call("GET", EV + f"?per_page=2&after={(e1_body.get('meta') or {}).get('next')}", "dev",
+                                     W), 200)
+check("…goes on from there", [e["id"] for e in e2] == [e["id"] for e in evs[2:4]], [e["id"] for e in e2])
+check("filter by kind on the server", [e["type"] for e in expect("prompts only", call("GET", EV + "?type=user_prompt",
+                                                                                         "dev", W), 200)]
+      == ["user_prompt"])
+check("search the words", [e["type"] for e in expect("search", call("GET", EV + "?q=npm", "dev", W), 200)]
+      == ["tool_result"])
+expect("dev2 can't read dev's timeline", call("GET", EV, "dev2", W), 404)
+
+# Who is working now (§11.4): every open tab at least once a minute, with when they last typed and whether a browser
+# shows it.
+LIVE = P + "/work-log/live"
+beat = json.dumps({"terminal": TERM["uuid"], "events": [],
+                   "tabs": [dict(tabs[0], last_input_at=int(time.time()) - 30, attached=True)]}).encode()
+expect("a heartbeat with the new fields", signed(ACT, beat), 200)
+lv = expect("owner: who is working now", call("GET", LIVE, "owner_a", W), 200)
+now_a = [r for r in lv if r["uuid"] == a.get("uuid")]
+check("…dev's open tab: their task, typed 30 s ago, shown in a browser, their key for Suspend", len(now_a) == 1
+      and now_a[0]["user_uuid"] == USERS["dev"][0] and now_a[0]["task_uuid"] == T1["uuid"]
+      and 20 <= (now_a[0].get("idle_secs") or -1) <= 300 and now_a[0]["attached"] is True
+      and now_a[0].get("key_uuid") == k5["uuid"], now_a)
+check("…not the ended one", b.get("uuid") not in [r["uuid"] for r in lv])
+mine = expect("dev: who is working now", call("GET", LIVE, "dev", W), 200)
+check("dev sees only their own, without key ids", mine and all(r["user_uuid"] == USERS["dev"][0]
+                                                               and r.get("key_uuid") is None for r in mine), mine)
+check("dev2 sees nobody", expect("dev2: now", call("GET", LIVE, "dev2", W), 200) == [])
+check("another workspace sees nobody", expect("other workspace: now", call("GET", LIVE, "owner_b", X), 200) == [])
+
+# Suspend / Resume (§10): signed out until resumed, the same key back.
+KS = K + f"/{k5['uuid']}"
+check("the keys feed names each person", all(k.get("name") for k in live_keys() if k["user"] == "dev.a"))
+expect("a member can't suspend a key", call("POST", KS + "/suspend", "dev", W), 403)
+sus = expect("manager suspends dev's key", call("POST", KS + "/suspend", "mgr", W), 200)
+check("…listed as suspended", sus.get("status") == "suspended" and sus.get("suspended_at"), sus)
+check("…and left out of the terminal's keys (it signs them out)", "dev.a" not in [k["user"] for k in live_keys()])
+expect("suspending again is fine", call("POST", KS + "/suspend", "mgr", W), 200)
+expect("another workspace can't", call("POST", P + f"/terminals/{TERM['uuid']}/keys/{k5['uuid']}/suspend", "owner_b",
+                                       X), 404)
+res_ = expect("manager resumes it", call("POST", KS + "/resume", "mgr", W), 200)
+check("…active again, the same key back on the terminal", res_.get("status") == "active"
+      and "dev.a" in [k["user"] for k in live_keys()], res_)
+
 if EXEC:
     sql("UPDATE ar_terminal_events SET created_at = NOW() - interval '91 days' WHERE event_id = 'tab0a:1'")
     sql("""UPDATE ar_terminal_recordings SET created_at = NOW() - interval '31 days' WHERE part = 0
@@ -726,6 +792,14 @@ if EXEC:
     back = expect("the tab again", call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
     check("…and it reopens", back.get("open") is True and back.get("end_reason") is None
           and back.get("active_secs") == 480, (back.get("open"), back.get("end_reason")))
+    sql("UPDATE ar_terminal_tabs SET seen_at = NOW() - interval '11 minutes' WHERE tab_id = 'tab0a'")
+    subprocess.run(shlex.split(EXEC) + [
+        "package.path = '/app/projects/ai-runner/?.lua;' .. package.path; require('ai_runner.worklog').close_stale()"],
+        capture_output=True, text=True)
+    gone = expect("the tab after 11 minutes without a heartbeat",
+                  call("GET", P + f"/work-log/tabs/{a.get('uuid')}", "dev", W), 200)
+    check("a terminal that reports every minute: its silent tab closes after 10 minutes", gone.get("open") is False
+          and gone.get("end_reason") == "the terminal stopped reporting", gone.get("end_reason"))
 
 # --- Switch off, delete -------------------------------------------------------------------------------------
 expect("switch the terminal off", call("PUT", P + f"/terminals/{TERM['uuid']}", "mgr", W, {"is_active": False}), 200)
@@ -743,7 +817,8 @@ for MIG, table in (("20261023120000_ai_runner_web_terminals", "ar_terminals"),
                    ("20261024120000_ai_runner_terminal_autologin", "ar_terminal_stepups"),
                    ("20261026120000_ai_runner_terminal_keys", "ar_terminal_keys"),
                    ("20261026130000_ai_runner_work_log", "ar_terminal_tabs"),
-                   ("20261028120000_ai_runner_terminal_contact", "ar_terminals")):
+                   ("20261028120000_ai_runner_terminal_contact", "ar_terminals"),
+                   ("20261029120000_ai_runner_terminal_live", "ar_terminal_tabs")):
     if not MIGRATE:
         break
     sql(f"DELETE FROM project_migrations WHERE project_code = 'ai_runner' AND migration_name = '{MIG}'")

@@ -40,6 +40,10 @@ return {
         { label = "Work log", route = "/dashboard/ai-runner/work-log", module = "ai_runs", icon = "ClipboardList" },
         { label = "AI run settings", route = "/dashboard/ai-runner/settings", module = "ai_runs_settings",
           icon = "Settings" },
+        -- The same Work log page for people who see everyone's work log but don't run AI work themselves. A menu
+        -- entry needs one module; the sidebar shows a plugin page once even when both entries apply.
+        { label = "Work log", route = "/dashboard/ai-runner/work-log", module = "ai_terminal_worklogs",
+          icon = "ClipboardList", key = "work-log-team" },
     },
 
     -- Settings live in ar_settings / ar_project_settings / ar_prompt_templates (they have nested values and

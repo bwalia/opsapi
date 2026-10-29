@@ -140,10 +140,10 @@ function remember(m: Mode) {
     // private mode: nothing to remember
   }
 }
-/** Unattended Claude Code when offered (it finishes without stopping to ask), else the first agent that runs
- * something (not "just a terminal"), else the first one. */
-const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id === 'claude_auto')?.id
-  || t?.agents.find((a) => a.id !== 'shell')?.id || t?.agents[0]?.id || '';
+/** The first agent that runs something (not "just a terminal") and stops to ask before it changes things, else
+ * the first one. An unattended agent is only ever picked by hand. */
+const firstAgent = (t?: TerminalOffer) => t?.agents.find((a) => a.id !== 'shell' && !a.unattended)?.id
+  || t?.agents.find((a) => !a.unattended)?.id || t?.agents[0]?.id || '';
 const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialMode }: TaskRef & {
@@ -500,7 +500,9 @@ export function StartWithAIDialog({ open, onClose, taskUuid, taskLabel, initialM
           {(terminal?.recent_paths || []).map((p) => <option key={p} value={p} />)}
         </datalist>
       </div>
-      <Select id="air-terminal-agent" label="AI assistant to start" value={agent} onChange={(e) => setAgent(e.target.value)}>
+      <Select id="air-terminal-agent" label="AI assistant to start" value={agent} onChange={(e) => setAgent(e.target.value)}
+        helperText={terminal?.agents.find((a) => a.id === agent)?.unattended
+          ? 'This one works without stopping to ask you before it changes or runs things.' : undefined}>
         {(terminal?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
       </Select>
       {autoOffered && (

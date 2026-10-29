@@ -18,20 +18,22 @@ T.AUTOLOGIN_TTL = 120              -- a link that signs someone in works for 2 m
 T.STEPUP_TTL = 43200               -- an emailed-code step-up is remembered for 12 hours (§8)
 T.REPORT_TTL = 7 * 86400           -- an agent may report its pull request for a week after the launch (§9)
 T.AUTOLOGIN_PERMISSION = { "ai_terminal_autologin", "create" }
+-- A new terminal's agents. No unattended one: a manager adds it on purpose (an id ending in _auto, or
+-- unattended = true), and only AI runs managers may start it (T.is_unattended).
 T.DEFAULT_AGENTS = {
     { id = "claude", label = "Claude Code" },
-    { id = "claude_auto", label = "Claude Code (unattended)" },
     { id = "codex", label = "Codex" },
     { id = "cursor", label = "Cursor" },
     { id = "shell", label = "Just a terminal" },
 }
--- What the terminal's config runs for each default agent (shown in the config block; the terminal decides).
+-- What the terminal's config runs for each agent (shown in the config block; the terminal decides). `--` ends the
+-- options, so the prompt can never be read as one; OpsAPI's prompts never start with "-" either (T.safe_prompt).
 T.RUN_LINES = {
-    claude = 'claude "$OPSAPI_TASK_PROMPT"',
-    -- Never stops to ask: acceptable only because the terminal runs under its own macOS account (W1).
-    claude_auto = 'claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"',
-    codex = 'codex "$OPSAPI_TASK_PROMPT"',
-    cursor = 'cursor-agent "$OPSAPI_TASK_PROMPT"',
+    claude = 'claude -- "$OPSAPI_TASK_PROMPT"',
+    -- Never stops to ask: only for terminals that still list it (no longer a default; managers only).
+    claude_auto = 'claude --dangerously-skip-permissions -- "$OPSAPI_TASK_PROMPT"',
+    codex = 'codex -- "$OPSAPI_TASK_PROMPT"',
+    cursor = 'cursor-agent -- "$OPSAPI_TASK_PROMPT"',
 }
 
 -- ---------------------------------------------------------------------------
@@ -67,7 +69,13 @@ end
 -- Terminals
 -- ---------------------------------------------------------------------------
 
---- Agents as given: 1 to 20 of { id = [a-z0-9_-]{1,32}, label = 1..60 }, ids unique. 422 otherwise.
+--- Does this agent work without stopping to ask (an id ending in _auto, or marked unattended)? Only AI runs managers
+-- may start one.
+function T.is_unattended(a)
+    return type(a) == "table" and (a.unattended == true or (type(a.id) == "string" and a.id:match("_auto$") ~= nil))
+end
+
+--- Agents as given: 1 to 20 of { id = [a-z0-9_-]{1,32}, label = 1..60, unattended? }, ids unique. 422 otherwise.
 function T.agents_of(v)
     if v == nil or v == cjson.null then return nil end
     if type(v) ~= "table" or v[1] == nil or #v > 20 then U.invalid({ agents = "must be a list of 1 to 20 agents" }) end
@@ -80,8 +88,11 @@ function T.agents_of(v)
         end
         if seen[id] then U.invalid({ agents = "ids must be different" }) end
         if label == "" or #label > 60 then U.invalid({ agents = "each label is 1 to 60 characters" }) end
+        if a.unattended ~= nil and a.unattended ~= cjson.null and type(a.unattended) ~= "boolean" then
+            U.invalid({ agents = "unattended is true or false" })
+        end
         seen[id] = true
-        out[i] = { id = id, label = label }
+        out[i] = { id = id, label = label, unattended = a.unattended == true or nil }
     end
     return U.array(out)
 end
@@ -177,9 +188,22 @@ function T.paths(ns, project_uuid, terminal_uuid, ps)
     return out
 end
 
+--- The agents this person may start on a terminal: unattended ones only for AI runs managers (marked so).
+function T.agents_for(row, can_unattended)
+    local out = {}
+    for _, a in ipairs(agents(row)) do
+        if T.is_unattended(a) then
+            if can_unattended then out[#out + 1] = { id = a.id, label = a.label, unattended = true } end
+        else
+            out[#out + 1] = { id = a.id, label = a.label }
+        end
+    end
+    return U.array(out)
+end
+
 --- What the Start dialog offers: each active terminal with its agents and folders for this task's project.
 -- `autologin`: this person may be signed in there by the link (the terminal allows it, and they hold
--- ai_terminal_autologin or a live key on it; who = { user_uuid, can_autologin }).
+-- ai_terminal_autologin or a live key on it). who = { user_uuid, can_autologin, can_unattended }.
 function T.offer(ns, task, ps, who)
     who = who or {}
     local out = {}
@@ -187,7 +211,7 @@ function T.offer(ns, task, ps, who)
         local paths = T.paths(ns, task.project_uuid, t.uuid, ps)
         local auto = t.autologin == true and (who.can_autologin == true
             or (who.user_uuid ~= nil and T.live_key(ns, who.user_uuid, t.id) ~= nil))
-        out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = U.array(agents(t)),
+        out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = T.agents_for(t, who.can_unattended == true),
             autologin = auto, default_path = U.null(paths[1]), recent_paths = U.array(paths) }
     end
     return U.array(out)
@@ -214,6 +238,14 @@ end
 
 function T.with_folder(prompt, path)
     return (prompt:gsub("{{%s*repo_path%s*}}", function() return path end))
+end
+
+--- The prompt as the terminal gets it: never starting with "-" (an agent's command line could take it for an option,
+-- and the terminal refuses such a prompt), so a leading dash gets a word in front.
+function T.safe_prompt(prompt)
+    local p = tostring(prompt or ""):gsub("^%s+", "")
+    if p:sub(1, 1) == "-" then p = "Task: " .. p end
+    return p
 end
 
 local function remember_path(ns, project_uuid, terminal_uuid, path)
@@ -263,7 +295,8 @@ end
 function T.verify_stepup(ns, user_uuid, code)
     local u = account(user_uuid)
     if not u then return nil, 404, "User not found" end
-    local ok, err = require("helper.otp").verify(u.id, tostring(code or ""))
+    -- Only the emailed code: the non-production TEST_OTP_CODE shortcut never unlocks automatic sign-in.
+    local ok, err = require("helper.otp").verify(u.id, tostring(code or ""), { no_test_bypass = true })
     if not ok then return nil, 401, err or "Invalid code" end
     db.query([[INSERT INTO ar_terminal_stepups (namespace_id, user_uuid, email, verified_at, expires_at)
         VALUES (?, ?, lower(?), NOW(), NOW() + interval ']] .. T.STEPUP_TTL .. [[ seconds')
@@ -284,11 +317,13 @@ end
 T.KEY_TTL = 90 * 86400             -- a key works for 90 days, then the manager issues a new one
 T.KEY_REMIND = 14 * 86400          -- the manager who issued it is reminded this long before it expires
 
--- A key counts only while it isn't blocked or expired and its person is an active user and member of the workspace:
--- removing someone from the workspace, or deactivating them, blocks their keys with nothing else to do.
-local LIVE_KEY = [[k.revoked_at IS NULL AND k.expires_at > NOW() AND EXISTS (SELECT 1 FROM users ku
-    JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
-    WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]]
+-- A key counts only while it isn't blocked, suspended or expired and its person is an active user and member of the
+-- workspace: removing someone from the workspace, or deactivating them, blocks their keys with nothing else to do.
+-- A suspended key is left out the same way (the terminal signs them out) until a manager resumes it.
+local LIVE_KEY = [[k.revoked_at IS NULL AND k.suspended_at IS NULL AND k.expires_at > NOW()
+    AND EXISTS (SELECT 1 FROM users ku
+        JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
+        WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]]
 
 --- An OpenSSH ed25519 public key line -> "ssh-ed25519 <base64>" (no comment) and its SHA256 fingerprint, or nil.
 function T.parse_public_key(line)
@@ -362,26 +397,47 @@ function T.block_key(ns, term, key_uuid, by)
         by, ns, term.id, key_uuid:lower())
 end
 
+--- Suspend a key (on = true) or resume it (on = false). Suspended, it is left out of the keys the terminal fetches, so
+-- the person is signed out and their sessions close within about 30 seconds; resuming gives the same key back. Only
+-- a key that isn't blocked; doing it twice is fine. @return row | nil
+function T.suspend_key(ns, term, key_uuid, by, on)
+    if not U.is_uuid(key_uuid) then return nil end
+    if on then
+        return U.one([[UPDATE ar_terminal_keys SET suspended_at = COALESCE(suspended_at, NOW()),
+            suspended_by = CASE WHEN suspended_at IS NULL THEN ? ELSE suspended_by END
+            WHERE namespace_id = ? AND terminal_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING *]],
+            by, ns, term.id, key_uuid:lower())
+    end
+    return U.one([[UPDATE ar_terminal_keys SET suspended_at = NULL, suspended_by = NULL
+        WHERE namespace_id = ? AND terminal_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING *]],
+        ns, term.id, key_uuid:lower())
+end
+
 --- A terminal's keys for its managers, newest live ones first: who, terminal user, fingerprint, issued, expires, and
--- status active | expired | blocked | replaced | left (left the workspace or was deactivated).
+-- status active | suspended | expired | blocked | replaced | left (left the workspace or was deactivated).
 function T.keys(ns, term)
     retire_leavers(term.id)
     local rows = db.query([[SELECT k.uuid, k.user_uuid, k.terminal_user, k.fingerprint, k.created_at, k.expires_at,
-            k.revoked_at, k.revoked_reason, ]] .. R.name_sql("u") .. [[ AS person_name, u.email AS person_email,
-            ]] .. R.name_sql("cb") .. [[ AS created_by_name, ]] .. R.name_sql("rb") .. [[ AS revoked_by_name,
+            k.revoked_at, k.revoked_reason, k.suspended_at, ]] .. R.name_sql("u") .. [[ AS person_name,
+            u.email AS person_email, ]] .. R.name_sql("cb") .. [[ AS created_by_name,
+            ]] .. R.name_sql("rb") .. [[ AS revoked_by_name, ]] .. R.name_sql("sb") .. [[ AS suspended_by_name,
             (]] .. LIVE_KEY .. [[) AS live, (k.expires_at <= NOW()) AS expired
         FROM ar_terminal_keys k LEFT JOIN users u ON u.uuid = k.user_uuid
         LEFT JOIN users cb ON cb.uuid = k.created_by LEFT JOIN users rb ON rb.uuid = k.revoked_by
+        LEFT JOIN users sb ON sb.uuid = k.suspended_by
         WHERE k.namespace_id = ? AND k.terminal_id = ?
         ORDER BY (k.revoked_at IS NULL) DESC, k.created_at DESC LIMIT 200]], ns, term.id)
     local out = {}
     for i, k in ipairs(rows) do
-        local status = k.live and "active" or k.revoked_reason == "replaced" and "replaced"
+        local status = k.live and "active"
+            or (k.revoked_at == nil and k.suspended_at ~= nil and not k.expired) and "suspended"
+            or k.revoked_reason == "replaced" and "replaced"
             or k.revoked_reason == "left" and "left" or k.revoked_reason == "blocked" and "blocked" or "expired"
         out[i] = { uuid = k.uuid, user_uuid = k.user_uuid, person_name = U.null(k.person_name),
             person_email = U.null(k.person_email), terminal_user = k.terminal_user, fingerprint = k.fingerprint,
             created_at = k.created_at, created_by_name = U.null(k.created_by_name), expires_at = k.expires_at,
-            revoked_at = U.null(k.revoked_at), revoked_by_name = U.null(k.revoked_by_name), status = status }
+            revoked_at = U.null(k.revoked_at), revoked_by_name = U.null(k.revoked_by_name),
+            suspended_at = U.null(k.suspended_at), suspended_by_name = U.null(k.suspended_by_name), status = status }
     end
     return U.array(out)
 end
@@ -420,8 +476,26 @@ local function remind_expiring(term)
     end
 end
 
+--- Is AI Runs usable in this workspace: the workspace is active and has the plugin on (as R.require_plugin)?
+function T.workspace_on(ns)
+    local n = U.one("SELECT status FROM namespaces WHERE id = ?", ns)
+    return n ~= nil and n.status == "active" and require("helper.plugin-workspaces").isEnabled("ai_runner", ns)
+end
+
+--- A correctly signed call from a terminal still stops when the terminal is switched off (403) or removed, or its
+-- workspace is inactive or has AI Runs off (404, as for runners: R.require_plugin). Raises U.fail.
+function T.require_on(term)
+    if not term then U.fail(403, "This web terminal was removed from OpsAPI", { code = "TERMINAL_OFF" }) end
+    if term.is_active ~= true then
+        U.fail(403, "This web terminal is switched off in OpsAPI", { code = "TERMINAL_OFF" })
+    end
+    local n = U.one("SELECT status FROM namespaces WHERE id = ?", term.namespace_id)
+    R.require_plugin(n and n.status, term.namespace_id)
+end
+
 --- The terminal a signed request comes from (§11.2): `X-Opsapi-Terminal` names it and `X-Opsapi-Signature` is its
--- hex HMAC-SHA256 over `msg`. @return terminal row | nil
+-- hex HMAC-SHA256 over `msg`. @return terminal row | nil (not signed by it). A switched-off terminal, or one whose
+-- workspace has AI Runs off, is refused (T.require_on raises).
 function T.signed_terminal(terminal_uuid, msg, signature)
     local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
     local secret = term and secret_of(term)
@@ -432,12 +506,14 @@ function T.signed_terminal(terminal_uuid, msg, signature)
         return nil
     end
     note_contact(term)
+    T.require_on(term)
     return term
 end
 
 --- What the terminal fetches (§10): its live keys, signed so it can trust them. The request is signed too:
 -- X-Opsapi-Signature: sha256=hex(HMAC(secret, "keys\n<terminal uuid>\n<X-Opsapi-Timestamp>")).
--- A terminal switched off in OpsAPI gets an empty list. @return body, signature hex | nil, http status, message
+-- A terminal switched off in OpsAPI, or in a workspace that is inactive or has AI Runs off, gets an empty list (still
+-- signed: the terminal then signs everyone out). @return body, signature hex | nil, http status, message
 function T.keys_for_terminal(terminal_uuid, ts, signature)
     local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
     if not term then return nil, 401, "Unauthorized" end
@@ -455,14 +531,16 @@ function T.keys_for_terminal(terminal_uuid, ts, signature)
     note_contact(term)
     local keys = {}
     retire_leavers(term.id)
-    if term.is_active then
+    if term.is_active and T.workspace_on(term.namespace_id) then
         pcall(remind_expiring, term)
         for i, k in ipairs(db.query([[SELECT k.terminal_user AS user, k.public_key,
-                EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email
+                EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email,
+                ]] .. R.name_sql("pu") .. [[ AS name
             FROM ar_terminal_keys k JOIN users pu ON pu.uuid = k.user_uuid
             WHERE k.terminal_id = ? AND ]] .. LIVE_KEY .. " ORDER BY k.id", term.id)) do
+            -- name: the person's display name, for the terminal's own screens (optional for the terminal).
             keys[i] = { user = k.user, public_key = k.public_key, expires_unix = tonumber(k.expires_unix),
-                email = U.null(k.email) }
+                email = U.null(k.email), name = U.null(k.name) }
         end
     end
     local body = cjson.encode({ terminal = term.uuid, generated_at = ngx.time(), keys = U.array(keys) })
@@ -622,6 +700,7 @@ function T.webhook(raw, signature)
         return nil, 400, "ts is missing or too far from now"
     end
     note_contact(term)
+    T.require_on(term)
     local event = payload.event
     if event ~= "session_start" and event ~= "session_end" then return nil, 400, "Unknown event" end
     local sid = type(payload.session_id) == "string" and payload.session_id:match("^%x+$") and #payload.session_id <= 64
@@ -667,7 +746,8 @@ local function pr_parts(url)
     if url:match("^https://[%w%.%-]+/.+/%-/merge_requests/%d+/?$") then return "", nil end
 end
 
---- Apply an agent's report: body = { pr_url?, note? }. @return { task_uuid, pr? } | nil, http status, message
+--- Apply an agent's report: body = { pr_url?, note? }.
+-- @return { task_uuid, pr?, tracked?, message? } | nil, http status, message
 function T.report(token, body)
     if type(token) ~= "string" or not token:match("^[%w_%-]+$") or #token < 32 or #token > 128 then
         return nil, 401, "Unauthorized"
@@ -675,25 +755,35 @@ function T.report(token, body)
     local s = U.one([[SELECT * FROM ar_terminal_sessions WHERE report_token_hash = ?
         AND created_at > NOW() - interval ']] .. T.REPORT_TTL .. [[ seconds']], sha256_hex(token))
     if not s then return nil, 401, "Unauthorized" end
+    T.require_on(s.terminal_uuid and U.one("SELECT * FROM ar_terminals WHERE uuid = ? AND namespace_id = ?",
+        s.terminal_uuid, s.namespace_id))
     if type(body) ~= "table" then return nil, 400, "Invalid JSON" end
     local pr_url = body.pr_url
+    -- tracked: the PR is in the project's own GitHub repository, so OpsAPI follows it and moves the task (on_pr_open,
+    -- then on_pr_merged from the poll). Without a repository to check it against (or for a GitLab merge request) a
+    -- token holder could name any PR, even one already merged elsewhere, and finish the task: such a PR is only
+    -- recorded on the task, and a manager moves it. `why` says why it isn't followed.
+    local tracked, why = false, nil
     if pr_url ~= nil and pr_url ~= cjson.null then
         if type(pr_url) ~= "string" or #pr_url > 500 or not pr_parts(pr_url) then
             return nil, 422, "pr_url must be a GitHub pull request (or GitLab merge request) URL"
         end
         pr_url = pr_url:gsub("/$", "")
-        -- Only a PR in the project's repository (or the folder's): the poll moves the task to Done when the reported
-        -- PR merges, so an unrelated, already-merged PR would otherwise finish the task.
         local V = require("ai_runner.vault_pr")
         local repo, known = (pr_parts(pr_url) or ""):lower(), {}
         for _, u in ipairs({ R.project_settings(s.namespace_id, s.project_uuid).target_repo_url, s.repo_url }) do
             local r = V.parse_repo(u)
             if r then known[#known + 1] = r end
         end
-        local ok = repo == "" or #known == 0
-        for _, r in ipairs(known) do ok = ok or r:lower() == repo end
-        if not ok then
-            return nil, 422, "pr_url must be a pull request in " .. table.concat(known, " or ")
+        if #known == 0 then
+            why = "the project has no GitHub repository set in its AI run settings"
+        elseif repo == "" then
+            why = "OpsAPI only follows GitHub pull requests"
+        else
+            for _, r in ipairs(known) do tracked = tracked or r:lower() == repo end
+            if not tracked then
+                return nil, 422, "pr_url must be a pull request in " .. table.concat(known, " or ")
+            end
         end
     else
         pr_url = nil
@@ -706,21 +796,32 @@ function T.report(token, body)
     local out = { task_uuid = s.task_uuid }
     if pr_url then
         local repo, num = pr_parts(pr_url)
-        local row = U.one([[INSERT INTO ar_task_prs (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
+        -- Not followed: no number, so the poll never looks at it (and never moves the task); still listed on the
+        -- task's AI work panel for a manager's sign-off.
+        if not tracked then num = nil end
+        local row = U.one([[INSERT INTO ar_task_prs
+                (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
             VALUES (?, ?, ?, ?, ?, ?, 'open')
             ON CONFLICT (namespace_id, task_uuid, pr_url) WHERE run_uuid IS NULL DO NOTHING RETURNING *]],
             s.namespace_id, s.task_uuid, s.project_uuid, repo, pr_url, num or db.NULL)
         if row then
             comment(s.task_uuid, s.namespace_id, s.opened_by, who .. " opened a pull request from the web terminal: "
                 .. pr_url .. (note and ("\n" .. note) or "")
+                .. (tracked and "" or ("\nOpsAPI can't follow it (" .. why .. "), so the task doesn't move by "
+                    .. "itself: a manager moves it."))
                 .. "\nManagers: approve or request changes on the task's AI work panel.")
-            R.automate_task(s.namespace_id, s.task_uuid, "on_pr_open")
+            if tracked then R.automate_task(s.namespace_id, s.task_uuid, "on_pr_open") end
         else
             row = U.one([[SELECT * FROM ar_task_prs WHERE namespace_id = ? AND task_uuid = ? AND pr_url = ?
                 AND run_uuid IS NULL]], s.namespace_id, s.task_uuid, pr_url)
             if note then comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note) end
         end
         out.pr = row and require("ai_runner.vault_pr").view(row) or nil
+        out.tracked = tracked
+        if not tracked then
+            out.message = "Recorded on the task. OpsAPI can't follow this pull request (" .. why .. "), so the task "
+                .. "doesn't move by itself: a manager moves it."
+        end
     else
         comment(s.task_uuid, s.namespace_id, s.opened_by, who .. ": " .. note)
     end
@@ -736,6 +837,12 @@ function T.ensure_poll_timer()
         ngx.timer.every(180, function(premature)
             if premature then return end
             pcall(function() require("ai_runner.pr_poll").tick() end)
+            -- Close tabs a terminal stopped reporting (W.LOST_SECS): one worker at a time, at most every 2 minutes.
+            local dict = ngx.shared and ngx.shared.cache
+            if not dict or dict:add("ar:worklog:close_stale", true, 120) then
+                local closed, err = pcall(function() require("ai_runner.worklog").close_stale() end)
+                if not closed then ngx.log(ngx.ERR, "[ai_runner] work log close_stale: ", tostring(err)) end
+            end
         end)
         -- Work log retention (§11.3): old prompt/command text blanked, old recordings deleted.
         ngx.timer.every(3600, function(premature)

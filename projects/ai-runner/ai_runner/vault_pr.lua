@@ -166,16 +166,17 @@ function V.open_or_attach(run, opts)
     return row
 end
 
---- Manager sign-off on a PR (does not merge).
-function V.review(ns, pr_uuid, user_uuid, decision, note)
+--- Manager sign-off on a PR of this task (does not merge). The task is part of the condition: a manager of one
+-- project can't sign off a PR of another task. 404 when it isn't this task's.
+function V.review(ns, task_uuid, pr_uuid, user_uuid, decision, note)
     if decision ~= "approved" and decision ~= "changes_requested" then
         U.invalid({ decision = "must be approved or changes_requested" })
     end
     local row = U.one([[
         UPDATE ar_task_prs SET review_status = ?, reviewed_by = ?, reviewed_at = NOW(),
             review_note = ?, updated_at = NOW()
-        WHERE namespace_id = ? AND uuid = ? RETURNING *
-    ]], decision, user_uuid, note and U.clean(note, 2000) or db.NULL, ns, pr_uuid)
+        WHERE namespace_id = ? AND task_uuid = ? AND uuid = ? RETURNING *
+    ]], decision, user_uuid, note and U.clean(note, 2000) or db.NULL, ns, task_uuid, pr_uuid)
     if not row then U.fail(404, "Pull request not found") end
     return row
 end

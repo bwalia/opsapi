@@ -344,6 +344,9 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
     end
 
     local filtered_items = {}
+    -- A plugin may list one page under several entries (each needs a single module, e.g. AI Runs' Work log for
+    -- ai_runs or ai_terminal_worklogs): show it once, as the first entry that applies.
+    local plugin_paths = {}
 
     -- Plugins turned off in this workspace (one query for the whole menu).
     local plugin_codes = {}
@@ -415,6 +418,14 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
             else
                 -- Items without module requirement are shown to all namespace members
                 should_include = true
+            end
+        end
+
+        if should_include and plugin_code and item.path then
+            if plugin_paths[item.path] then
+                should_include = false
+            else
+                plugin_paths[item.path] = true
             end
         end
 

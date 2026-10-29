@@ -4,11 +4,12 @@
  * People who may sign in to a web terminal with a key a manager issued them (docs/AI_RUNNER_WEB_TERMINAL.md §10).
  * The key pair is made in this browser (lib/ssh-key.ts); OpsAPI keeps only the public half, so the key file and its
  * passphrase are shown once, to hand over. Keys work 90 days; blocking one closes the person's terminals within a
- * minute; people who leave the workspace lose their keys by themselves.
+ * minute; suspending one does too, until Resume gives the same key back; people who leave the workspace lose their
+ * keys by themselves.
  */
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { Ban, Copy, Download, KeyRound, ShieldCheck } from 'lucide-react';
+import { Ban, Copy, Download, KeyRound, PauseCircle, PlayCircle, ShieldCheck } from 'lucide-react';
 import { Badge, Button, Modal, SearchableSelect, confirmDialog } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import { aiRunner, aiErrorText, type TerminalAccessKey, type WebTerminal } from '@/services/ai-runner.service';
@@ -34,6 +35,7 @@ function StatusBadge({ k }: { k: TerminalAccessKey }) {
       <Badge size="sm" variant="success">Active</Badge>
     );
   }
+  if (k.status === 'suspended') return <Badge size="sm" variant="warning">Suspended</Badge>;
   const label = { expired: 'Expired', blocked: 'Blocked', replaced: 'Replaced', left: 'Left the workspace' }[k.status];
   return <Badge size="sm" variant="secondary">{label}</Badge>;
 }
@@ -46,7 +48,7 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
   const [busy, setBusy] = useState(false);
   const [handover, setHandover] = useState<Handover | null>(null);
   const keys = data.data?.keys || [];
-  const live = new Set(keys.filter((k) => k.status === 'active').map((k) => k.user_uuid));
+  const live = new Set(keys.filter((k) => k.status === 'active' || k.status === 'suspended').map((k) => k.user_uuid));
   const options = (data.data?.people || []).map((p) => ({
     value: p.uuid,
     label: p.name || p.email || p.uuid,
@@ -91,6 +93,35 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
     try {
       await aiRunner.blockTerminalKey(terminal.uuid, k.uuid);
       toast.success(`${who}'s key is blocked`);
+      data.refresh();
+    } catch (e) {
+      toast.error(aiErrorText(e));
+    }
+  }
+
+  async function suspend(k: TerminalAccessKey) {
+    const who = k.person_name || k.person_email || k.terminal_user;
+    const ok = await confirmDialog({
+      title: `Sign ${who} out of ${terminal.name} now?`,
+      message: 'They can’t sign in again until you resume them. Their open terminals close within a minute.',
+      confirmText: 'Suspend',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await aiRunner.suspendTerminalKey(terminal.uuid, k.uuid);
+      toast.success(`${who} is signed out of ${terminal.name}`);
+      data.refresh();
+    } catch (e) {
+      toast.error(aiErrorText(e));
+    }
+  }
+
+  async function resume(k: TerminalAccessKey) {
+    const who = k.person_name || k.person_email || k.terminal_user;
+    try {
+      await aiRunner.resumeTerminalKey(terminal.uuid, k.uuid);
+      toast.success(`${who} can sign in to ${terminal.name} again`);
       data.refresh();
     } catch (e) {
       toast.error(aiErrorText(e));
@@ -221,8 +252,8 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
         <div className="space-y-4">
           <p className="text-sm text-secondary-600">
             Each person signs in with their own key, so the terminal records who did what. Keys work for 90 days.
-            Blocking a key closes that person&apos;s terminals within a minute, and people who leave the workspace lose
-            their keys by themselves.
+            Suspending someone signs them out within a minute until you resume them; blocking a key stops it for good.
+            People who leave the workspace lose their keys by themselves.
           </p>
           <div className="flex flex-wrap items-end gap-2 rounded-lg border border-secondary-200 p-3" data-testid="air-key-issue">
             <div className="min-w-[16rem] flex-1">
@@ -252,7 +283,7 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
           {keys.length > 0 && (
             <ul className="divide-y divide-secondary-100 rounded-lg border border-secondary-200" data-testid="air-key-list">
               {keys.map((k) => (
-                <li key={k.uuid} className={`flex flex-wrap items-center justify-between gap-2 p-3 ${k.status === 'active' ? '' : 'opacity-60'}`}>
+                <li key={k.uuid} className={`flex flex-wrap items-center justify-between gap-2 p-3 ${k.status === 'active' || k.status === 'suspended' ? '' : 'opacity-60'}`}>
                   <div className="min-w-0 text-sm">
                     <p className="flex flex-wrap items-center gap-2 font-medium text-secondary-900">
                       {k.person_name || k.person_email || 'Someone'}
@@ -264,6 +295,7 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
                       {k.created_by_name ? ` by ${k.created_by_name}` : ''}
                       {k.status === 'active' || k.status === 'expired' ? ` · ${k.status === 'active' ? 'works until' : 'stopped'} ${day(k.expires_at)}` : ''}
                       {k.revoked_at && k.status !== 'left' ? ` · ${k.status} ${day(k.revoked_at)}${k.revoked_by_name ? ` by ${k.revoked_by_name}` : ''}` : ''}
+                      {k.status === 'suspended' && k.suspended_at ? ` · suspended ${day(k.suspended_at)}${k.suspended_by_name ? ` by ${k.suspended_by_name}` : ''}` : ''}
                     </p>
                     <p className="truncate font-mono text-[11px] text-secondary-400" title={k.fingerprint}>
                       {k.fingerprint}
@@ -277,6 +309,18 @@ export function TerminalPeople({ terminal, onClose }: { terminal: WebTerminal; o
                       </Button>
                     )}
                     {k.status === 'active' && (
+                      <Button size="sm" variant="ghost" leftIcon={<PauseCircle className="h-4 w-4" aria-hidden />}
+                        onClick={() => void suspend(k)} data-testid="air-key-suspend">
+                        Suspend
+                      </Button>
+                    )}
+                    {k.status === 'suspended' && (
+                      <Button size="sm" variant="ghost" leftIcon={<PlayCircle className="h-4 w-4" aria-hidden />}
+                        onClick={() => void resume(k)} data-testid="air-key-resume">
+                        Resume
+                      </Button>
+                    )}
+                    {(k.status === 'active' || k.status === 'suspended') && (
                       <Button size="sm" variant="ghost" leftIcon={<Ban className="h-4 w-4" aria-hidden />} onClick={() => void block(k)}>
                         Block
                       </Button>

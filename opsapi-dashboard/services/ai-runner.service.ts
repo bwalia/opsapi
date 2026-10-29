@@ -389,6 +389,8 @@ export interface TaskPr {
 export interface TerminalAgent {
   id: string;
   label: string;
+  /** Works without stopping to ask (an id ending in _auto, or marked so): only AI runs managers can start it. */
+  unattended?: boolean;
 }
 /** A web terminal connected to this workspace (docs/AI_RUNNER_WEB_TERMINAL.md). The secret is never listed. */
 export interface WebTerminal {
@@ -439,8 +441,11 @@ export interface TerminalAccessKey {
   expires_at: string;
   revoked_at: string | null;
   revoked_by_name: string | null;
+  /** Suspended: signed out and kept out until a manager resumes the key. */
+  suspended_at?: string | null;
+  suspended_by_name?: string | null;
   /** left = left the workspace or was deactivated; replaced = a newer key was issued. */
-  status: 'active' | 'expired' | 'blocked' | 'replaced' | 'left';
+  status: 'active' | 'suspended' | 'expired' | 'blocked' | 'replaced' | 'left';
 }
 export interface TerminalKeyPerson {
   uuid: string;
@@ -528,6 +533,40 @@ export interface WorkLogTab {
   pull_requests: number;
   recording_parts: number;
   recording_bytes: number;
+  /** When someone last typed in it, when the terminal last reported it, whether a browser shows it (newer terminals). */
+  last_input_at?: string | null;
+  seen_at?: string | null;
+  attached?: boolean | null;
+}
+/** Someone working in a terminal right now: an open tab the terminal reported in the last 3 minutes. */
+export interface WorkLogLive {
+  uuid: string;
+  user_uuid: string | null;
+  person_name: string | null;
+  person_email: string | null;
+  terminal_user: string | null;
+  terminal_uuid: string | null;
+  terminal_name: string | null;
+  task_uuid: string | null;
+  task_number: number | null;
+  task_title: string | null;
+  project_uuid: string | null;
+  cwd: string | null;
+  agent: string | null;
+  via: string | null;
+  opened_at: string | null;
+  last_input_at: string | null;
+  /** Seconds since they last typed (null: nothing typed yet, or an older terminal). */
+  idle_secs: number | null;
+  seen_at: string | null;
+  /** A browser shows the tab (false: it runs on with nobody looking). */
+  attached: boolean | null;
+  /** Their live key on that terminal (only for ai_runners.manage): what Suspend acts on. */
+  key_uuid?: string | null;
+}
+export interface WorkLogOptions {
+  terminals: { uuid: string; name: string }[];
+  agents: TerminalAgent[];
 }
 /** user_prompt | api_request | api_error | tool_result | tool_decision | metric */
 export interface WorkLogEvent {
@@ -550,7 +589,9 @@ export interface WorkLogEvent {
   attrs: Record<string, string | number | boolean>;
 }
 export interface WorkLogDetail extends WorkLogTab {
+  /** The timeline's first page (oldest first); events_next continues it (workLogEvents). */
   events: WorkLogEvent[];
+  events_next?: string | null;
   recording: { part: number; final: boolean; bytes: number; created_at: string }[];
   text_days: number;
   recording_days: number;
@@ -579,7 +620,19 @@ export interface WorkLogFilters {
   task_uuid?: string;
   from?: string;
   to?: string;
+  terminal_uuid?: string;
+  state?: 'open' | 'closed';
+  agent?: string;
+  /** Searches the person's name or email, the folder and the task title. */
+  q?: string;
   page?: number;
+  per_page?: number;
+}
+export interface WorkLogEventFilters {
+  type?: string;
+  q?: string;
+  /** The previous page's `next`. */
+  after?: string;
   per_page?: number;
 }
 export interface TerminalLaunch {
@@ -896,7 +949,10 @@ export const aiErrorText = (e: unknown) => aiError(e).message;
 interface Envelope<T> {
   success: boolean;
   data: T;
-  meta?: { page?: number; per_page?: number; total?: number; total_pages?: number; sees_everyone?: boolean };
+  meta?: {
+    page?: number; per_page?: number; total?: number; total_pages?: number; sees_everyone?: boolean;
+    total_capped?: boolean; has_more?: boolean; can_suspend?: boolean; next?: string | null;
+  };
 }
 const id = encodeURIComponent;
 
@@ -1007,17 +1063,46 @@ export const aiRunner = {
     send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys`, body),
   blockTerminalKey: (uuid: string, keyUuid: string) =>
     send<{ blocked: boolean }>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/block`),
+  /** Sign the person out now and keep them out until resumed (the same key works again after Resume). */
+  suspendTerminalKey: (uuid: string, keyUuid: string) =>
+    send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/suspend`),
+  resumeTerminalKey: (uuid: string, keyUuid: string) =>
+    send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/resume`),
   /** Anyone in the workspace: the terminals they hold a key for. */
   myTerminals: async () => (await get<MyTerminal[]>('/my-terminals')).data,
 
   // Work log (§11): everyone's with ai_terminal_worklogs.read, else only your own.
   workLog: async (f: WorkLogFilters = {}) => {
     const res = await get<WorkLogTab[]>(`/work-log${buildQueryString({ ...f })}`);
-    return { ...paged<WorkLogTab>(res, f), seesEveryone: res.meta?.sees_everyone === true };
+    return {
+      ...paged<WorkLogTab>(res, f),
+      seesEveryone: res.meta?.sees_everyone === true,
+      /** More match than the total says (it counts up to 1000). */
+      totalCapped: res.meta?.total_capped === true,
+      hasMore: res.meta?.has_more === true,
+    };
+  },
+  workLogOptions: async (): Promise<WorkLogOptions> => {
+    const d = (await get<WorkLogOptions>('/work-log/options')).data;
+    return { terminals: list(d?.terminals), agents: list(d?.agents) };
+  },
+  /** Who is working in a terminal right now (yours, or everyone's with "Web terminal work logs"). */
+  workLogLive: async () => {
+    const res = await get<WorkLogLive[]>('/work-log/live');
+    return { items: list<WorkLogLive>(res.data), seesEveryone: res.meta?.sees_everyone === true,
+      canSuspend: res.meta?.can_suspend === true };
   },
   workLogPeople: async (f: Pick<WorkLogFilters, 'from' | 'to'> = {}) =>
     list<WorkLogPerson>((await get<WorkLogPerson[]>(`/work-log/people${buildQueryString({ ...f })}`)).data),
-  workLogTab: async (uuid: string) => (await get<WorkLogDetail>(`/work-log/tabs/${id(uuid)}`)).data,
+  workLogTab: async (uuid: string) => {
+    const d = (await get<WorkLogDetail>(`/work-log/tabs/${id(uuid)}`)).data;
+    return { ...d, events: list<WorkLogEvent>(d?.events), recording: list<WorkLogDetail['recording'][number]>(d?.recording) };
+  },
+  /** A page of a session's timeline, oldest first; `next` continues it (null: that was the last page). */
+  workLogEvents: async (uuid: string, f: WorkLogEventFilters = {}) => {
+    const res = await get<WorkLogEvent[]>(`/work-log/tabs/${id(uuid)}/events${buildQueryString({ ...f })}`);
+    return { items: list<WorkLogEvent>(res.data), next: res.meta?.next ?? null };
+  },
   /** One gzipped asciicast part of a tab's screen recording. */
   workLogRecordingPart: async (uuid: string, part: number) =>
     (await apiClient.get<ArrayBuffer>(`${BASE}/work-log/tabs/${id(uuid)}/recording/${part}`,
