@@ -196,7 +196,11 @@ curl -s https://showcase-api.demo.opsapi.org/api/v2/system/info | head -c 300
 ```
 
 Then point the opsapi.org/demo link at `https://showcase.demo.opsapi.org`.
-The old `showcase` workspace in `opsapi-demo` can be deleted once that's live.
+
+Both demos are permanent: don't uninstall either release or delete their
+databases or workspaces (including the old `showcase` workspace in
+`opsapi-demo`). The demo login is read-only, so visitors can't wipe the
+sample data; if it's ever lost, re-run the two seed scripts (step 5).
 
 ## Notes
 
