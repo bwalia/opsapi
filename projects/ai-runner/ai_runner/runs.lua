@@ -97,6 +97,19 @@ function R.base_url(v)
     if s:match("^https?://[%w%-%.]+$") or s:match("^https?://[%w%-%.]+:%d+$") then return s end
 end
 
+--- A web terminal's address: as R.base_url, but https unless it is this machine (localhost, 127.0.0.1, [::1]).
+-- Its launch links carry a sign-in ticket and a report token, so they never cross a network in clear.
+function R.secure_base_url(v)
+    if type(v) == "string" then
+        local s = v:gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
+        if s:match("^http://%[::1%]$") or s:match("^http://%[::1%]:%d+$") then return s end
+    end
+    local u = R.base_url(v)
+    if not u then return nil end
+    local host = u:match("^http://([^:/]+)")
+    if u:match("^https://") or host == "localhost" or host == "127.0.0.1" then return u end
+end
+
 --- The deployment's FRONTEND_URL (its first entry, when it lists several).
 function R.frontend_url()
     return ((os.getenv("FRONTEND_URL") or ""):match("^%s*([^,%s]*)"):gsub("/+$", ""))

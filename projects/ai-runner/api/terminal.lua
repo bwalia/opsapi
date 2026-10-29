@@ -53,8 +53,11 @@ local function stepup_view(st)
 end
 
 local function url_of(v)
-    local u = R.base_url(v)
-    if not u then U.invalid({ url = "must be the terminal's address, like https://dev.example.com" }) end
+    local u = R.secure_base_url(v)
+    if not u then
+        U.invalid({ url = "must be the terminal's https address, like https://dev.example.com (http only on this "
+            .. "machine: localhost or 127.0.0.1)" })
+    end
     return u
 end
 
@@ -181,6 +184,11 @@ return function(app)
         if not d then U.invalid(errors) end
         local term = T.find(ns, d.terminal_uuid)
         if not term or not term.is_active then U.fail(404, "Web terminal not found") end
+        -- Connected before addresses had to be https: the link would carry the ticket in clear.
+        if not R.secure_base_url(term.url) then
+            U.fail(409, "This web terminal's address doesn't start with https://, so it can't be opened from a task. "
+                .. "Ask an AI runners manager to change it under Machines → Web terminals.")
+        end
         local path = U.path(d.path)
         if not path or path:find("[%c]") then
             U.invalid({ path = "must be a full folder path, like /Users/you/projects/app" })

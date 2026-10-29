@@ -154,7 +154,7 @@ expect("assign dev", call("POST", API + f"/api/v2/kanban/tasks/{T1['uuid']}/assi
 # --- Connecting a terminal ------------------------------------------------------------------------------------
 expect("dev can't list terminals", call("GET", P + "/terminals", "dev", W), 403)
 expect("dev can't add one", call("POST", P + "/terminals", "dev", W, {"name": "x", "url": "https://x.invalid"}), 403)
-for bad in ("ftp://term.invalid", "https://term.invalid/some/path", "term.invalid", ""):
+for bad in ("ftp://term.invalid", "https://term.invalid/some/path", "term.invalid", "", "http://term.invalid"):
     expect(f"address {bad!r} refused", call("POST", P + "/terminals", "mgr", W, {"name": "Mac", "url": bad}), 422)
 expect("duplicate agent ids refused", call("POST", P + "/terminals", "mgr", W, {
     "name": "Mac", "url": "https://term.invalid", "agents": [{"id": "a", "label": "A"}, {"id": "a", "label": "B"}]}), 422)
