@@ -552,9 +552,8 @@ return function(app)
         })
         if not d then U.invalid(errors) end
         local V = require("ai_runner.vault_pr")
-        local row = V.review(ns, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
+        local row = V.review(ns, task.uuid, self.params.pr_uuid, sdk.user(self).uuid, d.decision,
             type(d.note) == "string" and d.note or nil)
-        if row.task_uuid ~= task.uuid then return sdk.not_found("Pull request") end
         local label = d.decision == "approved" and "Manager approved PR (OpsAPI sign-off; not merged)"
             or "Manager requested changes on PR"
         pcall(function()
