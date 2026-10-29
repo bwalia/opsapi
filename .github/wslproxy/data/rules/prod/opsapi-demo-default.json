@@ -36,6 +36,8 @@
     "host:hello-php.demo.opsapi.org",
     "host:hello-python.demo.opsapi.org",
     "host:hello-rust.demo.opsapi.org",
-    "host:hello-go.demo.opsapi.org"
+    "host:hello-go.demo.opsapi.org",
+    "host:showcase.demo.opsapi.org",
+    "host:showcase-api.demo.opsapi.org"
   ]
 }

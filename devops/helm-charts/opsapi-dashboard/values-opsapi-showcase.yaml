@@ -1,0 +1,28 @@
+# ── OpsAPI Dashboard — FULL DEMO (showcase) ────────────────────────────────
+# Helm RELEASE: opsapi-showcase-dashboard   Namespace: demo   Cluster: k3s1
+# Public host: https://showcase.demo.opsapi.org
+#   → calls the API at https://showcase-api.demo.opsapi.org (opsapi-showcase)
+env: prod
+
+# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so the
+# image must be built for this URL — see devops/demo/README.md.
+apiUrl: https://showcase-api.demo.opsapi.org
+
+image:
+  repository: bwalia/opsapi-dashboard
+  tag: showcase
+  pullPolicy: Always
+
+# MUST equal ingress.hostname below.
+host: showcase.demo.opsapi.org
+
+ingress:
+  enabled: true
+  className: traefik-edge
+  hostname: showcase.demo.opsapi.org
+  annotations: {}
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64

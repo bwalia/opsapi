@@ -1,0 +1,145 @@
+# opsapi-showcase-db — dedicated Postgres for the full OpsAPI demo (showcase).
+#
+# Separate from opsapi-demo-db: the identity demo runs PROJECT_CODE=core_only,
+# while the showcase runs PROJECT_CODE=all and needs every module's tables.
+# Owned by ONE release (`opsapi-showcase`, k8s namespace `demo`, cluster k3s1).
+#
+# Image: pgvector/pgvector:pg16 — the tax-classifier migration uses the
+# `vector(384)` type; the initdb ConfigMap enables the extension on a fresh
+# volume so the app's first `lapis migrate` never fails on it.
+#
+# Credentials: POSTGRES_PASSWORD comes from the WSL Vault path the app reads
+# (opsapi-showcase/config, seeded by devops/demo/seed-vault-demo.sh with
+# VAULT_PATH=opsapi-showcase/config) — no plaintext in git (this repo is public).
+#
+# Apply (one-time; the PVC persists across app redeploys):
+#   kubectl apply -f devops/k8s/opsapi-showcase-db.yaml
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: opsapi-showcase-db-auth
+  namespace: demo
+  labels:
+    app: opsapi-showcase-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: wslvault-backend
+    kind: ClusterSecretStore
+  target:
+    name: opsapi-showcase-db-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: POSTGRES_PASSWORD
+      remoteRef:
+        key: opsapi-showcase/config
+        property: POSTGRES_PASSWORD
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opsapi-showcase-db-initdb
+  namespace: demo
+  labels:
+    app: opsapi-showcase-db
+data:
+  # Runs ONLY on a fresh (empty) data volume, against POSTGRES_DB.
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opsapi-showcase-db
+  namespace: demo
+  labels:
+    app: opsapi-showcase-db
+spec:
+  type: ClusterIP
+  selector:
+    app: opsapi-showcase-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opsapi-showcase-db
+  namespace: demo
+  labels:
+    app: opsapi-showcase-db
+spec:
+  serviceName: opsapi-showcase-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opsapi-showcase-db
+  template:
+    metadata:
+      labels:
+        app: opsapi-showcase-db
+    spec:
+      # LAN amd64 pool, same as the app (see values-opsapi-showcase.yaml). local-path
+      # binds the PVC to whichever node first schedules it, so the pod stays there.
+      nodeSelector:
+        net-region: home
+        kubernetes.io/arch: amd64
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: pguser
+            - name: POSTGRES_DB
+              value: opsapi_showcase
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-showcase-db-auth
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d opsapi_showcase -h 127.0.0.1"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d opsapi_showcase -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: initdb
+          configMap:
+            name: opsapi-showcase-db-initdb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

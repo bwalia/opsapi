@@ -54,12 +54,12 @@ spec:
           containers:
             - name: reset
               image: pgvector/pgvector:pg16
-              command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "opsapi-demo-db", "-U", "pguser", "-d", "opsapi_demo", "-f", "/sql/reset.sql"]
+              command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "opsapi-showcase-db", "-U", "pguser", "-d", "opsapi_showcase", "-f", "/sql/reset.sql"]
               env:
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: opsapi-demo-db-auth
+                      name: opsapi-showcase-db-auth
                       key: POSTGRES_PASSWORD
               volumeMounts:
                 - name: sql
