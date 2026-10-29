@@ -1,7 +1,7 @@
 // opsapi.org theme. Type scale, fonts and rhythm match workstation-website
 // (Poppins body, Unbounded display, JetBrains Mono); the colours are OpsAPI's
 // own: deep "ops teal" ink, a teal-green accent and a signal amber.
-// Light by default, dark via the OS setting or the toggle (html[data-theme]).
+// Light by default, whatever the OS setting; dark only via the toggle (html[data-theme]).
 
 :root {
   --max-width: 1240px;
@@ -74,9 +74,6 @@
   --code-bg: #08191b;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
   color-scheme: dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { @include dark-tokens; }
 }
 :root[data-theme="dark"] { @include dark-tokens; }
 

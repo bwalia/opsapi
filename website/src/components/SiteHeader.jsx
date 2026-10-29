@@ -17,7 +17,7 @@ export default function SiteHeader() {
     }, []);
 
     function toggleTheme() {
-        const current = theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const current = theme || 'light';
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
         try { localStorage.setItem('opsapi-theme', next); } catch (e) { /* storage blocked: still switches for this visit */ }

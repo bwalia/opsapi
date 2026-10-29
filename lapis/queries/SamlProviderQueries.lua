@@ -178,6 +178,30 @@ function Q.consumeAssertion(provider_id, assertion_id, expires_at)
     return res[1] ~= nil
 end
 
+local function sha256_hex(s)
+    local d = require("resty.openssl.digest").new("sha256"):final(s)
+    return (d:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+
+--- Park a signed-in token behind a one-time code (valid 2 minutes).
+function Q.issueLoginCode(token)
+    db.query("DELETE FROM saml_login_codes WHERE expires_at < NOW()")
+    local raw = require("resty.openssl.rand").bytes(32)
+    local code = (raw:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+    db.query("INSERT INTO saml_login_codes (code_hash, token, expires_at) VALUES (?, ?, NOW() + INTERVAL '2 minutes')",
+        sha256_hex(code), token)
+    return code
+end
+
+--- Redeem a one-time code: the token, once; nil when unknown, used or expired.
+function Q.redeemLoginCode(code)
+    if type(code) ~= "string" or not code:match("^%x+$") or #code ~= 64 then return nil end
+    local row = db.query([[
+        DELETE FROM saml_login_codes WHERE code_hash = ? AND expires_at >= NOW() RETURNING token
+    ]], sha256_hex(code))[1]
+    return row and row.token or nil
+end
+
 function Q.recordLogin(provider_id)
     db.query("UPDATE saml_providers SET last_login_at = NOW(), login_count = login_count + 1 WHERE id = ?",
         provider_id)

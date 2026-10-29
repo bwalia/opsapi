@@ -9,7 +9,11 @@
                                       (?frontend_url=<dashboard origin>&from=<path>)
       POST /auth/saml/:id/acs         assertion consumer: the IdP posts here; we
                                       validate, sign the user in, and redirect to
-                                      <dashboard>/auth/callback?token=…
+                                      <dashboard>/auth/callback?saml_code=… (one-time)
+      POST /auth/saml/exchange        { code } → { token }: the dashboard redeems the
+                                      code. The JWT never rides in a URL — it can be
+                                      several KB (too big for some proxies' header
+                                      buffers) and URLs end up in logs and history.
 
     Workspace admin (namespace read to view, namespace manage to change):
       GET    /api/v2/sso/saml/providers
@@ -307,7 +311,18 @@ return function(app)
         pcall(function()
             require("lib.user-activity").auth("login", { method = "saml", user = full })
         end)
-        return back_to_dashboard(frontend, { token = token, redirect = state and state.from or "/dashboard" })
+        return back_to_dashboard(frontend, {
+            saml_code = Q.issueLoginCode(token), redirect = state and state.from or "/dashboard",
+        })
+    end))
+
+    app:post("/auth/saml/exchange", RateLimit.wrap(SSO_LIMIT, function(self)
+        local body = sdk.body(self) or {}
+        local token = Q.redeemLoginCode(body.code or self.params.code)
+        if not token then
+            return { status = 400, json = { error = "This sign-in link has expired. Please sign in again." } }
+        end
+        return { json = { success = true, token = token } }
     end))
 
     -- ── Workspace admin ────────────────────────────────────────────────

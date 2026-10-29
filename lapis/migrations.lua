@@ -2701,6 +2701,7 @@ local _migrations = {
     -- SAML single sign-on: per-workspace identity providers (routes/saml.lua)
     ['zzsaml1_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 1),
     ['zzsaml2_menu_item'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 2),
+    ['zzsaml3_login_codes'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 3),
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
     -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
