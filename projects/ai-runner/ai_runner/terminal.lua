@@ -317,11 +317,13 @@ end
 T.KEY_TTL = 90 * 86400             -- a key works for 90 days, then the manager issues a new one
 T.KEY_REMIND = 14 * 86400          -- the manager who issued it is reminded this long before it expires
 
--- A key counts only while it isn't blocked or expired and its person is an active user and member of the workspace:
--- removing someone from the workspace, or deactivating them, blocks their keys with nothing else to do.
-local LIVE_KEY = [[k.revoked_at IS NULL AND k.expires_at > NOW() AND EXISTS (SELECT 1 FROM users ku
-    JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
-    WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]]
+-- A key counts only while it isn't blocked, suspended or expired and its person is an active user and member of the
+-- workspace: removing someone from the workspace, or deactivating them, blocks their keys with nothing else to do.
+-- A suspended key is left out the same way (the terminal signs them out) until a manager resumes it.
+local LIVE_KEY = [[k.revoked_at IS NULL AND k.suspended_at IS NULL AND k.expires_at > NOW()
+    AND EXISTS (SELECT 1 FROM users ku
+        JOIN namespace_members km ON km.user_id = ku.id AND km.namespace_id = k.namespace_id
+        WHERE ku.uuid = k.user_uuid AND ku.active = true AND km.status = 'active')]]
 
 --- An OpenSSH ed25519 public key line -> "ssh-ed25519 <base64>" (no comment) and its SHA256 fingerprint, or nil.
 function T.parse_public_key(line)
@@ -395,26 +397,47 @@ function T.block_key(ns, term, key_uuid, by)
         by, ns, term.id, key_uuid:lower())
 end
 
+--- Suspend a key (on = true) or resume it (on = false). Suspended, it is left out of the keys the terminal fetches, so
+-- the person is signed out and their sessions close within about 30 seconds; resuming gives the same key back. Only
+-- a key that isn't blocked; doing it twice is fine. @return row | nil
+function T.suspend_key(ns, term, key_uuid, by, on)
+    if not U.is_uuid(key_uuid) then return nil end
+    if on then
+        return U.one([[UPDATE ar_terminal_keys SET suspended_at = COALESCE(suspended_at, NOW()),
+            suspended_by = CASE WHEN suspended_at IS NULL THEN ? ELSE suspended_by END
+            WHERE namespace_id = ? AND terminal_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING *]],
+            by, ns, term.id, key_uuid:lower())
+    end
+    return U.one([[UPDATE ar_terminal_keys SET suspended_at = NULL, suspended_by = NULL
+        WHERE namespace_id = ? AND terminal_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING *]],
+        ns, term.id, key_uuid:lower())
+end
+
 --- A terminal's keys for its managers, newest live ones first: who, terminal user, fingerprint, issued, expires, and
--- status active | expired | blocked | replaced | left (left the workspace or was deactivated).
+-- status active | suspended | expired | blocked | replaced | left (left the workspace or was deactivated).
 function T.keys(ns, term)
     retire_leavers(term.id)
     local rows = db.query([[SELECT k.uuid, k.user_uuid, k.terminal_user, k.fingerprint, k.created_at, k.expires_at,
-            k.revoked_at, k.revoked_reason, ]] .. R.name_sql("u") .. [[ AS person_name, u.email AS person_email,
-            ]] .. R.name_sql("cb") .. [[ AS created_by_name, ]] .. R.name_sql("rb") .. [[ AS revoked_by_name,
+            k.revoked_at, k.revoked_reason, k.suspended_at, ]] .. R.name_sql("u") .. [[ AS person_name,
+            u.email AS person_email, ]] .. R.name_sql("cb") .. [[ AS created_by_name,
+            ]] .. R.name_sql("rb") .. [[ AS revoked_by_name, ]] .. R.name_sql("sb") .. [[ AS suspended_by_name,
             (]] .. LIVE_KEY .. [[) AS live, (k.expires_at <= NOW()) AS expired
         FROM ar_terminal_keys k LEFT JOIN users u ON u.uuid = k.user_uuid
         LEFT JOIN users cb ON cb.uuid = k.created_by LEFT JOIN users rb ON rb.uuid = k.revoked_by
+        LEFT JOIN users sb ON sb.uuid = k.suspended_by
         WHERE k.namespace_id = ? AND k.terminal_id = ?
         ORDER BY (k.revoked_at IS NULL) DESC, k.created_at DESC LIMIT 200]], ns, term.id)
     local out = {}
     for i, k in ipairs(rows) do
-        local status = k.live and "active" or k.revoked_reason == "replaced" and "replaced"
+        local status = k.live and "active"
+            or (k.revoked_at == nil and k.suspended_at ~= nil and not k.expired) and "suspended"
+            or k.revoked_reason == "replaced" and "replaced"
             or k.revoked_reason == "left" and "left" or k.revoked_reason == "blocked" and "blocked" or "expired"
         out[i] = { uuid = k.uuid, user_uuid = k.user_uuid, person_name = U.null(k.person_name),
             person_email = U.null(k.person_email), terminal_user = k.terminal_user, fingerprint = k.fingerprint,
             created_at = k.created_at, created_by_name = U.null(k.created_by_name), expires_at = k.expires_at,
-            revoked_at = U.null(k.revoked_at), revoked_by_name = U.null(k.revoked_by_name), status = status }
+            revoked_at = U.null(k.revoked_at), revoked_by_name = U.null(k.revoked_by_name),
+            suspended_at = U.null(k.suspended_at), suspended_by_name = U.null(k.suspended_by_name), status = status }
     end
     return U.array(out)
 end
@@ -511,11 +534,13 @@ function T.keys_for_terminal(terminal_uuid, ts, signature)
     if term.is_active and T.workspace_on(term.namespace_id) then
         pcall(remind_expiring, term)
         for i, k in ipairs(db.query([[SELECT k.terminal_user AS user, k.public_key,
-                EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email
+                EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email,
+                ]] .. R.name_sql("pu") .. [[ AS name
             FROM ar_terminal_keys k JOIN users pu ON pu.uuid = k.user_uuid
             WHERE k.terminal_id = ? AND ]] .. LIVE_KEY .. " ORDER BY k.id", term.id)) do
+            -- name: the person's display name, for the terminal's own screens (optional for the terminal).
             keys[i] = { user = k.user, public_key = k.public_key, expires_unix = tonumber(k.expires_unix),
-                email = U.null(k.email) }
+                email = U.null(k.email), name = U.null(k.name) }
         end
     end
     local body = cjson.encode({ terminal = term.uuid, generated_at = ngx.time(), keys = U.array(keys) })
@@ -774,7 +799,8 @@ function T.report(token, body)
         -- Not followed: no number, so the poll never looks at it (and never moves the task); still listed on the
         -- task's AI work panel for a manager's sign-off.
         if not tracked then num = nil end
-        local row = U.one([[INSERT INTO ar_task_prs (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
+        local row = U.one([[INSERT INTO ar_task_prs
+                (namespace_id, task_uuid, project_uuid, repo, pr_url, pr_number, state)
             VALUES (?, ?, ?, ?, ?, ?, 'open')
             ON CONFLICT (namespace_id, task_uuid, pr_url) WHERE run_uuid IS NULL DO NOTHING RETURNING *]],
             s.namespace_id, s.task_uuid, s.project_uuid, repo, pr_url, num or db.NULL)

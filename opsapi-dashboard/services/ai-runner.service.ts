@@ -441,8 +441,11 @@ export interface TerminalAccessKey {
   expires_at: string;
   revoked_at: string | null;
   revoked_by_name: string | null;
+  /** Suspended: signed out and kept out until a manager resumes the key. */
+  suspended_at?: string | null;
+  suspended_by_name?: string | null;
   /** left = left the workspace or was deactivated; replaced = a newer key was issued. */
-  status: 'active' | 'expired' | 'blocked' | 'replaced' | 'left';
+  status: 'active' | 'suspended' | 'expired' | 'blocked' | 'replaced' | 'left';
 }
 export interface TerminalKeyPerson {
   uuid: string;
@@ -1009,6 +1012,11 @@ export const aiRunner = {
     send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys`, body),
   blockTerminalKey: (uuid: string, keyUuid: string) =>
     send<{ blocked: boolean }>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/block`),
+  /** Sign the person out now and keep them out until resumed (the same key works again after Resume). */
+  suspendTerminalKey: (uuid: string, keyUuid: string) =>
+    send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/suspend`),
+  resumeTerminalKey: (uuid: string, keyUuid: string) =>
+    send<TerminalAccessKey>('post', `/terminals/${id(uuid)}/keys/${id(keyUuid)}/resume`),
   /** Anyone in the workspace: the terminals they hold a key for. */
   myTerminals: async () => (await get<MyTerminal[]>('/my-terminals')).data,
 

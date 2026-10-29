@@ -21,6 +21,8 @@
 --   GET    /terminals/:uuid/keys            ai_runners.manage: { keys, people } (§10)
 --   POST   /terminals/:uuid/keys { user_uuid, public_key }   ai_runners.manage -> 201 key (blocks their old one)
 --   POST   /terminals/:uuid/keys/:key_uuid/block   ai_runners.manage
+--   POST   /terminals/:uuid/keys/:key_uuid/suspend | /resume   ai_runners.manage -> the key (status suspended |
+--                                           active): suspended keys aren't sent to the terminal until resumed
 --   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer);
 --                                           an empty list when the terminal is off or AI Runs is off there
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
@@ -159,6 +161,22 @@ return function(app)
             end
             return sdk.ok({ blocked = true })
         end)))
+
+    -- Suspend (sign out now, until resumed) and Resume: the same key, nothing to hand over again.
+    for action, on in pairs({ suspend = true, resume = false }) do
+        app:post("/terminals/:uuid/keys/:key_uuid/" .. action, sdk.handler({ permission = "ai_runners.manage" },
+            U.guard(function(self)
+                local ns = sdk.namespace_id(self)
+                local t = terminal_or_404(ns, self.params.uuid)
+                if not T.suspend_key(ns, t, self.params.key_uuid, sdk.user(self).uuid, on) then
+                    U.fail(404, "No key with that id on this terminal (a blocked key can't be suspended or resumed)")
+                end
+                for _, k in ipairs(T.keys(ns, t)) do
+                    if k.uuid == self.params.key_uuid:lower() then return sdk.ok(k) end
+                end
+                return sdk.ok({ uuid = self.params.key_uuid:lower(), suspended = on })
+            end)))
+    end
 
     app:get("/public/terminal/keys", sdk.handler({ namespace = false }, U.guard(function()
         local h = ngx.req.get_headers()
