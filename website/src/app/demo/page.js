@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import Figure, { Markers, Box, Table } from '@/components/Figure';
 import CopyButton from '@/components/CopyButton';
+import Sequence from '@/components/Sequence';
+import { AUTH_FLOWS, AuthMap } from '@/content/demo-auth';
 
 export const metadata = {
     title: 'Live demo',
@@ -97,6 +99,7 @@ export default function DemoPage() {
                     <div className="hero__actions">
                         <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--primary" href={DEMO.dashboard}>Open the dashboard</a>
                         <a className="btn-x btn-x--ghost" href="#saml">Try SAML sign-in</a>
+                        <a className="btn-x btn-x--ghost" href="#auth">How sign-in works</a>
                         {APPS.map((a) => (
                             <a key={a.name} target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={a.url}>{a.label} app</a>
                         ))}
@@ -143,6 +146,45 @@ export default function DemoPage() {
                     <Figure caption="All three front ends use the same identity service. The demo login and its sample users live in one workspace; real Google sign-ins land in another, so the public login can't see them.">
                         <DemoMap />
                     </Figure>
+                </div>
+            </section>
+
+            <section className="section" id="auth">
+                <div className="container-x">
+                    <p className="eyebrow">Under the hood</p>
+                    <h2>How each demo signs you in</h2>
+                    <p className="lead-x">
+                        Four ways in, all ending the same way: OpsAPI issues a short-lived JWT for one workspace, and every
+                        API call is checked against that workspace's roles. The diagrams follow the real requests, step
+                        by step.
+                    </p>
+                    <Figure caption="Two OpsAPI deployments back the demos. The full dashboard signs in with a password or SAML; the five apps use OpsAPI's hosted sign-in page with a password or Google." minWidth={760}>
+                        <AuthMap />
+                    </Figure>
+                    <Table
+                        head={['Method', 'Where to try it', 'Who checks the user', 'What you get']}
+                        rows={[
+                            [<a key="p" href="#auth-password">Email and password</a>, 'Full dashboard, demo login', 'OpsAPI (bcrypt, optional emailed code)', 'JWT + refresh cookie'],
+                            [<a key="g" href="#auth-google">Google</a>, "The five apps' sign-in page", 'Google, verified email only', 'JWT on the callback'],
+                            [<a key="h" href="#auth-hosted">Login with OpsAPI</a>, 'The five apps', 'OpsAPI hosted page; app checks a nonce, then /auth/me', 'App session + JWT'],
+                            [<a key="s" href="#auth-saml">SAML single sign-on</a>, 'Full dashboard, Sign in with SSO', "The workspace's IdP; OpsAPI verifies the signature", 'One-time code → JWT'],
+                        ]}
+                    />
+
+                    {AUTH_FLOWS.map((f, i) => (
+                        <div key={f.id} id={`auth-${f.id}`} style={{ marginTop: '3rem' }}>
+                            <p className="eyebrow">{`Flow ${i + 1} · ${f.demo}`}</p>
+                            <h3 style={{ fontSize: 'var(--font-xl, 1.5rem)' }}>{f.name}</h3>
+                            <p>{f.summary}</p>
+                            <Figure caption="Solid arrows are requests, dashed arrows redirects and responses, green the result that matters. Boxes on a line are what that party checks or does." minWidth={760}>
+                                <Sequence id={`seq-${f.id}`} title={`${f.name}: step-by-step sequence`} lanes={f.lanes} steps={f.steps} />
+                            </Figure>
+                            <Table head={['Concern', 'How it works']} rows={f.points} />
+                            <p>
+                                <a target="_blank" rel="noopener noreferrer" className="btn-x btn-x--ghost" href={f.tryHref}>Try it: {f.tryText}</a>
+                            </p>
+                        </div>
+                    ))}
                 </div>
             </section>
 
