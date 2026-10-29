@@ -462,23 +462,62 @@ function W.find(ns, uuid)
     return U.one(TAB_SQL .. " WHERE t.namespace_id = ? AND t.uuid = ?", ns, uuid:lower())
 end
 
---- A tab with its timeline (events, oldest first) and recording parts.
-function W.detail(t)
-    local events = {}
-    for i, e in ipairs(db.query([[SELECT event_id, at, type, claude_session, prompt_id, model, tool_name, success,
-            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, text, attrs
-        FROM ar_terminal_events WHERE tab_ref = ? ORDER BY at, id LIMIT 5000]], t.id)) do
-        events[i] = { id = e.event_id, at = e.at, type = e.type, session = U.null(e.claude_session),
-            prompt_id = U.null(e.prompt_id), model = U.null(e.model), tool_name = U.null(e.tool_name),
-            success = U.null(e.success), input_tokens = U.null(e.input_tokens), output_tokens = U.null(e.output_tokens),
-            cache_read_tokens = U.null(e.cache_read_tokens), cache_write_tokens = U.null(e.cache_write_tokens),
-            cost_usd = U.null(tonumber(e.cost_usd)), duration_ms = U.null(e.duration_ms), text = U.null(e.text),
-            attrs = U.json(e.attrs) or {} }
+W.EVENTS_PAGE, W.EVENTS_MAX = 200, 500            -- timeline events per page: default, most
+
+local function event_view(e)
+    return { id = e.event_id, at = e.at, type = e.type, session = U.null(e.claude_session),
+        prompt_id = U.null(e.prompt_id), model = U.null(e.model), tool_name = U.null(e.tool_name),
+        success = U.null(e.success), input_tokens = U.null(e.input_tokens), output_tokens = U.null(e.output_tokens),
+        cache_read_tokens = U.null(e.cache_read_tokens), cache_write_tokens = U.null(e.cache_write_tokens),
+        cost_usd = U.null(tonumber(e.cost_usd)), duration_ms = U.null(e.duration_ms), text = U.null(e.text),
+        attrs = U.json(e.attrs) or {} }
+end
+
+--- A page of a tab's timeline, oldest first. f = { type (one kind), q (in the words kept: prompt, command, error;
+-- and the tool and model), after (the previous page's `next`), per_page }. Every value is a parameter.
+-- @return events, next (a cursor for the following page) | nil
+function W.events(t, f)
+    f = f or {}
+    local where, args = { "e.tab_ref = ?" }, { t.id }
+    if EVENT_TYPES[f.type] then
+        where[#where + 1] = "e.type = ?"
+        args[#args + 1] = f.type
     end
+    local q = type(f.q) == "string" and U.clean(f.q:match("^%s*(.-)%s*$"), 100) or ""
+    if q ~= "" then
+        local p = like(q)
+        where[#where + 1] = "(e.text ILIKE ? OR e.tool_name ILIKE ? OR e.model ILIKE ?)"
+        for _ = 1, 3 do args[#args + 1] = p end
+    end
+    -- The cursor is the last event's row id; the page goes on after its (at, id), in this tab only.
+    local after = type(f.after) == "string" and f.after:match("^%d+$") and #f.after <= 18 and tonumber(f.after)
+    if after then
+        where[#where + 1] = [[(e.at, e.id) > (SELECT c.at, c.id FROM ar_terminal_events c
+            WHERE c.id = ? AND c.tab_ref = ?)]]
+        args[#args + 1] = after
+        args[#args + 1] = t.id
+    end
+    local limit = require("helper.global").perPageParam(f.per_page, W.EVENTS_PAGE, W.EVENTS_MAX)
+    args[#args + 1] = limit + 1
+    local rows = db.query([[SELECT e.id AS ref, e.event_id, e.at, e.type, e.claude_session, e.prompt_id, e.model,
+            e.tool_name, e.success, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+            e.cost_usd, e.duration_ms, e.text, e.attrs
+        FROM ar_terminal_events e WHERE ]] .. table.concat(where, " AND ") .. [[ ORDER BY e.at, e.id LIMIT ?]],
+        unpack(args))
+    local out = {}
+    for i = 1, math.min(#rows, limit) do out[i] = event_view(rows[i]) end
+    return U.array(out), #rows > limit and tostring(rows[limit].ref) or nil
+end
+
+--- A tab with the first page of its timeline (events, oldest first; events_next continues it: W.events) and its
+-- recording parts.
+function W.detail(t)
+    local events, next_page = W.events(t, {})
     local parts = db.query([[SELECT part, final, bytes, created_at FROM ar_terminal_recordings WHERE tab_ref = ?
         ORDER BY part]], t.id)
     local view = W.tab_view(t)
-    view.events = U.array(events)
+    view.events = events
+    view.events_next = U.null(next_page)
     view.recording = U.array(parts)
     view.text_days, view.recording_days = W.TEXT_DAYS, W.RECORDING_DAYS
     return view

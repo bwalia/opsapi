@@ -4,16 +4,16 @@
  * One web terminal session in the work log (docs/AI_RUNNER_WEB_TERMINAL.md §11): who, where, when; totals (prompts,
  * AI requests, tokens, cost, actions, code); a replay of the screen; and the timeline of what was asked and done.
  */
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, Bot, Check, ClipboardList, GitCommit, GitPullRequest, MessageSquare, Wrench, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Badge, Card } from '@/components/ui';
+import { Badge, Button, Card, Input } from '@/components/ui';
 import { ErrorNote } from '@/components/property-deals/ui';
 import { AiRunnerPage, BASE, PRODUCT, compact, cost, elapsed, useAiData, when } from '@/components/ai-runner/ui';
 import { ScreenReplay } from '@/components/ai-runner/ScreenReplay';
-import { aiRunner, type WorkLogDetail, type WorkLogEvent } from '@/services/ai-runner.service';
+import { aiRunner, aiError, type AiError, type WorkLogDetail, type WorkLogEvent } from '@/services/ai-runner.service';
 
 export default function WorkLogSessionPage() {
   return (
@@ -128,13 +128,54 @@ function EventRow({ e, textDays }: { e: WorkLogEvent; textDays: number }) {
   );
 }
 
+type Filter = (typeof FILTERS)[number]['key'];
+
+/**
+ * The timeline, filtered and searched by the server, a page at a time ("Show more" continues it). A new filter or
+ * search starts again from the first page; only the latest request wins.
+ */
+function useTimeline(uuid: string, filter: Filter, q: string) {
+  const [events, setEvents] = useState<WorkLogEvent[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<AiError>();
+  const seq = useRef(0);
+  const load = useCallback(async (after?: string) => {
+    const id = ++seq.current;
+    setLoading(true);
+    try {
+      const res = await aiRunner.workLogEvents(uuid, { type: filter === 'all' ? undefined : filter, q: q || undefined, after });
+      if (id !== seq.current) return;
+      setEvents((list) => (after ? [...list, ...res.items] : res.items));
+      setNext(res.next);
+      setError(undefined);
+    } catch (e) {
+      if (id === seq.current) setError(aiError(e));
+    } finally {
+      if (id === seq.current) setLoading(false);
+    }
+  }, [uuid, filter, q]);
+  useEffect(() => {
+    void load();
+    return () => { seq.current += 1; };
+  }, [load]);
+  return { events, next, loading, error, more: () => { if (next) void load(next); } };
+}
+
 function Session() {
   const params = useParams<{ uuid: string }>();
   const data = useAiData(() => aiRunner.workLogTab(params.uuid), [params.uuid]);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('all');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setQ(search.trim()), 400);
+    return () => clearTimeout(id);
+  }, [search]);
+  const timeline = useTimeline(params.uuid, filter, q);
   const t: WorkLogDetail | undefined = data.data;
   const person = t ? (t.person_name || t.person_email || (t.terminal_user ? `${t.terminal_user} (terminal user)` : 'Someone')) : '';
-  const events = (t?.events || []).filter((e) => filter === 'all' || e.type === filter);
+  const events = timeline.events;
 
   return (
     <div className="space-y-5">
@@ -189,6 +230,10 @@ function Session() {
           <section aria-labelledby="air-wl-timeline" className="space-y-2" data-testid="air-worklog-timeline">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="air-wl-timeline" className="font-semibold text-secondary-900">What happened</h2>
+              <div className="w-64">
+                <Input id="air-wl-event-search" type="search" aria-label="Search what happened" value={search}
+                  onChange={(e) => setSearch(e.target.value)} placeholder="Search prompts, commands, errors" />
+              </div>
               <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-secondary-200 bg-surface p-1">
                 {FILTERS.map((f) => (
                   <button
@@ -203,12 +248,15 @@ function Session() {
                 ))}
               </div>
             </div>
+            <ErrorNote error={timeline.error} product={PRODUCT} />
             <Card>
               {events.length === 0 ? (
                 <p className="text-sm text-secondary-500">
-                  {t.events.length === 0
-                    ? 'Nothing from an AI agent in this session (plain terminal work shows in the replay).'
-                    : 'Nothing of this kind.'}
+                  {timeline.loading
+                    ? 'Loading…'
+                    : t.events.length === 0
+                      ? 'Nothing from an AI agent in this session (plain terminal work shows in the replay).'
+                      : q ? 'Nothing matches this search.' : 'Nothing of this kind.'}
                 </p>
               ) : (
                 <ul className="divide-y divide-secondary-100">
@@ -216,6 +264,14 @@ function Session() {
                 </ul>
               )}
             </Card>
+            {timeline.next && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={timeline.more} isLoading={timeline.loading}
+                  data-testid="air-worklog-timeline-more">
+                  Show more
+                </Button>
+              </div>
+            )}
           </section>
         </>
       )}

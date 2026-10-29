@@ -12,7 +12,9 @@
 --                                           (yours; everyone's with ai_terminal_worklogs.read), key_uuid for
 --                                           ai_runners.manage (Suspend)
 --   GET  /work-log/people?from&to           ai_terminal_worklogs.read: totals per person
---   GET  /work-log/tabs/:uuid               one tab: totals, timeline (prompts, AI requests, actions), recording parts
+--   GET  /work-log/tabs/:uuid               one tab: totals, the timeline's first page (events, events_next),
+--                                           recording parts
+--   GET  /work-log/tabs/:uuid/events?type&q&after&per_page   the timeline, oldest first; meta.next continues it
 --   GET  /work-log/tabs/:uuid/recording/:part   the gzipped asciicast part
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
@@ -112,6 +114,13 @@ return function(app)
 
     app:get("/work-log/tabs/:uuid", sdk.handler(U.guard(function(self)
         return sdk.ok(W.detail(visible_tab(self)))
+    end)))
+
+    app:get("/work-log/tabs/:uuid/events", sdk.handler(U.guard(function(self)
+        local p = self.params
+        local events, next_page = W.events(visible_tab(self), { type = p.type, q = p.q, after = p.after,
+            per_page = p.per_page })
+        return sdk.ok(events, { next = next_page or require("cjson").null })
     end)))
 
     app:get("/work-log/tabs/:uuid/recording/:part", sdk.handler(U.guard(function(self)
