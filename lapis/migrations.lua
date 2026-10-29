@@ -2471,8 +2471,10 @@ local _migrations = {
         ]])
     end),
     -- Apps catalog (/dashboard/apps): every module, deployed or not. Top level,
-    -- under Dashboard; always_show so read-only roles see it too.
-    ['2001_seed_apps_menu_item'] = function()
+    -- under Dashboard; always_show so read-only roles see it too. zz-named so it
+    -- runs after menu_items exists on a fresh DB (a 2001_ name ran first).
+    ['zzw_seed_apps_menu_item'] = function()
+        if #db.select("1 FROM information_schema.tables WHERE table_name = 'menu_items'") == 0 then return end
         if #db.select("1 FROM menu_items WHERE key = 'apps'") > 0 then return end
         local MigrationUtils = require("helper.migration-utils")
         local timestamp = MigrationUtils.getCurrentTimestamp()
