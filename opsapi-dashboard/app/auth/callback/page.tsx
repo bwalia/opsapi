@@ -7,12 +7,16 @@ import { useAuthStore } from '@/store/auth.store';
 import { Logo } from '@/components/brand/Logo';
 import type { User } from '@/types';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
+
 /**
- * Google OAuth landing.
+ * Google OAuth and SAML single sign-on landing.
  *
- * The backend (`/auth/google/callback`) completes the OAuth exchange, mints the
- * app JWT, and redirects here as `?token=<jwt>&redirect=<path>` (or `?error=`).
- * We adopt the session and bounce to the destination — no second login.
+ * Google: the backend (`/auth/google/callback`) mints the app JWT and redirects
+ * here as `?token=<jwt>&redirect=<path>` (or `?error=`).
+ * SAML: the ACS (`/auth/saml/:id/acs`) redirects with a one-time
+ * `?saml_code=` instead, which we redeem at `POST /auth/saml/exchange`.
+ * Either way we adopt the session and bounce to the destination.
  */
 
 function decodeJwtUserinfo(token: string): Record<string, unknown> | null {
@@ -59,27 +63,49 @@ export default function GoogleCallbackPage(): React.ReactElement {
       return;
     }
 
-    const token = params.get('token');
     const redirect = params.get('redirect') || '/dashboard';
-
-    if (!token) {
-      setError('Missing sign-in token. Please try again.');
-      return;
-    }
-    const info = decodeJwtUserinfo(token);
-    if (!info || !info.uuid) {
-      setError('Invalid sign-in token. Please try again.');
-      return;
-    }
-
-    // Adopt the session, then strip the token from the address bar.
-    useAuthStore.getState().setToken(token);
-    useAuthStore.getState().setUser(userFromUserinfo(info));
+    const samlCode = params.get('saml_code');
+    // Strip the token / code from the address bar straight away.
     window.history.replaceState(null, '', window.location.pathname);
 
-    const dest = redirect.startsWith('/') ? redirect : '/dashboard';
-    // Full navigation so all providers (namespace, permissions, menu) hydrate.
-    window.location.assign(dest);
+    const adopt = (token: string | null) => {
+      if (!token) {
+        setError('Missing sign-in token. Please try again.');
+        return;
+      }
+      const info = decodeJwtUserinfo(token);
+      if (!info || !info.uuid) {
+        setError('Invalid sign-in token. Please try again.');
+        return;
+      }
+      useAuthStore.getState().setToken(token);
+      useAuthStore.getState().setUser(userFromUserinfo(info));
+      const dest = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/dashboard';
+      // Full navigation so all providers (namespace, permissions, menu) hydrate.
+      window.location.assign(dest);
+    };
+
+    if (!samlCode) {
+      adopt(params.get('token'));
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/saml/exchange`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: samlCode }),
+        });
+        const body = (await res.json()) as { token?: string; error?: string };
+        if (!res.ok || !body.token) {
+          setError(body.error || 'Single sign-on failed. Please try again.');
+          return;
+        }
+        adopt(body.token);
+      } catch {
+        setError('Could not finish single sign-on. Please try again.');
+      }
+    })();
   }, [router]);
 
   return (

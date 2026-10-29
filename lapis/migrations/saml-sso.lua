@@ -9,6 +9,9 @@
           saml_used_assertions  assertion IDs already accepted, until they expire,
                                 so a captured SAMLResponse can't be replayed.
       [2] "Single sign-on" menu item under workspace settings (namespace module).
+      [3] saml_login_codes  one-time codes the ACS hands the dashboard instead of
+                            the token: a full JWT in the redirect URL is too big
+                            for some proxies' header buffers, and URLs get logged.
 
     Idempotent; gated on FEATURES.CORE so every deployment gets it.
 ]]
@@ -57,6 +60,16 @@ return {
             VALUES (gen_random_uuid()::text, 'sso', 'Single sign-on', 'KeyRound', '/dashboard/namespace/sso',
                     'namespace', 'read', 103, true, false, false, '{}', NOW(), NOW())
             ON CONFLICT (key) DO NOTHING
+        ]])
+    end,
+
+    [3] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS saml_login_codes (
+                code_hash TEXT PRIMARY KEY,
+                token TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL
+            )
         ]])
     end,
 }
