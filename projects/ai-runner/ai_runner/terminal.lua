@@ -453,8 +453,26 @@ local function remind_expiring(term)
     end
 end
 
+--- Is AI Runs usable in this workspace: the workspace is active and has the plugin on (as R.require_plugin)?
+function T.workspace_on(ns)
+    local n = U.one("SELECT status FROM namespaces WHERE id = ?", ns)
+    return n ~= nil and n.status == "active" and require("helper.plugin-workspaces").isEnabled("ai_runner", ns)
+end
+
+--- A correctly signed call from a terminal still stops when the terminal is switched off (403) or removed, or its
+-- workspace is inactive or has AI Runs off (404, as for runners: R.require_plugin). Raises U.fail.
+function T.require_on(term)
+    if not term then U.fail(403, "This web terminal was removed from OpsAPI", { code = "TERMINAL_OFF" }) end
+    if term.is_active ~= true then
+        U.fail(403, "This web terminal is switched off in OpsAPI", { code = "TERMINAL_OFF" })
+    end
+    local n = U.one("SELECT status FROM namespaces WHERE id = ?", term.namespace_id)
+    R.require_plugin(n and n.status, term.namespace_id)
+end
+
 --- The terminal a signed request comes from (§11.2): `X-Opsapi-Terminal` names it and `X-Opsapi-Signature` is its
--- hex HMAC-SHA256 over `msg`. @return terminal row | nil
+-- hex HMAC-SHA256 over `msg`. @return terminal row | nil (not signed by it). A switched-off terminal, or one whose
+-- workspace has AI Runs off, is refused (T.require_on raises).
 function T.signed_terminal(terminal_uuid, msg, signature)
     local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
     local secret = term and secret_of(term)
@@ -465,12 +483,14 @@ function T.signed_terminal(terminal_uuid, msg, signature)
         return nil
     end
     note_contact(term)
+    T.require_on(term)
     return term
 end
 
 --- What the terminal fetches (§10): its live keys, signed so it can trust them. The request is signed too:
 -- X-Opsapi-Signature: sha256=hex(HMAC(secret, "keys\n<terminal uuid>\n<X-Opsapi-Timestamp>")).
--- A terminal switched off in OpsAPI gets an empty list. @return body, signature hex | nil, http status, message
+-- A terminal switched off in OpsAPI, or in a workspace that is inactive or has AI Runs off, gets an empty list (still
+-- signed: the terminal then signs everyone out). @return body, signature hex | nil, http status, message
 function T.keys_for_terminal(terminal_uuid, ts, signature)
     local term = U.is_uuid(terminal_uuid) and U.one("SELECT * FROM ar_terminals WHERE uuid = ?", terminal_uuid:lower())
     if not term then return nil, 401, "Unauthorized" end
@@ -488,7 +508,7 @@ function T.keys_for_terminal(terminal_uuid, ts, signature)
     note_contact(term)
     local keys = {}
     retire_leavers(term.id)
-    if term.is_active then
+    if term.is_active and T.workspace_on(term.namespace_id) then
         pcall(remind_expiring, term)
         for i, k in ipairs(db.query([[SELECT k.terminal_user AS user, k.public_key,
                 EXTRACT(EPOCH FROM k.expires_at)::bigint AS expires_unix, lower(pu.email) AS email
@@ -655,6 +675,7 @@ function T.webhook(raw, signature)
         return nil, 400, "ts is missing or too far from now"
     end
     note_contact(term)
+    T.require_on(term)
     local event = payload.event
     if event ~= "session_start" and event ~= "session_end" then return nil, 400, "Unknown event" end
     local sid = type(payload.session_id) == "string" and payload.session_id:match("^%x+$") and #payload.session_id <= 64
@@ -708,6 +729,8 @@ function T.report(token, body)
     local s = U.one([[SELECT * FROM ar_terminal_sessions WHERE report_token_hash = ?
         AND created_at > NOW() - interval ']] .. T.REPORT_TTL .. [[ seconds']], sha256_hex(token))
     if not s then return nil, 401, "Unauthorized" end
+    T.require_on(s.terminal_uuid and U.one("SELECT * FROM ar_terminals WHERE uuid = ? AND namespace_id = ?",
+        s.terminal_uuid, s.namespace_id))
     if type(body) ~= "table" then return nil, 400, "Invalid JSON" end
     local pr_url = body.pr_url
     if pr_url ~= nil and pr_url ~= cjson.null then

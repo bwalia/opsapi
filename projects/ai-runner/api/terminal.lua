@@ -10,7 +10,9 @@
 --                                           { session, launch_url }; an unattended agent (id *_auto or
 --                                           unattended = true) needs ai_runs.manage, else 403
 --   GET    /tasks/:task_uuid/terminal-sessions   ai_runs.read
---   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>)
+--   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>); webhook and
+--                                           report: 403 TERMINAL_OFF (terminal switched off or removed), 404
+--                                           PLUGIN_DISABLED (workspace inactive or AI Runs off)
 --   GET    /terminal-autologin              ai_runs.read: may I be signed in automatically, and my step-up (§8)
 --   POST   /terminal-autologin/code         ai_terminal_autologin.create or a live key: email me a code
 --   POST   /terminal-autologin/verify { code }   same -> the step-up (12 h)
@@ -19,7 +21,8 @@
 --   GET    /terminals/:uuid/keys            ai_runners.manage: { keys, people } (§10)
 --   POST   /terminals/:uuid/keys { user_uuid, public_key }   ai_runners.manage -> 201 key (blocks their old one)
 --   POST   /terminals/:uuid/keys/:key_uuid/block   ai_runners.manage
---   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer)
+--   GET    /public/terminal/keys            the terminal fetches its live keys (signed request, signed answer);
+--                                           an empty list when the terminal is off or AI Runs is off there
 local root = debug.getinfo(1, "S").source:match("^@(.+)/api/[^/]+%.lua$")
 if root and not package.path:find(root .. "/?.lua", 1, true) then package.path = root .. "/?.lua;" .. package.path end
 

@@ -1,6 +1,8 @@
 -- Work log (docs/AI_RUNNER_WEB_TERMINAL.md §11).
 --   POST /public/terminal/activity          the terminal: tab states + events (signed body) -> { tabs, events }
 --   POST /public/terminal/recordings        the terminal: one gzipped asciicast part (X-Opsapi-Tab/Part/Final)
+--                                           Both: 403 TERMINAL_OFF when the terminal is switched off, 404
+--                                           PLUGIN_DISABLED when its workspace is inactive or has AI Runs off.
 --   GET  /work-log?user_uuid&task_uuid&from&to&page&per_page   your tabs; everyone's with ai_terminal_worklogs.read
 --   GET  /work-log/people?from&to           ai_terminal_worklogs.read: totals per person
 --   GET  /work-log/tabs/:uuid               one tab: totals, timeline (prompts, AI requests, actions), recording parts
