@@ -297,17 +297,23 @@ local function detect_amount_columns(lines)
     return nil
 end
 
--- Assign an amount (by its start offset) to the nearest column anchor. Numbers
--- sitting in the description column are far from any anchor and get ignored.
-local function column_for_offset(offset, cols)
-    local best, best_dist
-    for name, anchor in pairs(cols) do
-        local dist = math.abs(offset - anchor)
-        if not best_dist or dist < best_dist then
-            best_dist, best = dist, name
-        end
+-- Assign an amount to a column by where its RIGHT edge falls. Each column owns
+-- the span from its header's start up to the next header's start. Matching the
+-- amount's start to the nearest header start broke on right-aligned layouts: a
+-- right-aligned Money-out value sits nearer the Money-in header, and a Money-in
+-- value nearer Balance, so every row came out with its direction flipped.
+-- Numbers ending before the first column (in the description) are ignored, as
+-- are numbers far past the last column.
+local function column_for_amount(first, last, cols)
+    local order = {}
+    for name, anchor in pairs(cols) do order[#order + 1] = { name = name, at = anchor } end
+    table.sort(order, function(a, b) return a.at < b.at end)
+    for i, col in ipairs(order) do
+        local nxt = order[i + 1]
+        local limit = nxt and (nxt.at - 1)
+            or (col.at + (i > 1 and (col.at - order[i - 1].at) or 20))
+        if last >= col.at and last <= limit then return col.name end
     end
-    if best_dist and best_dist <= 14 then return best end
     return nil
 end
 
@@ -337,7 +343,9 @@ function Extraction.extract_from_text(text)
     -- amount on later rows (the "£14,340.67 Gym" garbage).
     local lines = {}
     for line in text:gmatch("[^\r\n]+") do
+        -- Same for the em/en dash many statements print in the empty Debit/Credit cell.
         line = line:gsub("\194\163", " "):gsub("\226\130\172", " ")
+            :gsub("\226\128\148", "-"):gsub("\226\128\147", "-")
         lines[#lines + 1] = line
     end
 
@@ -372,7 +380,7 @@ function Extraction.extract_from_text(text)
                 local as, ae, acap = line:find("([%d,]+%.%d%d)", init)
                 if not as then break end
                 local val = clean_amount(acap)
-                if val then amts[#amts + 1] = { val = val, pos = as } end
+                if val then amts[#amts + 1] = { val = val, pos = as, stop = ae } end
                 init = ae + 1
             end
 
@@ -382,12 +390,15 @@ function Extraction.extract_from_text(text)
                 local description = line:sub((date_end or 0) + 1, amts[1].pos - 1)
                 description = description:gsub("\194\163", ""):gsub("\226\130\172", "")
                 description = description:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+                -- Drop the empty-cell placeholder ("—", normalised to "-") that sits
+                -- between the description and an amount in the next column.
+                description = description:gsub("[%s%-]+$", "")
 
                 -- Classify amounts into debit / credit / balance by column position.
                 local debit_v, credit_v, balance_v
                 if cols then
                     for _, a in ipairs(amts) do
-                        local which = column_for_offset(a.pos, cols)
+                        local which = column_for_amount(a.pos, a.stop, cols)
                         if which == "debit" then debit_v = a.val
                         elseif which == "credit" then credit_v = a.val
                         elseif which == "balance" then balance_v = a.val end
