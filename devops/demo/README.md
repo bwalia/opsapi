@@ -148,6 +148,11 @@ The identity demo above stays `core_only`; the two share nothing.
 | `devops/demo/seed-showcase.lua` | The `showcase` workspace, viewer role, demo login, fictional users |
 | `devops/demo/seed-showcase-data.lua` | Sample records: CRM, leads, invoices, projects, timesheets, shop, care home, CMS, academy, forms, hiring, field service |
 | `devops/demo/demo-account-reset.yaml` | Restores the demo login every 30 minutes (points at `opsapi-showcase-db`) |
+| `.github/workflows/deploy-opsapi-showcase.yml` | Does steps 1 and 3–7 below; runs weekly so the demo stays up and current |
+
+**Automated:** after the one-time Vault step (2), run
+`gh workflow run deploy-opsapi-showcase.yml`. It also runs every Monday. The
+manual steps below are the same thing by hand.
 
 ```bash
 export KUBECONFIG=~/.kube/k3s1.yaml
