@@ -139,6 +139,7 @@ The identity demo above stays `core_only`; the two share nothing.
 |---|---|---|
 | `showcase.demo.opsapi.org` | Admin UI (open **Apps** in the sidebar for the catalog) | `opsapi-showcase-dashboard` |
 | `showcase-api.demo.opsapi.org` | OpsAPI API, `PROJECT_CODE=all` | `opsapi-showcase` |
+| `saml-idp.demo.opsapi.org` | Demo SAML identity provider (BoxyHQ Mock SAML) | `kubectl apply` (`mock-saml-idp`) |
 
 | File | Purpose |
 |---|---|
@@ -147,6 +148,8 @@ The identity demo above stays `core_only`; the two share nothing.
 | `devops/helm-charts/opsapi-dashboard/values-opsapi-showcase.yaml` | Dashboard release values |
 | `devops/demo/seed-showcase.lua` | The `showcase` workspace, viewer role, demo login, fictional users |
 | `devops/demo/seed-showcase-data.lua` | Sample records: CRM, leads, invoices, projects, timesheets, shop, care home, CMS, academy, forms, hiring, field service |
+| `devops/k8s/mock-saml-idp.yaml` | Demo SAML IdP: signs a response for any `@example.com` / `@example.org` address |
+| `devops/demo/seed-showcase-saml.lua` | Connects the `showcase` workspace to that IdP (role `viewer`) |
 | `devops/demo/demo-account-reset.yaml` | Restores the demo login every 30 minutes (points at `opsapi-showcase-db`) |
 | `.github/workflows/deploy-opsapi-showcase.yml` | Does all the steps below; runs weekly so the demo stays up and current |
 
@@ -157,7 +160,7 @@ manual steps below are the same thing by hand.
 export KUBECONFIG=~/.kube/k3s1.yaml
 
 # 1. DNS
-for h in showcase showcase-api; do
+for h in showcase showcase-api saml-idp; do
   CLOUDFLARE_ZONE=opsapi.org ./devops/scripts/cloudflare-dns.sh \
     --name "$h.demo.opsapi.org" --content lon1.pop0.uk --proxied false
 done
@@ -190,15 +193,39 @@ kubectl -n demo exec $POD -- sh -c 'cd /app && printf %s "$PASSWORD" > /tmp/demo
   lapis exec "assert(loadfile(\"/tmp/seed-showcase.lua\"))()"; rm -f /tmp/demo-password'
 kubectl -n demo exec $POD -- sh -c 'cd /app && lapis exec "assert(loadfile(\"/tmp/seed-showcase-data.lua\"))()"'
 
-# 6. Demo-login reset job now targets the showcase DB
+# 6. Demo SAML IdP (key generated once; keep the Secret), then connect the workspace
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=saml-idp.demo.opsapi.org \
+  -keyout idp-key.pem -out idp-cert.pem
+kubectl -n demo create secret generic mock-saml-idp-keys \
+  --from-literal=PUBLIC_KEY="$(base64 -w0 < idp-cert.pem)" --from-literal=PRIVATE_KEY="$(base64 -w0 < idp-key.pem)"
+rm idp-key.pem idp-cert.pem
+kubectl apply -f devops/k8s/mock-saml-idp.yaml
+kubectl -n demo cp devops/demo/seed-showcase-saml.lua $POD:/tmp/seed-showcase-saml.lua
+kubectl -n demo exec $POD -- sh -c 'cd /app && curl -fsS -o /tmp/idp-metadata.xml \
+  http://mock-saml-idp.demo.svc.cluster.local:4000/api/saml/metadata && \
+  lapis exec "assert(loadfile(\"/tmp/seed-showcase-saml.lua\"))()"'
+
+# 7. Demo-login reset job now targets the showcase DB
 kubectl apply -f devops/demo/demo-account-reset.yaml
 
-# 7. Edge, then check
+# 8. Edge, then check
 gh workflow run wslproxy-register-domains.yml -f TARGET_ENV=prod -f ACTIVATE_CONFIG=true
 curl -s https://showcase-api.demo.opsapi.org/api/v2/system/info | head -c 300
 ```
 
 Then point the opsapi.org/demo link at `https://showcase.demo.opsapi.org`.
+
+### SAML single sign-on demo
+
+On `showcase.demo.opsapi.org/login` choose **Sign in with SSO**, enter any
+address at `example.com` or `example.org` (e.g. `visitor@example.com`), press
+**Continue**, then **Sign In** on the Mock SAML page. You come back signed in to
+the showcase as a `viewer`, through a real, signed SAML 2.0 response. Workspace
+owners see the setup under **Single sign-on** (`/dashboard/namespace/sso`).
+
+Mock SAML asks for no password, so it is trusted by the showcase workspace
+only, and SAML users there can't change anything. SAML users accumulate in
+`users` (one per address typed); that's harmless and the reset job leaves them.
 
 Both demos are permanent: don't uninstall either release or delete their
 databases or workspaces (including the old `showcase` workspace in

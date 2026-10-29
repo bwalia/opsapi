@@ -9,11 +9,12 @@ import * as pluginsAndConsumerProjects from './plugins-and-consumer-projects';
 import * as projectCodeFeatureGating from './project-code-feature-gating';
 import * as publicDemoAccount from './public-demo-account';
 import * as requestLifecycle from './request-lifecycle';
+import * as samlSingleSignOn from './saml-single-sign-on';
 import * as ssoSignInFlow from './sso-sign-in-flow';
 import * as webhooksAndEvents from './webhooks-and-events';
 import * as zeroTrustAdminAccess from './zero-trust-admin-access';
 
-export const TECHNOTES = [edgeDnsAndTls, hmrcMtdFiling, kubernetesDeployment, modulesMap, multiTenancyAndRbac, observabilityAndErrors, pluginsAndConsumerProjects, projectCodeFeatureGating, publicDemoAccount, requestLifecycle, ssoSignInFlow, webhooksAndEvents, zeroTrustAdminAccess]
+export const TECHNOTES = [edgeDnsAndTls, hmrcMtdFiling, kubernetesDeployment, modulesMap, multiTenancyAndRbac, observabilityAndErrors, pluginsAndConsumerProjects, projectCodeFeatureGating, publicDemoAccount, requestLifecycle, samlSingleSignOn, ssoSignInFlow, webhooksAndEvents, zeroTrustAdminAccess]
     .map((m) => ({ ...m.meta, Body: m.default }))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 

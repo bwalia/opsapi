@@ -1,0 +1,92 @@
+# mock-saml-idp — the demo SAML identity provider for the showcase
+#   https://saml-idp.demo.opsapi.org   (BoxyHQ Mock SAML, open source)
+#
+# A real SAML 2.0 IdP that signs every response but has no passwords: you type
+# any address at example.com or example.org and it vouches for it. That is
+# exactly what a public demo needs — and why it is only ever trusted by the
+# showcase workspace, which gives SAML users the read-only `viewer` role
+# (devops/demo/seed-showcase-saml.lua).
+#
+# Signing key: Secret mock-saml-idp-keys (PUBLIC_KEY / PRIVATE_KEY, base64 PEM),
+# generated once by .github/workflows/deploy-opsapi-showcase.yml and never
+# rotated by it, so the certificate the showcase trusts stays valid.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-saml-idp
+  namespace: demo
+  labels:
+    app: mock-saml-idp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-saml-idp
+  template:
+    metadata:
+      labels:
+        app: mock-saml-idp
+    spec:
+      nodeSelector:
+        net-region: home
+        kubernetes.io/arch: amd64
+      containers:
+        - name: mock-saml
+          image: boxyhq/mock-saml:1.4.2
+          ports:
+            - containerPort: 4000
+          env:
+            - name: APP_URL
+              value: https://saml-idp.demo.opsapi.org
+            - name: ENTITY_ID
+              value: https://saml-idp.demo.opsapi.org/entityid
+            - name: PUBLIC_KEY
+              valueFrom:
+                secretKeyRef: { name: mock-saml-idp-keys, key: PUBLIC_KEY }
+            - name: PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: { name: mock-saml-idp-keys, key: PRIVATE_KEY }
+          readinessProbe:
+            httpGet: { path: /api/saml/metadata, port: 4000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-saml-idp
+  namespace: demo
+  labels:
+    app: mock-saml-idp
+spec:
+  selector:
+    app: mock-saml-idp
+  ports:
+    - port: 4000
+      targetPort: 4000
+---
+# TLS ends at the wslproxy edge; traefik-edge routes plain HTTP by Host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mock-saml-idp
+  namespace: demo
+  labels:
+    app: mock-saml-idp
+spec:
+  ingressClassName: traefik-edge
+  rules:
+    - host: saml-idp.demo.opsapi.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mock-saml-idp
+                port:
+                  number: 4000

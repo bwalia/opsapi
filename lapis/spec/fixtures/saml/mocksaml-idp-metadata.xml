@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://saml.example.com/entityid" validUntil="2036-10-29T21:39:40.309Z">
+  <md:IDPSSODescriptor WantAuthnRequestsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>MIIC8jCCAdqgAwIBAgIUXfBio9YadW2eTSVjxATAqxY5obEwDQYJKoZIhvcNAQEL
+BQAwGTEXMBUGA1UEAwwObW9ja3NhbWwtbG9jYWwwHhcNMjYxMDI5MjEzNDQ3WhcN
+MzYxMDI2MjEzNDQ3WjAZMRcwFQYDVQQDDA5tb2Nrc2FtbC1sb2NhbDCCASIwDQYJ
+KoZIhvcNAQEBBQADggEPADCCAQoCggEBALz4c6dD5iZ+u2IWaRJ9NaTGC0d3Z48G
+54PfTUhuGRoLRoowJzWFW+/uEilqu2j15CuHgr0OrrIRt418qowEdNGHBadEy4BA
+n4XXKmNNyfZbhDHxvOr8ER1/lqNjnzzX5OxxQUWNXObb5/JQeSPV/eSCcQLdjetY
+d4RiPGCK1DeJATI9KJkOlWR9wMRsbQaqiro3r9ZdcS3XVhI3NboOIsr9oHsX4U0g
+oNGTgNoR5CHU4dbhxZxFLZU50IIl88kxJLYbTQOjd2ArJAKJZJML/R8Grw25R1bz
+H52SKVXYqsQeT39qeAxrnNW9PRADAkTpbTVrNZlDZIWC6zah8L0fqfkCAwEAAaMy
+MDAwHQYDVR0OBBYEFNQyAACFCY1AN9W1+o1OdDZGL04/MA8GA1UdEwEB/wQFMAMB
+Af8wDQYJKoZIhvcNAQELBQADggEBAGF0M0h/YIn5xcvhK6YkhK3iTggcXW1lgII+
+2MyrOUC5+CAE454Rzh9+DlyPS3qJb42DNoOKJ6D+YuduCjNc5XpDQ0Vdh9EKxNss
+G2PN6g1+mAIeoN0NX86u5yXZfBPOYOjKqehI1f3c/hsqHFPUry4h1pNrNS51SeKI
+Yuq/84wsYatblgw9L2ONwWTNQ7VyUnfpxKY+XdBFDevfkpyCSYTWdYnziWzCE4fP
+Vi7tKhN3L9w7EKCKk644Jt87NnlTKMvr2I5cwEJpSJekN3ejNwg+Upx4fcJ46nTF
+1I64dYo6itptxCxQenuQkWwSXNU32Ca7wjVrpNKqYMhjfCoITO4=</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="http://localhost:4400/api/saml/sso"/>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="http://localhost:4400/api/saml/sso"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>

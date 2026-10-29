@@ -1,6 +1,7 @@
 # Deploy the FULL OpsAPI demo (showcase) to k3s1, namespace `demo`:
 #   https://showcase.demo.opsapi.org      dashboard  (opsapi-showcase-dashboard)
 #   https://showcase-api.demo.opsapi.org  API, PROJECT_CODE=all (opsapi-showcase)
+#   https://saml-idp.demo.opsapi.org      demo SAML identity provider (mock-saml-idp)
 #
 # DNS -> wslproxy edge -> Postgres -> API -> dashboard -> sample data -> demo
 # login reset job. Every step is idempotent, and the weekly run keeps the demo
@@ -29,6 +30,7 @@ env:
   NS: demo
   API_HOST: showcase-api.demo.opsapi.org
   DASHBOARD_HOST: showcase.demo.opsapi.org
+  IDP_HOST: saml-idp.demo.opsapi.org
   API_VALUES: devops/helm-charts/diytaxreturn-lapis/values-opsapi-showcase.yaml
   DASHBOARD_VALUES: devops/helm-charts/opsapi-dashboard/values-opsapi-showcase.yaml
 
@@ -38,14 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: CNAME both hosts to the edge (DNS-only)
+      - name: CNAME the hosts to the edge (DNS-only)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE: opsapi.org
         run: |
           set -euo pipefail
           chmod +x devops/scripts/cloudflare-dns.sh
-          for h in "$API_HOST" "$DASHBOARD_HOST"; do
+          for h in "$API_HOST" "$DASHBOARD_HOST" "$IDP_HOST"; do
             ./devops/scripts/cloudflare-dns.sh --name "$h" --content lon1.pop0.uk --proxied false
           done
 
@@ -154,6 +156,31 @@ jobs:
             lapis exec 'assert(loadfile(\"/tmp/seed-showcase.lua\"))()'; rm -f /tmp/demo-password"
           kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && lapis exec 'assert(loadfile(\"/tmp/seed-showcase-data.lua\"))()'"
 
+      - name: Demo SAML identity provider (mock-saml-idp)
+        run: |
+          set -euo pipefail
+          # Signing key made once and kept: the showcase trusts its certificate.
+          if ! kubectl -n "$NS" get secret mock-saml-idp-keys >/dev/null 2>&1; then
+            openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=saml-idp.demo.opsapi.org" \
+              -keyout idp-key.pem -out idp-cert.pem 2>/dev/null
+            kubectl -n "$NS" create secret generic mock-saml-idp-keys \
+              --from-literal=PUBLIC_KEY="$(base64 -w0 < idp-cert.pem)" \
+              --from-literal=PRIVATE_KEY="$(base64 -w0 < idp-key.pem)"
+            rm -f idp-key.pem idp-cert.pem
+          fi
+          kubectl apply -f devops/k8s/mock-saml-idp.yaml
+          kubectl -n "$NS" rollout status deploy/mock-saml-idp --timeout=5m
+
+      - name: Connect the showcase workspace to the demo IdP
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n "$NS" get pod -l app=opsapi-showcase --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n "$NS" cp devops/demo/seed-showcase-saml.lua "$POD:/tmp/seed-showcase-saml.lua"
+          kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && \
+            curl -fsS --max-time 20 -o /tmp/idp-metadata.xml http://mock-saml-idp.$NS.svc.cluster.local:4000/api/saml/metadata && \
+            lapis exec 'assert(loadfile(\"/tmp/seed-showcase-saml.lua\"))()'"
+
       - name: Demo login reset job (and run it now)
         run: |
           set -euo pipefail
@@ -170,3 +197,5 @@ jobs:
           curl -fsS --max-time 20 -o health.json "https://$API_HOST/health" && head -c 300 health.json; echo
           curl -fsS --max-time 20 -o info.json "https://$API_HOST/api/v2/system/info" && head -c 300 info.json; echo
           curl -fsS --max-time 20 -o /dev/null -w "dashboard HTTP %{http_code}\n" "https://$DASHBOARD_HOST/login"
+          curl -fsS --max-time 20 -o /dev/null -w "SAML IdP metadata HTTP %{http_code}\n" "https://$IDP_HOST/api/saml/metadata"
+          curl -fsS --max-time 20 -o sso.json "https://$API_HOST/auth/saml/discover?email=visitor@example.com" && cat sso.json; echo

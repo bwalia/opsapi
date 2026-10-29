@@ -79,6 +79,9 @@ passwordResetAllowedOrigins: "https://showcase.demo.opsapi.org"
 # create workspaces of their own here.
 extraEnv:
   ALLOW_SELF_SERVICE_WORKSPACES: "false"
+  # Public base of this API: SAML SP metadata, ACS and sign-in URLs are built
+  # from it (lib/billing-urls.lua opsapi_base), whatever the proxy headers say.
+  OPSAPI_PUBLIC_URL: "https://showcase-api.demo.opsapi.org"
 
 autoscaling:
   enabled: false

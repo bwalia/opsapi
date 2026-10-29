@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Lock, User } from 'lucide-react';
+import { Building2, Eye, EyeOff, Lock, User } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { useBrand } from '@/components/brand/Logo';
@@ -14,6 +14,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
  * The right-hand sign-in panel. Username/email + password (with 2FA redirect),
  * plus "Continue with Google" which hands off to the backend OAuth flow
  * (GET /auth/google) — the callback returns to /auth/callback?token=... .
+ * "Sign in with SSO" finds the workspace's SAML identity provider from the
+ * email domain (GET /auth/saml/discover) and hands off to it the same way.
  */
 export default function LoginPanel() {
   const router = useRouter();
@@ -22,6 +24,10 @@ export default function LoginPanel() {
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [ssoOpen, setSsoOpen] = useState(false);
+  const [ssoEmail, setSsoEmail] = useState('');
+  const [ssoLoading, setSsoLoading] = useState(false);
+  const [ssoChoices, setSsoChoices] = useState<SsoProvider[]>([]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -63,6 +69,37 @@ export default function LoginPanel() {
     window.location.href = `${API_BASE}/auth/google?${params.toString()}`;
   };
 
+  const startSso = (provider: SsoProvider) => {
+    const params = new URLSearchParams({ frontend_url: window.location.origin, from: '/dashboard' });
+    window.location.assign(`${provider.login_url}?${params.toString()}`);
+  };
+
+  const handleSso = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ssoEmail.includes('@')) {
+      toast.error('Enter your work email');
+      return;
+    }
+    setSsoLoading(true);
+    setSsoChoices([]);
+    try {
+      const res = await fetch(`${API_BASE}/auth/saml/discover?email=${encodeURIComponent(ssoEmail.trim())}`);
+      const body = (await res.json()) as { data?: SsoProvider[] };
+      const providers = body.data ?? [];
+      if (providers.length === 0) {
+        toast.error('Single sign-on is not set up for that email domain');
+      } else if (providers.length === 1) {
+        startSso(providers[0]);
+        return;
+      } else {
+        setSsoChoices(providers);
+      }
+    } catch {
+      toast.error('Could not look up single sign-on. Please try again.');
+    }
+    setSsoLoading(false);
+  };
+
   return (
     <div className="w-full max-w-sm">
       <div className="mb-8">
@@ -81,6 +118,58 @@ export default function LoginPanel() {
         <GoogleGlyph />
         {googleLoading ? 'Redirecting…' : 'Continue with Google'}
       </button>
+
+      {/* SAML single sign-on */}
+      {!ssoOpen ? (
+        <button
+          type="button"
+          onClick={() => setSsoOpen(true)}
+          className="mt-3 flex w-full items-center justify-center gap-3 rounded-xl border border-secondary-200 bg-white px-4 py-3 text-sm font-medium text-secondary-700 shadow-sm transition-all hover:border-secondary-300 hover:bg-secondary-50 hover:shadow cursor-pointer"
+          data-testid="login-sso-button"
+        >
+          <Building2 className="h-[18px] w-[18px] text-secondary-500" />
+          Sign in with SSO
+        </button>
+      ) : (
+        <form onSubmit={handleSso} className="mt-3 space-y-3 rounded-xl border border-secondary-200 bg-secondary-50 p-4" data-testid="login-sso-form">
+          <Input
+            label="Work email"
+            name="sso_email"
+            type="email"
+            placeholder="you@company.com"
+            value={ssoEmail}
+            onChange={(e) => setSsoEmail(e.target.value)}
+            leftIcon={<Building2 className="h-4 w-4" />}
+            autoComplete="email"
+            autoFocus
+            data-testid="login-sso-email-input"
+          />
+          {ssoChoices.length > 1 && (
+            <div className="space-y-2">
+              <p className="text-xs text-secondary-500">Choose where to sign in:</p>
+              {ssoChoices.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => startSso(p)}
+                  className="w-full rounded-lg border border-secondary-200 bg-white px-3 py-2 text-left text-sm hover:bg-secondary-100 cursor-pointer"
+                >
+                  <span className="font-medium text-secondary-800">{p.name}</span>
+                  <span className="ml-2 text-secondary-500">{p.workspace}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1" isLoading={ssoLoading} data-testid="login-sso-continue">
+              Continue
+            </Button>
+            <Button type="button" variant="outline" onClick={() => { setSsoOpen(false); setSsoChoices([]); }}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
 
       <div className="my-6 flex items-center gap-3">
         <div className="h-px flex-1 bg-secondary-200" />
@@ -155,6 +244,13 @@ export default function LoginPanel() {
       </div>
     </div>
   );
+}
+
+interface SsoProvider {
+  id: string;
+  name: string;
+  workspace: string;
+  login_url: string;
 }
 
 /** Google "G" mark (official four-colour glyph). */

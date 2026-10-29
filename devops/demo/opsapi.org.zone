@@ -21,3 +21,4 @@ hello-rust.demo    300  IN  CNAME  lon1.pop0.uk.   ; demo Rust client
 hello-go.demo      300  IN  CNAME  lon1.pop0.uk.   ; demo Go client
 showcase.demo      300  IN  CNAME  lon1.pop0.uk.   ; full demo admin UI (opsapi-showcase-dashboard)
 showcase-api.demo  300  IN  CNAME  lon1.pop0.uk.   ; full demo API, PROJECT_CODE=all (opsapi-showcase)
+saml-idp.demo      300  IN  CNAME  lon1.pop0.uk.   ; demo SAML identity provider (BoxyHQ mock-saml) for the showcase
