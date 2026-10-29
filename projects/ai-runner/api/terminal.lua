@@ -7,7 +7,8 @@
 --   DELETE /terminals/:uuid                 ai_runners.manage (its sessions stay on their tasks)
 --   POST   /tasks/:task_uuid/terminal-sessions { terminal_uuid, path, agent, prompt?, autologin? }
 --                                           ai_runs.create + who may start AI work on the task -> 201
---                                           { session, launch_url }
+--                                           { session, launch_url }; an unattended agent (id *_auto or
+--                                           unattended = true) needs ai_runs.manage, else 403
 --   GET    /tasks/:task_uuid/terminal-sessions   ai_runs.read
 --   POST   /public/terminal/webhook         signed by the terminal (X-Opsapi-Signature: sha256=<hex>)
 --   GET    /terminal-autologin              ai_runs.read: may I be signed in automatically, and my step-up (§8)
@@ -196,8 +197,12 @@ return function(app)
         local agent
         for _, a in ipairs(T.agents(term)) do if a.id == d.agent then agent = a end end
         if not agent then U.invalid({ agent = "isn't one of this terminal's agents" }) end
+        if T.is_unattended(agent) and not sdk.can(self, "ai_runs", "manage") then
+            return sdk.error(403, agent.label .. " works without stopping to ask before it changes things, so only an "
+                .. "AI runs manager can start it. Pick another agent.")
+        end
         local prompt = type(d.prompt) == "string" and d.prompt ~= "" and U.clean(d.prompt) or T.prompt(ns, task)
-        prompt = T.with_folder(prompt, path)
+        prompt = T.safe_prompt(T.with_folder(prompt, path))
         if #prompt > T.MAX_PROMPT then U.invalid({ prompt = "is too long (at most " .. T.MAX_PROMPT .. " bytes)" }) end
         local me = U.one("SELECT " .. R.name_sql("u") .. " AS name, u.email FROM users u WHERE u.uuid = ?",
             sdk.user(self).uuid)

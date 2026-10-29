@@ -389,6 +389,8 @@ export interface TaskPr {
 export interface TerminalAgent {
   id: string;
   label: string;
+  /** Works without stopping to ask (an id ending in _auto, or marked so): only AI runs managers can start it. */
+  unattended?: boolean;
 }
 /** A web terminal connected to this workspace (docs/AI_RUNNER_WEB_TERMINAL.md). The secret is never listed. */
 export interface WebTerminal {

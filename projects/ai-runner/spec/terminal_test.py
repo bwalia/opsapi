@@ -165,8 +165,8 @@ created = expect("manager adds a terminal", call("POST", P + "/terminals", "mgr"
 TERM, SEC = created["terminal"], created["secret"]
 check("secret: 64 hex characters, shown once", len(SEC) == 64 and all(c in "0123456789abcdef" for c in SEC), SEC[:6])
 check("address stored without the trailing slash", TERM["url"] == "https://term.example.invalid", TERM)
-check("default agents: Claude Code, unattended, Codex, Cursor, Just a terminal",
-      [a["id"] for a in TERM["agents"]] == ["claude", "claude_auto", "codex", "cursor", "shell"], TERM["agents"])
+check("default agents: Claude Code, Codex, Cursor, Just a terminal (no unattended one)",
+      [a["id"] for a in TERM["agents"]] == ["claude", "codex", "cursor", "shell"], TERM["agents"])
 check("auto sign-in is off for a new terminal", TERM["autologin"] is False, TERM)
 check("hint is the secret's last 4", TERM["secret_hint"] == "…" + SEC[-4:], TERM)
 listed = expect("manager lists terminals", call("GET", P + "/terminals", "mgr", W), 200)

@@ -18,20 +18,22 @@ T.AUTOLOGIN_TTL = 120              -- a link that signs someone in works for 2 m
 T.STEPUP_TTL = 43200               -- an emailed-code step-up is remembered for 12 hours (§8)
 T.REPORT_TTL = 7 * 86400           -- an agent may report its pull request for a week after the launch (§9)
 T.AUTOLOGIN_PERMISSION = { "ai_terminal_autologin", "create" }
+-- A new terminal's agents. No unattended one: a manager adds it on purpose (an id ending in _auto, or
+-- unattended = true), and only AI runs managers may start it (T.is_unattended).
 T.DEFAULT_AGENTS = {
     { id = "claude", label = "Claude Code" },
-    { id = "claude_auto", label = "Claude Code (unattended)" },
     { id = "codex", label = "Codex" },
     { id = "cursor", label = "Cursor" },
     { id = "shell", label = "Just a terminal" },
 }
--- What the terminal's config runs for each default agent (shown in the config block; the terminal decides).
+-- What the terminal's config runs for each agent (shown in the config block; the terminal decides). `--` ends the
+-- options, so the prompt can never be read as one; OpsAPI's prompts never start with "-" either (T.safe_prompt).
 T.RUN_LINES = {
-    claude = 'claude "$OPSAPI_TASK_PROMPT"',
-    -- Never stops to ask: acceptable only because the terminal runs under its own macOS account (W1).
-    claude_auto = 'claude --dangerously-skip-permissions "$OPSAPI_TASK_PROMPT"',
-    codex = 'codex "$OPSAPI_TASK_PROMPT"',
-    cursor = 'cursor-agent "$OPSAPI_TASK_PROMPT"',
+    claude = 'claude -- "$OPSAPI_TASK_PROMPT"',
+    -- Never stops to ask: only for terminals that still list it (no longer a default; managers only).
+    claude_auto = 'claude --dangerously-skip-permissions -- "$OPSAPI_TASK_PROMPT"',
+    codex = 'codex -- "$OPSAPI_TASK_PROMPT"',
+    cursor = 'cursor-agent -- "$OPSAPI_TASK_PROMPT"',
 }
 
 -- ---------------------------------------------------------------------------
@@ -67,7 +69,13 @@ end
 -- Terminals
 -- ---------------------------------------------------------------------------
 
---- Agents as given: 1 to 20 of { id = [a-z0-9_-]{1,32}, label = 1..60 }, ids unique. 422 otherwise.
+--- Does this agent work without stopping to ask (an id ending in _auto, or marked unattended)? Only AI runs managers
+-- may start one.
+function T.is_unattended(a)
+    return type(a) == "table" and (a.unattended == true or (type(a.id) == "string" and a.id:match("_auto$") ~= nil))
+end
+
+--- Agents as given: 1 to 20 of { id = [a-z0-9_-]{1,32}, label = 1..60, unattended? }, ids unique. 422 otherwise.
 function T.agents_of(v)
     if v == nil or v == cjson.null then return nil end
     if type(v) ~= "table" or v[1] == nil or #v > 20 then U.invalid({ agents = "must be a list of 1 to 20 agents" }) end
@@ -80,8 +88,11 @@ function T.agents_of(v)
         end
         if seen[id] then U.invalid({ agents = "ids must be different" }) end
         if label == "" or #label > 60 then U.invalid({ agents = "each label is 1 to 60 characters" }) end
+        if a.unattended ~= nil and a.unattended ~= cjson.null and type(a.unattended) ~= "boolean" then
+            U.invalid({ agents = "unattended is true or false" })
+        end
         seen[id] = true
-        out[i] = { id = id, label = label }
+        out[i] = { id = id, label = label, unattended = a.unattended == true or nil }
     end
     return U.array(out)
 end
@@ -177,9 +188,22 @@ function T.paths(ns, project_uuid, terminal_uuid, ps)
     return out
 end
 
+--- The agents this person may start on a terminal: unattended ones only for AI runs managers (marked so).
+function T.agents_for(row, can_unattended)
+    local out = {}
+    for _, a in ipairs(agents(row)) do
+        if T.is_unattended(a) then
+            if can_unattended then out[#out + 1] = { id = a.id, label = a.label, unattended = true } end
+        else
+            out[#out + 1] = { id = a.id, label = a.label }
+        end
+    end
+    return U.array(out)
+end
+
 --- What the Start dialog offers: each active terminal with its agents and folders for this task's project.
 -- `autologin`: this person may be signed in there by the link (the terminal allows it, and they hold
--- ai_terminal_autologin or a live key on it; who = { user_uuid, can_autologin }).
+-- ai_terminal_autologin or a live key on it). who = { user_uuid, can_autologin, can_unattended }.
 function T.offer(ns, task, ps, who)
     who = who or {}
     local out = {}
@@ -187,7 +211,7 @@ function T.offer(ns, task, ps, who)
         local paths = T.paths(ns, task.project_uuid, t.uuid, ps)
         local auto = t.autologin == true and (who.can_autologin == true
             or (who.user_uuid ~= nil and T.live_key(ns, who.user_uuid, t.id) ~= nil))
-        out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = U.array(agents(t)),
+        out[i] = { uuid = t.uuid, name = t.name, url = t.url, agents = T.agents_for(t, who.can_unattended == true),
             autologin = auto, default_path = U.null(paths[1]), recent_paths = U.array(paths) }
     end
     return U.array(out)
@@ -214,6 +238,14 @@ end
 
 function T.with_folder(prompt, path)
     return (prompt:gsub("{{%s*repo_path%s*}}", function() return path end))
+end
+
+--- The prompt as the terminal gets it: never starting with "-" (an agent's command line could take it for an option,
+-- and the terminal refuses such a prompt), so a leading dash gets a word in front.
+function T.safe_prompt(prompt)
+    local p = tostring(prompt or ""):gsub("^%s+", "")
+    if p:sub(1, 1) == "-" then p = "Task: " .. p end
+    return p
 end
 
 local function remember_path(ns, project_uuid, terminal_uuid, path)
