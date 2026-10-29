@@ -360,6 +360,24 @@ return function(app)
                 end
                 db.update("tax_statements", stmt_updates, { id = statement_id })
 
+                -- Stamp the tax year if the upload didn't: the year views (File your tax,
+                -- reports) only count statements stamped with that year. Same rule as
+                -- tax-calculate's statementYear: period end, then start, then latest txn.
+                pcall(function()
+                    local TaxCalc = require("lib.tax-calc")
+                    local row = db.query([[SELECT s.tax_year, s.period_start::text AS ps, s.period_end::text AS pe,
+                            (SELECT MAX(transaction_date)::text FROM tax_transactions WHERE statement_id = s.id) AS last
+                        FROM tax_statements s WHERE s.id = ?]], statement_id)[1]
+                    if row and (row.tax_year == nil or row.tax_year == db.NULL or row.tax_year == "") then
+                        local year = TaxCalc.tax_year_for_date(row.pe) or TaxCalc.tax_year_for_date(row.ps)
+                            or TaxCalc.tax_year_for_date(row.last)
+                        if year then
+                            db.query([[UPDATE tax_statements SET tax_year = ?
+                                WHERE id = ? AND (tax_year IS NULL OR tax_year = '')]], year, statement_id)
+                        end
+                    end
+                end)
+
                 -- Audit log
                 pcall(function()
                     db.insert("tax_audit_logs", {
