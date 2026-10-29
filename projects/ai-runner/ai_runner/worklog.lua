@@ -16,6 +16,7 @@ W.LOST_SECS = 600                                 -- …or this long, from a ter
 W.LIVE_SECS = 180                                 -- "working now": the terminal reported the open tab this recently
 W.STALE_REASON = "the terminal stopped reporting"
 W.MAX_TABS, W.MAX_EVENTS = 500, 2000              -- per activity request
+W.COUNT_CAP = 1000                                -- the list counts matching tabs up to this many ("1000+")
 W.MAX_PART = 4 * 1024 * 1024                      -- bytes per recording part
 
 local EVENT_TYPES = { user_prompt = true, api_request = true, api_error = true, tool_result = true,
@@ -315,31 +316,80 @@ function W.tab_view(t)
     }
 end
 
--- WHERE clauses shared by the list and the per-person summary. f = { user_uuid, task_uuid, from, to }
-local function filters(ns, f)
-    local where, args = { "t.namespace_id = ?" }, { ns }
-    if U.is_uuid(f.user_uuid) then where[#where + 1] = "t.user_uuid = ?"; args[#args + 1] = f.user_uuid:lower() end
-    if U.is_uuid(f.task_uuid) then where[#where + 1] = "t.task_uuid = ?"; args[#args + 1] = f.task_uuid:lower() end
-    if type(f.from) == "string" and f.from:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        where[#where + 1] = "t.opened_at >= ?::date"; args[#args + 1] = f.from
-    end
-    if type(f.to) == "string" and f.to:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        where[#where + 1] = "t.opened_at < ?::date + 1"; args[#args + 1] = f.to
-    end
-    return table.concat(where, " AND "), args
+-- A search as an ILIKE pattern: its own %, _ and \ match themselves.
+local function like(q)
+    return "%" .. q:gsub("[%%_\\]", "\\%0") .. "%"
 end
 
-function W.list(ns, f, page, per_page)
-    local where, args = filters(ns, f)
-    local total = tonumber(U.one("SELECT COUNT(*) AS n FROM ar_terminal_tabs t WHERE " .. where, unpack(args)).n)
-    args[#args + 1] = per_page
-    args[#args + 1] = (page - 1) * per_page
-    local out = {}
-    for i, t in ipairs(db.query(TAB_SQL .. " WHERE " .. where
-        .. " ORDER BY t.opened_at DESC NULLS LAST, t.id DESC LIMIT ? OFFSET ?", unpack(args))) do
-        out[i] = W.tab_view(t)
+-- WHERE clauses shared by the list and the per-person summary; every value is a parameter.
+-- f = { user_uuid, task_uuid, from, to, terminal_uuid, state = open|closed, agent, q }. q (person name or email,
+-- terminal user, folder, task title) needs the users u and kanban_tasks kt joins: the third result says so.
+local function filters(ns, f)
+    local where, args = { "t.namespace_id = ?" }, { ns }
+    local function add(sql, ...)
+        where[#where + 1] = sql
+        for _, v in ipairs({ ... }) do args[#args + 1] = v end
     end
-    return U.array(out), { page = page, per_page = per_page, total = total, total_pages = math.ceil(total / per_page) }
+    if U.is_uuid(f.user_uuid) then add("t.user_uuid = ?", f.user_uuid:lower()) end
+    if U.is_uuid(f.task_uuid) then add("t.task_uuid = ?", f.task_uuid:lower()) end
+    local function day(v) return type(v) == "string" and v:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil end
+    if day(f.from) then add("t.opened_at >= ?::date", f.from) end
+    if day(f.to) then add("t.opened_at < ?::date + 1", f.to) end
+    if U.is_uuid(f.terminal_uuid) then
+        add("t.terminal_id = (SELECT id FROM ar_terminals WHERE namespace_id = ? AND uuid = ?)", ns,
+            f.terminal_uuid:lower())
+    end
+    if f.state == "open" then
+        add("t.closed_at IS NULL")
+    elseif f.state == "closed" then
+        add("t.closed_at IS NOT NULL")
+    end
+    if type(f.agent) == "string" and f.agent ~= "" and #f.agent <= 64 then add("t.agent = ?", f.agent) end
+    local q = type(f.q) == "string" and U.clean(f.q:match("^%s*(.-)%s*$"), 100) or ""
+    if q ~= "" then
+        local p = like(q)
+        add("(" .. R.name_sql("u") .. " ILIKE ? OR u.email ILIKE ? OR t.terminal_user ILIKE ? OR t.cwd ILIKE ? "
+            .. "OR kt.title ILIKE ?)", p, p, p, p, p)
+    end
+    return table.concat(where, " AND "), args, q ~= ""
+end
+
+--- A page of tabs, newest first. Counting stops at W.COUNT_CAP + 1 matches, so no page pays for counting a long
+-- history: meta.total_capped says there are more than total, and has_more whether a next page exists.
+function W.list(ns, f, page, per_page)
+    local where, args, joins = filters(ns, f)
+    local from = joins and [[ FROM ar_terminal_tabs t LEFT JOIN users u ON u.uuid = t.user_uuid
+        LEFT JOIN kanban_tasks kt ON kt.uuid = t.task_uuid]] or " FROM ar_terminal_tabs t"
+    local n = tonumber(U.one("SELECT COUNT(*) AS n FROM (SELECT 1" .. from .. " WHERE " .. where .. " LIMIT "
+        .. (W.COUNT_CAP + 1) .. ") c", unpack(args)).n)
+    local capped = n > W.COUNT_CAP
+    local total = capped and W.COUNT_CAP or n
+    args[#args + 1] = per_page + 1
+    args[#args + 1] = (page - 1) * per_page
+    local rows = db.query(TAB_SQL .. " WHERE " .. where
+        .. " ORDER BY t.opened_at DESC NULLS LAST, t.id DESC LIMIT ? OFFSET ?", unpack(args))
+    local out = {}
+    for i = 1, math.min(#rows, per_page) do out[i] = W.tab_view(rows[i]) end
+    local has_more = #rows > per_page
+    local pages = math.ceil(total / per_page)
+    if has_more then pages = math.max(pages, page + 1) end
+    return U.array(out), { page = page, per_page = per_page, total = total, total_pages = pages,
+        total_capped = capped, has_more = has_more }
+end
+
+--- What the work log's filters offer: the workspace's terminals and the agents they list.
+function W.options(ns)
+    local terminals, agents, seen = {}, {}, {}
+    for i, t in ipairs(T.list(ns)) do
+        terminals[i] = { uuid = t.uuid, name = t.name }
+        for _, a in ipairs(T.agents(t)) do
+            if not seen[a.id] then
+                seen[a.id] = true
+                agents[#agents + 1] = { id = a.id, label = a.label }
+            end
+        end
+    end
+    return { terminals = U.array(terminals), agents = U.array(agents) }
 end
 
 function W.people(ns, f)

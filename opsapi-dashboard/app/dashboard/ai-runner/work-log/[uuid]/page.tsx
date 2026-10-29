@@ -17,7 +17,7 @@ import { aiRunner, type WorkLogDetail, type WorkLogEvent } from '@/services/ai-r
 
 export default function WorkLogSessionPage() {
   return (
-    <AiRunnerPage module="ai_runs" action="read">
+    <AiRunnerPage module={['ai_runs', 'ai_terminal_worklogs']} action="read">
       <Session />
     </AiRunnerPage>
   );

@@ -19,7 +19,7 @@ const PER_PAGE = 50;
 
 export default function WorkLogPage() {
   return (
-    <AiRunnerPage module="ai_runs" action="read">
+    <AiRunnerPage module={['ai_runs', 'ai_terminal_worklogs']} action="read">
       <WorkLog />
     </AiRunnerPage>
   );
