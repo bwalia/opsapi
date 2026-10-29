@@ -210,9 +210,12 @@ end
 --- Verify an OTP code for a user.
 -- @param user_id number
 -- @param code string The code to verify
+-- @param opts table|nil { no_test_bypass = true }: never accept TEST_OTP_CODE (a
+--        step-up that unlocks something a stolen session alone mustn't, e.g. the
+--        web terminal's automatic sign-in). Sign-in itself doesn't pass it.
 -- @return boolean success
 -- @return string|nil Error message
-function OTP.verify(user_id, code)
+function OTP.verify(user_id, code, opts)
     if not user_id or not code then
         return false, "user_id and code are required"
     end
@@ -234,7 +237,7 @@ function OTP.verify(user_id, code)
     -- is selected — without OPSAPI_DEPLOY_ENV, every cluster env (int/acc)
     -- would look like prod and the bypass would never fire.
     local deploy = os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
-    if deploy ~= "production" and deploy ~= "prod" then
+    if deploy ~= "production" and deploy ~= "prod" and not (type(opts) == "table" and opts.no_test_bypass) then
         local test_code = os.getenv("TEST_OTP_CODE")
         if test_code and #test_code >= 6 and code == test_code then
             ngx.log(ngx.WARN, "[OTP] Test bypass used for user_id=", user_id,

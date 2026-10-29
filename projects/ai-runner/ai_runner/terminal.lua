@@ -263,7 +263,8 @@ end
 function T.verify_stepup(ns, user_uuid, code)
     local u = account(user_uuid)
     if not u then return nil, 404, "User not found" end
-    local ok, err = require("helper.otp").verify(u.id, tostring(code or ""))
+    -- Only the emailed code: the non-production TEST_OTP_CODE shortcut never unlocks automatic sign-in.
+    local ok, err = require("helper.otp").verify(u.id, tostring(code or ""), { no_test_bypass = true })
     if not ok then return nil, 401, err or "Invalid code" end
     db.query([[INSERT INTO ar_terminal_stepups (namespace_id, user_uuid, email, verified_at, expires_at)
         VALUES (?, ?, lower(?), NOW(), NOW() + interval ']] .. T.STEPUP_TTL .. [[ seconds')
