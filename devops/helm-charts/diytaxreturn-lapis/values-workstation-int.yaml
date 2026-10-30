@@ -225,3 +225,13 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
+
+# Plugins from private repos, copied into /app/projects at deploy time (templates/_plugins.tpl).
+# portfoliolab = Joy AI for Portfolio Lab (private repo bwalia/joyai), PoC in the leadsmagnet
+# workspace. `:int` is rebuilt by that repo's CI; Always so each deploy picks up the latest.
+pluginOverlays:
+  - name: portfoliolab
+    image: int-spectoncr.diytaxreturn.co.uk/joyai/portfoliolab-plugin:int
+    pullPolicy: Always
+imagePullSecrets:
+  - name: nebulacr-login
