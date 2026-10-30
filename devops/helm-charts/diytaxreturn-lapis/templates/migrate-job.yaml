@@ -64,6 +64,14 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.pluginOverlays }}
+      initContainers:
+        {{- include "opsapi.pluginOverlays.initContainers" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -121,6 +129,9 @@ spec:
           volumeMounts:
             - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
               mountPath: /tmp/secrets
+            {{- if .Values.pluginOverlays }}
+            {{- include "opsapi.pluginOverlays.volumeMounts" . | nindent 12 }}
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
@@ -165,6 +176,9 @@ spec:
               value: {{ .Values.passwordResetAllowedOrigins | quote }}
             {{- end }}
       volumes:
+        {{- if .Values.pluginOverlays }}
+        {{- include "opsapi.pluginOverlays.volumes" . | nindent 8 }}
+        {{- end }}
         - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
           secret:
             secretName: "{{ .Release.Name }}-secrets"

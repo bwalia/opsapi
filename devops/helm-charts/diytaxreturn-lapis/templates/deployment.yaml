@@ -83,6 +83,14 @@ spec:
       {{- end }}
       # Room for preStop: endpoint-removal wait + nginx graceful quit.
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 45 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.pluginOverlays }}
+      initContainers:
+        {{- include "opsapi.pluginOverlays.initContainers" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -112,6 +120,9 @@ spec:
               mountPath: /tmp/configmap
             - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
               mountPath: /tmp/secrets
+            {{- if .Values.pluginOverlays }}
+            {{- include "opsapi.pluginOverlays.volumeMounts" . | nindent 12 }}
+            {{- end }}
           ports:
             - containerPort: {{ .Values.containerPort | default 80 }}
           startupProbe:
@@ -418,6 +429,9 @@ spec:
             {{- end }}
             {{- end }}
       volumes:
+        {{- if .Values.pluginOverlays }}
+        {{- include "opsapi.pluginOverlays.volumes" . | nindent 8 }}
+        {{- end }}
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:
             name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
