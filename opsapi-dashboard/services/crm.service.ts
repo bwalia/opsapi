@@ -1,4 +1,4 @@
-import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
+import apiClient, { buildQueryString } from '@/lib/api-client';
 
 // Send a JSON request body (the CRM routes parse JSON via parse_json_body).
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
@@ -244,12 +244,12 @@ export const crmService = {
   },
 
   async createAccount(data: Record<string, unknown>): Promise<CrmAccount> {
-    const response = await apiClient.post('/api/v2/crm/accounts', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/accounts', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateAccount(uuid: string, data: Record<string, unknown>): Promise<CrmAccount> {
-    const response = await apiClient.put(`/api/v2/crm/accounts/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/accounts/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -273,12 +273,12 @@ export const crmService = {
   },
 
   async createContact(data: Record<string, unknown>): Promise<CrmContact> {
-    const response = await apiClient.post('/api/v2/crm/contacts', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/contacts', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateContact(uuid: string, data: Record<string, unknown>): Promise<CrmContact> {
-    const response = await apiClient.put(`/api/v2/crm/contacts/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/contacts/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -302,12 +302,12 @@ export const crmService = {
   },
 
   async createDeal(data: Record<string, unknown>): Promise<CrmDeal> {
-    const response = await apiClient.post('/api/v2/crm/deals', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/deals', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateDeal(uuid: string, data: Record<string, unknown>): Promise<CrmDeal> {
-    const response = await apiClient.put(`/api/v2/crm/deals/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/deals/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -340,12 +340,12 @@ export const crmService = {
   },
 
   async createPipeline(data: Record<string, unknown>): Promise<CrmPipeline> {
-    const response = await apiClient.post('/api/v2/crm/pipelines', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/pipelines', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updatePipeline(uuid: string, data: Record<string, unknown>): Promise<CrmPipeline> {
-    const response = await apiClient.put(`/api/v2/crm/pipelines/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/pipelines/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -364,12 +364,12 @@ export const crmService = {
   },
 
   async createActivity(data: Record<string, unknown>): Promise<CrmActivity> {
-    const response = await apiClient.post('/api/v2/crm/activities', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/activities', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateActivity(uuid: string, data: Record<string, unknown>): Promise<CrmActivity> {
-    const response = await apiClient.put(`/api/v2/crm/activities/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/activities/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -378,7 +378,7 @@ export const crmService = {
   },
 
   async completeActivity(uuid: string): Promise<CrmActivity> {
-    const response = await apiClient.put(`/api/v2/crm/activities/${uuid}/complete`, toFormData({}));
+    const response = await apiClient.put(`/api/v2/crm/activities/${uuid}/complete`, {}, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
