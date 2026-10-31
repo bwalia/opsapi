@@ -1,0 +1,56 @@
+# Self-heal for the *.demo.opsapi.org apps. On 2026-10-31 hello-java.demo.opsapi.org returned 404:
+# Helm still listed the release as deployed, but its Deployment, Service and Ingress were gone
+# (deleted outside Helm; the cause wasn't recoverable). Every 10 minutes this checks that every
+# resource of every deployed Helm release in `demo` still exists. If any is missing, it re-applies
+# the release's current revision (helm rollback to itself recreates exactly what was deployed)
+# and logs what it restored. Nothing is changed when everything is present.
+#   kubectl apply -f devops/demo/selfheal.yaml
+#   kubectl -n demo logs -l app=demo-selfheal --tail=50     # what it did
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: demo-selfheal, namespace: demo, labels: { app: demo-selfheal } }
+---
+# Namespace-scoped: it can only touch the demo namespace (Helm stores releases as Secrets here).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: demo-selfheal, namespace: demo, labels: { app: demo-selfheal } }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: admin }
+subjects: [{ kind: ServiceAccount, name: demo-selfheal, namespace: demo }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: demo-selfheal, namespace: demo, labels: { app: demo-selfheal } }
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      template:
+        metadata: { labels: { app: demo-selfheal } }
+        spec:
+          serviceAccountName: demo-selfheal
+          restartPolicy: Never
+          nodeSelector: { net-region: home, kubernetes.io/arch: amd64 }
+          containers:
+            - name: selfheal
+              image: alpine/k8s:1.31.4          # helm + kubectl + jq
+              resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -u
+                  healed=0
+                  for r in $(helm -n demo list --deployed -q); do
+                    missing=$(helm -n demo get manifest "$r" | kubectl -n demo get -f - -o name 2>&1 | grep -i "not found" || true)
+                    [ -z "$missing" ] && continue
+                    rev=$(helm -n demo history "$r" --max 1 -o json | jq -r '.[-1].revision')
+                    echo "$(date -u +%FT%TZ) $r: missing resources, re-applying revision $rev:"
+                    echo "$missing" | sed 's/^/    /'
+                    if helm -n demo rollback "$r" "$rev" --wait --timeout 5m; then healed=$((healed + 1))
+                    else echo "$(date -u +%FT%TZ) $r: re-apply FAILED"; exit 1; fi
+                  done
+                  echo "$(date -u +%FT%TZ) checked $(helm -n demo list --deployed -q | wc -l) releases, restored $healed"

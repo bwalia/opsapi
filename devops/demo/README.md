@@ -81,6 +81,9 @@ kubectl -n demo exec -i opsapi-demo-db-0 -- psql -U pguser -d opsapi_demo \
 # 7. Client apps (bring your own Deployments labelled app=hello-java / app=hello-php)
 kubectl apply -f devops/demo/hello-apps.yaml
 
+# 7b. Self-heal: every 10 min, re-applies any demo Helm release whose resources went missing
+kubectl apply -f devops/demo/selfheal.yaml
+
 # 8. Edge: push the committed vhosts + rule to wslproxy and take them live
 gh workflow run wslproxy-register-domains.yml -f TARGET_ENV=prod -f ACTIVATE_CONFIG=true
 
