@@ -45,7 +45,7 @@ spec:
                   pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
-                  BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
 
                   echo "Starting PostgreSQL backup..."
 
@@ -229,7 +229,7 @@ spec:
                   pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
-                  BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
 
                   echo "Starting PostgreSQL backup..."
 
