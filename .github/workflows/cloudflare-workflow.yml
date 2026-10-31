@@ -1,68 +1,54 @@
 name: cloudflare workflow
 
+# Upsert one Cloudflare DNS record by hand (idempotent: devops/scripts/cloudflare-dns.sh).
+# It used to run an Ansible playbook over SSH with a vault-encrypted key file that is no
+# longer in the repo, so every run failed at "Decrypt Ansible Vault file".
 on:
-  # Run manually using workflow_dispatch
-  # workflow_dispatch collects CLOUDFLARE_RECORD_NAME and overrides secrets.CLOUDFLARE_RECORD_NAME if provided
-    workflow_dispatch:
-      inputs:
-        CLOUDFLARE_RECORD_NAME:
-            description: 'Please provide the Cloudflare Record Name Eg: test'
-            required: false
-            default: ''
-            type: string
-        CLOUDFLARE_RECORD_TYPE:
-            description: 'Please provide the Cloudflare Record Type Eg: A'
-            required: false
-            default: ''
-            type: string
-        CLOUDFLARE_RECORD_VALUE:
-            description: 'Please provide the Cloudflare Record Value Eg: 127.0.0.1'
-            required: false
-            default: ''
-            type: string
-        CLOUDFLARE_ZONE:
-            description: 'Please provide the Cloudflare Zone Eg: opsapi.org'
-            required: false
-            default: ''
-            type: string
-        CLOUDFLARE_PROXIED:
-            description: 'Proxy the Cloudflare'
-            required: false
-            type: boolean
-
+  workflow_dispatch:
+    inputs:
+      CLOUDFLARE_RECORD_NAME:
+        description: "Full record name, e.g. joyai.fictionally.org (or just the label, e.g. joyai)"
+        required: true
+        type: string
+      CLOUDFLARE_RECORD_TYPE:
+        description: "Record type"
+        required: false
+        default: "CNAME"
+        type: string
+      CLOUDFLARE_RECORD_VALUE:
+        description: "Record content, e.g. lon1.pop0.uk"
+        required: true
+        type: string
+      CLOUDFLARE_ZONE:
+        description: "Zone apex, e.g. fictionally.org"
+        required: true
+        type: string
+      CLOUDFLARE_PROXIED:
+        description: "Proxy through Cloudflare (orange cloud)"
+        required: false
+        default: false
+        type: boolean
+      USE_ACCOUNT_KEY:
+        description: "Use the account Global API Key instead of the scoped token (zones the token can't edit)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  cloudflare-api:
+  cloudflare-dns:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code from repository
-        uses: actions/checkout@v3
-      - name: Install Ansible on Ubuntu Latest
-        run: |
-          sudo apt-get install -y ansible
-          export ANSIBLE_HOST_KEY_CHECKING=False
-
-      - name: Decrypt Ansible Vault file
+      - uses: actions/checkout@v4
+      - name: Upsert the record
         env:
-          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          CLOUDFLARE_ZONE: ${{ inputs.CLOUDFLARE_ZONE }}
+          CLOUDFLARE_API_TOKEN: ${{ !inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          CLOUDFLARE_ACCOUNT_EMAIL: ${{ inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_ACCOUNT_EMAIL || '' }}
+          CLOUDFLARE_ACCOUNT_API_KEY: ${{ inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_ACCOUNT_API_KEY || '' }}
+          NAME: ${{ inputs.CLOUDFLARE_RECORD_NAME }}
         run: |
-          ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
-
-      - name: Add SSH Host Key for hosts
-        run: |
-         mkdir -p ~/.ssh
-         ssh-keyscan -H `cat devops/ansible/hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
-
-      - name: Run Ansible Playbook
-        run: |
-          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts --tags "cloudflare" -l 94.72.96.175
-        env:
-          ANSIBLE_PRIVATE_KEY_FILE: id_rsa
-          CLOUDFLARE_ZONE: ${{ github.event.inputs.CLOUDFLARE_ZONE || secrets.CLOUDFLARE_ZONE }}
-          CLOUDFLARE_RECORD_NAME: ${{ github.event.inputs.CLOUDFLARE_RECORD_NAME || secrets.CLOUDFLARE_RECORD_NAME }}
-          CLOUDFLARE_RECORD_TYPE: ${{ github.event.inputs.CLOUDFLARE_RECORD_TYPE || secrets.CLOUDFLARE_RECORD_TYPE }}
-          CLOUDFLARE_RECORD_VALUE: ${{ github.event.inputs.CLOUDFLARE_RECORD_VALUE || secrets.CLOUDFLARE_RECORD_VALUE }}
-          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
-          CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
-          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED || secrets.CLOUDFLARE_PROXIED || 'false' }}
+          set -euo pipefail
+          case "$NAME" in *.*) ;; *) NAME="$NAME.$CLOUDFLARE_ZONE" ;; esac
+          chmod +x devops/scripts/cloudflare-dns.sh
+          ./devops/scripts/cloudflare-dns.sh --name "$NAME" --content "${{ inputs.CLOUDFLARE_RECORD_VALUE }}" \
+            --type "${{ inputs.CLOUDFLARE_RECORD_TYPE }}" --proxied "${{ inputs.CLOUDFLARE_PROXIED }}"
