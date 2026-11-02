@@ -169,7 +169,7 @@
       navigate: function (path) { send('navigate', { path: path }); },
       /** toast('Saved'), toast('Could not save', 'error'); types: success | error | info */
       toast: function (message, type) { send('toast', { message: String(message), toastType: type || 'success' }); },
-      /** Resolves true/false. { title, message, confirmLabel, danger } */
+      /** Resolves true/false. { title, message, confirmLabel, cancelLabel, danger } */
       confirm: function (options) { return call('confirm', { options: options || {} }, 24 * 3600 * 1000); },
       /** Put page state in the dashboard URL (deep links, back button): setParams({ ticket: id }). */
       setParams: function (params) {
