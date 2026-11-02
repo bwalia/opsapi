@@ -24,6 +24,19 @@ export interface SamlProvider {
   updated_at: string;
   /** What to give the IdP: our entity ID, ACS URL and metadata URL. */
   sp: { sp_entity_id: string; acs_url: string; login_url: string };
+  /** Each email domain and whether the workspace has proved it owns it. */
+  domains: SamlDomain[];
+}
+
+/** An email domain and the DNS TXT record proving the workspace owns it. */
+export interface SamlDomain {
+  domain: string;
+  verified: boolean;
+  verified_at?: string | null;
+  txt_name: string;
+  txt_value: string;
+  /** Why it isn't verified yet, after a check. */
+  message?: string;
 }
 
 export interface SamlProviderInput {
@@ -40,6 +53,8 @@ export interface SamlProviderInput {
 }
 
 const BASE = '/api/v2/sso/saml';
+// The SAML routes read JSON bodies (sdk.body); apiClient's default is form-encoded.
+const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 function unwrap<T>(response: { data: unknown }): T {
   const body = response.data as { data?: T };
@@ -52,16 +67,20 @@ export const ssoService = {
     return Array.isArray(data) ? data : [];
   },
   async create(input: SamlProviderInput): Promise<SamlProvider> {
-    return unwrap<SamlProvider>(await apiClient.post(`${BASE}/providers`, input));
+    return unwrap<SamlProvider>(await apiClient.post(`${BASE}/providers`, input, JSON_BODY));
   },
   async update(uuid: string, input: SamlProviderInput): Promise<SamlProvider> {
-    return unwrap<SamlProvider>(await apiClient.put(`${BASE}/providers/${uuid}`, input));
+    return unwrap<SamlProvider>(await apiClient.put(`${BASE}/providers/${uuid}`, input, JSON_BODY));
   },
   async remove(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/providers/${uuid}`);
   },
+  /** Look the domain's TXT record up now; verified once it's there. */
+  async verifyDomain(domain: string): Promise<SamlDomain> {
+    return unwrap<SamlDomain>(await apiClient.post(`${BASE}/domains/verify`, { domain }, JSON_BODY));
+  },
   /** Read entity ID, sign-in URL and certificate out of IdP metadata XML. */
   async parseMetadata(xml: string): Promise<Pick<SamlProvider, 'idp_entity_id' | 'idp_sso_url' | 'idp_x509_cert'>> {
-    return unwrap(await apiClient.post(`${BASE}/metadata/parse`, { xml }));
+    return unwrap(await apiClient.post(`${BASE}/metadata/parse`, { xml }, JSON_BODY));
   },
 };

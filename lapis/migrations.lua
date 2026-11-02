@@ -2705,6 +2705,7 @@ local _migrations = {
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
     -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
+    ['zzsaml4_verified_domains'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 4),
     ['zzai1_namespace_ai_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 1),
     ['zzai2_idempotency_keys'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 2),
     -- A blank custom domain is NULL, not "" (namespaces.domain is UNIQUE: two "" collided on rename).

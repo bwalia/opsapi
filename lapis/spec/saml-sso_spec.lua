@@ -103,8 +103,9 @@ end
 
 print("refusals")
 refused("changed email (digest)", (xml:gsub("jackson@example.com", "admin@example.com")), nil, nil, "digest mismatch")
-refused("wrong IdP certificate", xml, { idp_x509_cert = read(FIX .. "mocksaml-idp-metadata.xml"):match(
-    "<ds:X509Certificate>(.-)</ds:X509Certificate>"):gsub("A", "B", 1) })
+-- A different, valid certificate (public part only; its key was never kept): the signature must fail.
+refused("wrong IdP certificate", xml, { idp_x509_cert = read(FIX .. "other-idp-cert.pem") }, nil,
+    "does not match the IdP certificate")
 refused("unsigned", (xml:gsub("<Signature.-</Signature>", "")), nil, nil, "not signed")
 refused("DTD / XXE", (xml:gsub("^<%?xml[^>]*%?>",
     '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY e SYSTEM "file:///etc/passwd">]>')), nil, nil, "DTD")
@@ -119,6 +120,35 @@ refused("wrong ACS", xml, { acs_url = "https://elsewhere/acs" })
 refused("other issuer", xml, { idp_entity_id = "https://evil.example/idp" }, nil, "Issuer")
 refused("expired", xml, nil, NOW + 86400, "expired")
 refused("not base64 XML", "hello", nil, nil, nil)
+
+print("who a sign-in may become (signin_rule)")
+local function rule(over)
+    local f = { domain = "acme.com", domain_listed = true, domain_verified = true, auto_provision = true,
+        user_exists = true, user_active = true, platform_admin = false, other_workspaces = false,
+        is_owner = false, membership = "active" }
+    for k, v in pairs(over or {}) do f[k] = v end
+    if over and over.membership == false then f.membership = nil end
+    return SP.signin_rule(f)
+end
+check("member signs in", rule() == "member")
+check("existing account joins (auto-provision)", rule({ membership = false }) == "join")
+check("existing account, auto-provision off", rule({ membership = false, auto_provision = false }) == nil)
+check("unknown email gets an account", rule({ user_exists = false }) == "create")
+check("unknown email, auto-provision off", rule({ user_exists = false, auto_provision = false }) == nil)
+-- The takeover: any workspace's IdP asserting an address at a domain it never proved.
+check("unverified domain: member refused", rule({ domain_verified = false }) == nil)
+check("unverified domain: no account created", rule({ domain_verified = false, user_exists = false }) == nil)
+check("unlisted domain refused", rule({ domain_listed = false }) == nil)
+check("workspace owner refused", rule({ is_owner = true }) == nil)
+check("platform admin refused", rule({ platform_admin = true }) == nil)
+check("deactivated refused", rule({ user_active = false }) == nil)
+check("member of other workspaces refused", rule({ other_workspaces = true }) == nil)
+check("suspended membership refused", rule({ membership = "suspended" }) == nil)
+check("invited membership refused", rule({ membership = "invited" }) == nil)
+local _, shown, logged = rule({ platform_admin = true })
+check("refusal doesn't tell the IdP why", not shown:find("admin") and logged == "platform admin", shown)
+local _, shown2 = rule({ other_workspaces = true })
+check("same message for every account refusal", shown2 == shown, shown2)
 
 print("IdP metadata")
 local md, merr = SP.parse_idp_metadata(read(FIX .. "mocksaml-idp-metadata.xml"))

@@ -82,6 +82,9 @@ local function clean(body, partial)
     end
     if out.default_role == "" then out.default_role = db.NULL end
 
+    if out.email_domains == "" or (not partial and not out.email_domains) then
+        return nil, "Add at least one email domain (for example acme.com)"
+    end
     if not partial then
         if not out.name or out.name == "" then return nil, "Give the provider a name" end
         if not out.idp_entity_id or out.idp_entity_id == "" then return nil, "IdP entity ID is required" end
@@ -118,16 +121,18 @@ function Q.findPublic(uuid)
     return shape(db.select(COLUMNS .. " FROM saml_providers WHERE uuid = ? AND is_enabled = true", uuid)[1])
 end
 
---- Enabled providers that claim an email's domain.
+--- Enabled providers for an email's domain, only where the workspace proved it owns the domain:
+-- the login page sends people straight to the match, so an unproved claim would be phishing.
 function Q.findByEmailDomain(domain)
     domain = type(domain) == "string" and domain:lower() or ""
     if domain == "" then return {} end
     local rows = db.query([[
         SELECT p.uuid, p.name, n.name AS namespace_name, n.slug AS namespace_slug
         FROM saml_providers p JOIN namespaces n ON n.id = p.namespace_id
+        JOIN saml_verified_domains v ON v.namespace_id = p.namespace_id AND v.domain = ?
         WHERE p.is_enabled = true AND ? = ANY(string_to_array(p.email_domains, ','))
         ORDER BY p.created_at
-    ]], domain)
+    ]], domain, domain)
     return rows
 end
 
@@ -171,7 +176,7 @@ function Q.consumeAssertion(provider_id, assertion_id, expires_at)
     db.query("DELETE FROM saml_used_assertions WHERE expires_at < NOW() - INTERVAL '1 hour'")
     local res = db.query([[
         INSERT INTO saml_used_assertions (assertion_id, provider_id, expires_at)
-        VALUES (?, ?, to_timestamp(?) AT TIME ZONE 'UTC')
+        VALUES (?, ?, to_timestamp(?)::timestamp)
         ON CONFLICT (assertion_id) DO NOTHING
         RETURNING assertion_id
     ]], tostring(provider_id) .. ":" .. assertion_id, provider_id, expires_at)
@@ -196,10 +201,79 @@ end
 --- Redeem a one-time code: the token, once; nil when unknown, used or expired.
 function Q.redeemLoginCode(code)
     if type(code) ~= "string" or not code:match("^%x+$") or #code ~= 64 then return nil end
+    db.query("DELETE FROM saml_login_codes WHERE expires_at < NOW()")
     local row = db.query([[
         DELETE FROM saml_login_codes WHERE code_hash = ? AND expires_at >= NOW() RETURNING token
     ]], sha256_hex(code))[1]
     return row and row.token or nil
+end
+
+-- ── Domain proof ─────────────────────────────────────────────────────────
+-- A workspace proves it owns an email domain with a TXT record before its IdP may sign in
+-- anyone at that domain (routes/saml.lua header). Same record name as custom form domains.
+
+local Domains = require("lib.forms.domains")
+
+local function domain_token(namespace_id, domain)
+    local secret = os.getenv("JWT_SECRET_KEY") or ""
+    local mac = require("resty.openssl.hmac").new(secret, "sha256")
+        :final("saml-domain:" .. namespace_id .. ":" .. domain)
+    return (mac:sub(1, 16):gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+
+function Q.isDomainVerified(namespace_id, domain)
+    return #db.select("1 FROM saml_verified_domains WHERE namespace_id = ? AND domain = ?",
+        namespace_id, tostring(domain)) > 0
+end
+
+--- Each domain (default: every domain of the workspace's providers) with its proof status
+-- and the TXT record that proves it.
+function Q.domainStatus(namespace_id, domains)
+    if not domains then
+        local seen = {}
+        domains = {}
+        for _, r in ipairs(db.select("email_domains FROM saml_providers WHERE namespace_id = ?", namespace_id)) do
+            for d in (r.email_domains or ""):gmatch("[^,]+") do
+                if not seen[d] then seen[d] = true; domains[#domains + 1] = d end
+            end
+        end
+    end
+    local verified = {}
+    for _, r in ipairs(db.select("domain, verified_at FROM saml_verified_domains WHERE namespace_id = ?",
+        namespace_id)) do
+        verified[r.domain] = r.verified_at
+    end
+    local out = setmetatable({}, cjson.array_mt)
+    for _, d in ipairs(domains) do
+        out[#out + 1] = {
+            domain = d,
+            verified = verified[d] ~= nil,
+            verified_at = verified[d],
+            txt_name = Domains.TXT_PREFIX .. d,
+            txt_value = Domains.TXT_VALUE .. domain_token(namespace_id, d),
+        }
+    end
+    return out
+end
+
+--- Look the domain's TXT record up now; remember the proof when it's there.
+-- @return status (as in domainStatus, plus `message` while unproved) | nil, err
+function Q.verifyDomain(namespace_id, domain)
+    local status
+    for _, s in ipairs(Q.domainStatus(namespace_id)) do
+        if s.domain == domain then status = s end
+    end
+    if not status then return nil, "Add " .. tostring(domain) .. " to a provider's email domains first" end
+    if status.verified then return status end
+    local found, err = Domains.has_txt(domain, status.txt_value)
+    if found == nil then return nil, "Couldn't look up DNS right now (" .. tostring(err) .. "). Try again shortly." end
+    if not found then
+        status.message = "The TXT record isn't there yet. DNS changes can take a few minutes to show."
+        return status
+    end
+    db.query([[INSERT INTO saml_verified_domains (namespace_id, domain) VALUES (?, ?)
+        ON CONFLICT (namespace_id, domain) DO NOTHING]], namespace_id, domain)
+    return Q.domainStatus(namespace_id, { domain })[1]
 end
 
 function Q.recordLogin(provider_id)

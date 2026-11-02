@@ -12,6 +12,8 @@
       [3] saml_login_codes  one-time codes the ACS hands the dashboard instead of
                             the token: a full JWT in the redirect URL is too big
                             for some proxies' header buffers, and URLs get logged.
+      [4] saml_verified_domains  email domains a workspace proved it owns (DNS TXT);
+                            its IdP only signs in addresses at these domains.
 
     Idempotent; gated on FEATURES.CORE so every deployment gets it.
 ]]
@@ -71,5 +73,17 @@ return {
                 expires_at TIMESTAMP NOT NULL
             )
         ]])
+    end,
+
+    [4] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS saml_verified_domains (
+                namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                domain VARCHAR(253) NOT NULL,
+                verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (namespace_id, domain)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_saml_verified_domains_domain ON saml_verified_domains(domain)")
     end,
 }
