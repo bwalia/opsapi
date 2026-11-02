@@ -101,19 +101,25 @@ local function lookup(name, qtype)
     return answers
 end
 
+--- Whether `_opsapi-challenge.<domain>` has a TXT record equal to `value` (also used by SAML SSO).
+-- @return bool | nil, err (the lookup itself failed)
+function Domains.has_txt(domain, value)
+    local txt, err = lookup(Domains.TXT_PREFIX .. domain, require("resty.dns.resolver").TYPE_TXT)
+    if not txt then return nil, err end
+    for _, a in ipairs(txt) do
+        for _, v in ipairs(type(a.txt) == "table" and a.txt or { a.txt }) do
+            if v == value then return true end
+        end
+    end
+    return false
+end
+
 --- What DNS says about `domain` now.
 -- @return { owned = bool, routed = bool } | nil, err
 function Domains.dns(domain, token, target)
     local Resolver = require("resty.dns.resolver")
-    local txt, terr = lookup(Domains.TXT_PREFIX .. domain, Resolver.TYPE_TXT)
-    if not txt then return nil, terr end
-    local owned = false
-    for _, a in ipairs(txt) do
-        local values = type(a.txt) == "table" and a.txt or { a.txt }
-        for _, v in ipairs(values) do
-            if v == Domains.TXT_VALUE .. token then owned = true end
-        end
-    end
+    local owned, terr = Domains.has_txt(domain, Domains.TXT_VALUE .. token)
+    if owned == nil then return nil, terr end
     -- Routed: the CNAME chain reaches the target, or the domain has one of its addresses.
     local ans, aerr = lookup(domain, Resolver.TYPE_A)
     if not ans then return nil, aerr end

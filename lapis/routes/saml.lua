@@ -23,16 +23,24 @@
       DELETE /api/v2/sso/saml/providers/:id
       POST   /api/v2/sso/saml/metadata/parse    { xml } → IdP fields
 
-    Who a SAML sign-in may become (an IdP only vouches for its own workspace):
-      - the email must be in the provider's email domains (when any are set);
-      - a platform admin never signs in through SAML;
+      GET    /api/v2/sso/saml/domains           the workspace's email domains + the TXT record proving each
+      POST   /api/v2/sso/saml/domains/verify    { domain } → look the TXT record up now
+
+    Who a SAML sign-in may become (an IdP only vouches for its own workspace;
+    the rules live in SP.signin_rule, covered by spec/saml-sso_spec.lua):
+      - the email must be at one of the provider's email domains (at least one is
+        required), and the workspace must have PROVED it owns that domain with a
+        DNS TXT record. Anyone can create a workspace and attach an IdP; without
+        the proof that IdP could assert any address and take the account over;
+      - a platform admin, the workspace owner and deactivated accounts never sign
+        in through SAML;
       - an existing account may only be signed in when it belongs to no other
-        workspace — otherwise a workspace owner who controls an IdP could take
-        over someone's account in other workspaces. Such users sign in with
-        their password (or Google) instead;
+        workspace: its refresh token would also reach those, and this IdP doesn't
+        vouch for them. Such users sign in with their password (or Google);
       - unknown emails get an account (auto-provision) and join this workspace
         with the provider's default role; with auto-provision off they must be
         invited first.
+    Two-factor is the IdP's job: an SSO sign-in doesn't ask for OpsAPI's code.
 ]]
 
 local cjson = require("cjson.safe")
@@ -44,7 +52,9 @@ local RateLimit = require("middleware.rate-limit")
 local SP = require("lib.saml.sp")
 local Q = require("queries.SamlProviderQueries")
 
-local SSO_LIMIT = { rate = 20, window = 60, prefix = "auth:saml" }
+-- Separate buckets, so an office behind one address can look up, sign in and redeem together.
+local DISCOVER_LIMIT = { rate = 30, window = 60, prefix = "auth:saml:discover" }
+local SIGNIN_LIMIT = { rate = 60, window = 60, prefix = "auth:saml:signin" }
 local STATE_COOKIE = "opsapi_saml_state"
 local STATE_TTL = 600
 
@@ -139,32 +149,43 @@ end
 
 local function is_true(v) return v == true or v == "t" or v == "true" end
 
--- The account a validated assertion signs in, per the rules in the header.
+-- The account a validated assertion signs in: facts from the database, the decision
+-- from SP.signin_rule (the rules in the header).
 -- @return user row (from users), membership | nil, message
 local function resolve_account(provider, profile)
     local email = profile.email
     if not email then return nil, "Your identity provider did not send an email address" end
     local domain = email:match("@(.+)$")
-    if #provider.email_domains > 0 then
-        local ok = false
-        for _, d in ipairs(provider.email_domains) do if d == domain then ok = true end end
-        if not ok then return nil, "Accounts at " .. tostring(domain) .. " can't sign in with this provider" end
+    local ns_id = provider.namespace_id
+    local listed = false
+    for _, d in ipairs(provider.email_domains) do if d == domain then listed = true end end
+
+    local user = db.select("* FROM users WHERE lower(email) = ? LIMIT 1", email)[1]
+    local membership = user and db.select("* FROM namespace_members WHERE user_id = ? AND namespace_id = ?",
+        user.id, ns_id)[1]
+    local facts = {
+        domain = domain,
+        domain_listed = listed,
+        domain_verified = listed and Q.isDomainVerified(ns_id, domain),
+        auto_provision = is_true(provider.auto_provision),
+        user_exists = user ~= nil,
+        membership = membership and membership.status or nil,
+    }
+    if user then
+        facts.user_active = is_true(user.active)
+        facts.platform_admin = require("helper.admin-check").isPlatformAdmin({ uuid = user.uuid })
+        facts.is_owner = (membership and is_true(membership.is_owner))
+            or #db.select("1 FROM namespaces WHERE id = ? AND owner_user_id = ?", ns_id, user.id) > 0
+        facts.other_workspaces = #db.select([[1 FROM namespace_members
+            WHERE user_id = ? AND namespace_id <> ? AND status = 'active' LIMIT 1]], user.id, ns_id) > 0
+    end
+    local action, message, reason = SP.signin_rule(facts)
+    if not action then
+        ngx.log(ngx.WARN, "[SAML] provider ", provider.uuid, " refused ", email, ": ", reason)
+        return nil, message
     end
 
-    local ns_id = provider.namespace_id
-    local user = db.select("* FROM users WHERE lower(email) = ? LIMIT 1", email)[1]
-    if user then
-        if not is_true(user.active) then return nil, "This account has been deactivated" end
-        if require("helper.admin-check").isPlatformAdmin({ uuid = user.uuid }) then
-            return nil, "Platform administrators sign in with their password"
-        end
-        local other = db.select([[1 FROM namespace_members
-            WHERE user_id = ? AND namespace_id <> ? AND status = 'active' LIMIT 1]], user.id, ns_id)
-        if #other > 0 then
-            return nil, "This account belongs to other workspaces too, so it can't use single sign-on. "
-                .. "Sign in with your password instead."
-        end
-    elseif is_true(provider.auto_provision) then
+    if action == "create" then
         user = require("queries.UserQueries").createOAuthUser({
             uuid = Global.generateUUID(),
             email = email,
@@ -177,26 +198,16 @@ local function resolve_account(provider, profile)
             oauth_id = provider.uuid,
             active = true,
         })
-    else
-        return nil, "You don't have an account yet. Ask a workspace admin to invite you."
+        if not user then return nil, "Could not create your account" end
     end
-
-    local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
-    local membership = db.select("* FROM namespace_members WHERE user_id = ? AND namespace_id = ?", user.id, ns_id)[1]
-    if membership and membership.status ~= "active" then
-        return nil, "Your access to this workspace is " .. tostring(membership.status)
-    end
-    if not membership then
-        if not is_true(provider.auto_provision) then
-            return nil, "You aren't a member of this workspace. Ask a workspace admin to invite you."
-        end
+    if action ~= "member" then
         local role_ids
         if provider.default_role then
             local role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?",
                 ns_id, provider.default_role)[1]
             role_ids = role and { role.id } or nil
         end
-        membership = NamespaceMemberQueries.create({
+        membership = require("queries.NamespaceMemberQueries").create({
             namespace_id = ns_id, user_id = user.id, status = "active", role_ids = role_ids,
         })
     end
@@ -229,6 +240,7 @@ end
 
 local function with_sp(p)
     p.sp = sp_urls(p)
+    p.domains = Q.domainStatus(p.namespace_id, p.email_domains)
     return p
 end
 
@@ -236,8 +248,30 @@ local function guard(action, fn)
     return NamespaceMiddleware.requirePermission("namespace", action, fn)
 end
 
+-- Who changed which provider: SSO settings decide who can sign in, so every change is kept.
+local function audit(self, action, uuid, body)
+    local values
+    if type(body) == "table" then
+        values = {}
+        for k, v in pairs(body) do
+            if k == "idp_x509_cert" then values.idp_x509_cert = "(changed)"
+            elseif type(v) ~= "table" or k == "attribute_mapping" then values[k] = v end
+        end
+    end
+    pcall(require("queries.NamespaceAuditLogQueries").log, {
+        namespace_id = self.namespace.id,
+        user_id = self.namespace_membership and self.namespace_membership.user_id,
+        action = action,
+        entity_type = "saml_provider",
+        entity_id = uuid,
+        new_values = values,
+        ip_address = RateLimit.getClientIP(),
+        user_agent = self.req.headers["user-agent"],
+    })
+end
+
 return function(app)
-    app:get("/auth/saml/discover", RateLimit.wrap(SSO_LIMIT, function(self)
+    app:get("/auth/saml/discover", RateLimit.wrap(DISCOVER_LIMIT, function(self)
         local rows
         if self.params.email then
             local domain = tostring(self.params.email):lower():match("@([%w%.%-]+)$")
@@ -262,7 +296,7 @@ return function(app)
             SP.metadata({ sp_entity_id = urls.sp_entity_id, acs_url = urls.acs_url }) }
     end)
 
-    app:get("/auth/saml/:id/login", RateLimit.wrap(SSO_LIMIT, function(self)
+    app:get("/auth/saml/:id/login", RateLimit.wrap(SIGNIN_LIMIT, function(self)
         local p = Q.findPublic(self.params.id)
         local frontend = trusted_frontend(self.params.frontend_url) or default_frontend()
         if not p then return signin_error(frontend, "This single sign-on link is no longer active") end
@@ -278,7 +312,7 @@ return function(app)
         return { redirect_to = url }
     end))
 
-    app:post("/auth/saml/:id/acs", RateLimit.wrap(SSO_LIMIT, function(self)
+    app:post("/auth/saml/:id/acs", RateLimit.wrap(SIGNIN_LIMIT, function(self)
         local p = Q.findPublic(self.params.id)
         local state = decode_state(ngx.var["cookie_" .. STATE_COOKIE])
         if state and state.pid ~= self.params.id then state = nil end
@@ -316,7 +350,7 @@ return function(app)
         })
     end))
 
-    app:post("/auth/saml/exchange", RateLimit.wrap(SSO_LIMIT, function(self)
+    app:post("/auth/saml/exchange", RateLimit.wrap(SIGNIN_LIMIT, function(self)
         local body = sdk.body(self) or {}
         local token = Q.redeemLoginCode(body.code or self.params.code)
         if not token then
@@ -337,6 +371,7 @@ return function(app)
         if not body then return sdk.error(400, err) end
         local p, msg = Q.create(self.namespace.id, body)
         if not p then return sdk.error(422, msg) end
+        audit(self, "saml_provider.create", p.uuid, body)
         return sdk.created(with_sp(p))
     end))
 
@@ -352,12 +387,28 @@ return function(app)
         local p, msg = Q.update(self.namespace.id, self.params.id, body)
         if msg then return sdk.error(422, msg) end
         if not p then return sdk.not_found("SAML provider") end
+        audit(self, "saml_provider.update", p.uuid, body)
         return sdk.ok(with_sp(p))
     end))
 
     app:delete("/api/v2/sso/saml/providers/:id", guard("manage", function(self)
         if not Q.delete(self.namespace.id, self.params.id) then return sdk.not_found("SAML provider") end
+        audit(self, "saml_provider.delete", self.params.id)
         return sdk.ok()
+    end))
+
+    app:get("/api/v2/sso/saml/domains", guard("read", function(self)
+        return sdk.ok(Q.domainStatus(self.namespace.id))
+    end))
+
+    app:post("/api/v2/sso/saml/domains/verify", guard("manage", function(self)
+        local body = sdk.body(self) or {}
+        local domain = type(body.domain) == "string" and body.domain:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if not domain or domain == "" then return sdk.error(400, "Send the domain to check") end
+        local status, err = Q.verifyDomain(self.namespace.id, domain)
+        if not status then return sdk.error(422, err) end
+        if status.verified then audit(self, "saml_domain.verify", nil, { domain = domain }) end
+        return sdk.ok(status)
     end))
 
     app:post("/api/v2/sso/saml/metadata/parse", guard("manage", function(self)

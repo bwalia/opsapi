@@ -9,7 +9,10 @@
 # deletes data. See devops/demo/README.md "Full demo (showcase)".
 #
 # Secrets come from the identity demo's Vault path (opsapi-demo/config), which
-# already exists, so there is no manual prerequisite.
+# already exists, so there is no manual prerequisite. The one exception is the
+# session key (JWT_SECRET_KEY): the showcase makes its own once (Secret
+# opsapi-showcase-jwt), so a token from the identity demo's open sign-up isn't
+# accepted here.
 name: Deploy OpsAPI showcase demo
 
 on:
@@ -57,6 +60,9 @@ jobs:
     uses: ./.github/workflows/wslproxy-register-domains.yml
     with:
       TARGET_ENV: prod
+      # Only the showcase's own hosts: a full push would also re-import and activate every
+      # other prod vhost each Monday, undoing edits made in the edge admin UI.
+      HOSTS: showcase.demo.opsapi.org showcase-api.demo.opsapi.org saml-idp.demo.opsapi.org
       ACTIVATE_CONFIG: true
       DRY_RUN: false
     secrets: inherit
@@ -124,13 +130,27 @@ jobs:
       - name: API (opsapi-showcase)
         run: |
           set -euo pipefail
+          # Its own session key, made once (values: extraEnvFromSecrets).
+          kubectl -n "$NS" get secret opsapi-showcase-jwt >/dev/null 2>&1 || \
+            kubectl -n "$NS" create secret generic opsapi-showcase-jwt \
+              --from-literal=JWT_SECRET_KEY="$(openssl rand -hex 48)"
+          # The newest release whose image exists, pinned: with :latest a pod restart could
+          # pull newer code than the schema the migrate hook last ran.
+          TAG=""
+          for t in $(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
+                     | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -3); do
+            if docker manifest inspect "bwalia/opsapi:$t" >/dev/null 2>&1; then TAG=$t; break; fi
+          done
+          [ -n "$TAG" ] || { echo "::error::no released bwalia/opsapi image among the newest tags"; exit 1; }
+          echo "API image bwalia/opsapi:$TAG"
           # The migrate hook is pre-UPGRADE only, so a fresh install needs a
           # second upgrade to migrate. On an existing release this is one upgrade
           # plus a no-op one. No --wait: before the first migrate the pods
           # aren't ready (empty DB); the rollout below is the real check.
           for _ in 1 2; do
             helm upgrade --install opsapi-showcase devops/helm-charts/diytaxreturn-lapis \
-              -f "$API_VALUES" --namespace "$NS" --timeout 20m
+              -f "$API_VALUES" --namespace "$NS" --timeout 20m \
+              --set image.tag="$TAG" --set image.pullPolicy=IfNotPresent
           done
           kubectl -n "$NS" rollout restart deploy/opsapi-showcase
           kubectl -n "$NS" rollout status deploy/opsapi-showcase --timeout=10m
@@ -181,9 +201,10 @@ jobs:
             curl -fsS --max-time 20 -o /tmp/idp-metadata.xml http://mock-saml-idp.$NS.svc.cluster.local:4000/api/saml/metadata && \
             lapis exec 'assert(loadfile(\"/tmp/seed-showcase-saml.lua\"))()'"
 
-      - name: Demo login reset job (and run it now)
+      - name: Demo login reset job (and run it now), self-heal
         run: |
           set -euo pipefail
+          kubectl apply -f devops/demo/selfheal.yaml
           kubectl apply -f devops/demo/demo-account-reset.yaml
           JOB="demo-account-reset-$(date +%s)"
           kubectl -n "$NS" create job "$JOB" --from=cronjob/demo-account-reset
@@ -194,8 +215,13 @@ jobs:
           set -euo pipefail
           sleep 20
           # Save then print: `curl | head` fails under pipefail once head closes the pipe.
-          curl -fsS --max-time 20 -o health.json "https://$API_HOST/health" && head -c 300 health.json; echo
-          curl -fsS --max-time 20 -o info.json "https://$API_HOST/api/v2/system/info" && head -c 300 info.json; echo
+          # Each curl on its own line: `set -e` ignores a failure on the left of `&&`.
+          curl -fsS --max-time 20 -o health.json "https://$API_HOST/health"
+          head -c 300 health.json; echo
+          curl -fsS --max-time 20 -o info.json "https://$API_HOST/api/v2/system/info"
+          head -c 300 info.json; echo
           curl -fsS --max-time 20 -o /dev/null -w "dashboard HTTP %{http_code}\n" "https://$DASHBOARD_HOST/login"
           curl -fsS --max-time 20 -o /dev/null -w "SAML IdP metadata HTTP %{http_code}\n" "https://$IDP_HOST/api/saml/metadata"
-          curl -fsS --max-time 20 -o sso.json "https://$API_HOST/auth/saml/discover?email=visitor@example.com" && cat sso.json; echo
+          curl -fsS --max-time 20 -o sso.json "https://$API_HOST/auth/saml/discover?email=visitor@example.com"
+          cat sso.json; echo
+          grep -q '"login_url"' sso.json || { echo "::error::the login page doesn't find the demo IdP for example.com"; exit 1; }

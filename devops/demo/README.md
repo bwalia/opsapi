@@ -136,7 +136,10 @@ sign in to the demo apps land in `demo`, which the demo account can't see.
 A second, separate OpsAPI in the same k8s namespace, running **every** module
 (`PROJECT_CODE=all`) on its own database. The `showcase` workspace and the
 public `demo@opsapi.org` login live here, with made-up records in each app.
-The identity demo above stays `core_only`; the two share nothing.
+The identity demo above stays `core_only`; the two share no data. They do share
+the Vault path opsapi-demo/config, except the session key: the showcase makes
+its own (Secret `opsapi-showcase-jwt`), so a token from the identity demo isn't
+accepted here.
 
 | Host | What | Helm release |
 |---|---|---|
@@ -168,8 +171,10 @@ for h in showcase showcase-api saml-idp; do
     --name "$h.demo.opsapi.org" --content lon1.pop0.uk --proxied false
 done
 
-# 2. Secrets: nothing to do. The showcase reads the identity demo's Vault
-#    path (opsapi-demo/config) for its DB password, JWT/encryption keys and SMTP.
+# 2. Secrets: the showcase reads the identity demo's Vault path (opsapi-demo/config)
+#    for its DB password, encryption keys and SMTP. Its session key is its own, made once:
+kubectl -n demo get secret opsapi-showcase-jwt >/dev/null 2>&1 || kubectl -n demo create secret \
+  generic opsapi-showcase-jwt --from-literal=JWT_SECRET_KEY="$(openssl rand -hex 48)"
 
 # 3. Database, then the API (run the upgrade twice on a fresh install, as above)
 kubectl apply -f devops/k8s/opsapi-showcase-db.yaml
@@ -227,7 +232,10 @@ the showcase as a `viewer`, through a real, signed SAML 2.0 response. Workspace
 owners see the setup under **Single sign-on** (`/dashboard/namespace/sso`).
 
 Mock SAML asks for no password, so it is trusted by the showcase workspace
-only, and SAML users there can't change anything. SAML users accumulate in
+only, and SAML users there can't change anything. The seed marks example.com
+and example.org as verified for the workspace (they're reserved, so no TXT
+record can prove them), and no real or sample account uses them: the sample
+users live at sample.opsapi.org, so typing their address gets nowhere. SAML users accumulate in
 `users` (one per address typed); that's harmless and the reset job leaves them.
 
 Both demos are permanent: don't uninstall either release or delete their

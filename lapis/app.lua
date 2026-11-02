@@ -195,8 +195,6 @@ app:get("/api/v2/system/info", function(self)
             project_code = info_or_err.project_code,
             parsed_codes = info_or_err.project_codes,
             enabled_features = info_or_err.enabled_features,
-            -- Every feature, deployed or not, with its modules (dashboard Apps page)
-            apps = ProjectConfig.getAppCatalog(),
             environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
             -- Same git-derived version everything else reports (see module-
             -- level APP_VERSION). Keeps this endpoint in sync with `/`
@@ -207,6 +205,13 @@ app:get("/api/v2/system/info", function(self)
             timestamp = ngx.time(),
         }
     }
+end)
+
+-- Every feature, deployed or not, with its modules (dashboard Apps page). Signed-in only
+-- (not on the public list below): it names the plugins installed here, some private.
+app:get("/api/v2/system/apps", function()
+    local ProjectConfig = require("helper.project-config")
+    return { status = 200, json = { success = true, data = ProjectConfig.getAppCatalog() } }
 end)
 
 -- The API docs and OpenAPI spec list every route there is to probe. Served

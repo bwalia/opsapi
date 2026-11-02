@@ -58,6 +58,11 @@ on:
       GATEWAY_DOMAIN:
         required: false
         type: string
+      HOSTS:
+        description: "Only these hosts (space or comma separated) and the rules they use. Blank = every host."
+        required: false
+        default: ""
+        type: string
 
   workflow_dispatch:
     inputs:
@@ -93,6 +98,11 @@ on:
         required: false
         default: false
         type: boolean
+      HOSTS:
+        description: "Only these hosts (space or comma separated) and the rules they use. Blank = every host."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   push-domains:
@@ -179,14 +189,30 @@ jobs:
           TARGET_ENV: ${{ inputs.TARGET_ENV }}
           ACTIVATE_CONFIG: ${{ inputs.ACTIVATE_CONFIG }}
           DRY_RUN: ${{ inputs.DRY_RUN }}
+          HOSTS: ${{ inputs.HOSTS }}
         run: |
           set -euo pipefail
           RULES_DIR=".github/wslproxy/data/rules/${TARGET_ENV}"
           SERVERS_DIR=".github/wslproxy/data/servers/${TARGET_ENV}"
 
+          # HOSTS narrows the push to those hosts and their rules, so a caller that owns a
+          # few hosts (the showcase demo) never re-imports or re-activates everyone else's.
+          SERVER_FILES=("$SERVERS_DIR"/*.json)
+          if [ -n "${HOSTS:-}" ]; then
+            SERVER_FILES=()
+            for h in ${HOSTS//,/ }; do
+              f="$SERVERS_DIR/host:$h.json"
+              [ -f "$f" ] || { echo "::error::no server record for $h ($f)"; exit 1; }
+              SERVER_FILES+=("$f")
+            done
+          fi
           RULES_ARR=$(jq -s '.' "$RULES_DIR"/*.json 2>/dev/null || echo '[]')
           # config_status is a workflow toggle, not a commit — override it here.
-          SERVERS_ARR=$(jq -s --argjson active "$ACTIVATE_CONFIG" 'map(.config_status = $active)' "$SERVERS_DIR"/*.json)
+          SERVERS_ARR=$(jq -s --argjson active "$ACTIVATE_CONFIG" 'map(.config_status = $active)' "${SERVER_FILES[@]}")
+          if [ -n "${HOSTS:-}" ]; then
+            RULES_ARR=$(jq -c --argjson servers "$SERVERS_ARR" \
+              '[.[] | select(.id as $id | $servers | map(.rules) | flatten | index($id))]' <<<"$RULES_ARR")
+          fi
 
           import() {
             local dtype="$1" arr="$2" body resp code

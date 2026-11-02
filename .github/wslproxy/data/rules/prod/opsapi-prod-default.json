@@ -38,6 +38,7 @@
     "host:acc-opsapi-ui.workstation.co.uk",
     "host:int-api.tenthmatrix.com",
     "host:test-api.tenthmatrix.com",
-    "host:acc-api.tenthmatrix.com"
+    "host:acc-api.tenthmatrix.com",
+    "host:joyai.fictionally.org"
   ]
 }

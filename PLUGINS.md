@@ -732,6 +732,23 @@ RUN opsapi plugin:check             # fail the build on a broken plugin
 - Keep the readiness probe on `/ready`. A pod whose plugins failed to load stays unready, so a rolling update stops with the old pods still serving.
 - Don't mount plugins from a writable shared volume. Rebuild the image instead.
 
+### Plugin overlays (a plugin in its own image)
+
+A plugin from another (for example private) repository can ship as its own image and be loaded at deploy time, so `bwalia/opsapi` stays the same image Ring Promoter deploys. The `diytaxreturn-lapis` chart copies it in with an init container (`templates/_plugins.tpl`), in the app pods and in the migrate job, so its migrations run with `lapis migrate`:
+
+```yaml
+pluginOverlays:
+  - name: portfoliolab           # folder under /app/projects, and /plugin/<name>/ inside the image
+    image: registry.example/team/portfoliolab-plugin:3f2c1ab
+    pullPolicy: IfNotPresent     # default
+imagePullSecrets:
+  - name: my-registry-login      # not created by the chart: create it in the namespace first
+```
+
+- The image must contain `/plugin/<name>/project.lua`. A missing folder fails the init container, so the pod never starts half-loaded.
+- **Pin an immutable tag** (a version or commit sha) and bump it to roll forward. A moving tag such as `:int` with `pullPolicy: Always` means any pod restart runs whatever was last pushed, the pods and the migrate job can end up on different builds, and a registry outage or a deleted tag leaves the migrate hook in `ImagePullBackOff`, so every deploy of that release times out.
+- Off by default: a values file without `pluginOverlays` renders exactly as before.
+
 ### Upgrading OpsAPI
 
 - The SDK (`helper.plugin-sdk`) is the stable contract. Anything else inside OpsAPI can change between releases.

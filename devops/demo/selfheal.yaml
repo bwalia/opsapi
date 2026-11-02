@@ -4,13 +4,19 @@
 # resource of every deployed Helm release in `demo` still exists. If any is missing, it re-applies
 # the release's current revision (helm rollback to itself recreates exactly what was deployed)
 # and logs what it restored. Nothing is changed when everything is present.
+# Applied by .github/workflows/deploy-opsapi-showcase.yml (weekly), or by hand:
 #   kubectl apply -f devops/demo/selfheal.yaml
 #   kubectl -n demo logs -l app=demo-selfheal --tail=50     # what it did
+# It only heals Helm releases. The kubectl-applied pieces (databases, ExternalSecrets, the reset
+# CronJob, the mock IdP) are re-applied by that weekly workflow.
 apiVersion: v1
 kind: ServiceAccount
 metadata: { name: demo-selfheal, namespace: demo, labels: { app: demo-selfheal } }
 ---
-# Namespace-scoped: it can only touch the demo namespace (Helm stores releases as Secrets here).
+# Namespace-scoped: it can only touch the demo namespace. `admin` there, because a rollback must
+# read and write Helm's release Secrets and re-create any kind of resource a release owns; a
+# narrower Role would still need Secrets, so it would protect nothing. The image is therefore
+# pinned by digest: a re-pushed tag can't run with these rights.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata: { name: demo-selfheal, namespace: demo, labels: { app: demo-selfheal } }
@@ -37,7 +43,8 @@ spec:
           nodeSelector: { net-region: home, kubernetes.io/arch: amd64 }
           containers:
             - name: selfheal
-              image: alpine/k8s:1.31.4          # helm + kubectl + jq
+              # helm + kubectl + jq; alpine/k8s:1.31.4, pinned (see the RoleBinding note).
+              image: alpine/k8s@sha256:9c4976d47656d78cf53a92b0203fc54ac45eae18a2b45001ac221c27da4c8036
               resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
               command: ["/bin/sh", "-c"]
               args:

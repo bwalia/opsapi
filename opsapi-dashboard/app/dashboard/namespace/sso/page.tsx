@@ -17,7 +17,80 @@ import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { Pill, apiError } from '@/components/field-service/shared';
-import { ssoService, type SamlProvider, type SamlProviderInput } from '@/services/sso.service';
+import { ssoService, type SamlDomain, type SamlProvider, type SamlProviderInput } from '@/services/sso.service';
+
+// Nobody at a domain can sign in until the workspace proves it owns that domain: otherwise
+// any workspace could attach an IdP that claims someone else's email address.
+function DomainProof({ domains, allowEdit, onVerified }: {
+  domains: SamlDomain[];
+  allowEdit: boolean;
+  onVerified: () => void;
+}) {
+  const [checking, setChecking] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const check = async (domain: string) => {
+    setChecking(domain);
+    try {
+      const status = await ssoService.verifyDomain(domain);
+      if (status.verified) {
+        toast.success(`${domain} is verified`);
+        onVerified();
+      } else {
+        setNotes((n) => ({ ...n, [domain]: status.message ?? 'The record isn\'t there yet.' }));
+      }
+    } catch (err) {
+      toast.error(apiError(err, 'Could not check the domain'));
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  if (domains.length === 0) {
+    return (
+      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+        Add your company&apos;s email domain (edit the provider) so people can sign in with it.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3 mb-4">
+      {domains.map((d) => (
+        <div
+          key={d.domain}
+          className={`rounded-lg border p-3 ${d.verified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-secondary-900">
+              {d.domain}{' '}
+              <Pill className={d.verified ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800'}>
+                {d.verified ? 'Verified' : 'Not verified yet'}
+              </Pill>
+            </p>
+            {!d.verified && allowEdit && (
+              <Button size="sm" variant="outline" onClick={() => check(d.domain)} isLoading={checking === d.domain}>
+                Check now
+              </Button>
+            )}
+          </div>
+          {!d.verified && (
+            <>
+              <p className="text-xs text-secondary-600 mt-2">
+                Nobody at {d.domain} can sign in until you prove you own it. At your DNS provider, add this
+                TXT record, then press Check now.
+              </p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
+                <CopyField label="TXT record name" value={d.txt_name} />
+                <CopyField label="TXT record value" value={d.txt_value} />
+              </div>
+              {notes[d.domain] && <p className="text-xs text-amber-800 mt-2">{notes[d.domain]}</p>}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -175,7 +248,7 @@ function ProviderModal({
         <Input
           label="Email domains"
           placeholder="acme.com, acme.co.uk"
-          helperText="Only these addresses can sign in with this provider, and the login page finds it from them."
+          helperText="Required. Only these addresses can sign in with this provider. You then prove you own each domain with a DNS record."
           value={form.email_domains}
           onChange={(e) => set('email_domains', e.target.value)}
         />
@@ -300,8 +373,6 @@ function SsoPageContent() {
                 </Pill>
               </div>
               <p className="text-xs text-secondary-500 mt-1">
-                {p.email_domains.length ? `Domains: ${p.email_domains.join(', ')}` : 'Any email domain'}
-                {' · '}
                 {p.login_count} sign-in{p.login_count === 1 ? '' : 's'}
                 {p.last_login_at ? ` · last ${new Date(p.last_login_at).toLocaleString()}` : ''}
               </p>
@@ -329,6 +400,7 @@ function SsoPageContent() {
               </div>
             )}
           </div>
+          <DomainProof domains={p.domains ?? []} allowEdit={allowEdit} onVerified={load} />
           <p className="text-sm font-medium text-secondary-700 mb-2">Give these to your identity provider</p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <CopyField label="Metadata URL" value={p.sp.sp_entity_id} />

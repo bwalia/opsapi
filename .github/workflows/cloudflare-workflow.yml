@@ -45,10 +45,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ !inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_API_TOKEN || '' }}
           CLOUDFLARE_ACCOUNT_EMAIL: ${{ inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_ACCOUNT_EMAIL || '' }}
           CLOUDFLARE_ACCOUNT_API_KEY: ${{ inputs.USE_ACCOUNT_KEY && secrets.CLOUDFLARE_ACCOUNT_API_KEY || '' }}
+          # Inputs reach the script as env vars, never pasted into it: a `${{ }}` in `run`
+          # is substituted before bash parses the line, so a value could run commands.
           NAME: ${{ inputs.CLOUDFLARE_RECORD_NAME }}
+          VALUE: ${{ inputs.CLOUDFLARE_RECORD_VALUE }}
+          TYPE: ${{ inputs.CLOUDFLARE_RECORD_TYPE }}
+          PROXIED: ${{ inputs.CLOUDFLARE_PROXIED }}
         run: |
           set -euo pipefail
           case "$NAME" in *.*) ;; *) NAME="$NAME.$CLOUDFLARE_ZONE" ;; esac
           chmod +x devops/scripts/cloudflare-dns.sh
-          ./devops/scripts/cloudflare-dns.sh --name "$NAME" --content "${{ inputs.CLOUDFLARE_RECORD_VALUE }}" \
-            --type "${{ inputs.CLOUDFLARE_RECORD_TYPE }}" --proxied "${{ inputs.CLOUDFLARE_PROXIED }}"
+          ./devops/scripts/cloudflare-dns.sh --name "$NAME" --content "$VALUE" --type "$TYPE" --proxied "$PROXIED"

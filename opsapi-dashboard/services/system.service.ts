@@ -29,4 +29,14 @@ export const systemService = {
     const res = await apiClient.get('/api/v2/system/info');
     return res.data as SystemInfo;
   },
+  /** GET /api/v2/system/apps (signed in only: it names installed plugins): every feature and its modules. */
+  async getApps(): Promise<AppFeature[]> {
+    const res = await apiClient.get('/api/v2/system/apps');
+    return (res.data?.data ?? []) as AppFeature[];
+  },
+  /** System info plus the app catalog, for the Apps page. */
+  async getInfoWithApps(): Promise<SystemInfo> {
+    const [info, apps] = await Promise.all([systemService.getInfo(), systemService.getApps()]);
+    return { ...info, apps };
+  },
 };

@@ -245,8 +245,11 @@ function M.validate_response(b64_response, p, now)
         end
     end
 
+    local assertion_id = XML.attr(assertion, "ID")
+    if not assertion_id or assertion_id == "" then return fail("the assertion has no ID") end
+
     return {
-        assertion_id = XML.attr(assertion, "ID"),
+        assertion_id = assertion_id,
         name_id = doc:text(".", name_id_node),
         name_id_format = XML.attr(name_id_node, "Format"),
         session_index = XML.attr(doc:one("saml:AuthnStatement", assertion), "SessionIndex"),
@@ -286,6 +289,43 @@ function M.profile(result, mapping)
         first_name = pick("first_name") or "",
         last_name = pick("last_name") or "",
     }
+end
+
+local CANT_USE_SSO = "This account can't use single sign-on. Sign in with your password instead."
+
+--- Who a validated sign-in may become. Pure (facts in, decision out) so the spec covers every rule.
+-- An IdP only vouches for addresses at domains its workspace has proved it owns (DNS TXT):
+-- without that, anyone who can create a workspace could attach their own IdP and assert
+-- someone else's email.
+-- @param f { domain, domain_listed, domain_verified, auto_provision, user_exists, user_active,
+--            platform_admin, other_workspaces, is_owner, membership = status | nil }
+-- @return "member" (sign in) | "join" (add to the workspace) | "create" (new account)
+--         | nil, message (shown to the person), reason (logged)
+function M.signin_rule(f)
+    local domain = tostring(f.domain)
+    if not f.domain_listed then
+        return nil, "Accounts at " .. domain .. " can't sign in with this provider", "domain not listed"
+    end
+    if not f.domain_verified then
+        return nil, "Single sign-on isn't ready for " .. domain .. " yet: a workspace admin must verify the domain.",
+            "domain not verified"
+    end
+    if not f.user_exists then
+        if f.auto_provision then return "create" end
+        return nil, "You don't have an account yet. Ask a workspace admin to invite you.", "no account"
+    end
+    -- Specific reasons stay in the log: the IdP's owner shouldn't learn them about an address.
+    if not f.user_active then return nil, CANT_USE_SSO, "account deactivated" end
+    if f.platform_admin then return nil, CANT_USE_SSO, "platform admin" end
+    if f.is_owner then return nil, CANT_USE_SSO, "workspace owner" end
+    -- A token here also refreshes into the person's other workspaces, which this IdP doesn't vouch for.
+    if f.other_workspaces then return nil, CANT_USE_SSO, "member of other workspaces" end
+    if f.membership == "active" then return "member" end
+    if f.membership then
+        return nil, "Your access to this workspace is " .. tostring(f.membership), "membership " .. f.membership
+    end
+    if f.auto_provision then return "join" end
+    return nil, "You aren't a member of this workspace. Ask a workspace admin to invite you.", "not a member"
 end
 
 return M
