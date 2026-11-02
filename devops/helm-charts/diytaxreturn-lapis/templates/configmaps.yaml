@@ -119,7 +119,8 @@ data:
       #!/bin/bash
       set -x
       TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-      BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
+      # Same name as the backup CronJob writes (templates/cronjob.yaml); run by hand only.
+      BACKUP_FILE="backup_{{ .Values.app }}-{{ .Release.Namespace }}_$TIMESTAMP.sql.gz"
 
       pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c | gzip > "/tmp/$BACKUP_FILE"
 

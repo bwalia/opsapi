@@ -4,6 +4,10 @@
 **Audience:** next developer picking up deploy / verification / follow-ons  
 **Status:** All four PRs below are **merged**. Rings may still need image rollout via Ring Promoter.
 
+> **Part A is out of date.** The web terminal was reworked after 20 Oct (#805, #808, #814, #815, #818, #828;
+> workstation-terminal #10, #11): employee keys, key-file sign-in, the live work log and the hardening.
+> For the terminal, read [AI_RUNNER_WEB_TERMINAL.md](AI_RUNNER_WEB_TERMINAL.md) instead. Parts B and C still apply.
+
 ---
 
 ## What shipped (four PRs)
