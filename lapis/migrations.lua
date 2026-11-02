@@ -103,6 +103,7 @@ local tax_profile_guidance_migrations = load_if_enabled(ProjectConfig.FEATURES.T
 local tax_agent_sessions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-sessions") or {}
 local tax_agent_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-menu-item") or {}
 local tax_filing_requests_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-filing-requests") or {}
+local tax_statement_year_backfill = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-year-backfill") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -2096,6 +2097,8 @@ local _migrations = {
     -- (sorts after the 'tax' parent menu, like the agent menu above).
     ['zz_tax_filing_requests_1'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_filing_requests_migrations, 1),
     ['zz_tax_filing_requests_2'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_filing_requests_migrations, 2),
+    -- Statements uploaded before the extract step stamped their tax year (#830).
+    ['zz_tax_statement_year_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_statement_year_backfill, 1),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
@@ -2702,10 +2705,10 @@ local _migrations = {
     ['zzsaml1_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 1),
     ['zzsaml2_menu_item'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 2),
     ['zzsaml3_login_codes'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 3),
+    ['zzsaml4_verified_domains'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 4),
     ['zzsec1_auth_throttle'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 1),
     ['zzsec2_otp_code_hash'] = conditional_array(ProjectConfig.FEATURES.CORE, auth_hardening_migrations, 2),
     -- Workspace AI providers (sealed keys) and Idempotency-Key replay (migrations/ai-providers.lua)
-    ['zzsaml4_verified_domains'] = conditional_array(ProjectConfig.FEATURES.CORE, saml_sso_migrations, 4),
     ['zzai1_namespace_ai_providers'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 1),
     ['zzai2_idempotency_keys'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 2),
     -- A blank custom domain is NULL, not "" (namespaces.domain is UNIQUE: two "" collided on rename).
