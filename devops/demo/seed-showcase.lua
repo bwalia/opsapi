@@ -2,7 +2,7 @@
 -- Runs on the full demo (opsapi-showcase, PROJECT_CODE=all); follow it with
 -- seed-showcase-data.lua for the sample records.
 --
--- `showcase` holds ONLY fictional sample users (example.com) and the public
+-- `showcase` holds ONLY fictional sample users (sample.opsapi.org) and the public
 -- read-only account demo@opsapi.org, so the published demo login never shows
 -- the real people who sign in to the demo apps (they land in `demo`).
 -- The emailed sign-in code is off here only, so the published password works
@@ -72,15 +72,25 @@ end
 ensure_user({ email = "demo@opsapi.org", username = "opsapi-demo", first_name = "Demo",
               last_name = "Viewer", password = password }, "viewer")
 
--- Fictional sample users; nobody can sign in as them (random passwords).
+-- Fictional sample users; nobody can sign in as them: random passwords, and their
+-- domain is NOT one the demo SAML IdP trusts. That IdP signs any address at
+-- example.com / example.org without a password, so a sample user there would
+-- hand every visitor Ava's owner role.
+local SAMPLE_DOMAIN = "sample.opsapi.org"
 local samples = {
-    { "ava.patel@example.com",   "Ava",    "Patel",   "admin" },
-    { "liam.okafor@example.com", "Liam",   "Okafor",  "developer" },
-    { "mia.chen@example.com",    "Mia",    "Chen",    "developer" },
-    { "noah.berg@example.com",   "Noah",   "Berg",    "member" },
-    { "zara.ali@example.com",    "Zara",   "Ali",     "member" },
-    { "oscar.dubois@example.com","Oscar",  "Dubois",  "member" },
+    { "ava.patel",    "Ava",    "Patel",   "admin" },
+    { "liam.okafor",  "Liam",   "Okafor",  "developer" },
+    { "mia.chen",     "Mia",    "Chen",    "developer" },
+    { "noah.berg",    "Noah",   "Berg",    "member" },
+    { "zara.ali",     "Zara",   "Ali",     "member" },
+    { "oscar.dubois", "Oscar",  "Dubois",  "member" },
 }
+for _, s in ipairs(samples) do
+    -- Earlier seeds used example.com: move those rows rather than add a second set.
+    db.query("UPDATE users SET email = ? WHERE email = ? AND NOT EXISTS (SELECT 1 FROM users WHERE email = ?)",
+        s[1] .. "@" .. SAMPLE_DOMAIN, s[1] .. "@example.com", s[1] .. "@" .. SAMPLE_DOMAIN)
+    s[1] = s[1] .. "@" .. SAMPLE_DOMAIN
+end
 for _, s in ipairs(samples) do
     ensure_user({ email = s[1], username = s[1]:match("^[^@]+"):gsub("%.", "-"), first_name = s[2],
                   last_name = s[3], password = Global.generateRandomPassword() .. "Aa1!" }, s[4])
@@ -88,7 +98,7 @@ end
 
 -- The fictional Ava owns the workspace, so the public member list shows no
 -- real address; the real admin leaves it (platform admins still reach it).
-local ava = db.select("id FROM users WHERE email = 'ava.patel@example.com'")[1]
+local ava = db.select("id FROM users WHERE email = ?", "ava.patel@" .. SAMPLE_DOMAIN)[1]
 local owner_role_id = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = 'owner'", ns.id)[1].id
 db.update("namespaces", { owner_user_id = ava.id }, { id = ns.id })
 db.update("namespace_members", { is_owner = true }, { namespace_id = ns.id, user_id = ava.id })

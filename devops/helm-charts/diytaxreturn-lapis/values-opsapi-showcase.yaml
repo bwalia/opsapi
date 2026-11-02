@@ -18,6 +18,8 @@ projectCode: all
 
 frontendUrl: "https://showcase.demo.opsapi.org"
 
+# deploy-opsapi-showcase.yml pins the newest release (--set image.tag=1.0.N, IfNotPresent);
+# latest/Always is only the fallback for a hand-run helm upgrade.
 image:
   repository: bwalia/opsapi
   tag: latest
@@ -77,6 +79,11 @@ passwordResetAllowedOrigins: "https://showcase.demo.opsapi.org"
 
 # A demo, not a product: visitors use the shared read-only login and can't
 # create workspaces of their own here.
+# Its own session key (Secret made once by deploy-opsapi-showcase.yml), overriding the
+# JWT_SECRET_KEY in opsapi-demo/config: with the shared key a token from the identity
+# demo's open sign-up would be accepted here, and its platform admins would be ours.
+extraEnvFromSecrets:
+  - opsapi-showcase-jwt
 extraEnv:
   ALLOW_SELF_SERVICE_WORKSPACES: "false"
   # Public base of this API: SAML SP metadata, ACS and sign-in URLs are built

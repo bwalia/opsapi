@@ -45,5 +45,12 @@ else
     p, err = Q.create(ns.id, fields)
 end
 assert(p, err)
+-- example.com / example.org are reserved (RFC 2606): nobody can publish the TXT record that
+-- proves them, so the operator vouches for them here. No real account uses these domains:
+-- seed-showcase.lua keeps its sample users at sample.opsapi.org.
+for _, d in ipairs(p.email_domains) do
+    db.query([[INSERT INTO saml_verified_domains (namespace_id, domain) VALUES (?, ?)
+        ON CONFLICT (namespace_id, domain) DO NOTHING]], ns.id, d)
+end
 print(string.format("[showcase-saml] %s provider %s -> %s (role viewer, domains %s)",
     existing and "updated" or "created", p.uuid, p.idp_sso_url, table.concat(p.email_domains, ",")))

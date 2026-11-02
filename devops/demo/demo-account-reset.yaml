@@ -1,6 +1,8 @@
 # Puts the public demo account (demo@opsapi.org, published on opsapi.org/demo)
 # back every 30 minutes: its password, active flag and read-only role in the
-# showcase workspace. A visitor can change the password or deactivate the
+# showcase workspace. Both demo databases: the full demo's (opsapi_showcase,
+# where the published login lives now) and the identity demo's (opsapi_demo),
+# which still has the original showcase workspace and the same login. A visitor can change the password or deactivate the
 # account from inside the dashboard; this undoes it. The hash is of the
 # published password, so it isn't a secret.
 #
@@ -60,6 +62,18 @@ spec:
                   valueFrom:
                     secretKeyRef:
                       name: opsapi-showcase-db-auth
+                      key: POSTGRES_PASSWORD
+              volumeMounts:
+                - name: sql
+                  mountPath: /sql
+            - name: reset-identity-demo
+              image: pgvector/pgvector:pg16
+              command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "opsapi-demo-db", "-U", "pguser", "-d", "opsapi_demo", "-f", "/sql/reset.sql"]
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: opsapi-demo-db-auth
                       key: POSTGRES_PASSWORD
               volumeMounts:
                 - name: sql
