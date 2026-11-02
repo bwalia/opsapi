@@ -47,7 +47,7 @@ const FEATURE_META: Record<string, { name: string; blurb: string; icon: LucideIc
 type Filter = 'all' | 'deployed' | 'not_deployed';
 
 export default function AppsPage() {
-  const { data: info, isLoading, error } = useDataFetch(systemService.getInfo, []);
+  const { data: info, isLoading, error } = useDataFetch(systemService.getInfoWithApps, []);
   const { allMenu } = useMenu();
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
@@ -129,7 +129,7 @@ export default function AppsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {apps.map((app) => (
-            <AppTile key={app.feature} app={app} href={hrefFor(app, menuPathByModule)} />
+            <AppTile key={app.feature} app={app} href={hrefFor(app, menuPathByModule, allMenu)} />
           ))}
         </div>
       )}
@@ -141,12 +141,18 @@ function displayName(app: AppFeature): string {
   return FEATURE_META[app.feature]?.name ?? snakeToTitle(app.feature);
 }
 
-function hrefFor(app: AppFeature, menuPathByModule: Record<string, string>): string | undefined {
+// Open only links to a page the user can see in the sidebar; anything else would answer 403.
+function hrefFor(
+  app: AppFeature,
+  menuPathByModule: Record<string, string>,
+  menu: { path?: string }[],
+): string | undefined {
   if (!app.enabled) return undefined;
   for (const m of app.modules) {
     if (menuPathByModule[m.machine_name]) return menuPathByModule[m.machine_name];
   }
-  return FEATURE_META[app.feature]?.href;
+  const fallback = FEATURE_META[app.feature]?.href;
+  return fallback && menu.some((item) => item.path === fallback) ? fallback : undefined;
 }
 
 function AppTile({ app, href }: { app: AppFeature; href?: string }) {

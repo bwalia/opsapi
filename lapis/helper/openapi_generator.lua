@@ -145,6 +145,7 @@ local PUBLIC_PATHS = {
     ["/health"]                  = true,
     ["/ready"]                   = true,
     ["/live"]                    = true,
+    ["/api/v2/system/info"]      = true,
 }
 
 local function is_public_path(path)
@@ -1017,6 +1018,27 @@ local function get_manual_paths()
                         },
                     },
                 },
+            },
+        },
+    }
+
+    -- app.lua defines these two directly, so the routes/ scan doesn't find them.
+    paths["/api/v2/system/info"] = {
+        get = {
+            tags = { "System" },
+            summary = "The PROJECT_CODE, enabled features and version this server runs (public)",
+            operationId = "get_system_info",
+            responses = { ["200"] = { description = "Project configuration and build" } },
+        },
+    }
+    paths["/api/v2/system/apps"] = {
+        get = {
+            tags = { "System" },
+            summary = "Every app (feature) with its modules and whether this server runs it (signed in)",
+            operationId = "get_system_apps",
+            responses = {
+                ["200"] = { description = "{ success, data = [ { feature, enabled, plugin, modules } ] }" },
+                ["401"] = { description = "Not signed in" },
             },
         },
     }
