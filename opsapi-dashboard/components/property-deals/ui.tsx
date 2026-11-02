@@ -223,7 +223,7 @@ export function ErrorNote({ error, product = 'Property Deals' }: { error?: PdErr
   if (error.status === 403) {
     return (
       <div className="flex items-center gap-2 rounded-lg bg-warning-500/10 p-3 text-sm text-warning-700">
-        <Lock className="h-4 w-4" aria-hidden /> You don&apos;t have access to this. Ask a workspace admin for a {product} role.
+        <Lock className="h-4 w-4" aria-hidden /> You don&apos;t have access to this page. Ask a workspace admin to add it to your {product} role.
       </div>
     );
   }

@@ -84,7 +84,7 @@ describe('Property PA — pages, roles and the plugin switch', () => {
   it('An operator gets no manager pages', () => {
     for (const path of ['manager', 'insights']) {
       visitAs(seed.operator, `/dashboard/property-pa/${path}`);
-      cy.contains('Ask a workspace admin for a Property PA role', { timeout: 20000 });
+      cy.contains('Ask a workspace admin to add it to your Property PA role', { timeout: 20000 });
       cy.contains('h1', /Manager today|PA insights/).should('not.exist');
     }
   });
