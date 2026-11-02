@@ -49,7 +49,8 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   stores: { label: 'Total stores', module: 'stores', source: 'core', size: 'stat' },
   revenue: { label: 'Total revenue', module: 'orders', source: 'core', size: 'stat' },
   orders_chart: { label: 'Revenue by month', module: 'orders', source: 'core', size: 'half' },
-  health: { label: 'System health', module: 'dashboard', size: 'half' },
+  // Server, database and storage details: for people who run the workspace (settings), not every member.
+  health: { label: 'System health', module: 'settings', size: 'half' },
   recent_orders: { label: 'Recent orders', module: 'orders', source: 'core', size: 'full' },
   my_tasks_today: { label: 'My tasks today', module: 'projects', size: 'full' },
   pd_active_deals: { label: 'Active deals', module: 'property_deals_deals', source: 'property', size: 'stat' },

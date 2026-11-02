@@ -44,6 +44,8 @@ export default function PWAInstallPrompt() {
 
     const onPrompt = (e: Event) => {
       e.preventDefault(); // keep it from auto-showing; we surface our own button
+      // Chrome fires this again on later in-app navigations; once closed, stay closed.
+      if (dismissed()) return;
       setDeferred(e as BeforeInstallPromptEvent);
       setHidden(false);
     };

@@ -17,13 +17,23 @@ import {
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { ProtectedPage } from '@/components/permissions';
 import { EditRolesModal } from '@/components/namespace/EditRolesModal';
 import { namespaceService } from '@/services';
 import { formatDate, getInitials } from '@/lib/utils';
 import type { NamespaceMember, NamespaceRole, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
+// The members API needs users.read; without it the page used to show "No members found".
 export default function NamespaceMembersPage() {
+  return (
+    <ProtectedPage module="users" action="read" title="Members">
+      <NamespaceMembersContent />
+    </ProtectedPage>
+  );
+}
+
+function NamespaceMembersContent() {
   const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
   const [members, setMembers] = useState<NamespaceMember[]>([]);
   const [roles, setRoles] = useState<NamespaceRole[]>([]);
