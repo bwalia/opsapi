@@ -65,7 +65,8 @@ function Reports() {
         <Stat label="Deals completed" value={String(lateD?.completed ?? '—')} hint={lateD?.on_time_pct !== undefined ? `${lateD.on_time_pct}% on time` : undefined} />
         <Stat label="Avg days late" value={String(lateD?.avg_days_late ?? '—')} tone={Number(lateD?.late || 0) > 0 ? 'warning' : undefined} />
         <Stat label="Late penalty cost" value={gbp(lateD?.penalty_cost)} tone={Number(lateD?.penalty_cost || 0) > 0 ? 'error' : undefined} />
-        <Stat label="AI cost" value={`$${Number(aiD?.total_cost_usd || 0).toFixed(2)}`} />
+        {/* AI providers bill in US dollars; say so rather than show $ beside £ figures unexplained. */}
+        <Stat label="AI cost (US$)" value={`$${Number(aiD?.total_cost_usd || 0).toFixed(2)}`} hint="as the AI provider bills it" />
       </div>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>

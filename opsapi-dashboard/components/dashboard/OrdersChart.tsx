@@ -68,7 +68,8 @@ const OrdersChart: React.FC<OrdersChartProps> = memo(function OrdersChart({
   isLoading,
 }) {
   // Memoize the Y-axis formatter
-  const yAxisFormatter = useCallback((value: number) => `$${value / 1000}k`, []);
+  // Same currency as the Total revenue card (formatCurrency defaults to GBP).
+  const yAxisFormatter = useCallback((value: number) => `£${value / 1000}k`, []);
 
   // Memoize chart configuration
   const chartMargin = useMemo(() => ({ top: 10, right: 10, left: 0, bottom: 0 }), []);

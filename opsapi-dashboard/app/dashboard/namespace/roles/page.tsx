@@ -15,6 +15,7 @@ import {
 import { Button, Card, Badge, ConfirmDialog } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { ProtectedPage } from '@/components/permissions';
 import { namespaceService } from '@/services';
 import type { NamespaceRole, NamespacePermissions, NamespaceModuleMeta, NamespaceActionMeta, PermissionAction } from '@/types';
 import toast from 'react-hot-toast';
@@ -39,7 +40,16 @@ function normalizePermissions(raw: unknown): NamespacePermissions {
   return result as NamespacePermissions;
 }
 
+// The roles API needs roles.read; say so instead of showing an empty page.
 export default function NamespaceRolesPage() {
+  return (
+    <ProtectedPage module="roles" action="read" title="Roles & Permissions">
+      <NamespaceRolesContent />
+    </ProtectedPage>
+  );
+}
+
+function NamespaceRolesContent() {
   const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
   const [roles, setRoles] = useState<NamespaceRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);

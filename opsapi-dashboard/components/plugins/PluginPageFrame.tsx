@@ -44,6 +44,7 @@ interface PendingConfirm {
   title: string;
   message: string;
   confirmLabel: string;
+  cancelLabel: string;
   danger: boolean;
 }
 
@@ -173,6 +174,8 @@ export function PluginPageFrame({ schema }: { schema: PluginPageSchema }) {
             title: text(o.title, 120, 'Are you sure?'),
             message: text(o.message, 600),
             confirmLabel: text(o.confirmLabel, 40, 'Confirm'),
+            // "Cancel" next to "Cancel call" is ambiguous; a page can name the way out ("Keep the call").
+            cancelLabel: text(o.cancelLabel, 40, 'Cancel'),
             danger: o.danger === true,
           });
           break;
@@ -280,6 +283,7 @@ export function PluginPageFrame({ schema }: { schema: PluginPageSchema }) {
         title={confirm?.title ?? ''}
         message={confirm?.message ?? ''}
         confirmText={confirm?.confirmLabel}
+        cancelText={confirm?.cancelLabel}
         variant={confirm?.danger ? 'danger' : 'info'}
       />
     </div>

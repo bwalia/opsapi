@@ -30,12 +30,9 @@ export const dashboardService = {
         0
       );
 
-      // Generate mock revenue by month data (until API provides this)
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      const revenueByMonth = months.map((month) => ({
-        month,
-        revenue: Math.floor(Math.random() * 50000) + 10000,
-      }));
+      // ponytail: no orders-by-month endpoint yet, so the chart shows "No data available"
+      // rather than invented figures (it used Math.random()). Add an aggregate route to fill it.
+      const revenueByMonth: { month: string; revenue: number }[] = [];
 
       return {
         totalUsers: dbDetails?.total_users || 0,

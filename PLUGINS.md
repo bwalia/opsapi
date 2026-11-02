@@ -437,7 +437,7 @@ The page itself:
 | `ops.can(action)`, `ops.can(module, action)` | Whether the user may do it: for the page's module as the API decided, otherwise from the user's role. Use it to hide buttons; the API still enforces everything. |
 | `ops.navigate('/dashboard/…')` | Open another dashboard page. |
 | `ops.toast(message, 'success' \| 'error' \| 'info')` | A dashboard notification. |
-| `ops.confirm({ title, message, confirmLabel, danger })` | The dashboard's confirm dialog. Resolves `true` or `false`. |
+| `ops.confirm({ title, message, confirmLabel, cancelLabel, danger })` | The dashboard's confirm dialog. Resolves `true` or `false`. `cancelLabel` names the way out (default "Cancel"). |
 | `ops.setParams({ ticket: id })`, `ops.on('params', fn)` | Keep page state in the dashboard URL, so links can be shared and the back button works. `ops.context.params` has the values the page opened with. |
 | `ops.on('theme', fn)` | The user switched light/dark or the branding changed. `opsapi-ui.css` follows by itself. |
 

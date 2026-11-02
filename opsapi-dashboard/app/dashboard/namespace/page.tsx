@@ -40,6 +40,9 @@ export default function NamespacePage() {
   // Same check as the Activity page's own guard, so the card never leads to "Cannot access".
   const canViewActivity = usePermissions().hasPermission("activity", "read");
   const canViewEmail = usePermissions().hasPermission("namespace", "read");
+  // The members and roles APIs need users.read / roles.read: no card that leads to an empty page.
+  const canViewMembers = usePermissions().hasPermission("users", "read");
+  const canViewRoles = usePermissions().hasPermission("roles", "read");
   const [stats, setStats] = useState<NamespaceStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
@@ -237,47 +240,51 @@ export default function NamespacePage() {
 
       {/* Quick Links */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Link href="/dashboard/namespace/members">
-          <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center group-hover:bg-primary-200 transition-colors">
-                  <Users className="w-5 h-5 text-primary-600" />
+        {canViewMembers && (
+          <Link href="/dashboard/namespace/members">
+            <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+                    <Users className="w-5 h-5 text-primary-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-secondary-900">
+                      Manage Members
+                    </h3>
+                    <p className="text-sm text-secondary-500">
+                      Add or remove team members
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-secondary-900">
-                    Manage Members
-                  </h3>
-                  <p className="text-sm text-secondary-500">
-                    Add or remove team members
-                  </p>
-                </div>
+                <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
               </div>
-              <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
-            </div>
-          </Card>
-        </Link>
+            </Card>
+          </Link>
+        )}
 
-        <Link href="/dashboard/namespace/roles">
-          <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-warning-100 flex items-center justify-center group-hover:bg-warning-200 transition-colors">
-                  <ShieldCheck className="w-5 h-5 text-warning-600" />
+        {canViewRoles && (
+          <Link href="/dashboard/namespace/roles">
+            <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-warning-100 flex items-center justify-center group-hover:bg-warning-200 transition-colors">
+                    <ShieldCheck className="w-5 h-5 text-warning-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-secondary-900">
+                      Roles & Permissions
+                    </h3>
+                    <p className="text-sm text-secondary-500">
+                      Configure access controls
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-secondary-900">
-                    Roles & Permissions
-                  </h3>
-                  <p className="text-sm text-secondary-500">
-                    Configure access controls
-                  </p>
-                </div>
+                <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
               </div>
-              <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
-            </div>
-          </Card>
-        </Link>
+            </Card>
+          </Link>
+        )}
 
         {canManageKeys && (
           <Link href="/dashboard/namespace/api-keys">
