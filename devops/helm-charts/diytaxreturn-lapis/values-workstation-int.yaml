@@ -182,7 +182,11 @@ setup:
 # of this shared opsapi: its instructor dashboard (int-teach.workstation.academy)
 # is a cross-origin browser client of this API. Additive — the existing
 # workstation.co.uk origins are unaffected.
-corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk"
+#
+# pintopets.app: PintoPets (bwalia/pintopets) signs users in with this OpsAPI's
+# hosted sign-in, which only returns a token to a trusted frontend_url
+# (int.pintopets.app). Additive.
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk,pintopets.app"
 
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.
@@ -231,9 +235,16 @@ autoscaling:
 # workspace. `:int` is rebuilt by that repo's CI; Always so each deploy picks up the latest.
 # Int only: a moving tag can't go to test/acc/prod. Before it leaves int, have that CI push an
 # immutable tag (commit sha) and pin it here; see PLUGINS.md "Plugin overlays" for why.
+#
+# pintopets = PintoPets' data plugin (public repo bwalia/pintopets, opsapi/pintopets): pets
+# and their health records, in the `pintopets` workspace. Public image on Docker Hub, pushed
+# by that repo's deploy workflow with `:int` and the commit sha. Same int-only rule as above.
 pluginOverlays:
   - name: portfoliolab
     image: int-spectoncr.diytaxreturn.co.uk/joyai/portfoliolab-plugin:int
+    pullPolicy: Always
+  - name: pintopets
+    image: docker.io/harneetk78/pintopets-opsapi-plugin:int
     pullPolicy: Always
 imagePullSecrets:
   - name: nebulacr-login
