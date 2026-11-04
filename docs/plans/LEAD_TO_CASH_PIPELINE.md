@@ -1,6 +1,10 @@
 # Lead-to-cash pipeline: plan
 
-Status: plan only, nothing built yet (2026-11-04).
+Status (2026-11-04): **built** on branch `feat/lead-pipeline` (one PR), except what §12 lists as later.
+Decisions taken: core CRM for every workspace; members see their own and unassigned leads, managers
+everything; the AI runs on every new lead; meetings by calendar invite; payment links left for later.
+Added on request: the AI sizes the deal (web price search), suggests the next best action for the
+situation, and deals can be passed to partners for a commission (§4.10).
 Covers: core CRM leads and deals, the Property Deals module, invoicing and payments. Joy (the portfoliolab plugin in bwalia/joyai) has its own client journey and is out of scope (see §11).
 
 ---
@@ -189,6 +193,19 @@ For each stage: what the system does by itself, what a person does, and what the
   - The deal shows "Paid".
 - **Accounting** (only when that module is on): post the invoice (receivables, sales, VAT) and the payment (bank, receivables) through `lib/accounting-engine.lua`.
 
+### 4.10 Partners and commissions (added)
+- A **partner** is a CRM account with a profile: what it supplies, categories, regions, who receives
+  referrals, and the default commission (% of the deal or a fixed fee).
+- The AI matches a lead's need against the partner directory and can suggest **“Pass to a partner”**
+  as the next best action when the business can't fulfil it itself.
+- **Pass to partner** (lead or deal): the partner gets an email with a private link
+  (`/partner-referral/<token>`, only a hash is stored) to accept or decline, and later to say they won
+  or lost it with the final value. The customer's name and contact details are shared only when a
+  person confirms the customer agreed (UK GDPR); otherwise the partner sees the need and its size.
+- Referral states: draft → sent → accepted → won → commission invoiced → commission paid (or declined /
+  lost / cancelled). Commission is recomputed from the final value; **Invoice the commission** creates a
+  draft invoice to the partner linked to the deal; when it's paid (`invoice.paid`) the referral closes.
+
 ### 4.9 Reports
 - **Funnel:** leads → contacted → qualified → meeting → deal → won → paid, by source, owner and month, with the conversion rate and the **typical time between steps**.
 - **Speed to lead:** typical time to first contact, and the percentage within the time allowed.
@@ -297,6 +314,22 @@ For each stage: what the system does by itself, what a person does, and what the
   Run the same script with Property Deals on: a seller lead with a property → a deal on the map with the property kept → a fee invoice at the stage gate.
 - **Permissions:** run the API regression sandbox (main vs branch, with copies of the database and no internet) to show that existing users keep their access and only the new rules change.
 - **UI:** Cypress through the flow as a first-time user, and screenshots of each screen.
+
+## 12. Built vs later
+
+Built (one PR): everything in §3 except the invoice number race, §4.1–4.8 except quotes and pay links,
+§4.10, the board/insights/list, the lead page, settings, partners, and the checks in §10
+(`lapis/spec/crm-lead-pipeline-pure_spec.lua`, `lapis/spec/lead-pipeline-e2e/` check.py, ai_check.lua,
+pd_check.lua, `opsapi-dashboard/cypress/e2e/leads-pipeline.cy.ts`).
+
+Later:
+- **Payment links on invoices.** Workspaces can already connect Stripe (Billing → Stripe Connect
+  onboarding), but invoices have no checkout link or webhook into `invoice_payments`; payments are
+  recorded by hand. Next step: Checkout on the workspace's connected account + a webhook branch.
+- **Quotes** as an invoicing document type with a public accept link.
+- `partially_paid` / `overdue` invoice statuses, the numbering race, accounting posting.
+- Calendar account sync (Google/Microsoft free/busy), a self-booking page, paid SMS/WhatsApp, lead ads.
+- CRM deals board/page in core (Property Deals has its own); deal-level referrals from a deal page.
 
 ## 11. Out of scope, and how Joy fits
 
