@@ -193,7 +193,8 @@ def chat(key, msgs, created, quote_id=None, order_id=None, consent=False, countr
 chat("s1", [SYS, U, S("Hello! What will you run on it?")], ago("1 day"), consent=True, country="GB")
 chat("s2", [U, S("(no reply)")], ago("2 days"), quote_id=Q2, country="GB")
 chat("s3", [U, S("Added it.\n\n[tools: search_catalog, add_to_cart]")], ago("3 days"), country="US")
-chat("s4", [U, S("It has 96 GB.", tools=["get_product"]), U, S("Done")], ago("4 days"), order_id=O1, member=True)
+# s4 is the shape the shop now writes: a structured tools list AND the text suffix (must count once)
+chat("s4", [U, S("It has 96 GB.\n\n[tools: get_product]", tools=["get_product"]), U, S("Done")], ago("4 days"), order_id=O1, member=True)
 chat("s5", [SYS], ago("1 day"))                                                                  # never typed
 chat("s6", [U, S("Old chat")], ago("45 days"), consent=True)                                       # previous period
 
