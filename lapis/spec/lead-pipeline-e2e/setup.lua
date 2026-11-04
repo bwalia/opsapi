@@ -59,13 +59,13 @@ for _, u in ipairs({ rep1, rep2 }) do
 end
 
 local JWT = require("helper.jwt-helper")
-local tokens = { namespace_id = ns.id, slug = ns.slug, users = {} }
+local tokens = { namespace_id = ns.id, namespace_uuid = ns.uuid, slug = ns.slug, name = ns.name, users = {} }
 for key, u in pairs({ owner = owner, rep1 = rep1, rep2 = rep2 }) do
     local m = db.query("SELECT * FROM namespace_members WHERE namespace_id = ? AND user_id = ?", ns.id, u.id)[1]
     local roles = db.query([[SELECT r.role_name, r.display_name FROM namespace_user_roles ur JOIN namespace_roles r ON r.id = ur.namespace_role_id
         WHERE ur.namespace_member_id = ?]], m.id)
     u.roles = {}
-    tokens.users[key] = { uuid = u.uuid, email = u.email,
+    tokens.users[key] = { uuid = u.uuid, email = u.email, first_name = u.first_name, last_name = u.last_name,
         token = JWT.generateNamespaceToken(u, ns, m, { namespace_roles = roles }) }
 end
 local f = assert(io.open("/tmp/lp_tokens.json", "w"))

@@ -303,8 +303,8 @@ function AI.run(run)
     end
     local chain = AI.chain(ns, settings)
     if #chain == 0 then
-        return finish(run, lead_id, "skipped", { error = "No AI provider is set up for this workspace. "
-            .. "An admin can add one under Settings → AI providers." })
+        return finish(run, lead_id, "skipped", { error = "No AI model is set up for this workspace. "
+            .. "A workspace admin can add one under Workspace → AI models." })
     end
     if spent_today(ns) >= settings.ai_daily_cost_usd and settings.ai_daily_cost_usd > 0 then
         return finish(run, lead_id, "skipped", { error = "Today's AI budget for lead analysis is used up. "
