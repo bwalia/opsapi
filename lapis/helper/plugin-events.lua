@@ -556,6 +556,10 @@ local CORE_SUBSCRIPTIONS = {
     -- Form responses' emails (lib/forms/jobs.lua).
     { feature = "forms", subscriber = "core.forms",
       events = { "form.submission.created", "form.submission.updated" } },
+    -- Lead pipeline (lib/crm/lead-jobs.lua): a new lead starts its pipeline, meeting
+    -- invites, a paid commission invoice closes its referral.
+    { feature = "crm", subscriber = "core.crm",
+      events = { "crm.lead.created", "crm.activity.created", "crm.activity.updated", "invoice.paid" } },
 }
 function PluginEvents.syncCore()
     local ProjectConfig = require("helper.project-config")
@@ -1015,6 +1019,16 @@ function PluginEvents.start(projects_root)
             ngx.timer.every(Stats.FLUSH_SECONDS, Stats.tick)
         else
             ngx.log(ngx.ERR, "[plugin-events] forms jobs failed to load: ", tostring(forms_jobs))
+        end
+    end
+    -- Lead pipeline: its outbox handlers and timers (worker 0).
+    if require("helper.project-config").isFeatureEnabled("crm") then
+        local ok_crm, crm_jobs = pcall(require, "lib.crm.lead-jobs")
+        if ok_crm then
+            _handlers["core.crm"] = crm_jobs.handlers
+            crm_jobs.start()
+        else
+            ngx.log(ngx.ERR, "[plugin-events] lead pipeline jobs failed to load: ", tostring(crm_jobs))
         end
     end
     -- Always poll: workspace webhooks are deliveries too, plugins or not.

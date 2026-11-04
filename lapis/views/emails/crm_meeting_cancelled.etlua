@@ -1,0 +1,8 @@
+<p>Hello<% if recipient_name and recipient_name ~= "" then %> <%= recipient_name %><% end %>,</p>
+<p>This meeting has been cancelled:</p>
+<div class="info-box">
+  <p style="margin: 0 0 6px 0;"><strong><%= meeting_title %></strong></p>
+  <p style="margin: 0;"><%= when %></p>
+</div>
+<p>Opening the attachment removes it from your calendar. We'll be in touch to find another time.</p>
+<% if organiser_name and organiser_name ~= "" then %><p>Best wishes,<br><%= organiser_name %></p><% end %>

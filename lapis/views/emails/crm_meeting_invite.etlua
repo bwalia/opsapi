@@ -1,0 +1,11 @@
+<p>Hello<% if recipient_name and recipient_name ~= "" then %> <%= recipient_name %><% end %>,</p>
+<p><% if updated and updated ~= "" then %>The meeting has changed. Here are the new details.<% else %>You're invited to a meeting.<% end %></p>
+<div class="info-box">
+  <p style="margin: 0 0 6px 0;"><strong><%= meeting_title %></strong></p>
+  <p style="margin: 0 0 6px 0;"><%= when %></p>
+  <% if location and location ~= "" then %><p style="margin: 0 0 6px 0;">Where: <%= location %></p><% end %>
+  <% if meeting_url and meeting_url ~= "" then %><p style="margin: 0;">Join: <a href="<%= meeting_url %>"><%= meeting_url %></a></p><% end %>
+</div>
+<% if notes and notes ~= "" then %><p><%= notes %></p><% end %>
+<p>The calendar invite is attached: open it to add the meeting to your calendar.</p>
+<% if organiser_name and organiser_name ~= "" then %><p>Best wishes,<br><%= organiser_name %></p><% end %>
