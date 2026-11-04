@@ -170,6 +170,7 @@ local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "mig
 local shop_insights_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-insights") or {}
 local shop_advisor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-advisor") or {}
 local shop_supplier_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-suppliers") or {}
+local shop_analytics_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-analytics") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -2641,6 +2642,12 @@ local _migrations = {
     ['zzs29_shop_price_lock_60'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 8),
     -- AI advisor: visitor IP / country / contact and member flag on chat sessions
     ['zzs30_shop_advisor_chat_visitor'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_advisor_migrations, 2),
+    -- Shop Analytics: window indexes, RBAC module shop_analytics (+ owner/admin grants), sidebar item
+    ['zzs31_shop_analytics_indexes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 1),
+    ['zzs32_shop_analytics_module'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 2),
+    ['zzs33_shop_analytics_grants'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 3),
+    ['zzs34_shop_analytics_menu_item'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 4),
+    ['zzs35_shop_analytics_enable_menu'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 5),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

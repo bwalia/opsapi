@@ -604,6 +604,7 @@ ProjectConfig.PROJECT_MODULES = {
     -- Shop modules — RBAC module the routes/shop-admin.lua gates on ("shop")
     shop = {
         { machine_name = "shop", name = "Shop", description = "AI hardware shop: catalogue, stock, orders, quotes, chats and knowledge", category = "Commerce" },
+        { machine_name = "shop_analytics", name = "Shop Analytics", description = "Shop sales, checkout, cart, quote and AI chat reporting", category = "Commerce" },
     },
 
     -- Field service modules — RBAC modules the routes/field-service-*.lua gate on
