@@ -170,7 +170,7 @@ MenuQueries.GROUP_OF = {
     crm = "sales", crm_leads = "sales", customers = "sales", forms = "sales",
     invoices = "finance", purchase_orders = "finance", accounting = "finance", document_templates = "finance",
     billing = "finance",
-    shop = "commerce", orders = "commerce", products = "commerce", stores = "commerce", delivery = "commerce",
+    shop = "commerce", shop_analytics = "commerce", orders = "commerce", products = "commerce", stores = "commerce", delivery = "commerce",
     projects = "work", timesheets = "work", employees = "work",
     hospitals = "healthcare", patients = "healthcare", care_home = "healthcare",
     tax = "tax",
