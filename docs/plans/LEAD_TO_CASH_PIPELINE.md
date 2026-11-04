@@ -1,10 +1,10 @@
 # Lead-to-cash pipeline: plan
 
-Status (2026-11-04): **built** on branch `feat/lead-pipeline` (one PR), except what §12 lists as later.
+Status (2026-11-04): **built** on branch `feat/lead-pipeline` (one PR), except what §11 lists as later.
 Decisions taken: core CRM for every workspace; members see their own and unassigned leads, managers
 everything; the AI runs on every new lead; meetings by calendar invite; payment links left for later.
 Added on request: the AI sizes the deal (web price search), suggests the next best action for the
-situation, and deals can be passed to partners for a commission (§4.10).
+situation, and deals can be passed to partners for a commission (§4.9).
 Covers: core CRM leads and deals, the Property Deals module, invoicing and payments. Joy (the portfoliolab plugin in bwalia/joyai) has its own client journey and is out of scope (see §11).
 
 ---
@@ -193,7 +193,7 @@ For each stage: what the system does by itself, what a person does, and what the
   - The deal shows "Paid".
 - **Accounting** (only when that module is on): post the invoice (receivables, sales, VAT) and the payment (bank, receivables) through `lib/accounting-engine.lua`.
 
-### 4.10 Partners and commissions (added)
+### 4.9 Partners and commissions (added)
 - A **partner** is a CRM account with a profile: what it supplies, categories, regions, who receives
   referrals, and the default commission (% of the deal or a fixed fee).
 - The AI matches a lead's need against the partner directory and can suggest **“Pass to a partner”**
@@ -206,7 +206,7 @@ For each stage: what the system does by itself, what a person does, and what the
   lost / cancelled). Commission is recomputed from the final value; **Invoice the commission** creates a
   draft invoice to the partner linked to the deal; when it's paid (`invoice.paid`) the referral closes.
 
-### 4.9 Reports
+### 4.10 Reports
 - **Funnel:** leads → contacted → qualified → meeting → deal → won → paid, by source, owner and month, with the conversion rate and the **typical time between steps**.
 - **Speed to lead:** typical time to first contact, and the percentage within the time allowed.
 - **Pipeline value:** open deals × probability by stage, and a forecast by expected close month.
@@ -315,10 +315,9 @@ For each stage: what the system does by itself, what a person does, and what the
 - **Permissions:** run the API regression sandbox (main vs branch, with copies of the database and no internet) to show that existing users keep their access and only the new rules change.
 - **UI:** Cypress through the flow as a first-time user, and screenshots of each screen.
 
-## 12. Built vs later
+## 11. Built vs later
 
-Built (one PR): everything in §3 except the invoice number race, §4.1–4.8 except quotes and pay links,
-§4.10, the board/insights/list, the lead page, settings, partners, and the checks in §10
+Built (one PR): everything in §3 except the invoice number race, §4.1–4.9 except quotes and pay links, the board/insights/list, the lead page, settings, partners, and the checks in §10
 (`lapis/spec/crm-lead-pipeline-pure_spec.lua`, `lapis/spec/lead-pipeline-e2e/` check.py, ai_check.lua,
 pd_check.lua, `opsapi-dashboard/cypress/e2e/leads-pipeline.cy.ts`).
 
@@ -331,7 +330,7 @@ Later:
 - Calendar account sync (Google/Microsoft free/busy), a self-booking page, paid SMS/WhatsApp, lead ads.
 - CRM deals board/page in core (Property Deals has its own); deal-level referrals from a deal page.
 
-## 11. Out of scope, and how Joy fits
+## 12. Out of scope, and how Joy fits
 
 - **Joy** (the Portfolio Lab CRM in bwalia/joyai) keeps its own client journey, calls and templates. Later it can listen to the same `crm.lead.*` events instead of having its own intake.
 - **Not in v1:**
