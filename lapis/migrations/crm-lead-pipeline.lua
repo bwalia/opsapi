@@ -239,6 +239,13 @@ return {
         if not table_exists("crm_deals") then return end
         db.query("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS lead_id BIGINT REFERENCES crm_leads(id) ON DELETE SET NULL")
         db.query("CREATE INDEX IF NOT EXISTS crm_deals_lead_idx ON crm_deals (lead_id) WHERE lead_id IS NOT NULL")
+        -- Deals closed from the CRM page (closed_won / closed_lost) were never marked won/lost.
+        db.query([[UPDATE crm_deals SET status = 'won', won_at = COALESCE(won_at, updated_at),
+            actual_close_date = COALESCE(actual_close_date, updated_at::date)
+            WHERE stage IN ('closed_won', 'won') AND status = 'open']])
+        db.query([[UPDATE crm_deals SET status = 'lost', lost_at = COALESCE(lost_at, updated_at),
+            actual_close_date = COALESCE(actual_close_date, updated_at::date)
+            WHERE stage IN ('closed_lost', 'lost') AND status = 'open']])
         -- Deals converted before this migration: link them back to their lead.
         db.query([[
             UPDATE crm_deals d SET lead_id = l.id

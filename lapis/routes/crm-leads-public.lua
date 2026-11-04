@@ -51,9 +51,52 @@ return function(app)
                 if ok then data = parsed end
             end
 
+            if type(data) ~= "table" then data = {} end
+
+            -- Bots: a hidden "honeypot" field people never fill in (send it empty
+            -- as _hp, hp or website_hp). A filled one gets the normal thank-you
+            -- and nothing is stored, so the bot learns nothing.
+            for _, k in ipairs({ "_hp", "hp", "website_hp" }) do
+                if type(data[k]) == "string" and data[k] ~= "" then
+                    ngx.log(ngx.NOTICE, "[public-lead] honeypot filled for ", namespace.slug)
+                    return { status = 201, json = { success = true, message = "Thank you for your submission" } }
+                end
+            end
+            -- Cloudflare Turnstile (the workspace's key from Forms settings): checked
+            -- whenever a token is sent, and required when the lead settings say so.
+            local token = data.captcha_token or data["cf-turnstile-response"]
+            local required = require("lib.crm.lead-settings").get(namespace.id).public_captcha == true
+            if required or (type(token) == "string" and token ~= "") then
+                local ok_ws, Workspace = pcall(require, "lib.forms.workspace")
+                local secret
+                if ok_ws then
+                    local ok_t, _, s2 = pcall(Workspace.turnstile, namespace.id)
+                    if ok_t then secret = s2 end
+                end
+                local verified = type(secret) == "string" and secret ~= "" and type(token) == "string"
+                    and Workspace.verify(secret, token, RateLimit.getClientIP())
+                if not verified and (required or type(secret) == "string") then
+                    return { status = 400, json = { success = false, code = "captcha",
+                        error = "Please complete the security check and try again." } }
+                end
+            end
+
+            -- Text fields only, with sensible lengths.
+            local LIMITS = { first_name = 120, last_name = 120, email = 254, phone = 40, company_name = 200,
+                job_title = 120, source = 64, channel = 64, campaign = 120, landing_page_url = 2000,
+                referrer_url = 2000, message = 10000, comments = 10000, notes = 10000 }
+            for k, max in pairs(LIMITS) do
+                local v = data[k]
+                if v ~= nil and type(v) ~= "string" then data[k] = nil
+                elseif type(v) == "string" and #v > max then data[k] = v:sub(1, max) end
+            end
+
             -- Require at least email or first_name
             if (not data.email or data.email == "") and (not data.first_name or data.first_name == "") then
                 return { status = 400, json = { success = false, error = "Email or name is required" } }
+            end
+            if data.email and data.email ~= "" and not data.email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$") then
+                return { status = 400, json = { success = false, error = "Please enter a valid email address" } }
             end
 
             -- Capture source metadata from request headers

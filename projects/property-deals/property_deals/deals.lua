@@ -112,48 +112,77 @@ function Deals.create(ns, input, user_uuid, settings)
     return U.tx(function()
         local lead, contact
         if input.lead_uuid then
-            lead = U.one("SELECT * FROM crm_leads WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL", input.lead_uuid, ns)
+            lead = U.one("SELECT * FROM crm_leads WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL FOR UPDATE",
+                input.lead_uuid, ns)
             if not lead then U.fail(422, "Validation failed", { lead_uuid = "not found" }) end
-            contact = contact_from_lead(ns, lead, user_uuid)
         elseif input.contact_uuid then
             contact = U.one("SELECT * FROM crm_contacts WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL",
                 input.contact_uuid, ns)
             if not contact then U.fail(422, "Validation failed", { contact_uuid = "not found" }) end
         end
 
+        -- The property: the one asked for, else the one already on the lead (kept, never wiped).
+        local property_uuid = input.property_uuid
+        if not property_uuid and lead then
+            local details = U.one("SELECT property_uuid FROM property_deals_lead_details WHERE namespace_id = ? AND lead_uuid = ?",
+                ns, lead.uuid)
+            property_uuid = details and details.property_uuid ~= db.NULL and details.property_uuid or nil
+        end
         local property
-        if input.property_uuid then
-            property = U.one("SELECT * FROM property_deals_properties WHERE uuid = ? AND namespace_id = ?", input.property_uuid, ns)
+        if property_uuid then
+            property = U.one("SELECT * FROM property_deals_properties WHERE uuid = ? AND namespace_id = ?", property_uuid, ns)
             if not property then U.fail(422, "Validation failed", { property_uuid = "not found" }) end
         end
 
         local name = input.name
-        if not name or name == "" then
-            local who = contact and table.concat({ contact.first_name or "", contact.last_name or "" }, " "):match("^%s*(.-)%s*$")
-            name = (property and property.address_line1) or (who ~= "" and who) or "New deal"
+        local pipeline_id = pipeline_for(ns, tpl, version)
+        local value = tonumber(input.agreed_price or input.offer_amount)
+        local currency = input.currency or (settings and settings.currency) or "GBP"
+        local crm_deal
+        if lead and lead.converted_deal_id and lead.converted_deal_id ~= db.NULL then
+            -- Converted already (core Convert): the property deal joins that deal.
+            crm_deal = U.one("SELECT * FROM crm_deals WHERE id = ? AND namespace_id = ? AND deleted_at IS NULL",
+                lead.converted_deal_id, ns)
+            if not crm_deal then U.fail(409, "This lead's deal was deleted") end
+            if U.one("SELECT 1 AS x FROM property_deals_deals WHERE crm_deal_uuid = ?", crm_deal.uuid) then
+                U.fail(409, "This lead already has a property deal")
+            end
+            contact = crm_deal.contact_id ~= db.NULL and U.one("SELECT * FROM crm_contacts WHERE id = ?", crm_deal.contact_id)
+                or contact_from_lead(ns, lead, user_uuid)
+            db.update("crm_deals", { pipeline_id = pipeline_id, stage = first.key, name = (name and name ~= "") and name or nil,
+                value = value or nil, expected_close_date = input.target_completion_date, updated_at = db.raw("NOW()") },
+                { id = crm_deal.id })
+            crm_deal = U.one("SELECT * FROM crm_deals WHERE id = ?", crm_deal.id)
+        elseif lead then
+            -- One conversion path for every deal: the core lead pipeline's.
+            if not name or name == "" then name = (property and property.address_line1) or nil end
+            local converted, cerr = require("lib.crm.lead-convert").convert_locked(ns, lead, user_uuid, {
+                name = name, value = value, currency = currency, pipeline_id = pipeline_id, stage = first.key,
+                expected_close_date = input.target_completion_date, metadata = { source = "property_deals" },
+            })
+            if not converted then U.fail(cerr.status or 422, cerr.message or "Couldn't convert the lead", cerr.fields) end
+            crm_deal, contact = converted.deal, converted.contact
+        else
+            if not name or name == "" then
+                local who = contact and table.concat({ contact.first_name or "", contact.last_name or "" }, " "):match("^%s*(.-)%s*$")
+                name = (property and property.address_line1) or (who ~= "" and who) or "New deal"
+            end
+            crm_deal = db.insert("crm_deals", {
+                uuid = require("helper.global").generateUUID(),
+                namespace_id = ns,
+                pipeline_id = pipeline_id,
+                contact_id = contact and contact.id or nil,
+                name = name,
+                value = value or 0,
+                currency = currency,
+                stage = first.key,
+                expected_close_date = input.target_completion_date,
+                owner_user_uuid = user_uuid,
+                status = "open",
+                metadata = cjson.encode({ source = "property_deals" }),
+            }, { returning = "*" })[1]
         end
-
-        local crm_deal = db.insert("crm_deals", {
-            uuid = require("helper.global").generateUUID(),
-            namespace_id = ns,
-            pipeline_id = pipeline_for(ns, tpl, version),
-            contact_id = contact and contact.id or nil,
-            name = name,
-            value = tonumber(input.agreed_price or input.offer_amount) or 0,
-            currency = input.currency or (settings and settings.currency) or "GBP",
-            stage = first.key,
-            expected_close_date = input.target_completion_date,
-            owner_user_uuid = user_uuid,
-            status = "open",
-            metadata = cjson.encode({ source = "property_deals" }),
-        }, { returning = "*" })[1]
-
-        if lead and not lead.converted_at then
-            db.update("crm_leads", {
-                status = "converted", converted_at = db.raw("NOW()"), converted_contact_id = contact.id,
-                converted_deal_id = crm_deal.id, updated_at = db.raw("NOW()"),
-            }, { id = lead.id })
-        end
+        name = crm_deal.name
 
         local state = Workspace.get(ns)
         local project = U.one("SELECT id FROM kanban_projects WHERE uuid = ?", state.kanban_project_uuid)
@@ -192,8 +221,10 @@ function Deals.create(ns, input, user_uuid, settings)
             })
         end
         if lead then
-            db.update("property_deals_lead_details", { property_uuid = deal.property_uuid or db.NULL },
-                { namespace_id = ns, lead_uuid = lead.uuid })
+            if deal.property_uuid then
+                db.update("property_deals_lead_details", { property_uuid = deal.property_uuid },
+                    { namespace_id = ns, lead_uuid = lead.uuid })
+            end
             -- Contacts logged on the lead before it was a deal now show on the deal.
             db.query("UPDATE property_deals_chases SET deal_uuid = ?, updated_at = NOW() WHERE namespace_id = ? AND lead_uuid = ? AND deal_uuid IS NULL",
                 deal.uuid, ns, lead.uuid)

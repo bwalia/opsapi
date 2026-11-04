@@ -36,7 +36,7 @@ return function(app)
 
     -- GET /api/v2/crm/contacts - List contacts
     app:get("/api/v2/crm/contacts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_contacts", "read", function(self)
             local result = CrmQueries.getContacts(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -58,7 +58,7 @@ return function(app)
 
     -- POST /api/v2/crm/contacts - Create contact
     app:post("/api/v2/crm/contacts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_contacts", "create", function(self)
             local data = parse_json_body()
 
             if not data.first_name or data.first_name == "" then
@@ -103,7 +103,7 @@ return function(app)
 
     -- GET /api/v2/crm/contacts/:uuid - Get contact
     app:get("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_contacts", "read", function(self)
             local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")
@@ -119,7 +119,7 @@ return function(app)
 
     -- PUT /api/v2/crm/contacts/:uuid - Update contact
     app:put("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_contacts", "update", function(self)
             local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")
@@ -161,7 +161,7 @@ return function(app)
 
     -- DELETE /api/v2/crm/contacts/:uuid - Soft delete contact
     app:delete("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_contacts", "delete", function(self)
             local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")

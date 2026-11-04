@@ -36,7 +36,7 @@ return function(app)
 
     -- GET /api/v2/crm/pipelines - List pipelines
     app:get("/api/v2/crm/pipelines", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_pipelines", "read", function(self)
             local result = CrmQueries.getPipelines(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page
@@ -55,7 +55,7 @@ return function(app)
 
     -- POST /api/v2/crm/pipelines - Create pipeline
     app:post("/api/v2/crm/pipelines", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_pipelines", "create", function(self)
             local data = parse_json_body()
 
             if not data.name or data.name == "" then
@@ -85,7 +85,7 @@ return function(app)
 
     -- GET /api/v2/crm/pipelines/:uuid - Get pipeline
     app:get("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_pipelines", "read", function(self)
             local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
@@ -101,7 +101,7 @@ return function(app)
 
     -- PUT /api/v2/crm/pipelines/:uuid - Update pipeline
     app:put("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_pipelines", "update", function(self)
             local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
@@ -140,7 +140,7 @@ return function(app)
 
     -- DELETE /api/v2/crm/pipelines/:uuid - Soft delete pipeline
     app:delete("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_pipelines", "delete", function(self)
             local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")

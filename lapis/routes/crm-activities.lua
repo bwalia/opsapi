@@ -39,7 +39,7 @@ return function(app)
     -- NOTE: This route must be defined before /api/v2/crm/activities/:uuid to avoid
     -- route conflicts. The frontend calls this with PUT; POST kept for compatibility.
     local complete_handler = AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "update", function(self)
             local activity = CrmQueries.getActivity(self.params.uuid)
             if not activity then
                 return api_response(404, nil, "Activity not found")
@@ -62,7 +62,7 @@ return function(app)
 
     -- GET /api/v2/crm/activities - List activities
     app:get("/api/v2/crm/activities", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "read", function(self)
             local result = CrmQueries.getActivities(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -86,7 +86,7 @@ return function(app)
 
     -- POST /api/v2/crm/activities - Create activity
     app:post("/api/v2/crm/activities", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "create", function(self)
             local data = parse_json_body()
 
             if not data.subject or data.subject == "" then
@@ -150,7 +150,7 @@ return function(app)
 
     -- GET /api/v2/crm/activities/:uuid - Get activity
     app:get("/api/v2/crm/activities/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "read", function(self)
             local activity = CrmQueries.getActivity(self.params.uuid)
             if not activity then
                 return api_response(404, nil, "Activity not found")
@@ -166,7 +166,7 @@ return function(app)
 
     -- PUT /api/v2/crm/activities/:uuid - Update activity
     app:put("/api/v2/crm/activities/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "update", function(self)
             local activity = CrmQueries.getActivity(self.params.uuid)
             if not activity then
                 return api_response(404, nil, "Activity not found")
@@ -209,7 +209,7 @@ return function(app)
 
     -- DELETE /api/v2/crm/activities/:uuid - Soft delete activity
     app:delete("/api/v2/crm/activities/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_activities", "delete", function(self)
             local activity = CrmQueries.getActivity(self.params.uuid)
             if not activity then
                 return api_response(404, nil, "Activity not found")

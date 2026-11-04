@@ -42,6 +42,9 @@ Settings.DEFAULTS = {
     },
     lost_reasons = { "Not interested", "No budget", "Couldn't reach them", "Went elsewhere", "Spam", "Duplicate", "Other" },
     stage_labels = {},
+    -- Require Cloudflare Turnstile on the public lead endpoint (the key is the
+    -- workspace's Forms Turnstile key). Off: checked only when a token is sent.
+    public_captcha = false,
     meeting = {
         default_minutes = 30,
         default_link = "",
@@ -146,6 +149,7 @@ function Settings.validate(s)
     if not out.escalate_after_minutes then e.escalate_after_minutes = "5 to 10080 minutes" end
 
     out.auto_assign = s.auto_assign == true
+    out.public_captcha = s.public_captcha == true
     out.round_robin_user_uuids = uuid_list(s.round_robin_user_uuids or {}, "round_robin_user_uuids", e)
     out.manager_user_uuids = uuid_list(s.manager_user_uuids or {}, "manager_user_uuids", e)
 

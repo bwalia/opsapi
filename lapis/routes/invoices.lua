@@ -438,23 +438,43 @@ return function(app)
                 subject = "Invoice " .. number .. " from " .. company
             end
 
+            -- Every value from the invoice or the request is escaped: a customer
+            -- name or note with markup must not inject HTML into the email.
+            local function esc(v)
+                return (tostring(v or ""):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;",
+                    ['"'] = "&quot;", ["'"] = "&#39;" }))
+            end
+            if type(to) ~= "string" or #to > 254 or not to:match("^[^%s@<>,;]+@[^%s@<>,;]+%.[^%s@<>,;]+$") then
+                return api_response(400, nil, "That recipient email doesn't look right")
+            end
             local amount = tostring(invoice.currency or "") .. " " .. tostring(invoice.total or invoice.balance_due or "")
-            local greeting = invoice.customer_name and ("Dear " .. tostring(invoice.customer_name) .. ",") or "Hello,"
-            local note = (body.message and body.message ~= "") and ("<p>" .. tostring(body.message) .. "</p>") or ""
+            local has_name = invoice.customer_name and invoice.customer_name ~= ngx.null and invoice.customer_name ~= ""
+            local greeting = has_name and ("Dear " .. esc(invoice.customer_name) .. ",") or "Hello,"
+            local note = ""
+            if type(body.message) == "string" and body.message ~= "" then
+                note = "<p>" .. esc(body.message:sub(1, 5000)):gsub("\n", "<br>") .. "</p>"
+            end
             local html = table.concat({
                 "<p>", greeting, "</p>", note,
-                "<p>Please find attached invoice <strong>", number, "</strong> for ", amount, ".</p>",
+                "<p>Please find attached invoice <strong>", esc(number), "</strong> for ", esc(amount), ".</p>",
                 "<p>Thank you for your business.</p>",
-                "<p>", company, "</p>",
+                "<p>", esc(company), "</p>",
             })
 
             local filename = body.filename
-            if not filename or filename == "" then filename = "Invoice-" .. number .. ".pdf" end
+            if type(filename) ~= "string" or filename == "" then filename = "Invoice-" .. number .. ".pdf" end
+            filename = filename:gsub("[^%w%.%-_ ]", "_"):sub(1, 120)
 
+            -- The workspace's own SMTP when it has one (its address, its reputation).
+            local smtp = require("helper.namespace-mail").smtp(self.namespace.id)
             local ok, mail_err = Mail.send({
                 to = to,
-                subject = subject,
+                subject = subject:sub(1, 200),
                 html = html,
+                smtp = smtp,
+                from_email = smtp and smtp.from_email or nil,
+                from_name = smtp and smtp.from_name or nil,
+                reply_to = smtp and smtp.reply_to or nil,
                 attachments = {
                     { filename = filename, content_type = "application/pdf", content_b64 = pdf_b64 },
                 },
