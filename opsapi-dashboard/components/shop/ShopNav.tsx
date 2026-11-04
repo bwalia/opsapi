@@ -16,8 +16,10 @@ import {
   Gift,
   Truck,
   Scale,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePermissions } from '@/contexts/PermissionsContext';
 
 export const SHOP_SECTIONS = [
   { href: '/dashboard/shop', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -32,15 +34,18 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
   { href: '/dashboard/shop/credits', label: 'Credits', icon: Gift },
   { href: '/dashboard/shop/knowledge', label: 'Knowledge', icon: BookOpen },
+  // Its own RBAC module: shown only to people who may see revenue.
+  { href: '/dashboard/shop/analytics', label: 'Analytics', icon: BarChart3, module: 'shop_analytics' },
 ] as const;
 
 /** In-section sub-navigation shared by every /dashboard/shop page. */
 export function ShopNav() {
   const pathname = usePathname() || '';
+  const { hasPermission } = usePermissions();
   return (
     <div className="border-b border-secondary-200 print:hidden">
       <nav className="-mb-px flex gap-1 overflow-x-auto" aria-label="Shop sections">
-        {SHOP_SECTIONS.map((s) => {
+        {SHOP_SECTIONS.filter((s) => !('module' in s) || hasPermission(s.module, 'read')).map((s) => {
           const active = 'exact' in s && s.exact ? pathname === s.href : pathname.startsWith(s.href);
           const Icon = s.icon;
           return (
