@@ -251,6 +251,13 @@ function P.assign(ns, uuid, owner_uuid, actor, opts)
         end
         lead._previous_owner = U.nz(lead.owner_user_uuid)
         lead.owner_user_uuid = owner_uuid
+        -- An open lead with nothing planned (e.g. from before the pipeline existed) gets a first call,
+        -- so the new owner sees what to do next.
+        if owner_uuid and Stages.is_open(lead.status) and U.null(lead.next_action_at) then
+            local settings = Settings.get(ns)
+            P.plan_step(ns, lead, actor, { type = "call", attempt = 1,
+                due_at = WH.due_at(settings.working_hours, settings.first_response_minutes) })
+        end
         return lead
     end)
     if not lead then return nil, err end
@@ -886,7 +893,10 @@ end
 function P.timeline(ns, lead)
     local items = {}
     local function add(t) items[#items + 1] = t end
-    add({ kind = "created", at = lead.created_at, title = "Lead created",
+    -- created_at / converted_at are old zone-less columns; ::timestamptz gives them back with their zone.
+    local at = U.one("SELECT created_at::timestamptz AS created_at, converted_at::timestamptz AS converted_at FROM crm_leads WHERE id = ?",
+        lead.id) or lead
+    add({ kind = "created", at = at.created_at, title = "Lead created",
         detail = U.nz(lead.source) and ("Source: " .. tostring(lead.source)) or cjson.null })
     for _, h in ipairs(db.query([[
         SELECT h.from_status, h.to_status, h.reason, h.created_at, h.changed_by_uuid,
@@ -900,7 +910,7 @@ function P.timeline(ns, lead)
     if U.crm() then
         for _, a in ipairs(db.query([[
             SELECT a.uuid, a.activity_type, a.subject, a.description, a.status, a.outcome, ]] .. U.ACTIVITY_AT .. [[ AS at,
-                   a.ends_at, a.completed_at, a.cancelled_at, a.duration_minutes, a.location, a.meeting_url,
+                   a.ends_at, a.completed_at::timestamptz AS completed_at, a.cancelled_at, a.duration_minutes, a.location, a.meeting_url,
                    NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS by_name
             FROM crm_activities a LEFT JOIN users u ON u.uuid = a.owner_user_uuid
             WHERE a.lead_id = ? AND a.deleted_at IS NULL ORDER BY a.activity_date
@@ -929,8 +939,8 @@ function P.timeline(ns, lead)
                 detail = "Referral " .. r.status, referral_uuid = r.uuid })
         end
     end
-    if not U.null(lead.converted_at) then
-        add({ kind = "converted", at = lead.converted_at, title = "Converted to a deal" })
+    if not U.null(at.converted_at) then
+        add({ kind = "converted", at = at.converted_at, title = "Converted to a deal" })
     end
     table.sort(items, function(a, b) return tostring(a.at) > tostring(b.at) end)
     return U.array(items)

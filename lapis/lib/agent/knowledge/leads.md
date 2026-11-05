@@ -23,6 +23,7 @@ Who sees what: lead managers (crm_leads "manage": owners, admins) see every lead
 
 ## Rules
 - Create needs `first_name` or `email`. A new lead starts in an open stage (default new); the creator owns it unless `owner_user_uuid` is null (queue). Only managers can give a new lead to someone else.
+- Giving an open lead an owner when nothing is planned for it (e.g. leads from before the pipeline) plans a first call by itself.
 - Stage changes: use `POST /api/v2/crm/leads/{uuid}/stage`. `lost` needs `reason`; `nurture` needs `nurture_until` (a date after today). Never set converted — use convert.
 - Calls: `outcome` is one of connected, no_answer, voicemail, wrong_number, callback, not_interested. `callback` needs `next_at` (future ISO time). no_answer/voicemail plan the next attempt by themselves; not_interested moves the lead to lost.
 - Meetings: `type` video | phone | in_person | viewing; in_person/viewing need `location`; `starts_at` must be in the future; invites go by email with a calendar file.

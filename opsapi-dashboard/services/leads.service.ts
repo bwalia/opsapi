@@ -205,6 +205,17 @@ export interface BoardColumn {
   leads: BoardCard[];
 }
 
+/** Totals over every lead you can see (GET /leads/stats). */
+export interface LeadStats {
+  new_leads: number | string;
+  contacting_leads: number | string;
+  qualified_leads: number | string;
+  meeting_leads: number | string;
+  overdue_leads: number | string;
+  open_value: number | string;
+  currency: string;
+}
+
 export interface Board {
   stages: BoardColumn[];
   currency: string;
@@ -424,6 +435,7 @@ export const leadsService = {
     call<Board>(apiClient.get(`${L}/board${qs(q)}`)),
   funnel: (from?: string, to?: string) => call<Funnel>(apiClient.get(`${L}/funnel${qs({ from, to })}`)),
   mySteps: () => call<MySteps>(apiClient.get(`${L}/my-steps`)),
+  stats: () => call<LeadStats>(apiClient.get(`${L}/stats`)),
   team: () => call<TeamMember[]>(apiClient.get(`${L}/team`)),
   get: (uuid: string) => call<Lead>(apiClient.get(`${L}/${uuid}`)),
   timeline: (uuid: string) => call<TimelineItem[]>(apiClient.get(`${L}/${uuid}/timeline`)),
