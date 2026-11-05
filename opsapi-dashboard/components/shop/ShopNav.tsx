@@ -16,6 +16,7 @@ import {
   Gift,
   Truck,
   Scale,
+  Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +33,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
   { href: '/dashboard/shop/credits', label: 'Credits', icon: Gift },
   { href: '/dashboard/shop/knowledge', label: 'Knowledge', icon: BookOpen },
+  { href: '/dashboard/shop/settings', label: 'Settings', icon: Settings },
 ] as const;
 
 /** In-section sub-navigation shared by every /dashboard/shop page. */

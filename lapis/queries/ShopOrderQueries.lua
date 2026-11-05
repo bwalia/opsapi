@@ -214,6 +214,10 @@ local effective_vat_rate = Pricing.effective_vat_rate
 -- Returns ({order_uuid, order_token, checkout_url}) or (nil, err)
 function ShopOrderQueries.checkout(ns_id, body, cart_token)
     local PaymentProvider = require("lib.payment-provider")
+    if not require("queries.ShopSettingsQueries").checkoutEnabled(ns_id) then
+        return nil, U.err(409, "CHECKOUT_DISABLED",
+            "Online checkout is closed — request a quote and we'll confirm your final price")
+    end
     if not U.env("STRIPE_SECRET_KEY") then
         return nil, U.err(503, "PAYMENTS_DISABLED", "Online payment is not available — please request a quote")
     end
