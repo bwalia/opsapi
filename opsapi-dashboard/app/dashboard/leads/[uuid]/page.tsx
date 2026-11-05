@@ -421,7 +421,7 @@ function LeadContent() {
                 <p className="flex items-center gap-2 text-sm font-medium text-secondary-900">
                   <Clock className="h-4 w-4" aria-hidden="true" />{lead.next_action_note || STEP_LABEL[lead.next_action_type ?? ''] || 'Follow up'}
                 </p>
-                <p className={cn('mt-0.5 text-xs', due.overdue ? 'font-semibold text-error-700' : 'text-secondary-600')}>{due.text} · {dateTime(lead.next_action_at)}</p>
+                <p className={cn('mt-0.5 text-xs', due.overdue ? 'font-semibold text-error-700' : 'text-secondary-600')}>{due.overdue || due.soon ? `${due.text} · ${dateTime(lead.next_action_at)}` : due.text}</p>
               </div>
             ) : (
               <p className="text-sm text-secondary-500">{open ? 'Nothing planned. Plan the next step so this lead doesn’t go cold.' : 'None — the lead isn’t open.'}</p>

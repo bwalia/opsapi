@@ -32,7 +32,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   ALL_STAGES, leadError, leadsService, type Board, type Funnel, type Lead, type LeadListQuery, type MySteps,
-  type SettingsBundle,
+  type LeadStats, type SettingsBundle,
 } from '@/services/leads.service';
 
 type View = 'pipeline' | 'insights' | 'list';
@@ -55,6 +55,7 @@ function LeadsContent() {
   const [board, setBoard] = useState<Board | null>(null);
   const [funnel, setFunnel] = useState<Funnel | null>(null);
   const [steps, setSteps] = useState<MySteps | null>(null);
+  const [stats, setStats] = useState<LeadStats | null>(null);
   const [settings, setSettings] = useState<SettingsBundle | null>(null);
   const [range, setRange] = useState(90);
   const [loading, setLoading] = useState(true);
@@ -79,8 +80,11 @@ function LeadsContent() {
 
   const loadTop = useCallback(async () => {
     try {
-      const [s, st] = await Promise.all([leadsService.mySteps(), settings ? Promise.resolve(settings) : leadsService.settings()]);
+      const [s, st, totals] = await Promise.all([
+        leadsService.mySteps(), settings ? Promise.resolve(settings) : leadsService.settings(), leadsService.stats(),
+      ]);
       setSteps(s);
+      setStats(totals);
       if (!settings) setSettings(st);
     } catch (e) {
       setError(leadError(e).message);
@@ -117,14 +121,14 @@ function LeadsContent() {
   const labels = settings?.stage_labels;
 
   const totals = useMemo(() => {
-    if (!board) return null;
-    const open = board.stages.filter((s) => s.open);
+    if (!stats) return null;
+    const n = (v: number | string) => Number(v) || 0;
     return {
-      open: open.reduce((n, s) => n + s.count, 0),
-      value: open.reduce((n, s) => n + s.value, 0),
-      overdue: open.reduce((n, s) => n + s.overdue, 0),
+      open: n(stats.new_leads) + n(stats.contacting_leads) + n(stats.qualified_leads) + n(stats.meeting_leads),
+      value: n(stats.open_value),
+      overdue: n(stats.overdue_leads),
     };
-  }, [board]);
+  }, [stats]);
 
   return (
     <div className="space-y-6">
@@ -159,7 +163,7 @@ function LeadsContent() {
           <div className="rounded-xl border border-secondary-200 bg-white p-4">
             <p className="text-xs font-medium text-secondary-500">Pipeline value</p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-secondary-900">
-              {totals ? money(totals.value, board?.currency, true) : '—'}
+              {totals ? money(totals.value, stats?.currency, true) : '—'}
             </p>
           </div>
           <div className="rounded-xl border border-secondary-200 bg-white p-4">

@@ -41,6 +41,8 @@ function useForm<T>() {
 // Log a call
 // ---------------------------------------------------------------------------
 
+const OUTCOME_ORDER: CallOutcome[] = ['connected', 'no_answer', 'voicemail', 'callback', 'wrong_number', 'not_interested'];
+
 const OUTCOME_HELP: Record<CallOutcome, string> = {
   connected: 'You talked to them.',
   no_answer: 'We plan the next try for you.',
@@ -72,7 +74,7 @@ export function LogCallDialog({ lead, outcomes, onClose, onDone }: {
         <fieldset>
           <legend className={labelCls}>Outcome</legend>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {(Object.keys(outcomes) as CallOutcome[]).map((o) => (
+            {OUTCOME_ORDER.filter((o) => outcomes[o]).map((o) => (
               <button key={o} type="button" onClick={() => setOutcome(o)} aria-pressed={outcome === o}
                 className={cn('rounded-lg border px-3 py-2 text-left text-sm transition',
                   outcome === o ? 'border-primary-500 bg-primary-50 text-primary-800 ring-2 ring-primary-500/20' : 'border-secondary-200 hover:border-secondary-300')}>

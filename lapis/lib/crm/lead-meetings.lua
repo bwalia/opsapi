@@ -251,7 +251,7 @@ function M.get(ns, activity_uuid)
     local a = U.one([[
         SELECT a.uuid, a.subject, a.description, a.status, a.outcome, ]] .. U.ACTIVITY_AT .. [[ AS starts_at, a.ends_at,
                a.duration_minutes, a.location, a.meeting_url, a.attendees, a.owner_user_uuid, a.ics_sequence, a.metadata,
-               a.reminders_sent, a.completed_at, a.cancelled_at, l.uuid AS lead_uuid
+               a.reminders_sent, a.completed_at::timestamptz AS completed_at, a.cancelled_at, l.uuid AS lead_uuid
         FROM crm_activities a LEFT JOIN crm_leads l ON l.id = a.lead_id
         WHERE a.namespace_id = ? AND a.uuid = ? AND a.activity_type = 'meeting' AND a.deleted_at IS NULL
     ]], ns, activity_uuid)

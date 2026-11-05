@@ -10,7 +10,7 @@ all @e2e.invalid (mail to them is suppressed outside production), and writes the
 tokens to /tmp/lp_tokens.json inside the container; this script reads them from
 there and never prints them. Leads it creates use @e2e.invalid addresses too.
 """
-import json, os, subprocess, sys, time, urllib.request, urllib.error, datetime
+import json, os, re, subprocess, sys, time, urllib.request, urllib.error, datetime
 
 API = os.environ.get("API", "http://127.0.0.1:4020")
 CONTAINER = os.environ.get("CONTAINER", "opsapi")
@@ -95,6 +95,23 @@ flagged = wait_for(lambda: (lambda st, x: x["data"] if st == 200 and (x["data"].
     *call("rep1", "GET", "/api/v2/crm/leads/" + dup["uuid"])))
 check("same email flagged as a possible duplicate (not merged)", flagged and flagged["metadata"].get("duplicate_of") == ann["uuid"],
       flagged and flagged.get("metadata"))
+
+# An open lead with nothing planned (like leads from before the pipeline) gets a first call when given an owner.
+s, r = call("owner", "GET", "/api/v2/crm/leads/" + dup["uuid"] + "/timeline")
+planned = [t for t in r.get("data", []) if t.get("kind") == "activity" and t.get("status") == "planned"]
+for t in planned:
+    call("owner", "POST", "/api/v2/crm/leads/" + dup["uuid"] + "/steps/" + t["activity_uuid"], {"status": "cancelled"})
+s, r = call("owner", "GET", "/api/v2/crm/leads/" + dup["uuid"])
+check("cancelling its only step leaves nothing planned", s == 200 and not r["data"].get("next_action_at"), r.get("data", {}).get("next_action_at"))
+s, r = call("owner", "POST", "/api/v2/crm/leads/" + dup["uuid"] + "/assign", {"owner_user_uuid": rep2})
+check("giving it an owner plans a first call", s == 200 and r["data"].get("owner_user_uuid") == rep2
+      and r["data"].get("next_action_type") == "call" and r["data"].get("next_action_at"), r.get("data"))
+first_due = r.get("data", {}).get("next_action_at")
+s, r = call("owner", "POST", "/api/v2/crm/leads/" + dup["uuid"] + "/assign", {"owner_user_uuid": rep1})
+s2, t = call("owner", "GET", "/api/v2/crm/leads/" + dup["uuid"] + "/timeline")
+n_planned = len([x for x in t.get("data", []) if x.get("kind") == "activity" and x.get("status") == "planned"])
+check("handing it on keeps that one call (no second one)", s == 200 and n_planned == 1
+      and r["data"].get("next_action_at") == first_due, (n_planned, first_due, r.get("data", {}).get("next_action_at")))
 
 print("who sees what")
 s, r = call("rep2", "GET", "/api/v2/crm/leads/" + ann["uuid"])
@@ -197,6 +214,20 @@ check("my steps", s == 200 and "overdue" in r["data"] and "meetings" in r["data"
 s, r = call("rep1", "GET", "/api/v2/crm/leads/" + ann["uuid"] + "/timeline")
 kinds = [t["kind"] for t in r.get("data", [])]
 check("timeline has created, stage changes and calls", s == 200 and "created" in kinds and "stage" in kinds and "activity" in kinds, kinds[:10])
+done_call = next((t for t in r.get("data", []) if t.get("kind") == "activity" and t.get("outcome") == "no_answer"), None)
+def when(v):
+    v = re.sub(r"\.\d+", "", str(v or "")).replace(" ", "T")  # Python < 3.11 can't read 5-digit fractions
+    v = v + ":00" if len(v) > 3 and v[-3] in "+-" and v[-3:].lstrip("+-").isdigit() else v
+    return datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+try:
+    at = when(done_call and done_call.get("at"))
+    skew = abs((at - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+except Exception as e:  # no zone, unparsable or missing
+    at, skew = (done_call or {}).get("at"), str(e)
+check("a logged call's time carries its zone (not UTC shown as local)", isinstance(skew, float) and skew < 600, (at, skew))
+created = next((t for t in r.get("data", []) if t.get("kind") == "created"), {})
+check("'Lead created' time carries its zone", str(created.get("at", ""))[-3:] in ("+00", "Z") or "+" in str(created.get("at", ""))[19:],
+      created.get("at"))
 
 print("partners and referrals")
 s, r = call("owner", "POST", "/api/v2/crm/partners", {"name": "Laptop Partner " + RUN, "offering": "Business laptops, bulk IT hardware",
