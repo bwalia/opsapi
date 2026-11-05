@@ -220,5 +220,28 @@ check("selection_key is order independent",
     == P.selection_key({ b = { { option = "z", qty = 1 } }, a = { { option = "y", qty = 2 }, { option = "x", qty = 1 } } }))
 check("round half up", P.round(2.5) == 3 and P.round(2.49) == 2 and P.round(-2.5) == -3)
 
+-- 11. quote_only lines can't be paid until priced -----------------------------------------------
+local q_lines = {
+    { product_name = "RTX PRO 6000", price_mode = "fixed", unit_price_minor = 1369900 },
+    { product_name = "HGX B300 8-GPU", price_mode = "quote_only", unit_price_minor = 0 },
+    { product_name = "DGX BasePOD", price_mode = "quote_only", unit_price_minor = 0, price_override_minor = 99000000 },
+}
+local unpriced = P.unpriced_lines(q_lines)
+check("unpriced: only the quote_only line without a staff price", #unpriced == 1 and unpriced[1] == "HGX B300 8-GPU",
+    table.concat(unpriced, ","))
+check("unpriced: a staff price override makes quote_only payable", #P.unpriced_lines({ q_lines[3] }) == 0)
+check("unpriced: fixed/configurable lines never block", #P.unpriced_lines({ q_lines[1] }) == 0)
+check("unpriced: nil/garbage input is safe", #P.unpriced_lines(nil) == 0 and #P.unpriced_lines({ "x" }) == 0)
+
+-- 12. effective VAT rate (Trade discount / refunds on mixed-rate baskets) ------------------------
+check("effective rate: all-20% basket", math.abs(P.effective_vat_rate(10000, 2000) - 0.2) < 1e-12)
+check("effective rate: half 20% + half 0% = 10%", math.abs(P.effective_vat_rate(10000, 1000) - 0.1) < 1e-12)
+check("effective rate: empty basket falls back to 20%", P.effective_vat_rate(0, 0) == 0.2)
+-- £5,000 at 20% + £5,000 zero-rated, 5% Trade discount: VAT must be £950, not the first line's 20% (£1,900)
+local R = require("lib.shop-membership")
+local d = R.apply_discount(1000000, P.effective_vat_rate(1000000, 100000), 0, 5)
+check("mixed basket discount: VAT shrinks in proportion", d.discount_minor == 50000 and d.vat_minor == 95000
+    and d.total_minor == 950000 + 95000, d.vat_minor)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

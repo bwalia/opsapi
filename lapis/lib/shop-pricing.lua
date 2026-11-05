@@ -543,6 +543,27 @@ function ShopPricing.totals(lines, shipping_minor)
     }
 end
 
+--- A basket's effective VAT rate: its VAT ÷ its ex-VAT subtotal. Recomputing VAT after a discount
+-- (or for a refund clawback) with this rate shrinks every line's VAT in proportion, which stays right
+-- for mixed-rate baskets; any single line's rate does not.
+function ShopPricing.effective_vat_rate(subtotal_minor, vat_minor)
+    local net = tonumber(subtotal_minor) or 0
+    if net <= 0 then return DEFAULT_VAT end
+    return (tonumber(vat_minor) or 0) / net
+end
+
+--- Product names of quote_only lines nobody has priced (no price_override_minor). A self-service
+-- quote snapshots them at no price, so a quote holding any is not payable until staff price them.
+function ShopPricing.unpriced_lines(lines)
+    local out = {}
+    for _, l in ipairs(type(lines) == "table" and lines or {}) do
+        if type(l) == "table" and l.price_mode == "quote_only" and tonumber(l.price_override_minor) == nil then
+            out[#out + 1] = tostring(l.product_name or l.name or l.sku or "an item")
+        end
+    end
+    return out
+end
+
 --- Canonical string for a (normalised) selections table — used to merge
 -- identical cart lines.
 function ShopPricing.selection_key(selections)

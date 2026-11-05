@@ -226,6 +226,15 @@ local function apply_price(ns_id, p, new_price, cost, margin, status, actor, cha
     require("queries.ShopInsightsQueries").snapshotPrices(ns_id, { p.id })
 end
 
+--- True when the latest decided change for this product was a rejection of the same move
+-- (same current price → same new price). Without it a rejected change came back on every sync.
+local function rejected_already(product_id, old_price, new_price)
+    local last = db.query([[SELECT status, old_price_minor, new_price_minor FROM shop_price_changes
+                             WHERE product_id = ? AND status <> 'pending' ORDER BY id DESC LIMIT 1]], product_id)[1]
+    return last ~= nil and last.status == "rejected" and tonumber(last.new_price_minor) == tonumber(new_price)
+        and tonumber(last.old_price_minor) == tonumber(old_price)
+end
+
 --- Reprice products linked to supplier items. where_sql filters products (alias p).
 -- Returns { applied, pending, unchanged }.
 local function reprice(ns_id, where_sql, ...)
@@ -255,6 +264,9 @@ local function reprice(ns_id, where_sql, ...)
             if decision == "apply" then
                 apply_price(ns_id, p, new_price, p.cost_minor, margin, "applied")
                 out.applied = out.applied + 1
+            elseif decision == "review" and rejected_already(p.id, p.base_price_minor, new_price) then
+                -- Staff already rejected exactly this change; raise it again only when the price moves.
+                out.unchanged = out.unchanged + 1
             elseif decision == "review" then
                 local existing = db.query("SELECT id FROM shop_price_changes WHERE product_id = ? AND status = 'pending'", p.id)[1]
                 local pct = S.change_pct(p.base_price_minor, new_price)
@@ -303,6 +315,13 @@ end
 
 --- Import a whole price file for a supplier row (from supplier_row). Returns a summary.
 function Q.importText(ns_id, sup, text)
+    -- The shop sells in GBP and OpsAPI has no FX conversion: a USD/EUR price file would be priced
+    -- as if its amounts were pounds. Refuse it (nothing changes) rather than misprice the catalogue.
+    local currency = tostring(sup.currency or "GBP"):upper()
+    if currency ~= "GBP" then
+        return nil, U.err(422, "CURRENCY_UNSUPPORTED", "This supplier's prices are in " .. currency
+            .. ". The shop sells in GBP and does not convert currencies, so use a GBP price file.")
+    end
     local opts = U.dec(sup.feed_options, {})
     local mapping = U.dec(sup.mapping, {})
     local filter = U.dec(sup.filter, {})
