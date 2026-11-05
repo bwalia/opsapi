@@ -11,8 +11,12 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # Default: start the new pod before stopping the old one (no downtime).
+      # A ring pinned to one nearly-full host sets maxSurge 0 / maxUnavailable 1
+      # (values-workstation-int.yaml): there is no room for a second pod there.
+      # No `default` here: it treats 0 as empty. values.yaml holds the defaults.
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}

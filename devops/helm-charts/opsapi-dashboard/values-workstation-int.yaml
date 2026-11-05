@@ -32,3 +32,11 @@ ingress:
 # reschedule until it's back — repoint this hostname to another home node then.
 nodeSelector:
   kubernetes.io/hostname: debian006
+
+# debian006 has almost all its CPU reserved (2026-11-05: 3990m of 4000m), so
+# a rolling update can't start the new pod next to the old one and helm --wait
+# times out with the new pod Pending. Stop the old pod first instead: int's
+# dashboard is down for the ~30 s the new one takes to start.
+rollingUpdate:
+  maxUnavailable: 1
+  maxSurge: 0

@@ -44,6 +44,12 @@ readinessProbe:
   path: /login
   port: 8039
 
+# Rollout: new pod first, then the old one stops (override per ring when the
+# pinned host can't fit a second pod).
+rollingUpdate:
+  maxUnavailable: 0
+  maxSurge: 1
+
 resources:
   requests:
     cpu: 50m
