@@ -1,0 +1,130 @@
+name: Deploy Joy AI OpsAPI (Ring Promoter)
+
+# Rolls the Joy AI OpsAPI (`joyai-opsapi` Helm release, namespace joyai-<env>)
+# to an OpsAPI release version. Dispatched by the workstation Ring Promoter
+# (rp.workstation.co.uk, app `joyai-opsapi`) with TARGET_ENV=<ring> and
+# IMAGE_TAG=<version>; can also be run by hand.
+#
+# Joy AI is a consumer of OpsAPI: its acc environment runs the stock
+# bwalia/opsapi image plus the portfoliolab plugin overlay, with values that
+# live in the PRIVATE bwalia/joyai repo (deploy/<env>/opsapi-values.yaml). This
+# workflow does not need those values: it re-applies the release's current
+# values (--reset-then-reuse-values: new chart defaults, then the values the
+# release already has) and only changes the image tag. The chart is checked
+# out at the release tag, so chart and image always match.
+#
+# A values change (hosts, plugin, CORS…) is still a manual helm upgrade from
+# the joyai repo — see joyai deploy/acc/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Joy AI ring to deploy (namespace joyai-<env>)"
+        required: true
+        default: acc
+        type: choice
+        options:
+          - acc
+      IMAGE_TAG:
+        description: "OpsAPI release version to deploy (e.g. 1.0.311 — what Ring Promoter sends). Must be a git tag and a pushed bwalia/opsapi image."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-joyai-${{ github.event.inputs.TARGET_ENV }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: bwalia/opsapi
+  CHART_PATH: devops/helm-charts/diytaxreturn-lapis
+  RELEASE_NAME: joyai-opsapi
+
+jobs:
+  deploy:
+    name: Deploy joyai-opsapi ${{ github.event.inputs.IMAGE_TAG }} to joyai-${{ github.event.inputs.TARGET_ENV }}
+    # The k3s1 API only answers on the operator network.
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 35
+    env:
+      NS: joyai-${{ github.event.inputs.TARGET_ENV }}
+      TAG: ${{ github.event.inputs.IMAGE_TAG }}
+      TARGET_ENV: ${{ github.event.inputs.TARGET_ENV }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "::error::bad IMAGE_TAG '$TAG'"; exit 1 ;; esac
+          echo "Deploying ${IMAGE}:${TAG} as release ${RELEASE_NAME} in ${NS}"
+
+      - name: Checkout chart at the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.IMAGE_TAG }}
+          sparse-checkout: ${{ env.CHART_PATH }}
+
+      - name: Decode kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || {
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          }
+          helm version --short
+
+      - name: Preflight — image exists and the release is already installed
+        run: |
+          set -euo pipefail
+          # A tag missing from the registry would ImagePullBackOff the API.
+          docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1 \
+            || { echo "::error::image ${IMAGE}:${TAG} not found — refusing to deploy"; exit 1; }
+          # This workflow only upgrades. The first install needs the private
+          # values file (joyai repo, deploy/<env>/opsapi-values.yaml).
+          helm status "$RELEASE_NAME" -n "$NS" >/dev/null 2>&1 \
+            || { echo "::error::release ${RELEASE_NAME} not installed in ${NS} — install it from the joyai repo first"; exit 1; }
+          echo "current: $(kubectl -n "$NS" get deploy "$RELEASE_NAME" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+
+      - name: Helm upgrade (image tag only)
+        run: |
+          set -euo pipefail
+          # No --wait: the rollout is driven and watched in the next step (same
+          # as deploy-k3s.yml). --timeout covers the pre-upgrade migrate hook.
+          helm upgrade "$RELEASE_NAME" "$CHART_PATH" \
+            --namespace "$NS" \
+            --reset-then-reuse-values \
+            --timeout 20m \
+            --set-string image.repository="$IMAGE" \
+            --set-string image.tag="$TAG"
+
+      - name: Roll out and wait
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" rollout status "deploy/$RELEASE_NAME" --timeout=10m
+          kubectl -n "$NS" get pods -o wide -l app="$RELEASE_NAME"
+
+      - name: Verify the API reports the new version
+        run: |
+          set -euo pipefail
+          URL="https://${TARGET_ENV}-joyai.workstation.co.uk/ready"
+          for i in $(seq 1 12); do
+            VER=$(curl -s --max-time 10 "$URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)
+            echo "probe $i/12: $URL version=${VER:-none} (want $TAG)"
+            [ "$VER" = "$TAG" ] && exit 0
+            sleep 10
+          done
+          echo "::error::$URL never reported $TAG"
+          exit 1
