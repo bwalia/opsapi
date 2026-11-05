@@ -365,6 +365,12 @@ function OptionRow({
   const delta = poundsToMinor(o.price_delta);
   const [, attrErr] = parseJsonObject(o.attributes);
   const component = componentProducts.find((p) => componentValue(p) === o.component_product);
+  // Same rule as OpsAPI (OPTION_PRICE_SQL): a priced component product sets this option's price, so it
+  // is changed once on that product. Its own Price Δ only applies when the component has no price.
+  const componentPrice =
+    component && component.price_mode !== 'quote_only' && (component.base_price_minor ?? 0) > 0
+      ? component.base_price_minor
+      : null;
   return (
     <div className={cn('rounded-lg border p-3', o.is_active ? 'border-secondary-200' : 'border-dashed border-secondary-300 opacity-70')}>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
@@ -385,11 +391,13 @@ function OptionRow({
           <Input
             label="Price Δ (£ ex VAT)"
             id={`o-${o.key}-price`}
-            value={o.price_delta}
+            value={componentPrice !== null ? minorToPounds(componentPrice) : o.price_delta}
             onChange={(e) => onChange({ price_delta: e.target.value })}
             onBlur={() => delta !== null && onChange({ price_delta: minorToPounds(delta) })}
             inputMode="decimal"
-            error={delta === null && o.price_delta.trim() !== '' ? 'Invalid' : undefined}
+            disabled={componentPrice !== null}
+            helperText={componentPrice !== null && component ? `Follows ${component.name}` : undefined}
+            error={componentPrice === null && delta === null && o.price_delta.trim() !== '' ? 'Invalid' : undefined}
           />
         </div>
         <div className="md:col-span-2">
@@ -439,11 +447,11 @@ function OptionRow({
           <div className="space-y-3">
             <Input label="Description" id={`o-${o.key}-desc`} value={o.description} onChange={(e) => onChange({ description: e.target.value })} />
             <Select
-              label="Component product (stock source)"
+              label="Component product (stock and price source)"
               id={`o-${o.key}-comp`}
               value={o.component_product}
               onChange={(e) => onChange({ component_product: e.target.value })}
-              helperText="When set, stock is taken from that product instead of this option."
+              helperText="When set, this option uses that product's stock and its live price (unless it is quote-only)."
             >
               <option value="">— None —</option>
               {componentProducts.map((p) => (

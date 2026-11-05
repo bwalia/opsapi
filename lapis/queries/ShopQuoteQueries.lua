@@ -34,16 +34,24 @@ local function url_path(q)
 end
 ShopQuoteQueries.urlPath = url_path
 
+local PAYABLE_STATUSES = { draft = true, sent = true, accepted = true }
+
 --- Public Quote shape.
 function ShopQuoteQueries.shape(q, opts)
     opts = opts or {}
+    local lines = U.dec(q.lines, {})
+    local unpriced = Pricing.unpriced_lines(lines)
     local out = {
+        -- payable: what checkout will accept (status, validity and every item priced);
+        -- pending_pricing: items we still have to price before the customer can pay
+        payable = PAYABLE_STATUSES[q.status] == true and q.is_past_validity ~= true and #unpriced == 0,
+        pending_pricing = U.arr(unpriced),
         uuid = q.uuid,
         quote_number = q.quote_number,
         status = q.status,
         source = q.source,
         customer = U.dec(q.customer, {}),
-        lines = U.arr(U.dec(q.lines, {})),
+        lines = U.arr(lines),
         subtotal_minor = q.subtotal_minor,
         vat_minor = q.vat_minor,
         shipping_minor = q.shipping_minor,

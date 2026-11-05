@@ -102,7 +102,14 @@ function Q.offer(ns_id)
     local s = Q.settings(ns_id)
     local taken = Q.foundingTaken(ns_id)
     local tier = R.tier_for(s, taken)
+    -- Real "saved by members" figure for the shop home page: Trade discount taken on orders that were
+    -- paid and not refunded or cancelled. Never padded; the shop hides the counter while it is 0.
+    local saved = db.query([[
+        SELECT COALESCE(SUM(member_discount_minor), 0)::bigint AS minor FROM shop_orders
+         WHERE namespace_id = ? AND status IN ('paid', 'processing', 'shipped', 'delivered')
+    ]], ns_id)[1]
     return {
+        members_saved_minor = tonumber(saved and saved.minor) or 0,
         enabled = s.enabled,
         currency = "GBP",
         vat_rate = s.vat_rate,
