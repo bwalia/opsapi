@@ -123,11 +123,13 @@ shop:
   allowedOrigins: "https://shop.workstation.co.uk"
   publicUrl: "https://shop.workstation.co.uk"
 
-# CMS featured-image upload → public www S3 (POST /api/v2/cms/media).
-# Non-secret settings here; put credentials in Vault workstation-opsapi/prod/config:
+# CMS media library (lapis/lib/media-library.lua). Images go to the public www S3
+# bucket when these are in Vault workstation-opsapi/prod/config:
 #   CMS_PUBLIC_S3_ACCESS_KEY
 #   CMS_PUBLIC_S3_SECRET_KEY
-# (or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY with PutObject on workstation-website).
+# (or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY with PutObject + DeleteObject on
+# workstation-website). Without them, to the MinIO this release uses (MINIO_*),
+# served by /api/v2/public/media/<file>.
 extraEnv:
   CMS_PUBLIC_S3_BUCKET: "workstation-website"
   CMS_PUBLIC_S3_REGION: "eu-west-2"

@@ -19,6 +19,7 @@ import {
   Send,
   Globe,
   KeyRound,
+  Images,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
@@ -44,16 +45,18 @@ import {
   type PostStatus,
 } from '@/services/cms.service';
 import { formatDate } from '@/lib/utils';
+import { MediaLibrary } from '@/components/media';
 import { DeliveryStatus, HowItWorks, WebhookSetupModal, explainDelivery } from '@/components/cms/WebsiteUpdateGuide';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
 const PER_PAGE = 20;
-type TabKey = 'posts' | 'pages' | 'categories' | 'tags' | 'webhooks';
+type TabKey = 'posts' | 'pages' | 'media' | 'categories' | 'tags' | 'webhooks';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'posts', label: 'Blog Posts', icon: <Newspaper className="h-4 w-4" /> },
   { key: 'pages', label: 'Pages', icon: <Files className="h-4 w-4" /> },
+  { key: 'media', label: 'Media library', icon: <Images className="h-4 w-4" /> },
   { key: 'categories', label: 'Categories', icon: <FolderTree className="h-4 w-4" /> },
   { key: 'tags', label: 'Tags', icon: <TagIcon className="h-4 w-4" /> },
   { key: 'webhooks', label: 'Website updates', icon: <Webhook className="h-4 w-4" /> },
@@ -988,6 +991,11 @@ function CmsHub() {
       <div role="tabpanel" aria-label={activeLabel}>
         {tab === 'posts' && <PostsTab />}
         {tab === 'pages' && <PagesTab />}
+        {tab === 'media' && (
+          <Card className="p-4 sm:p-6">
+            <MediaLibrary />
+          </Card>
+        )}
         {tab === 'categories' && <CategoriesTab />}
         {tab === 'tags' && <TagsTab />}
         {tab === 'webhooks' && <WebhooksTab />}

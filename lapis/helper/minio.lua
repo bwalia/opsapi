@@ -864,6 +864,46 @@ function MinioClient:delete(object_key, bucket)
     end
 end
 
+--- Read an object (over the internal endpoint, so it works where the public
+-- MinIO host is not reachable).
+-- @return string|nil body
+-- @return string|nil content type, or the error when body is nil
+-- @return number|nil HTTP status from MinIO (404 = no such object)
+function MinioClient:get(object_key, bucket)
+    bucket = bucket or self.bucket
+
+    local valid, config_err = self:validate()
+    if not valid then
+        return nil, config_err
+    end
+
+    local uri = "/" .. bucket .. "/" .. object_key
+    local headers = {
+        ["Host"] = self.host,
+        ["x-amz-content-sha256"] = sha256(""),
+        ["x-amz-date"] = getUtcTime().timestamp
+    }
+    local auth_header, timestamp = generateAuthHeader(
+        self.access_key, self.secret_key, self.region, "s3", "GET", uri, "", headers, "")
+    headers["Authorization"] = auth_header
+    headers["x-amz-date"] = timestamp
+
+    local httpc = http.new()
+    httpc:set_timeout(15000)
+    local res, err = httpc:request_uri(self:_resolved_endpoint() .. uri, {
+        method = "GET",
+        headers = headers,
+        ssl_verify = false
+    })
+    if not res then
+        return nil, "Read request failed: " .. tostring(err)
+    end
+    if res.status ~= 200 then
+        return nil, string.format("Read failed (HTTP %d)", res.status), res.status
+    end
+    return res.body, res.headers["Content-Type"], 200
+end
+
 --- Check if an object exists
 -- @param object_key string The object key to check
 -- @param bucket string Optional bucket

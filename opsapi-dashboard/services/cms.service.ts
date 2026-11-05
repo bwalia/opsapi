@@ -35,6 +35,63 @@ export interface CmsTag {
   updated_at?: string;
 }
 
+// ---------------- Media library ----------------
+export type MediaStorage = 'minio' | 's3_public' | 'link';
+export type MediaType = 'jpeg' | 'png' | 'webp' | 'gif' | 'svg';
+export type MediaSort = 'newest' | 'oldest' | 'name' | 'largest';
+
+export interface MediaAsset {
+  uuid: string;
+  storage: MediaStorage;
+  url: string;
+  filename?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  alt_text?: string | null;
+  title?: string | null;
+  source_uuid?: string | null;
+  uploaded_by_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  /** Only on GET /media/:uuid */
+  used_in?: { kind: 'post' | 'page'; uuid: string; title: string; status: string }[];
+}
+
+export interface MediaConfig {
+  configured: boolean;
+  storage?: 'minio' | 's3_public' | null;
+  max_bytes?: number;
+  /** The public website, to preview site-relative paths like /img/x.jpg */
+  site_url?: string | null;
+}
+
+export interface MediaListParams {
+  search?: string;
+  type?: MediaType | '';
+  sort?: MediaSort;
+  page?: number;
+  per_page?: number;
+}
+
+export interface MediaListMeta {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface MediaUploadFields {
+  filename?: string;
+  alt_text?: string;
+  title?: string;
+  width?: number;
+  height?: number;
+  /** The image this one was cropped/resized from */
+  source_uuid?: string;
+}
+
 export const WEBHOOK_EVENTS = ['post.created', 'post.updated', 'post.deleted'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -244,22 +301,45 @@ export const cmsService = {
     await apiClient.delete(`/api/v2/cms/posts/${uuid}`);
   },
 
-  // ---------------- Public media (www S3) ----------------
-  async getMediaConfig(): Promise<{ configured: boolean; base_url?: string }> {
+  // ---------------- Media library ----------------
+  async getMediaConfig(): Promise<MediaConfig> {
     const response = await apiClient.get('/api/v2/cms/media/config');
-    return unwrapData<{ configured: boolean; base_url?: string }>(response);
+    return unwrapData<MediaConfig>(response);
   },
 
-  async uploadMedia(
-    file: File,
-    opts: { slug?: string; kind?: string } = {},
-  ): Promise<{ url: string; key: string; bucket: string; size: number; content_type?: string }> {
+  async listMedia(params: MediaListParams = {}): Promise<{ items: MediaAsset[]; meta: MediaListMeta }> {
+    const response = await apiClient.get(`/api/v2/cms/media${buildQueryString({ ...params })}`);
+    const body = response.data as { data?: MediaAsset[]; meta?: MediaListMeta };
+    return {
+      items: body?.data ?? [],
+      meta: body?.meta ?? { page: 1, per_page: 40, total: 0, total_pages: 1 },
+    };
+  },
+
+  async getMedia(uuid: string): Promise<MediaAsset> {
+    const response = await apiClient.get(`/api/v2/cms/media/${uuid}`);
+    return unwrapData<MediaAsset>(response);
+  },
+
+  async uploadMedia(file: Blob, fields: MediaUploadFields = {}): Promise<MediaAsset> {
     const fd = new FormData();
-    fd.append('file', file);
-    if (opts.slug) fd.append('slug', opts.slug);
-    if (opts.kind) fd.append('kind', opts.kind);
+    fd.append('file', file, fields.filename || (file instanceof File ? file.name : 'image'));
+    for (const key of ['alt_text', 'title', 'source_uuid'] as const) {
+      if (fields[key]) fd.append(key, String(fields[key]));
+    }
+    if (fields.width) fd.append('width', String(fields.width));
+    if (fields.height) fd.append('height', String(fields.height));
     const response = await apiClient.post('/api/v2/cms/media', fd);
-    return unwrapData(response);
+    return unwrapData<MediaAsset>(response);
+  },
+
+  async updateMedia(uuid: string, data: { alt_text?: string; title?: string }): Promise<MediaAsset> {
+    const response = await apiClient.put(`/api/v2/cms/media/${uuid}`, data);
+    return unwrapData<MediaAsset>(response);
+  },
+
+  async deleteMedia(uuid: string): Promise<void> {
+    await apiClient.delete(`/api/v2/cms/media/${uuid}`);
   },
 
   // ---------------- Pages (static site pages) ----------------
