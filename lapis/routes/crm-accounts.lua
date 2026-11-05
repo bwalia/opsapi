@@ -36,7 +36,7 @@ return function(app)
 
     -- GET /api/v2/crm/accounts - List accounts
     app:get("/api/v2/crm/accounts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_accounts", "read", function(self)
             local result = CrmQueries.getAccounts(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -58,7 +58,7 @@ return function(app)
 
     -- POST /api/v2/crm/accounts - Create account
     app:post("/api/v2/crm/accounts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_accounts", "create", function(self)
             local data = parse_json_body()
 
             if not data.name or data.name == "" then
@@ -100,7 +100,7 @@ return function(app)
 
     -- GET /api/v2/crm/accounts/:uuid - Get account with stats
     app:get("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_accounts", "read", function(self)
             local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
@@ -116,7 +116,7 @@ return function(app)
 
     -- PUT /api/v2/crm/accounts/:uuid - Update account
     app:put("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_accounts", "update", function(self)
             local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
@@ -160,7 +160,7 @@ return function(app)
 
     -- DELETE /api/v2/crm/accounts/:uuid - Soft delete account
     app:delete("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_accounts", "delete", function(self)
             local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")

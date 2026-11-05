@@ -62,6 +62,49 @@ NamespaceMail.TEMPLATES = {
             answers_text = "Name: Ann Lee\nEmail: ann@example.com",
             response_url = "https://app.example.com/dashboard/forms/sample" },
     },
+    ["crm.meeting_invite"] = {
+        name = "Leads: meeting invitation",
+        feature = "crm",
+        file = "crm_meeting_invite",
+        subject = "{{meeting_title}}: {{when}}",
+        variables = { "recipient_name", "meeting_title", "when", "location", "meeting_url", "organiser_name", "notes", "updated" },
+        sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
+            when = "Thursday 5 November 2026, 14:30 (Europe/London, 30 minutes)", location = "",
+            meeting_url = "https://meet.example.com/abc", organiser_name = "Sam Taylor", notes = "We'll go through your options.",
+            updated = "" },
+    },
+    ["crm.meeting_cancelled"] = {
+        name = "Leads: meeting cancelled",
+        feature = "crm",
+        file = "crm_meeting_cancelled",
+        subject = "Cancelled: {{meeting_title}}",
+        variables = { "recipient_name", "meeting_title", "when", "organiser_name" },
+        sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
+            when = "Thursday 5 November 2026, 14:30 (Europe/London, 30 minutes)", organiser_name = "Sam Taylor" },
+    },
+    ["crm.meeting_reminder"] = {
+        name = "Leads: meeting reminder",
+        feature = "crm",
+        file = "crm_meeting_reminder",
+        subject = "Reminder: {{meeting_title}}, {{when}}",
+        variables = { "recipient_name", "meeting_title", "when", "location", "meeting_url" },
+        sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
+            when = "Thursday 5 November 2026, 14:30 (Europe/London, 30 minutes)", location = "",
+            meeting_url = "https://meet.example.com/abc" },
+    },
+    ["crm.partner_referral"] = {
+        name = "Leads: deal passed to a partner",
+        feature = "crm",
+        file = "crm_partner_referral",
+        subject = "New referral from {{from_name}}: {{deal_title}}",
+        variables = { "partner_name", "from_name", "deal_title", "summary", "wants", "value", "commission", "customer",
+            "message", "respond_url" },
+        sample = { app_name = "Acme Ltd", partner_name = "Jo at Bosch", from_name = "Acme Ltd",
+            deal_title = "40 laptops for a school", summary = "A school wants 40 laptops for its new term.",
+            wants = "40 business laptops", value = "32000.00 GBP", commission = "5% of the deal value",
+            customer = "", message = "They need delivery before 1 December.",
+            respond_url = "https://app.example.com/partner-referral/sample" },
+    },
     ["forms.auto_reply"] = {
         name = "Forms: reply to the person who answered",
         feature = "forms",
@@ -275,7 +318,8 @@ end
 
 --- Send a template now (call from a background job: the outbox retries on failure).
 -- @return true | nil, err
-function NamespaceMail.send(namespace_id, key, to, data, brand)
+-- `extra`: { attachments = { { filename, content_type, content_b64 } } } (e.g. a calendar invite).
+function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
     if not NamespaceMail.TEMPLATES[key] then return nil, "unknown template " .. tostring(key) end
     local smtp = NamespaceMail.smtp(namespace_id)
     if smtp then
@@ -284,6 +328,7 @@ function NamespaceMail.send(namespace_id, key, to, data, brand)
     end
     local m = message(namespace_id, key, data, brand)
     m.to, m.sync, m.smtp = to, true, smtp
+    if type(extra) == "table" and type(extra.attachments) == "table" then m.attachments = extra.attachments end
     if smtp then
         m.from_email = smtp.from_email
         m.from_name = (brand and brand.app_name) or smtp.from_name

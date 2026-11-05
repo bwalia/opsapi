@@ -45,12 +45,16 @@ import RecordFormResponses from '@/components/forms/RecordFormResponses';
 // Option lists
 // ============================================================
 
+// The pipeline's stages (lapis/lib/crm/lead-stages.lua). "Converted" only
+// happens through Convert, so the edit dropdowns leave it out.
 export const LEAD_STATUS_OPTIONS = [
-  { value: 'all', label: 'All Status' },
+  { value: 'all', label: 'All stages' },
   { value: 'new', label: 'New' },
-  { value: 'contacted', label: 'Contacted' },
+  { value: 'contacting', label: 'Contacting' },
   { value: 'qualified', label: 'Qualified' },
+  { value: 'meeting', label: 'Meeting' },
   { value: 'converted', label: 'Converted' },
+  { value: 'nurture', label: 'Nurture' },
   { value: 'lost', label: 'Lost' },
 ];
 
@@ -76,11 +80,14 @@ export const LEAD_PRIORITY_OPTIONS = [
 // ============================================================
 
 export const leadStatusColors: Record<string, string> = {
-  new: 'bg-blue-100 text-blue-800',
-  contacted: 'bg-amber-100 text-amber-800',
-  qualified: 'bg-green-100 text-green-800',
-  converted: 'bg-purple-100 text-purple-800',
-  lost: 'bg-red-100 text-red-800',
+  new: 'bg-sky-100 text-sky-800',
+  contacting: 'bg-indigo-100 text-indigo-800',
+  contacted: 'bg-indigo-100 text-indigo-800',
+  qualified: 'bg-violet-100 text-violet-800',
+  meeting: 'bg-amber-100 text-amber-800',
+  converted: 'bg-emerald-100 text-emerald-800',
+  nurture: 'bg-teal-100 text-teal-800',
+  lost: 'bg-secondary-100 text-secondary-700',
 };
 
 export const leadSourceLabels: Record<string, string> = {

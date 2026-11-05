@@ -1,0 +1,19 @@
+<p>Hello<% if partner_name and partner_name ~= "" then %> <%= partner_name %><% end %>,</p>
+<p><%= from_name %> has a customer you may be able to help.</p>
+<div class="info-box">
+  <p style="margin: 0 0 6px 0;"><strong><%= deal_title %></strong></p>
+  <% if wants and wants ~= "" then %><p style="margin: 0 0 6px 0;">What they want: <%= wants %></p><% end %>
+  <% if summary and summary ~= "" then %><p style="margin: 0 0 6px 0;"><%= summary %></p><% end %>
+  <p style="margin: 0 0 6px 0;">Estimated value: <%= value %></p>
+  <p style="margin: 0;">Our commission: <%= commission %></p>
+</div>
+<% if customer and customer ~= "" then %>
+  <p><strong>The customer</strong> (they agreed we could share their details with you): <%= customer %></p>
+<% else %>
+  <p>We'll introduce you to the customer once you accept.</p>
+<% end %>
+<% if message and message ~= "" then %><p><%= message %></p><% end %>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="<%= respond_url %>" class="btn">Accept or decline</a>
+</p>
+<p>Use the same link later to tell us whether you won the work. Please keep it private.</p>

@@ -105,16 +105,20 @@ export default function PropertyDealsLeadPanel({ leadUuid }: { leadUuid: string 
           } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(null); }
         }}>Save deal fields</Button>
         {lead.deal_uuid ? (
-          <Button size="sm" onClick={() => router.push(`/dashboard/property-deals/deals/${lead.deal_uuid}`)}>Open deal</Button>
-        ) : (
+          <Button size="sm" onClick={() => router.push(`/dashboard/property-deals/deals/${lead.deal_uuid}`)}>Open property deal</Button>
+        ) : (lead as { converted_at?: string | null }).converted_at ? (
+          // One conversion for every lead (the lead page's "Convert to deal"); this adds the
+          // property workflow to the deal it made.
           <Button size="sm" isLoading={busy === 'deal'} onClick={async () => {
             setBusy('deal');
             try {
               const d = (await pdService.createDeal({ lead_uuid: leadUuid, deal_type: f.lead_kind === 'buyer_investor' ? 'sell' : 'buy' })).data;
-              toast.success('Deal created');
+              toast.success('Property workflow started');
               router.push(`/dashboard/property-deals/deals/${d.uuid}`);
             } catch (e) { toast.error(pdErrorText(e)); } finally { setBusy(null); }
-          }}>Create deal</Button>
+          }}>Start the property workflow</Button>
+        ) : (
+          <span className="self-center text-xs text-secondary-500">Convert the lead to a deal to start its property workflow.</span>
         )}
       </div>
       <LeadActivity leadUuid={leadUuid} />

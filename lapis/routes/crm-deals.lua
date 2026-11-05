@@ -40,7 +40,7 @@ return function(app)
     -- NOTE: This route must be defined before /api/v2/crm/deals/:uuid to avoid
     -- "dashboard" being captured as a :uuid parameter.
     app:get("/api/v2/crm/dashboard/stats", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "read", function(self)
             local stats = CrmQueries.getDashboardStats(self.namespace.id)
             return api_response(200, stats)
         end)
@@ -50,7 +50,7 @@ return function(app)
     -- NOTE: These must be defined before /api/v2/crm/deals/:uuid to avoid
     -- "pipeline" being captured as a :uuid parameter.
     local deals_by_pipeline = AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "read", function(self)
             local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.pipeline_uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
@@ -71,7 +71,7 @@ return function(app)
 
     -- GET /api/v2/crm/deals - List deals
     app:get("/api/v2/crm/deals", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "read", function(self)
             local result = CrmQueries.getDeals(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -95,7 +95,7 @@ return function(app)
 
     -- POST /api/v2/crm/deals - Create deal
     app:post("/api/v2/crm/deals", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "create", function(self)
             local data = parse_json_body()
 
             if not data.name or data.name == "" then
@@ -151,7 +151,7 @@ return function(app)
 
     -- GET /api/v2/crm/deals/:uuid - Get deal with joins
     app:get("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "read", function(self)
             local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")
@@ -167,7 +167,7 @@ return function(app)
 
     -- PUT /api/v2/crm/deals/:uuid - Update deal
     app:put("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "update", function(self)
             local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")
@@ -211,7 +211,7 @@ return function(app)
 
     -- DELETE /api/v2/crm/deals/:uuid - Soft delete deal
     app:delete("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("crm_deals", "delete", function(self)
             local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")

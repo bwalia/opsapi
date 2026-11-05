@@ -1,0 +1,9 @@
+<p>Hello<% if recipient_name and recipient_name ~= "" then %> <%= recipient_name %><% end %>,</p>
+<p>A reminder of our meeting:</p>
+<div class="info-box">
+  <p style="margin: 0 0 6px 0;"><strong><%= meeting_title %></strong></p>
+  <p style="margin: 0 0 6px 0;"><%= when %></p>
+  <% if location and location ~= "" then %><p style="margin: 0 0 6px 0;">Where: <%= location %></p><% end %>
+  <% if meeting_url and meeting_url ~= "" then %><p style="margin: 0;">Join: <a href="<%= meeting_url %>"><%= meeting_url %></a></p><% end %>
+</div>
+<p>If the time no longer works, just reply to this email.</p>

@@ -356,6 +356,8 @@ local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migra
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
 local crm_leads_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads-menu-items") or {}
 local crm_lead_notif_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-lead-notifications") or {}
+-- Lead pipeline (core: crm_leads is in every deployment; CRM-only steps skip themselves).
+local crm_lead_pipeline_migrations = require("migrations.crm-lead-pipeline")
 
 -- Leads are a CORE capability: the crm_leads table is created for EVERY
 -- PROJECT_CODE (lead capture is generic), so this module loads unconditionally.
@@ -2780,6 +2782,19 @@ local _migrations = {
     ['zzinv1_invitation_source'] = conditional_array(ProjectConfig.FEATURES.CORE, invitation_source_migrations, 1),
     -- My Tasks sidebar item, right after Dashboard (migrations/my-tasks.lua)
     ['zzmt1_my_tasks_menu'] = conditional_array(ProjectConfig.FEATURES.KANBAN, my_tasks_migrations, 1),
+    -- Lead pipeline (migrations/crm-lead-pipeline.lua, docs/plans/LEAD_TO_CASH_PIPELINE.md)
+    ['zzcrm1_lead_pipeline_columns'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 1),
+    ['zzcrm2_lead_pipeline_stage_history'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 2),
+    ['zzcrm3_lead_pipeline_analyses'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 3),
+    ['zzcrm4_lead_pipeline_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 4),
+    ['zzcrm5_lead_pipeline_assignment_rules'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 5),
+    ['zzcrm6_lead_pipeline_activity_fields'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 6),
+    ['zzcrm7_lead_pipeline_deal_lead_link'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 7),
+    ['zzcrm8_lead_pipeline_rbac_module'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 8),
+    ['zzcrm9_lead_pipeline_invoice_deal_link'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 9),
+    -- Letters after 9: keys sort as strings ('zzcrm10' would run before 'zzcrm2').
+    ['zzcrma_lead_pipeline_partner_profiles'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 10),
+    ['zzcrmb_lead_pipeline_deal_referrals'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 11),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

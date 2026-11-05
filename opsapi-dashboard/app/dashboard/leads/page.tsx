@@ -1,488 +1,315 @@
 'use client';
 
 /**
- * Leads Inbox — /dashboard/leads
+ * Leads: the lead pipeline (docs/plans/LEAD_TO_CASH_PIPELINE.md).
  *
- * A focused view of every lead captured for the CURRENT namespace, from any
- * source (public website form, API/webhook, manual entry, referral). Data is
- * namespace-scoped by the backend: crmService goes through the axios client
- * which injects the active namespace headers, and the /api/v2/crm/leads route
- * filters by the resolved tenant.
+ *   Pipeline  every stage as a column; drag a lead to move it
+ *   Insights  the funnel, speed to lead, sources, why leads are lost
+ *   List      search, filter and sort every lead you can see
  *
- * The CRM workspace (/dashboard/crm) has a leads tab for triage alongside
- * accounts/contacts/deals; this page is the dedicated inbox for reviewing an
- * individual lead in full (the detail drawer), updating its status, and
- * converting it. Shared building blocks live in components/crm/leads-shared.
+ * "Your next steps" sits on top: late and today's calls and meetings.
+ * Managers (crm_leads manage) see every lead; everyone else their own and
+ * unassigned ones (the API decides; the page just shows what it gets).
  */
-
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  Search,
-  Plus,
-  Trash2,
-  UserPlus,
-  Mail,
-  Phone,
-  Briefcase,
-  ArrowRightCircle,
-  ChevronDown,
-  RefreshCw,
-  Star,
-  Bell,
-  CheckCircle2,
-} from 'lucide-react';
-import { Input, Table, Pagination, Card, Button, ConfirmDialog } from '@/components/ui';
-import { ProtectedPage } from '@/components/permissions';
-import TourHost from '@/components/property-deals/Tour';
-import { PageHeader } from '@/components/layout/PageHeader';
-import {
-  crmService,
-  type CrmLead,
-  type CrmLeadStats,
-  type CrmListParams,
-} from '@/services/crm.service';
-import {
-  LEAD_STATUS_OPTIONS,
-  LEAD_SOURCE_OPTIONS,
-  LEAD_PRIORITY_OPTIONS,
-  leadStatusColors,
-  leadSourceLabels,
-  leadPriorityColors,
-  CreateLeadModal,
-  ConvertLeadModal,
-  LeadDetailModal,
-  LeadNotificationsModal,
-} from '@/components/crm/leads-shared';
-import { formatDate } from '@/lib/utils';
-import type { TableColumn } from '@/types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
+import {
+  BarChart3, Bell, Handshake, KanbanSquare, List as ListIcon, Plus, RefreshCw, Search, Settings2, Target, Users,
+} from 'lucide-react';
+import { Button, Input, Pagination } from '@/components/ui';
+import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
+import TourHost from '@/components/property-deals/Tour';
+import { CreateLeadModal, LeadNotificationsModal } from '@/components/crm/leads-shared';
+import { PipelineBoard } from '@/components/leads/PipelineBoard';
+import { FunnelPanel } from '@/components/leads/FunnelPanel';
+import { MyStepsPanel } from '@/components/leads/MySteps';
+import {
+  Avatar, dueText, fullName, money, ScoreBadge, StageBadge, STEP_LABEL,
+} from '@/components/leads/ui';
+import { cn } from '@/lib/utils';
+import {
+  ALL_STAGES, leadError, leadsService, type Board, type Funnel, type Lead, type LeadListQuery, type MySteps,
+  type SettingsBundle,
+} from '@/services/leads.service';
 
-const PER_PAGE = 10;
+type View = 'pipeline' | 'insights' | 'list';
 
-// ============================================================
-// Stat card
-// ============================================================
-
-interface StatCardProps {
-  title: string;
-  value: string | number;
-  icon: React.ReactNode;
-  color: 'primary' | 'success' | 'warning' | 'info' | 'violet';
+function isoDay(offsetDays = 0): string {
+  return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
-  const colorClasses: Record<StatCardProps['color'], string> = {
-    primary: 'bg-primary-50 text-primary-600',
-    success: 'bg-green-50 text-green-600',
-    warning: 'bg-amber-50 text-amber-600',
-    info: 'bg-blue-50 text-blue-600',
-    violet: 'bg-violet-50 text-violet-600',
-  };
-  return (
-    <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-secondary-500">{title}</p>
-          <p className="text-2xl font-bold text-secondary-900 mt-1">{value}</p>
-        </div>
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${colorClasses[color]}`}>
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-};
+const RANGES = [
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'Last 12 months', days: 365 },
+];
 
-// ============================================================
-// Main content
-// ============================================================
+function LeadsContent() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const [view, setView] = useState<View>((params.get('view') as View) || 'pipeline');
+  const [mine, setMine] = useState(false);
+  const [board, setBoard] = useState<Board | null>(null);
+  const [funnel, setFunnel] = useState<Funnel | null>(null);
+  const [steps, setSteps] = useState<MySteps | null>(null);
+  const [settings, setSettings] = useState<SettingsBundle | null>(null);
+  const [range, setRange] = useState(90);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
 
-function LeadsPageContent() {
-  const [leads, setLeads] = useState<CrmLead[]>([]);
-  const [stats, setStats] = useState<CrmLeadStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
-  const [sortColumn, setSortColumn] = useState('created_at');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [telegramActive, setTelegramActive] = useState(false); // green dot on the Notifications button
-  const [isConvertOpen, setIsConvertOpen] = useState(false);
-  const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
-  const [detailLead, setDetailLead] = useState<CrmLead | null>(null);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  // Deep-link: /dashboard/leads?open=<uuid> opens that lead's drawer (e.g. after creating a lead
-  // from the deal finder). Read from the URL directly to avoid needing a Suspense boundary.
-  const [openUuid] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return new URLSearchParams(window.location.search).get('open');
+  // List view state
+  const [query, setQuery] = useState<LeadListQuery>({
+    stage: params.get('stage') ?? undefined, owner: (params.get('owner') as LeadListQuery['owner']) ?? undefined,
+    sort: 'next_action', page: 1, per_page: 25,
   });
+  const [search, setSearch] = useState('');
+  const [list, setList] = useState<{ items: Lead[]; total: number; total_pages: number } | null>(null);
 
-  const [deleteTarget, setDeleteTarget] = useState<CrmLead | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const setViewAndUrl = (v: View) => {
+    setView(v);
+    const sp = new URLSearchParams(params.toString());
+    sp.set('view', v);
+    router.replace(`/dashboard/leads?${sp.toString()}`, { scroll: false });
+  };
 
-  const fetchIdRef = useRef(0);
-
-  // Debounce the search box so we issue one request after typing settles.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setDebouncedSearch(searchQuery.trim());
-      setCurrentPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
-
-  const loadStats = useCallback(async () => {
-    const s = await crmService.getLeadStats().catch(() => null);
-    if (s) setStats(s);
-  }, []);
-
-  // Whether Telegram alerts are live (drives the dot on the Notifications button).
-  const loadNotifStatus = useCallback(async () => {
-    const s = await crmService.getLeadNotificationSettings().catch(() => null);
-    setTelegramActive(!!(s && s.telegram_enabled && s.has_telegram_token));
-  }, []);
-
-  useEffect(() => { loadStats(); loadNotifStatus(); }, [loadStats, loadNotifStatus]);
-
-  const fetchLeads = useCallback(async () => {
-    const fetchId = ++fetchIdRef.current;
-    setIsLoading(true);
+  const loadTop = useCallback(async () => {
     try {
-      const params: CrmListParams = {
-        page: currentPage,
-        perPage: PER_PAGE,
-        orderBy: sortColumn,
-        orderDir: sortDirection,
-      };
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (sourceFilter !== 'all') params.source = sourceFilter;
-      if (priorityFilter !== 'all') params.priority = priorityFilter;
+      const [s, st] = await Promise.all([leadsService.mySteps(), settings ? Promise.resolve(settings) : leadsService.settings()]);
+      setSteps(s);
+      if (!settings) setSettings(st);
+    } catch (e) {
+      setError(leadError(e).message);
+    }
+  }, [settings]);
 
-      const response = await crmService.getLeads(params);
-      if (fetchId === fetchIdRef.current) {
-        setLeads(response.data);
-        setTotalPages(response.total_pages);
-        setTotalItems(response.total);
+  const loadView = useCallback(async () => {
+    setError(null);
+    try {
+      if (view === 'pipeline') setBoard(await leadsService.board({ owner: mine ? 'me' : undefined }));
+      else if (view === 'insights') setFunnel(await leadsService.funnel(isoDay(-(range - 1)), isoDay(0)));
+      else {
+        const res = await leadsService.list({ ...query, search: search || undefined, owner: mine ? 'me' : query.owner });
+        setList(res);
       }
-    } catch (error) {
-      if (fetchId === fetchIdRef.current) {
-        console.error('Failed to fetch leads:', error);
-        toast.error('Failed to load leads');
-      }
+    } catch (e) {
+      setError(leadError(e).message);
     } finally {
-      if (fetchId === fetchIdRef.current) setIsLoading(false);
+      setLoading(false);
     }
-  }, [currentPage, sortColumn, sortDirection, debouncedSearch, statusFilter, sourceFilter, priorityFilter]);
+  }, [view, mine, range, query, search]);
 
-  useEffect(() => { fetchLeads(); }, [fetchLeads]);
+  useEffect(() => { loadTop(); }, [loadTop]);
+  useEffect(() => { setLoading(true); loadView(); }, [loadView]);
 
-  const refreshAll = useCallback(() => {
-    fetchLeads();
-    loadStats();
-  }, [fetchLeads, loadStats]);
-
-  const handleSort = useCallback((column: string) => {
-    setSortColumn((prev) => {
-      if (prev === column) {
-        setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
-      setSortDirection('desc');
-      return column;
-    });
-  }, []);
-
-  const openDetail = useCallback((lead: CrmLead) => {
-    setDetailLead(lead);
-    setIsDetailOpen(true);
-  }, []);
-
-  // Open the deep-linked lead once on mount, fetched by uuid so it works regardless of the
-  // current page, filters or sort (and quietly falls back to the list if it's gone or unreadable).
+  // Light polling so AI scores and new leads appear without a reload.
   useEffect(() => {
-    if (!openUuid) return;
-    let alive = true;
-    crmService
-      .getLead(openUuid)
-      .then((lead) => { if (alive && lead) openDetail(lead); })
-      .catch(() => { /* deleted or no access — just show the list */ });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') { loadView(); loadTop(); } }, 30000);
+    return () => clearInterval(t);
+  }, [loadView, loadTop]);
 
-  // Quick triage: flip new ⇄ contacted from the row. Updates the header stats.
-  const handleToggleContacted = useCallback(async (lead: CrmLead) => {
-    const next = lead.status === 'contacted' ? 'new' : 'contacted';
-    try {
-      await crmService.updateLead(lead.uuid, { status: next });
-      refreshAll();
-    } catch {
-      toast.error('Failed to update lead');
-    }
-  }, [refreshAll]);
+  const refresh = () => { loadTop(); loadView(); };
+  const lostReasons = settings?.settings.lost_reasons ?? ['Not interested', 'Other'];
+  const labels = settings?.stage_labels;
 
-  const handleConvert = useCallback((lead: CrmLead) => {
-    setIsDetailOpen(false);
-    setConvertTarget(lead);
-    setIsConvertOpen(true);
-  }, []);
-
-  const handleDeleteClick = useCallback((lead: CrmLead) => {
-    setIsDetailOpen(false);
-    setDeleteTarget(lead);
-    setDeleteDialogOpen(true);
-  }, []);
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget) return;
-    setIsDeleting(true);
-    try {
-      await crmService.deleteLead(deleteTarget.uuid);
-      toast.success('Lead deleted');
-      setDeleteDialogOpen(false);
-      setDeleteTarget(null);
-      refreshAll();
-    } catch (error) {
-      console.error('Failed to delete lead:', error);
-      toast.error('Failed to delete lead');
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [deleteTarget, refreshAll]);
-
-  const columns: TableColumn<CrmLead>[] = useMemo(() => [
-    {
-      key: 'name',
-      header: 'Name',
-      sortable: true,
-      render: (lead) => (
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-            <UserPlus className="w-5 h-5 text-violet-600" />
-          </div>
-          <div>
-            <p className="font-medium text-secondary-900">{lead.first_name} {lead.last_name || ''}</p>
-            {lead.company_name && <p className="text-xs text-secondary-500">{lead.company_name}</p>}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'email',
-      header: 'Email',
-      render: (lead) => lead.email ? (
-        <div className="flex items-center gap-2 text-sm text-secondary-600">
-          <Mail className="w-3.5 h-3.5 text-secondary-400" />
-          <span>{lead.email}</span>
-        </div>
-      ) : <span className="text-sm text-secondary-400">--</span>,
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      render: (lead) => (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary-100 text-secondary-700">
-          {leadSourceLabels[lead.source] || lead.source}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (lead) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadStatusColors[lead.status] || 'bg-secondary-100 text-secondary-600'}`}>
-          {lead.status}
-        </span>
-      ),
-    },
-    {
-      key: 'priority',
-      header: 'Priority',
-      render: (lead) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadPriorityColors[lead.priority] || 'bg-secondary-100 text-secondary-600'}`}>
-          {lead.priority}
-        </span>
-      ),
-    },
-    {
-      key: 'score',
-      header: 'Score',
-      sortable: true,
-      render: (lead) => <span className="text-sm font-medium text-secondary-700">{lead.score}</span>,
-    },
-    {
-      key: 'created_at',
-      header: 'Created',
-      sortable: true,
-      render: (lead) => <span className="text-sm text-secondary-600">{formatDate(lead.created_at)}</span>,
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 'w-32',
-      render: (lead) => (
-        <div className="flex items-center gap-1">
-          {(lead.status === 'new' || lead.status === 'contacted') && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleToggleContacted(lead); }}
-              className={`p-1.5 rounded-lg transition-colors ${lead.status === 'contacted' ? 'text-green-600 bg-green-50 hover:bg-green-100' : 'text-secondary-400 hover:text-green-600 hover:bg-green-50'}`}
-              title={lead.status === 'contacted' ? 'Contacted — click to mark New' : 'Mark contacted'}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-            </button>
-          )}
-          {lead.status !== 'converted' && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleConvert(lead); }}
-              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-              title="Convert to Contact"
-            >
-              <ArrowRightCircle className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleDeleteClick(lead); }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-            title="Delete Lead"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ),
-    },
-  ], [handleConvert, handleDeleteClick, handleToggleContacted]);
+  const totals = useMemo(() => {
+    if (!board) return null;
+    const open = board.stages.filter((s) => s.open);
+    return {
+      open: open.reduce((n, s) => n + s.count, 0),
+      value: open.reduce((n, s) => n + s.value, 0),
+      overdue: open.reduce((n, s) => n + s.overdue, 0),
+    };
+  }, [board]);
 
   return (
     <div className="space-y-6">
       <PageHeader
+        icon={<Target className="h-5 w-5" aria-hidden="true" />}
         title="Leads"
-        description="Every enquiry captured for this workspace — website forms, API, referrals and manual entries."
+        description="Every enquiry from arrival to deal: who owns it, what's next, and what it's worth."
         actions={
-          <>
-            <Button variant="secondary" onClick={refreshAll} title="Refresh">
-              <RefreshCw className="w-4 h-4" />
-            </Button>
-            <Button variant="secondary" onClick={() => setIsNotifOpen(true)} title={telegramActive ? 'Notifications — Telegram alerts on' : 'Notifications'}>
-              <span className="relative mr-1.5 inline-flex">
-                <Bell className="w-4 h-4" />
-                {telegramActive && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 ring-2 ring-surface" />
-                )}
-              </span>
-              Notifications
-              {telegramActive && <span className="ml-1.5 hidden sm:inline text-xs font-medium text-green-600">• Telegram on</span>}
-            </Button>
-            <Button onClick={() => setIsCreateOpen(true)}>
-              <Plus className="w-4 h-4 mr-1.5" /> New Lead
-            </Button>
-          </>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/dashboard/leads/partners"
+              className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-secondary-600 hover:bg-secondary-100">
+              <Handshake className="h-4 w-4" aria-hidden="true" />Partners
+            </Link>
+            {settings?.can_edit && (
+              <Link href="/dashboard/leads/settings"
+                className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-secondary-600 hover:bg-secondary-100">
+                <Settings2 className="h-4 w-4" aria-hidden="true" />Settings
+              </Link>
+            )}
+            <Button variant="ghost" onClick={() => setNotifOpen(true)} leftIcon={<Bell className="h-4 w-4" />}>Alerts</Button>
+            <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" />} data-tour="add-lead">Add lead</Button>
+          </div>
         }
       />
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard title="Total" value={stats?.total_leads ?? 0} icon={<UserPlus className="w-6 h-6" />} color="violet" />
-        <StatCard title="New" value={stats?.new_leads ?? 0} icon={<Star className="w-6 h-6" />} color="info" />
-        <StatCard title="Contacted" value={stats?.contacted_leads ?? 0} icon={<Phone className="w-6 h-6" />} color="warning" />
-        <StatCard title="Qualified" value={stats?.qualified_leads ?? 0} icon={<Briefcase className="w-6 h-6" />} color="success" />
-        <StatCard title="Conversion" value={stats ? `${stats.conversion_rate}%` : '0%'} icon={<ArrowRightCircle className="w-6 h-6" />} color="primary" />
-      </div>
-
-      {/* Filters */}
-      <Card padding="md">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-[250px] max-w-md">
-            <Input
-              placeholder="Search leads..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              leftIcon={<Search className="w-4 h-4" />}
-            />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-3 gap-3 lg:col-span-2">
+          <div className="rounded-xl border border-secondary-200 bg-white p-4">
+            <p className="text-xs font-medium text-secondary-500">Open leads</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-secondary-900">{totals ? totals.open : '—'}</p>
           </div>
-          <div className="relative">
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }} className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
-              {LEAD_STATUS_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+          <div className="rounded-xl border border-secondary-200 bg-white p-4">
+            <p className="text-xs font-medium text-secondary-500">Pipeline value</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-secondary-900">
+              {totals ? money(totals.value, board?.currency, true) : '—'}
+            </p>
           </div>
-          <div className="relative">
-            <select value={sourceFilter} onChange={(e) => { setSourceFilter(e.target.value); setCurrentPage(1); }} className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
-              {LEAD_SOURCE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select value={priorityFilter} onChange={(e) => { setPriorityFilter(e.target.value); setCurrentPage(1); }} className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
-              <option value="all">All Priority</option>
-              {LEAD_PRIORITY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+          <div className="rounded-xl border border-secondary-200 bg-white p-4">
+            <p className="text-xs font-medium text-secondary-500">Late next steps</p>
+            <p className={cn('mt-1 text-2xl font-bold tabular-nums', totals && totals.overdue > 0 ? 'text-error-600' : 'text-secondary-900')}>
+              {totals ? totals.overdue : '—'}
+            </p>
           </div>
         </div>
-      </Card>
-
-      {/* Table */}
-      <div>
-        <Table
-          columns={columns}
-          data={leads}
-          keyExtractor={(l) => l.uuid}
-          onRowClick={openDetail}
-          sortColumn={sortColumn}
-          sortDirection={sortDirection}
-          onSort={handleSort}
-          isLoading={isLoading}
-          emptyMessage="No leads yet — captured enquiries will appear here."
-        />
-        <Pagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={totalItems}
-          perPage={PER_PAGE}
-          onPageChange={setCurrentPage}
-        />
+        {steps && (
+          <MyStepsPanel steps={steps} onShowUnassigned={() => {
+            setQuery((q) => ({ ...q, owner: 'unassigned', stage: undefined, page: 1 }));
+            setMine(false);
+            setViewAndUrl('list');
+          }} />
+        )}
       </div>
 
-      {/* Modals */}
-      <LeadDetailModal
-        isOpen={isDetailOpen}
-        lead={detailLead}
-        onClose={() => setIsDetailOpen(false)}
-        onSaved={refreshAll}
-        onConvert={handleConvert}
-        onDelete={handleDeleteClick}
-      />
-      <CreateLeadModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} onSuccess={refreshAll} />
-      <LeadNotificationsModal isOpen={isNotifOpen} onClose={() => { setIsNotifOpen(false); loadNotifStatus(); }} />
-      <ConvertLeadModal
-        isOpen={isConvertOpen}
-        onClose={() => { setIsConvertOpen(false); setConvertTarget(null); }}
-        onSuccess={refreshAll}
-        lead={convertTarget}
-      />
-      <ConfirmDialog
-        isOpen={deleteDialogOpen}
-        onClose={() => setDeleteDialogOpen(false)}
-        onConfirm={handleDeleteConfirm}
-        title="Delete lead"
-        message={`Are you sure you want to delete "${deleteTarget?.first_name || ''} ${deleteTarget?.last_name || ''}"? This action cannot be undone.`}
-        confirmText="Delete"
-        variant="danger"
-        isLoading={isDeleting}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-secondary-200 bg-white p-1" role="tablist" aria-label="Leads view">
+          {([
+            ['pipeline', 'Pipeline', KanbanSquare], ['insights', 'Insights', BarChart3], ['list', 'List', ListIcon],
+          ] as const).map(([key, label, Icon]) => (
+            <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setViewAndUrl(key)}
+              className={cn('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+                view === key ? 'bg-primary-500 text-white shadow-sm' : 'text-secondary-600 hover:bg-secondary-100')}>
+              <Icon className="h-4 w-4" aria-hidden="true" />{label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {view !== 'insights' && (
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-secondary-200 bg-white px-3 py-2 text-sm text-secondary-700">
+              <input type="checkbox" className="h-4 w-4 rounded border-secondary-300 text-primary-500" checked={mine}
+                onChange={(e) => setMine(e.target.checked)} />
+              <Users className="h-4 w-4 text-secondary-400" aria-hidden="true" />Only mine
+            </label>
+          )}
+          {view === 'insights' && (
+            <select value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="Period"
+              className="rounded-lg border border-secondary-200 bg-white px-3 py-2 text-sm">
+              {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
+            </select>
+          )}
+          <Button variant="ghost" size="sm" onClick={refresh} leftIcon={<RefreshCw className="h-4 w-4" />}>Refresh</Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700" role="alert">
+          {error} <button type="button" className="ml-2 font-medium underline" onClick={refresh}>Try again</button>
+        </div>
+      )}
+
+      {loading && !board && !funnel && !list ? (
+        <div className="flex h-64 items-center justify-center text-sm text-secondary-500">Loading leads…</div>
+      ) : view === 'pipeline' ? (
+        board && <PipelineBoard board={board} lostReasons={lostReasons} onChanged={refresh} />
+      ) : view === 'insights' ? (
+        funnel && (funnel.total === 0
+          ? <div className="rounded-xl border border-dashed border-secondary-300 bg-white p-10 text-center text-sm text-secondary-500">
+              No leads arrived in this period. Leads from your website, forms and shop show here as they come in.
+            </div>
+          : <FunnelPanel funnel={funnel} />)
+      ) : (
+        <section className="rounded-xl border border-secondary-200 bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-secondary-200 p-3">
+            <form className="relative min-w-[14rem] flex-1" onSubmit={(e) => { e.preventDefault(); setQuery((q) => ({ ...q, page: 1 })); loadView(); }}>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary-400" aria-hidden="true" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, company or phone"
+                className="pl-9" aria-label="Search leads" />
+            </form>
+            <select value={query.stage ?? ''} aria-label="Stage" onChange={(e) => setQuery((q) => ({ ...q, stage: e.target.value || undefined, page: 1 }))}
+              className="rounded-lg border border-secondary-200 px-3 py-2 text-sm">
+              <option value="">All stages</option>
+              {ALL_STAGES.map((s) => <option key={s} value={s}>{labels?.[s] ?? s}</option>)}
+            </select>
+            <select value={query.owner ?? ''} aria-label="Owner" onChange={(e) => setQuery((q) => ({ ...q, owner: e.target.value || undefined, page: 1 }))}
+              className="rounded-lg border border-secondary-200 px-3 py-2 text-sm">
+              <option value="">Anyone</option>
+              <option value="me">Mine</option>
+              <option value="unassigned">No owner</option>
+            </select>
+            <select value={query.due ?? ''} aria-label="Due" onChange={(e) => setQuery((q) => ({ ...q, due: (e.target.value || undefined) as LeadListQuery['due'], page: 1 }))}
+              className="rounded-lg border border-secondary-200 px-3 py-2 text-sm">
+              <option value="">Any time</option>
+              <option value="overdue">Late</option>
+              <option value="today">Due today</option>
+            </select>
+            <select value={query.sort ?? 'next_action'} aria-label="Sort" onChange={(e) => setQuery((q) => ({ ...q, sort: e.target.value as LeadListQuery['sort'] }))}
+              className="rounded-lg border border-secondary-200 px-3 py-2 text-sm">
+              <option value="next_action">Next step first</option>
+              <option value="newest">Newest</option>
+              <option value="score">Best AI score</option>
+              <option value="value">Highest value</option>
+              <option value="stage_changed">Recently moved</option>
+            </select>
+          </div>
+          {list && list.items.length === 0 ? (
+            <p className="p-10 text-center text-sm text-secondary-500">No leads match. Try another filter, or add one.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-secondary-200 text-left text-xs text-secondary-500">
+                    <th className="px-4 py-2.5 font-medium">Lead</th><th className="px-4 py-2.5 font-medium">Stage</th>
+                    <th className="px-4 py-2.5 font-medium">Next step</th><th className="px-4 py-2.5 font-medium">AI</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Value</th><th className="px-4 py-2.5 font-medium">Owner</th>
+                    <th className="px-4 py-2.5 font-medium">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(list?.items ?? []).map((l) => {
+                    const due = dueText(l.next_action_at);
+                    return (
+                      <tr key={l.uuid} className="cursor-pointer border-b border-secondary-100 hover:bg-secondary-50"
+                        onClick={() => router.push(`/dashboard/leads/${l.uuid}`)}>
+                        <td className="px-4 py-3">
+                          <Link href={`/dashboard/leads/${l.uuid}`} className="font-medium text-secondary-900 hover:text-primary-600"
+                            onClick={(e) => e.stopPropagation()}>{fullName(l)}</Link>
+                          <p className="text-xs text-secondary-500">{l.company_name || l.email || l.phone || ''}</p>
+                        </td>
+                        <td className="px-4 py-3"><StageBadge stage={l.stage} label={l.stage_label} /></td>
+                        <td className={cn('px-4 py-3 text-xs', due.overdue ? 'font-medium text-error-600' : 'text-secondary-600')}>
+                          {l.next_action_at ? `${STEP_LABEL[l.next_action_type ?? ''] ?? 'Step'} · ${due.text}` : '—'}
+                        </td>
+                        <td className="px-4 py-3"><ScoreBadge score={l.ai_score} /></td>
+                        <td className="px-4 py-3 text-right tabular-nums">{l.estimated_value ? money(l.estimated_value, l.currency || board?.currency) : '—'}</td>
+                        <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><Avatar name={l.owner_name} />
+                          <span className="text-xs text-secondary-600">{l.owner_name ?? 'No owner'}</span></span></td>
+                        <td className="px-4 py-3 text-xs capitalize text-secondary-600">{(l.source ?? '').replace(/_/g, ' ')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {list && list.total_pages > 1 && (
+            <div className="border-t border-secondary-200 p-3">
+              <Pagination currentPage={query.page ?? 1} totalPages={list.total_pages} totalItems={list.total}
+                perPage={query.per_page ?? 25} onPageChange={(p: number) => setQuery((q) => ({ ...q, page: p }))} />
+            </div>
+          )}
+        </section>
+      )}
+
+      <CreateLeadModal isOpen={createOpen} onClose={() => setCreateOpen(false)}
+        onSuccess={() => { setCreateOpen(false); toast.success('Lead added. The AI is looking at it now.'); refresh(); }} />
+      <LeadNotificationsModal isOpen={notifOpen} onClose={() => setNotifOpen(false)} />
     </div>
   );
 }
@@ -490,8 +317,10 @@ function LeadsPageContent() {
 export default function LeadsPage() {
   return (
     <>
-      <ProtectedPage module="crm_accounts" title="Leads">
-        <LeadsPageContent />
+      <ProtectedPage module="crm_leads" title="Leads">
+        <React.Suspense fallback={<div className="p-10 text-sm text-secondary-500">Loading…</div>}>
+          <LeadsContent />
+        </React.Suspense>
       </ProtectedPage>
       <TourHost />
     </>

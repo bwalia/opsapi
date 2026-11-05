@@ -723,12 +723,12 @@ load_if("crm", "routes.crm-activities")
 -- project regardless of whether the full CRM feature (accounts, contacts,
 -- deals, pipelines) is enabled. A lead is inbound raw contact info — most
 -- projects need a way to receive it even if they don't run the pipeline
--- side of CRM. The convert-to-contact/deal endpoint inside crm-leads
--- self-gates on the CRM feature (it needs crm_contacts + crm_deals), so
--- the "core"-ness only exposes capture + list + edit + archive, never the
--- convert path.
+-- side of CRM. Calls, meetings and convert need crm_activities/crm_deals and
+-- answer 409 where CRM isn't deployed (lib/crm/util.lua U.crm()).
 safe_load_routes("routes.crm-leads")
 safe_load_routes("routes.crm-leads-public")
+-- Partners (pass a deal on for a commission) and their public answer link.
+load_if("crm", "routes.crm-partners")
 -- The link in a workspace invitation email (core: invitations are).
 safe_load_routes("routes.invitations-public")
 

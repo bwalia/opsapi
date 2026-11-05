@@ -9,7 +9,7 @@ local R, CRU = { "read" }, { "create", "read", "update" }
 -- orders, invoices, purchase orders, payments and renovation project boards.
 -- Unknown modules (a feature not deployed) are skipped by setup.
 local BACK_OFFICE = {
-    "dashboard", "crm_accounts", "crm_contacts", "crm_deals", "crm_pipelines", "crm_activities", "forms",
+    "dashboard", "crm_leads", "crm_accounts", "crm_contacts", "crm_deals", "crm_pipelines", "crm_activities", "forms",
     "customers", "orders", "products", "stores", "payments", "invoices", "purchase_orders", "tax_rates_config",
     "accounting", "expense_management", "projects", "kanban", "chat", "reports", "templates",
 }

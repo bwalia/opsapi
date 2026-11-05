@@ -561,6 +561,7 @@ ProjectConfig.PROJECT_MODULES = {
 
     -- CRM modules
     crm = {
+        { machine_name = "crm_leads", name = "CRM Leads", description = "Lead pipeline: capture, follow-up, meetings, conversion", category = "CRM" },
         { machine_name = "crm_accounts", name = "CRM Accounts", description = "Company/organization management", category = "CRM" },
         { machine_name = "crm_contacts", name = "CRM Contacts", description = "Contact management", category = "CRM" },
         { machine_name = "crm_deals", name = "CRM Deals", description = "Deal pipeline management", category = "CRM" },

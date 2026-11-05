@@ -464,16 +464,26 @@ function CrmQueries.updateDeal(uuid, params)
     local deal = CrmDealModel:find({ uuid = uuid })
     if not deal then return nil end
 
-    -- Detect stage transitions
+    -- Detect stage transitions. The CRM page's stages are closed_won /
+    -- closed_lost; older clients send won / lost. Leaving a closed stage
+    -- reopens the deal.
+    local WON, LOST = { won = true, closed_won = true }, { lost = true, closed_lost = true }
     if params.stage and params.stage ~= deal.stage then
-        if params.stage == "won" then
+        if WON[params.stage] then
             params.won_at = db.raw("NOW()")
+            params.lost_at = db.NULL
             params.actual_close_date = db.raw("CURRENT_DATE")
             params.status = "won"
-        elseif params.stage == "lost" then
+            params.probability = 100
+        elseif LOST[params.stage] then
             params.lost_at = db.raw("NOW()")
+            params.won_at = db.NULL
             params.actual_close_date = db.raw("CURRENT_DATE")
             params.status = "lost"
+            params.probability = 0
+        elseif WON[deal.stage] or LOST[deal.stage] or deal.status ~= "open" then
+            params.status = "open"
+            params.won_at, params.lost_at, params.actual_close_date = db.NULL, db.NULL, db.NULL
         end
     end
 
