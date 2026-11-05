@@ -25,6 +25,8 @@
       POST   /quotes
       GET    /quotes/:uuid?t=
       POST   /checkout                           { …, membership?: { interval, accept_terms, terms_version } } joins Trade in the same payment
+                                                 409 CHECKOUT_DISABLED while settings.checkout_enabled is false
+      GET    /settings                           { checkout_enabled } — false: enquiries (quotes) only, no online payment
       GET    /orders/:uuid?t=
       POST   /chat-sessions                      { cart_token?, email?, name?, phone? } (+ BFF X-Visitor-Country)
       POST   /chat-sessions/:uuid/messages
@@ -304,6 +306,12 @@ return function(app)
         local res, err = Chat.saveContact(ns_id, self.params.uuid, body)
         if not res then return U.from_err(err) end
         return U.ok(res)
+    end))
+
+    -- shop settings (checkout_enabled false = enquiries only) ----------------------------
+    app:get(BASE .. "/settings", public(function(_, ns_id)
+        local s = require("queries.ShopSettingsQueries").get(ns_id)
+        return U.ok({ checkout_enabled = s.checkout_enabled })
     end))
 
     -- VIP membership ------------------------------------------------------------------

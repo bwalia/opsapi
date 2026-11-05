@@ -13,6 +13,7 @@ local U = require("lib.shop-util")
 local Pricing = require("lib.shop-pricing")
 local Catalog = require("queries.ShopCatalogQueries")
 local Leads = require("queries.ShopLeadQueries")
+local Settings = require("queries.ShopSettingsQueries")
 local Cart = require("queries.ShopCartQueries")
 
 local ShopQuoteQueries = {}
@@ -42,9 +43,10 @@ function ShopQuoteQueries.shape(q, opts)
     local lines = U.dec(q.lines, {})
     local unpriced = Pricing.unpriced_lines(lines)
     local out = {
-        -- payable: what checkout will accept (status, validity and every item priced);
-        -- pending_pricing: items we still have to price before the customer can pay
-        payable = PAYABLE_STATUSES[q.status] == true and q.is_past_validity ~= true and #unpriced == 0,
+        -- payable: what checkout will accept (checkout switched on, status, validity and
+        -- every item priced); pending_pricing: items we still have to price before the customer can pay
+        payable = PAYABLE_STATUSES[q.status] == true and q.is_past_validity ~= true and #unpriced == 0
+            and Settings.checkoutEnabled(q.namespace_id),
         pending_pricing = U.arr(unpriced),
         uuid = q.uuid,
         quote_number = q.quote_number,

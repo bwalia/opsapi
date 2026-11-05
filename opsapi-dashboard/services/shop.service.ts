@@ -136,7 +136,24 @@ export interface ShopPageParams {
   offset?: number;
 }
 
+/** Shop-wide settings. checkout_enabled false = no online payment for orders, enquiries (quotes) only. */
+export interface ShopSettings {
+  checkout_enabled: boolean;
+  updated_at: string | null;
+}
+
 export const shopService = {
+  // ---------------- Settings ----------------
+  async getSettings(): Promise<ShopSettings> {
+    const res = await apiClient.get(`${BASE}/settings`);
+    return unwrap<ShopSettings>(res);
+  },
+
+  async updateSettings(body: Pick<ShopSettings, 'checkout_enabled'>): Promise<ShopSettings> {
+    const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
+    return unwrap<ShopSettings>(res);
+  },
+
   // ---------------- Dashboard / ops ----------------
   async getDashboard(): Promise<ShopDashboardKpis> {
     const res = await apiClient.get(`${BASE}/dashboard`);

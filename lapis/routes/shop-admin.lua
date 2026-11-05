@@ -18,6 +18,7 @@
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
+      GET/PUT           /settings              { checkout_enabled } — false: no online payment for orders, enquiries only
       GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 60|120, refund threshold, …)
       GET               /membership/members    (?status=&q=)
       GET               /waitlist              (?product_uuid=&include_notified=; members first)
@@ -323,6 +324,23 @@ return function(app)
     app:post(BASE .. "/reconcile", guard("update", function(_, ns_id)
         return U.ok(ShopStripe.reconcile(ns_id, {}))
     end))
+
+    -- shop settings -------------------------------------------------------------------
+    local Settings = require("queries.ShopSettingsQueries")
+
+    app:match(BASE .. "/settings", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(_, ns_id) return U.ok(Settings.get(ns_id)) end)(self)
+        elseif m == "PUT" or m == "PATCH" then
+            return guard("update", function(_, ns_id)
+                local body, bad = body_or_400()
+                if not body then return bad end
+                return result(Settings.update(ns_id, body))
+            end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
 
     -- VIP membership ------------------------------------------------------------------
     local Membership = require("queries.ShopMembershipQueries")
