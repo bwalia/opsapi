@@ -10,7 +10,7 @@
       GET/POST          /products              GET/PUT/DELETE /products/:uuid
       POST              /products/:uuid/stock  POST /options/:uuid/stock
       GET               /stock                 GET /stock/movements
-      POST              /import
+      POST              /import                   (existing products keep their prices; body overwrite_prices: true resets them)
       GET               /orders                GET/PUT /orders/:uuid
       POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
                                                goods via Stripe less the Trade discount clawback
@@ -18,7 +18,7 @@
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
-      GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 90|120, refund threshold, …)
+      GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 60|120, refund threshold, …)
       GET               /membership/members    (?status=&q=)
       GET               /waitlist              (?product_uuid=&include_notified=; members first)
       GET/POST          /credits               loyalty credit (?q=&status=&source=); POST { email, amount_minor,

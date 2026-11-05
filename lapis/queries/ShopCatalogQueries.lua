@@ -27,6 +27,10 @@ local PRODUCT_TYPES = {
     networking = true, peripheral = true, software = true, service = true,
 }
 local PRICE_MODES = { fixed = true, configurable = true, quote_only = true }
+-- Product columns a catalogue import leaves alone on existing products (see saveProduct keep_prices).
+local PRICE_FIELDS = { "base_price_minor", "price_mode", "price_verified", "pricing_source", "margin_pct",
+                       "vat_rate", "currency" }
+ShopCatalogQueries.PRICE_FIELDS = PRICE_FIELDS
 local PRODUCT_STATUS = { draft = true, active = true, archived = true }
 local RULE_KINDS = { requires = true, excludes = true, power = true, max_total = true, attr_match = true }
 ShopCatalogQueries.RULE_KINDS = RULE_KINDS
@@ -40,6 +44,22 @@ local PRODUCT_COLS = [[
     p.public_launch_at, COALESCE(p.public_launch_at > NOW(), false) AS prelaunch, p.created_at, p.updated_at
 ]]
 ShopCatalogQueries.PRODUCT_COLS = PRODUCT_COLS
+
+-- The price an option adds (aliases o = shop_options, cp = its component product, LEFT JOINed).
+-- An option backed by a priced component product follows that product's live base price, so a
+-- component's price is changed once and every configuration using it follows. The option's own
+-- price_delta_minor applies when there is no component or the component has no price (quote_only).
+-- The one definition used by listings (FROM_PRICE_SQL) and by loadBundle (product pages, cart,
+-- quotes, checkout) so they can never disagree.
+-- ponytail: a linked option always follows the component; add a per-option override column if a
+-- bundle-only price for a component is ever needed.
+local OPTION_PRICE_SQL = [[
+    CASE WHEN cp.id IS NOT NULL AND cp.price_mode <> 'quote_only' AND cp.base_price_minor > 0
+         THEN cp.base_price_minor ELSE o.price_delta_minor END
+]]
+local OPTION_FOLLOWS_SQL = [[
+    (cp.id IS NOT NULL AND cp.price_mode <> 'quote_only' AND cp.base_price_minor > 0)
+]]
 
 -- ---------------------------------------------------------------------------
 -- members' early access (shop_products.public_launch_at)
@@ -166,7 +186,9 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
           FROM shop_option_groups WHERE product_id = ? ORDER BY sort_order, id
     ]], p.id)
     local options = db.query([[
-        SELECT o.id, o.uuid, o.group_id, o.code, o.name, o.description, o.price_delta_minor, o.component_product_id,
+        SELECT o.id, o.uuid, o.group_id, o.code, o.name, o.description,
+               ]] .. OPTION_PRICE_SQL .. [[ AS price_delta_minor, o.price_delta_minor AS stored_price_delta_minor,
+               ]] .. OPTION_FOLLOWS_SQL .. [[ AS price_follows_component, o.component_product_id,
                o.stock_qty, o.max_qty, o.is_default, o.is_active, o.sort_order, o.attributes::text AS attributes,
                cp.uuid AS component_uuid, cp.sku AS component_sku, cp.name AS component_name,
                cp.allow_backorder AS component_allow_backorder, cp.lead_time_days AS component_lead_time_days,
@@ -205,6 +227,8 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
     for _, o in ipairs(options) do
         o.attributes = U.dec(o.attributes, {})
         o.price_delta_minor = tonumber(o.price_delta_minor) or 0
+        o.stored_price_delta_minor = tonumber(o.stored_price_delta_minor) or 0
+        o.price_follows_component = o.price_follows_component == true
         if U.nz(o.component_product_id) then
             local a = pav[o.component_product_id]
             o.available = a and a.available or 0
@@ -348,7 +372,8 @@ local FROM_PRICE_SQL = [[
         SELECT SUM(CASE WHEN need > 0 THEN m.min_delta * need ELSE LEAST(m.min_delta, 0) END)
           FROM (SELECT g.id, GREATEST(g.min_qty, CASE WHEN g.required THEN 1 ELSE 0 END) AS need
                   FROM shop_option_groups g WHERE g.product_id = p.id AND g.is_active) g2
-          JOIN LATERAL (SELECT MIN(o.price_delta_minor) AS min_delta FROM shop_options o
+          JOIN LATERAL (SELECT MIN(]] .. OPTION_PRICE_SQL .. [[) AS min_delta FROM shop_options o
+                          LEFT JOIN shop_products cp ON cp.id = o.component_product_id
                          WHERE o.group_id = g2.id AND o.is_active) m ON m.min_delta IS NOT NULL
     ), 0)
 ]]
@@ -639,7 +664,11 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
         for _, o in ipairs(g.options) do
             opts[#opts + 1] = {
                 uuid = o.uuid, code = o.code, name = o.name, description = o.description or U.null,
+                -- the price customers are charged; when price_follows_component it is the component's
+                -- live price and stored_price_delta_minor is only the fallback (component unpriced)
                 price_delta_minor = o.price_delta_minor,
+                stored_price_delta_minor = o.stored_price_delta_minor,
+                price_follows_component = o.price_follows_component,
                 stock_qty = U.nz(o.stock_qty) and tonumber(o.stock_qty) or U.null,
                 component_product = U.nz(o.component_product_id) and {
                     uuid = o.component_uuid, sku = o.component_sku, name = o.component_name } or U.null,
@@ -773,8 +802,10 @@ local function validate_product_doc(doc, existing)
 end
 
 --- Replace option groups/options for a product (upsert by code, deactivate missing).
+-- keep_option_prices: existing options keep their price_delta_minor (catalogue import); new options
+-- still take the document's price.
 -- Returns list of unresolved component skus { {option_id, sku} }.
-local function save_groups(ns_id, product_id, groups_doc, keep_option_stock)
+local function save_groups(ns_id, product_id, groups_doc, keep_option_stock, keep_option_prices)
     local unresolved = {}
     local seen_groups = {}
     for gi, g in ipairs(groups_doc) do
@@ -824,6 +855,7 @@ local function save_groups(ns_id, product_id, groups_doc, keep_option_stock)
             if oex then
                 -- existing option: keep its stock when editing (only set on creation)
                 if keep_option_stock then ofields.stock_qty = nil end
+                if keep_option_prices then ofields.price_delta_minor = nil end
                 db.update("shop_options", ofields, { id = oex.id })
                 oid = oex.id
             else
@@ -976,6 +1008,13 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
             fields.category_id = cid or db.NULL
         end
 
+        -- Catalogue import (opts.keep_prices): an existing product's price lives in OpsAPI (dashboard,
+        -- supplier sync, market apply-price) and a re-import must never undo it. New products still
+        -- take the document's price. Import with overwrite_prices: true to reset prices on purpose.
+        if existing and opts.keep_prices then
+            for _, k in ipairs(PRICE_FIELDS) do fields[k] = nil end
+        end
+
         -- PUT (opts.ignore_stock) never touches stock: that goes through the /stock
         -- endpoints so a stale editor cannot overwrite sales.
         local new_stock = (doc.stock_qty ~= nil and not (opts.ignore_stock and existing))
@@ -1005,7 +1044,7 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
 
         local unresolved = {}
         if type(doc.option_groups) == "table" then
-            unresolved = save_groups(ns_id, product_id, doc.option_groups, opts.ignore_stock)
+            unresolved = save_groups(ns_id, product_id, doc.option_groups, opts.ignore_stock, opts.keep_prices)
         end
         if type(doc.rules) == "table" then
             save_rules(product_id, doc.rules)
@@ -1045,9 +1084,13 @@ end
 
 function ShopCatalogQueries.import(ns_id, payload, user_id)
     payload = payload or {}
+    -- Prices are managed in OpsAPI: a re-import adds new products and updates content, but existing
+    -- products and options keep their live prices unless the caller resets them on purpose.
+    local keep_prices = payload.overwrite_prices ~= true
     local result = {
         categories = { created = 0, updated = 0 },
         products = { created = 0, updated = 0 },
+        prices = keep_prices and "kept" or "overwritten",
         errors = {},
     }
     local function add_error(kind, ref, message)
@@ -1090,7 +1133,7 @@ function ShopCatalogQueries.import(ns_id, payload, user_id)
         -- existing products/options keep their stock unless overwrite_stock.
         local ok, res, err = pcall(ShopCatalogQueries.saveProduct, ns_id, p,
             { reason = "import", ref = "import", user_id = user_id,
-              ignore_stock = payload.overwrite_stock ~= true })
+              ignore_stock = payload.overwrite_stock ~= true, keep_prices = keep_prices })
         local ref = type(p) == "table" and (p.sku or p.slug or p.name) or nil
         if not ok then
             add_error("product", ref, tostring(res))

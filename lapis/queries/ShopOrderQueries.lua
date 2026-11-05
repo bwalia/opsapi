@@ -206,6 +206,9 @@ local function stripe_line_items(lines, totals)
     return items
 end
 
+-- Trade discount / refund VAT uses the basket's weighted rate, not one line's (lib/shop-pricing).
+local effective_vat_rate = Pricing.effective_vat_rate
+
 --- POST /checkout.
 -- body: {from:"cart"|"quote", quote_uuid?, quote_token?, email?, name?, company?, phone?, success_url, cancel_url}
 -- Returns ({order_uuid, order_token, checkout_url}) or (nil, err)
@@ -258,6 +261,13 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         end
         lines = U.dec(quote.lines, {})
         if #lines == 0 then return nil, U.err(400, "EMPTY_QUOTE", "The quote has no lines") end
+        -- quote_only items sit on a self-service quote at no price; paying now would buy them for
+        -- nothing. They become payable once staff price the line (price_override_minor).
+        local unpriced = Pricing.unpriced_lines(lines)
+        if #unpriced > 0 then
+            return nil, U.err(409, "QUOTE_PRICING_PENDING", "We still need to price " .. table.concat(unpriced, ", ")
+                .. ". We'll send you the updated quote to pay.", { products = U.arr(unpriced) })
+        end
         customer = U.dec(quote.customer, {})
         email = email or U.nz(customer.email)
     else
@@ -312,7 +322,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         })
         if not s then return nil, jemail end
         join = { settings = s, m = Membership.reserve(ns_id, s, jemail, interval) }
-        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local vat_rate = effective_vat_rate(totals.subtotal_minor, totals.vat_minor)
         -- A new membership year: the whole yearly cap is available to the order they join with.
         local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
             R.cap_remaining(s, 0))
@@ -330,7 +340,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     if member and (not email or tostring(email):lower() == member.email) then
         local Membership = require("queries.ShopMembershipQueries")
         local R = require("lib.shop-membership")
-        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local vat_rate = effective_vat_rate(totals.subtotal_minor, totals.vat_minor)
         local m = member.membership
         if from == "cart" and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
@@ -668,8 +678,7 @@ function ShopOrderQueries.adminRefund(ns_id, uuid, body, actor)
         if not REFUNDABLE[o.status] then
             return nil, U.err(409, "NOT_REFUNDABLE", "This order can't be refunded (status " .. o.status .. ")")
         end
-        local lines = U.dec(o.lines, {})
-        local vat_rate = tonumber(lines[1] and lines[1].vat_rate) or 0.2
+        local vat_rate = effective_vat_rate(o.subtotal_minor, o.vat_minor)
         local split, verr = R.refund_split(require("queries.ShopMembershipQueries").settings(ns_id), o,
             body.amount_net_minor, full, vat_rate)
         if not split then return nil, U.err(400, "VALIDATION_ERROR", verr) end
