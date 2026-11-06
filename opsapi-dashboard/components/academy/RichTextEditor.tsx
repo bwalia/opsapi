@@ -47,7 +47,9 @@ import {
   Youtube as YoutubeIcon,
   Loader2,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { promptDialog } from '@/components/ui';
+import { MediaPicker, uploadImageFile } from '@/components/media';
 import styles from './RichTextEditor.module.css';
 
 // ------------------------------------------------------------
@@ -212,6 +214,12 @@ export interface RichTextEditorProps {
    * for an https URL (Academy / comments behaviour).
    */
   uploadImage?: (file: File) => Promise<string>;
+  /**
+   * The workspace media library (CMS): the image button opens the library to
+   * pick, upload or crop an image, and pasted/dropped images are added to the
+   * library. Needs the cms permission.
+   */
+  imageLibrary?: boolean;
 }
 
 // ------------------------------------------------------------
@@ -255,9 +263,11 @@ const Toolbar: React.FC<{
   sourceMode?: boolean;
   onToggleSource?: () => void;
   uploadImage?: (file: File) => Promise<string>;
-}> = ({ editor, sourceMode, onToggleSource, uploadImage }) => {
+  imageLibrary?: boolean;
+}> = ({ editor, sourceMode, onToggleSource, uploadImage, imageLibrary }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const setLink = useCallback(async () => {
     const previous = editor.getAttributes('link').href as string | undefined;
@@ -279,8 +289,7 @@ const Toolbar: React.FC<{
         const src = await uploadImage(file);
         if (src) editor.chain().focus().setImage({ src }).run();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Image upload failed';
-        window.alert(msg);
+        toast.error(err instanceof Error ? err.message : 'Image upload failed');
       } finally {
         setUploading(false);
         if (fileRef.current) fileRef.current.value = '';
@@ -290,6 +299,10 @@ const Toolbar: React.FC<{
   );
 
   const addImage = useCallback(async () => {
+    if (imageLibrary) {
+      setPickerOpen(true);
+      return;
+    }
     if (uploadImage) {
       fileRef.current?.click();
       return;
@@ -298,7 +311,7 @@ const Toolbar: React.FC<{
     if (url && url.trim()) {
       editor.chain().focus().setImage({ src: url.trim() }).run();
     }
-  }, [editor, uploadImage]);
+  }, [editor, uploadImage, imageLibrary]);
 
   const addVideo = useCallback(async () => {
     const url = await promptDialog({
@@ -467,16 +480,27 @@ const Toolbar: React.FC<{
         title={
           uploading
             ? 'Uploading image…'
-            : uploadImage
-              ? 'Upload image (publishes to the public site)'
-              : 'Insert image by URL'
+            : imageLibrary
+              ? 'Insert image (from the media library or your computer)'
+              : uploadImage
+                ? 'Upload image (publishes to the public site)'
+                : 'Insert image by URL'
         }
         onClick={addImage}
         disabled={uploading}
       >
         {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
       </TbButton>
-      {uploadImage ? (
+      {imageLibrary ? (
+        <MediaPicker
+          isOpen={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onPick={(asset) =>
+            editor.chain().focus().setImage({ src: asset.url, alt: asset.alt_text || undefined }).run()
+          }
+        />
+      ) : null}
+      {uploadImage && !imageLibrary ? (
         <input
           ref={fileRef}
           type="file"
@@ -519,6 +543,12 @@ const Toolbar: React.FC<{
 // Editor
 // ------------------------------------------------------------
 
+async function libraryUpload(file: File): Promise<string> {
+  const asset = await uploadImageFile(file);
+  toast.success('Image added to the media library.');
+  return asset.url;
+}
+
 const RichTextEditor: React.FC<RichTextEditorProps> = ({
   value = '',
   onChange,
@@ -526,14 +556,17 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   editable = true,
   mentionItems,
   uploadImage,
+  imageLibrary,
 }) => {
   // Read the latest items lazily so async-loaded members work without remounting.
   const mentionItemsRef = useRef<MentionItem[]>(mentionItems ?? []);
   useEffect(() => { mentionItemsRef.current = mentionItems ?? []; }, [mentionItems]);
   const withMentions = mentionItems !== undefined;
 
-  const uploadImageRef = useRef(uploadImage);
-  useEffect(() => { uploadImageRef.current = uploadImage; }, [uploadImage]);
+  // Pasted / dropped image files: the caller's uploader, else the media library.
+  const upload = uploadImage ?? (imageLibrary ? libraryUpload : undefined);
+  const uploadImageRef = useRef(upload);
+  useEffect(() => { uploadImageRef.current = upload; }, [upload]);
 
   const editor = useEditor({
     immediatelyRender: false, // required for Next.js SSR (avoids hydration mismatch)
@@ -588,7 +621,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             view.dispatch(view.state.tr.replaceSelectionWith(node));
           })
           .catch((err: unknown) => {
-            window.alert(err instanceof Error ? err.message : 'Image upload failed');
+            toast.error(err instanceof Error ? err.message : 'Image upload failed');
           });
         return true;
       },
@@ -612,7 +645,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             view.dispatch(view.state.tr.insert(pos, node));
           })
           .catch((err: unknown) => {
-            window.alert(err instanceof Error ? err.message : 'Image upload failed');
+            toast.error(err instanceof Error ? err.message : 'Image upload failed');
           });
         return true;
       },
@@ -655,6 +688,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           sourceMode={sourceMode}
           onToggleSource={toggleSource}
           uploadImage={uploadImage}
+          imageLibrary={imageLibrary}
         />
       )}
       {sourceMode ? (

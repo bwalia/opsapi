@@ -162,6 +162,7 @@ local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADE
 -- CMS (website pages + blog: articles, categories, tags — namespace-scoped)
 local cms_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-system") or {}
 local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-menu-items") or {}
+local media_library_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.media-library") or {}
 
 -- Shop (Workstation AI Shop: configurable catalogue, carts, quotes, orders, Stripe, RAG)
 local shop_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-system") or {}
@@ -2798,6 +2799,9 @@ local _migrations = {
     -- Letters after 9: keys sort as strings ('zzcrm10' would run before 'zzcrm2').
     ['zzcrma_lead_pipeline_partner_profiles'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 10),
     ['zzcrmb_lead_pipeline_deal_referrals'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 11),
+    -- Media library (migrations/media-library.lua): images reused across content
+    ['zzmed1_media_assets'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 1),
+    ['zzmed2_media_backfill'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 2),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),
