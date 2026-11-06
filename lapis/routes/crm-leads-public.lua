@@ -103,6 +103,22 @@ return function(app)
             local referrer = ngx.var.http_referer or data.referrer_url
             local user_agent = ngx.var.http_user_agent
 
+            -- Optional legal confirmation ticked on the form: { documents = [{ key, version, statement }] }.
+            -- Kept on the lead and, when the shop is enabled, in the legal-acceptance ledger (checkpoint "contact").
+            local consent
+            if type(data.consent) == "table" and type(data.consent.documents) == "table" then
+                local docs = {}
+                for i, d in ipairs(data.consent.documents) do
+                    if i > 6 then break end
+                    if type(d) == "table" and type(d.key) == "string" and type(d.version) == "string"
+                        and type(d.statement) == "string" then
+                        docs[#docs + 1] = { key = d.key:sub(1, 48), version = d.version:sub(1, 32),
+                            statement = d.statement:sub(1, 1000) }
+                    end
+                end
+                if #docs > 0 then consent = { documents = docs, accepted_at = ngx.utctime() .. "Z" } end
+            end
+
             local lead, err = CrmLeadQueries.createLeadFromPublic({
                 namespace_id = namespace.id,
                 first_name = data.first_name or "",
@@ -128,6 +144,7 @@ return function(app)
                     -- Keep the ORIGINAL submitted message verbatim so a later
                     -- edit to `notes` can never lose the visitor's own words.
                     message = data.message or data.comments or data.notes,
+                    consent = consent,
                 })
             })
 
@@ -140,6 +157,17 @@ return function(app)
                     return { status = 200, json = { success = true, message = "Thank you for your submission" } }
                 end
                 return { status = 500, json = { success = false, error = "Submission failed" } }
+            end
+
+            if consent and data.email and data.email ~= "" then
+                local ok_q, Legal = pcall(require, "queries.ShopLegalQueries")
+                if ok_q then
+                    local ok_r, res_or_err = pcall(Legal.record, namespace.id, {
+                        email = data.email, checkpoint = "contact", subject_ref = lead.uuid,
+                        ip = RateLimit.getClientIP(), user_agent = user_agent, documents = consent.documents,
+                    })
+                    if not ok_r then ngx.log(ngx.WARN, "[public-lead] legal acceptance not recorded: ", tostring(res_or_err)) end
+                end
             end
 
             -- Fresh capture succeeded — fire configured notifications (confirmation
