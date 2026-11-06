@@ -54,6 +54,12 @@
       POST   /auth/password                      { email, password } → { session_token, email } + emails a code (BFF only)
       POST   /auth/password/verify               { session_token, code } → { session_token, email, expires_in_days } (BFF only)
       GET    /customer/quotes                    the signed-in customer's quotes, matched on email (X-Member-Token)
+
+    Legal acceptances (append-only evidence of the statements a customer ticks; the shop decides which
+    document versions are current):
+      POST   /legal/acceptances                  { email, checkpoint, subject_ref?, ip?, user_agent?,
+                                                   documents: [{ key, version, hash?, statement }] } (BFF only)
+      GET    /legal/acceptances?email=           newest acceptance per document (BFF only; or X-Member-Token → own email)
 ]]
 
 local U = require("lib.shop-util")
@@ -69,6 +75,7 @@ local Market = require("queries.ShopMarketQueries")
 local Insights = require("queries.ShopInsightsQueries")
 local Membership = require("queries.ShopMembershipQueries")
 local CustomerAuth = require("queries.ShopCustomerAuthQueries")
+local Legal = require("queries.ShopLegalQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -427,6 +434,29 @@ return function(app)
         if not m then return bad end
         local data, meta = Quote.forCustomer(ns_id, m.email, self.params)
         return U.ok(data, 200, meta)
+    end))
+
+    app:post(BASE .. "/legal/acceptances", public(function(self, ns_id)
+        if not is_bff(self) then return U.fail(403, "FORBIDDEN", "Only the shop server may record acceptances") end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Legal.record(ns_id, body)
+        if not res then return U.from_err(err) end
+        return U.ok(res, 201)
+    end))
+
+    app:get(BASE .. "/legal/acceptances", public(function(self, ns_id)
+        local email
+        if is_bff(self) then
+            email = self.params.email
+        else
+            local m, bad = member_or_401()
+            if not m then return bad end
+            email = m.email
+        end
+        local res, err = Legal.latestForEmail(ns_id, email)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
     end))
 
     app:get(BASE .. "/member/early-access", public(function(_, ns_id)

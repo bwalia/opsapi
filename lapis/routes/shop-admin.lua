@@ -36,6 +36,8 @@
       GET               /price-changes          (?status=pending|applied|approved|rejected|superseded)
       POST              /price-changes/:uuid/approve | /reject
       POST              /reconcile
+      GET               /legal/acceptances     legal confirmations customers ticked (?q=email&document_key=
+                                               &checkpoint=&subject_ref=&limit=&offset=), newest first
 ]]
 
 local U = require("lib.shop-util")
@@ -49,6 +51,7 @@ local Chat = require("queries.ShopChatQueries")
 local Search = require("queries.ShopSearchQueries")
 local Dashboard = require("queries.ShopDashboardQueries")
 local ShopStripe = require("queries.ShopStripeQueries")
+local Legal = require("queries.ShopLegalQueries")
 
 local BASE = "/api/v2/shop/admin"
 
@@ -363,6 +366,11 @@ return function(app)
 
     app:get(BASE .. "/membership/members", guard("read", function(self, ns_id)
         return U.ok(Membership.adminMembers(ns_id, self.params))
+    end))
+
+    app:get(BASE .. "/legal/acceptances", guard("read", function(self, ns_id)
+        local data, meta = Legal.adminList(ns_id, self.params)
+        return U.ok(data, 200, meta)
     end))
 
     app:get(BASE .. "/waitlist", guard("read", function(self, ns_id)

@@ -171,6 +171,7 @@ local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "mig
 local shop_insights_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-insights") or {}
 local shop_advisor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-advisor") or {}
 local shop_supplier_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-suppliers") or {}
+local shop_legal_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-legal") or {}
 local shop_analytics_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-analytics") or {}
 local shop_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-settings") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
@@ -2654,6 +2655,8 @@ local _migrations = {
     ['zzs35_shop_analytics_enable_menu'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_analytics_migrations, 5),
     -- Shop settings: checkout_enabled (off = enquiries only; Shop → Settings)
     ['zzs36_shop_settings'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_settings_migrations, 1),
+    -- Legal acceptances: append-only record of the statements customers tick (terms, privacy, Trade, AI)
+    ['zzs37_shop_legal_acceptances'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_legal_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
