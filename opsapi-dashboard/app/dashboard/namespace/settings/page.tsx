@@ -21,7 +21,7 @@ import toast from 'react-hot-toast';
 import type { UpdateNamespaceDto } from '@/types';
 import Link from 'next/link';
 
-const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '' };
+const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '', email_name: '' };
 
 export default function NamespaceSettingsPage() {
   const { currentNamespace, isNamespaceOwner, refreshNamespaces } = useNamespace();
@@ -38,6 +38,7 @@ export default function NamespaceSettingsPage() {
         logo_url: currentNamespace.logo_url || '',
         banner_url: currentNamespace.banner_url || '',
         business_type: currentNamespace.business_type || '',
+        email_name: currentNamespace.email_name || '',
       };
       setInitial(next);
       setValues(next);

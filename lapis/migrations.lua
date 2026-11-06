@@ -2686,6 +2686,10 @@ local _migrations = {
     ['zznm3_namespace_mfa_required'] = conditional(ProjectConfig.FEATURES.CORE, function()
         db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS mfa_required BOOLEAN NOT NULL DEFAULT TRUE")
     end),
+    -- Workspace setting: the product name in its members' sign-in emails. Empty = the deployment's APP_NAME.
+    ['zznm4_namespace_email_name'] = conditional(ProjectConfig.FEATURES.CORE, function()
+        db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS email_name VARCHAR(80)")
+    end),
 
     ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
     ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),

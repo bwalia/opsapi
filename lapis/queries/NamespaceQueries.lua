@@ -342,7 +342,7 @@ function NamespaceQueries.getForUser(user_id)
     local query = [[
         SELECT
             n.id, n.uuid, n.name, n.slug, n.description, n.logo_url,
-            n.status, n.plan, n.settings, n.business_type,
+            n.status, n.plan, n.settings, n.business_type, n.email_name,
             nm.is_owner, nm.status as member_status, nm.joined_at,
             (
                 SELECT json_agg(json_build_object(
@@ -380,7 +380,7 @@ function NamespaceQueries.getAllForPlatformAdmin()
     local query = [[
         SELECT
             n.id, n.uuid, n.name, n.slug, n.description, n.logo_url,
-            n.status, n.plan, n.settings, n.business_type,
+            n.status, n.plan, n.settings, n.business_type, n.email_name,
             true as is_owner, 'active' as member_status, NULL as joined_at,
             (
                 SELECT json_agg(json_build_object(
@@ -1004,6 +1004,28 @@ function NamespaceQueries.mfaRequiredForUser(user_id)
     ]], user_id)
     if not ok or not rows or not rows[1] then return true end
     return (tonumber(rows[1].total) or 0) == 0 or (tonumber(rows[1].required) or 0) > 0
+end
+
+--- The product name for this person's sign-in and password-reset emails: their workspace's "Name in emails"
+-- (their default workspace, else the last one they used, else their first), else the deployment's APP_NAME.
+-- Sent before anyone picks a workspace, so it can only follow the person.
+function NamespaceQueries.emailNameForUser(user_id)
+    local fallback = Global.trim(os.getenv("APP_NAME") or "")
+    if fallback == "" then fallback = "OpsAPI" end
+    if not user_id then return fallback end
+    local ok, rows = pcall(db.query, [[
+        SELECT n.email_name
+        FROM namespace_members m
+        JOIN namespaces n ON n.id = m.namespace_id AND n.status = 'active'
+        LEFT JOIN user_namespace_settings s ON s.user_id = m.user_id
+        WHERE m.user_id = ? AND m.status = 'active'
+        ORDER BY (n.id = s.default_namespace_id) IS TRUE DESC,
+                 (n.id = s.last_active_namespace_id) IS TRUE DESC, m.id
+        LIMIT 1
+    ]], user_id)
+    local name = ok and rows and rows[1] and rows[1].email_name
+    name = type(name) == "string" and Global.trim(name) or ""
+    return name ~= "" and name or fallback
 end
 
 return NamespaceQueries

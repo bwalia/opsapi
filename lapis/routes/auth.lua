@@ -815,7 +815,7 @@ return function(app)
         -- The email template ``password_reset.etlua`` already exists —
         -- we just need to provide the data.
         local reset_url = origin .. "/reset-password?token=" .. raw_token
-        local app_name = os.getenv("APP_NAME") or "OpsAPI"
+        local app_name = NamespaceQueries.emailNameForUser(user.id)
 
         local send_ok, send_err = pcall(Mail.send, {
             to = user.email,

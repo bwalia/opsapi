@@ -534,6 +534,8 @@ export interface Namespace {
   settings?: Record<string, unknown>;
   /** What the workspace does; picks its default home dashboard. Empty = general. */
   business_type?: BusinessType | null;
+  /** Product name in members' sign-in emails. Empty = the deployment's default. */
+  email_name?: string | null;
   max_users: number;
   max_stores: number;
   owner_user_id?: number;
@@ -684,6 +686,7 @@ export interface CreateNamespaceDto {
   plan?: NamespacePlan;
   settings?: Record<string, unknown>;
   business_type?: BusinessType | '';
+  email_name?: string;
   max_users?: number;
   max_stores?: number;
 }

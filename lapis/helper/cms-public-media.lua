@@ -14,8 +14,9 @@
       CMS_PUBLIC_S3_ENDPOINT     default https://s3.<region>.amazonaws.com
       CMS_PUBLIC_BASE_URL        default https://www.workstation.co.uk
 
-    Falls back to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when the CMS_*
-    key pair is unset (same shape as the website deploy secrets).
+    Only the CMS_PUBLIC_S3_* keys switch uploads to this bucket (not any
+    AWS_* keys a deployment may hold for something else). Each name must also be
+    declared with `env` in nginx.conf, or the app can't see it.
 ]]
 
 local MinioClient = require("helper.minio")
@@ -30,8 +31,7 @@ local function env(name, fallback)
 end
 
 local function keys()
-    return env("CMS_PUBLIC_S3_ACCESS_KEY") or env("AWS_ACCESS_KEY_ID"),
-        env("CMS_PUBLIC_S3_SECRET_KEY") or env("AWS_SECRET_ACCESS_KEY")
+    return env("CMS_PUBLIC_S3_ACCESS_KEY"), env("CMS_PUBLIC_S3_SECRET_KEY")
 end
 
 --- True when Vault / env has enough to reach the public website bucket.
