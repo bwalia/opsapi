@@ -20,7 +20,7 @@ import type { CreateNamespaceDto, Namespace, NamespaceStatus, NamespacePlan } fr
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 
-const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '' };
+const EMPTY: NamespaceFieldValues = { name: '', description: '', domain: '', logo_url: '', banner_url: '', business_type: '', email_name: '' };
 const STATUSES: NamespaceStatus[] = ['active', 'pending', 'suspended', 'archived'];
 const PLANS: NamespacePlan[] = ['free', 'starter', 'professional', 'enterprise'];
 
@@ -62,6 +62,7 @@ export default function EditNamespacePage() {
         logo_url: ns.logo_url || '',
         banner_url: ns.banner_url || '',
         business_type: ns.business_type || '',
+        email_name: ns.email_name || '',
       };
       const a: AdminFields = {
         status: ns.status,

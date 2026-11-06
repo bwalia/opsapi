@@ -81,12 +81,18 @@ end
 
 -- The host the browser reached us on: an image URL must work from a browser.
 -- (Not OPSAPI_PUBLIC_URL: a shared Vault secret can point that at another stack.)
-local function request_base()
-    local scheme = (ngx.var.http_x_forwarded_proto or ""):match("^%s*([%a]+)") or ngx.var.scheme or "https"
-    local host = ngx.var.http_host or ngx.var.host
+-- Always https on a public host: the proxies in front of a deployment end TLS and
+-- pass the request on as "http", and an http image is blocked on an https page.
+-- Plain http only for a local development host.
+function M.request_base(host)
+    host = host or ngx.var.http_host or ngx.var.host
     if not host or host == "" then return nil end
-    return scheme:lower() .. "://" .. host
+    local name = host:lower():gsub(":%d+$", ""):gsub("^%[(.*)%]$", "%1")
+    local is_local = name == "localhost" or name == "::1" or name:match("^127%.") ~= nil
+        or name:match("%.localhost$") ~= nil or name:match("%.test$") ~= nil
+    return (is_local and "http" or "https") .. "://" .. host
 end
+local request_base = M.request_base
 
 --- The deployment's own MinIO client, or nil when it is not configured.
 function M.minio()

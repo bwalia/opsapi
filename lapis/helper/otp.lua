@@ -365,7 +365,10 @@ function OTP.sendToEmail(user, brand)
     end
 
     brand = brand or {}
-    local app_name = type(brand.app_name) == "string" and brand.app_name ~= "" and brand.app_name or "DIY Tax Return"
+    -- An app that sends its own name (e.g. DIY Tax Return's sign-in page) keeps it; otherwise the person's
+    -- workspace "Name in emails", else the deployment's APP_NAME.
+    local app_name = type(brand.app_name) == "string" and brand.app_name ~= "" and brand.app_name
+        or require("queries.NamespaceQueries").emailNameForUser(user.id)
     local safe_color = sanitize_hex_color(brand.brand_color)
     local safe_logo = sanitize_url(brand.brand_logo_url)
 

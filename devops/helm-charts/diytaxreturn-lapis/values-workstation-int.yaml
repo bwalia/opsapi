@@ -27,6 +27,9 @@ projectCode: all
 
 # Plain, non-secret env for this release (templates/deployment.yaml → extraEnv).
 extraEnv:
+  # Product name in sign-in and password-reset emails (a workspace can set its own
+  # in Settings → Branding → "Name in emails").
+  APP_NAME: "Workstation OpsAPI"
   # Voice for the assistant (lapis/routes/voice.lua): the self-hosted Speaches server
   # (faster-whisper + Kokoro) next to Ollama on the LAN. Audio never leaves our machines.
   # Server-to-server plain http on 8014; https://192.168.1.177:8015 (Caddy, self-signed) is for browsers
@@ -41,8 +44,8 @@ extraEnv:
   AI_CLASSIFY_CONCURRENCY: "2"
   # CMS media library (lapis/lib/media-library.lua): images go to the public www S3
   # bucket when CMS_PUBLIC_S3_ACCESS_KEY + CMS_PUBLIC_S3_SECRET_KEY (PutObject +
-  # DeleteObject) are in Vault workstation-opsapi/int/config (or AWS_*); without
-  # them, to this release's own MinIO, served by /api/v2/public/media/<file>.
+  # DeleteObject) are in Vault workstation-opsapi/int/config; without them, to
+  # this release's own MinIO, served by /api/v2/public/media/<file>.
   CMS_PUBLIC_S3_BUCKET: "workstation-website"
   CMS_PUBLIC_S3_REGION: "eu-west-2"
   CMS_PUBLIC_BASE_URL: "https://www.workstation.co.uk"

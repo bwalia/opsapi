@@ -14,6 +14,8 @@ export interface NamespaceFieldValues {
   banner_url: string;
   /** '' = general */
   business_type: string;
+  /** '' = the deployment's default name */
+  email_name: string;
 }
 
 interface Props {
@@ -123,7 +125,7 @@ export default function NamespaceFormFields({ values, onChange, slug, disabled }
         icon={<ImageIcon className="w-5 h-5 text-warning-600" />}
         tint="bg-warning-100"
         title="Branding"
-        subtitle="Logo and banner shown across the namespace"
+        subtitle="Logo, banner and the name in emails"
       >
         <div className="grid gap-5 sm:grid-cols-[auto,1fr] sm:items-start">
           {/* Live preview */}
@@ -166,6 +168,20 @@ export default function NamespaceFormFields({ values, onChange, slug, disabled }
                 leftIcon={<Link2 className="w-4 h-4" />}
                 disabled={disabled}
               />
+            </div>
+            <div>
+              <FieldLabel>Name in emails</FieldLabel>
+              <Input
+                name="email_name"
+                value={values.email_name}
+                onChange={(e) => onChange('email_name', e.target.value)}
+                placeholder="Leave empty to use the default name"
+                maxLength={80}
+                disabled={disabled}
+              />
+              <p className="text-xs text-secondary-500 mt-1">
+                Shown in sign-in code and password reset emails, for people whose main workspace is this one.
+              </p>
             </div>
           </div>
         </div>

@@ -12,7 +12,8 @@ Edit the current workspace's profile: name, description, logo, banner and custom
 
 ## Using the page
 - Only namespace owners can use this page; others see "Access Restricted — Only namespace owners can change these settings."
-- Fields: Namespace Name (required), Slug (read-only), Description, Logo URL, Banner URL, Domain.
+- Fields: Namespace Name (required), Slug (read-only), Description, Logo URL, Banner URL, Name in emails, Domain.
+- **Name in emails** (Branding, up to 80 characters): the product name in sign-in code and password reset emails for people whose main workspace is this one (their default workspace, else the one they used last). Empty = the deployment's default name.
 - Bottom bar: "You have unsaved changes." with **Reset** and **Save Changes**. Header link **API Keys** goes to /dashboard/namespace/api-keys.
 - **Sign-in code (MFA)** card: a switch, on by default. On = everyone in this workspace enters a 6-digit code from their email after their password. It saves at once (turning it off asks to confirm) and only the owner can change it. Even when it's off, someone who also belongs to another workspace that asks for a code still gets one, and platform administrators always do.
 
@@ -26,5 +27,5 @@ Edit the current workspace's profile: name, description, logo, banner and custom
 - Never change the sign-in code (MFA) setting yourself: explain it and point to the switch on this page.
 
 ## API
-- `GET /api/v2/namespace` — current workspace (name, slug, description, logo_url, banner_url, domain, plan, status, max_users, max_stores) plus my membership and permissions
-- `PUT /api/v2/namespace {name, description, logo_url, banner_url, business_type, domain}` — save (send only changed fields; domain and slug: owner only)
+- `GET /api/v2/namespace` — current workspace (name, slug, description, logo_url, banner_url, email_name, domain, plan, status, max_users, max_stores) plus my membership and permissions
+- `PUT /api/v2/namespace {name, description, logo_url, banner_url, business_type, email_name, domain}` — save (send only changed fields; domain and slug: owner only)

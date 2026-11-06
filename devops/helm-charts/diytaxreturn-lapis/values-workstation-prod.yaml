@@ -127,10 +127,13 @@ shop:
 # bucket when these are in Vault workstation-opsapi/prod/config:
 #   CMS_PUBLIC_S3_ACCESS_KEY
 #   CMS_PUBLIC_S3_SECRET_KEY
-# (or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY with PutObject + DeleteObject on
-# workstation-website). Without them, to the MinIO this release uses (MINIO_*),
-# served by /api/v2/public/media/<file>.
+# (an IAM key with PutObject + DeleteObject on workstation-website). Without
+# them, to the MinIO this release uses (MINIO_*), served by
+# /api/v2/public/media/<file>.
 extraEnv:
+  # Product name in sign-in and password-reset emails (a workspace can set its own
+  # in Settings → Branding → "Name in emails").
+  APP_NAME: "Workstation OpsAPI"
   CMS_PUBLIC_S3_BUCKET: "workstation-website"
   CMS_PUBLIC_S3_REGION: "eu-west-2"
   CMS_PUBLIC_BASE_URL: "https://www.workstation.co.uk"

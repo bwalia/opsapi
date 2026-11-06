@@ -27,13 +27,25 @@ local RbacGuard = require("helper.rbac-guard")
 
 -- Rate limit configs for sensitive namespace operations
 -- PUT /api/v2/namespace: what it may change. Any other column is refused there (see the route).
-local PROFILE_FIELDS = { name = true, description = true, logo_url = true, banner_url = true, business_type = true }
+local PROFILE_FIELDS = {
+    name = true, description = true, logo_url = true, banner_url = true, business_type = true, email_name = true,
+}
 local OWNER_FIELDS = { slug = true, domain = true }
 local PROTECTED_FIELDS = {
     id = true, uuid = true, plan = true, max_users = true, max_stores = true, status = true, settings = true,
     owner_user_id = true, project_code = true, allowed_redirect_origins = true, mfa_required = true,
     created_at = true, updated_at = true,
 }
+
+-- "Name in emails" (namespaces.email_name, VARCHAR(80)): trimmed text; "" clears it.
+local function email_name_value(v)
+    if type(v) ~= "string" then return nil, "email_name must be text" end
+    v = Global.trim(v)
+    if select(2, v:gsub("[^\128-\191]", "")) > 80 then
+        return nil, "The name in emails can be at most 80 characters"
+    end
+    return v
+end
 
 local NS_SWITCH_LIMIT = { rate = 20, window = 60, prefix = "ns:switch" }   -- 20/min per IP
 local NS_CREATE_LIMIT = { rate = 5,  window = 60, prefix = "ns:create" }   -- 5/min per IP
@@ -552,7 +564,7 @@ return function(app)
                 end
                 if next(changes) == nil then
                     return error_response(400, "Nothing to update: send name, description, logo_url, banner_url, "
-                        .. "business_type" .. (owner and ", slug or domain" or ""))
+                        .. "business_type, email_name" .. (owner and ", slug or domain" or ""))
                 end
 
                 -- JSON null clears a field, like the empty string the dashboard sends.
@@ -564,6 +576,11 @@ return function(app)
                 end
                 for field, value in pairs(changes) do
                     if type(value) ~= "string" then return error_response(400, field .. " must be text") end
+                end
+                if changes.email_name then
+                    local en, en_err = email_name_value(changes.email_name)
+                    if not en then return error_response(400, en_err) end
+                    changes.email_name = en
                 end
                 if changes.slug and changes.slug ~= self.namespace.slug then
                     if not NamespaceQueries.isSlugAvailable(changes.slug, self.namespace.id) then
@@ -1756,6 +1773,13 @@ return function(app)
                 settings = cjson.encode(current)
             end
 
+            local email_name
+            if params.email_name ~= nil then
+                local en_err
+                email_name, en_err = email_name_value(params.email_name)
+                if not email_name then return error_response(400, en_err) end
+            end
+
             local business_type
             if params.business_type ~= nil then
                 local bt_err
@@ -1772,6 +1796,7 @@ return function(app)
                 domain = params.domain,
                 logo_url = params.logo_url,
                 banner_url = params.banner_url,
+                email_name = email_name,
                 status = params.status,
                 plan = params.plan,
                 max_users = params.max_users and tonumber(params.max_users),

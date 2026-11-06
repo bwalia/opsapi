@@ -102,3 +102,9 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
+
+# Plain, non-secret env for this release (templates/deployment.yaml → extraEnv).
+extraEnv:
+  # Product name in sign-in and password-reset emails (a workspace can set its own
+  # in Settings → Branding → "Name in emails").
+  APP_NAME: "Workstation OpsAPI"
