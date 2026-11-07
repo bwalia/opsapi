@@ -120,7 +120,7 @@ facebookRedirectUri: "https://opsapi.workstation.co.uk/auth/facebook/callback"
 #   STRIPE_SHOP_WEBHOOK_SECRET  whsec_… for https://opsapi.workstation.co.uk/api/v2/public/shop/stripe/webhook
 #   SHOP_BFF_KEY                random ≥32-byte key; same value in workstation-shop/prod/config
 shop:
-  allowedOrigins: "https://shop.workstation.co.uk"
+  allowedOrigins: "https://shop.workstation.co.uk,https://shop.workstation.be"
   publicUrl: "https://shop.workstation.co.uk"
 
 # CMS media library (lapis/lib/media-library.lua). Images go to the public www S3
