@@ -4,7 +4,9 @@
     =========================================================
       GET /api/v2/shop/admin/analytics          ?from=YYYY-MM-DD&to=YYYY-MM-DD | ?days=30
                                                 &bucket=day|week|month &compare=false
-      GET /api/v2/shop/admin/analytics/export   ?report=daily|products|chat_tools (+ the same window params)
+      GET /api/v2/shop/admin/analytics/survey   ?from=&to= | ?days=30 &survey=what-do-i-need
+                                                survey funnel, drop-off by question, answers, apply by plan
+      GET /api/v2/shop/admin/analytics/export   ?report=daily|products|chat_tools|survey (+ the same window params)
                                                 → text/csv
 
     Server-derived metrics only (queries/ShopAnalyticsQueries.lua). A separate
@@ -16,6 +18,7 @@ local U = require("lib.shop-util")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local Analytics = require("queries.ShopAnalyticsQueries")
+local Survey = require("queries.ShopSurveyQueries")
 local ReportCsv = require("helper.report-csv")
 
 local BASE = "/api/v2/shop/admin/analytics"
@@ -28,7 +31,7 @@ local function guard(handler)
 end
 
 local function window_params(p)
-    return { from = p.from, to = p.to, days = p.days, bucket = p.bucket, compare = p.compare }
+    return { from = p.from, to = p.to, days = p.days, bucket = p.bucket, compare = p.compare, survey = p.survey }
 end
 
 return function(app)
@@ -37,6 +40,14 @@ return function(app)
         if not report then return U.fail(400, "VALIDATION_ERROR", err) end
         local res = U.ok(report)
         -- Figures for one tenant, behind auth: never cache in a shared proxy.
+        res.headers = { ["Cache-Control"] = "private, no-store" }
+        return res
+    end))
+
+    app:get(BASE .. "/survey", guard(function(self, ns_id)
+        local report, err = Survey.report(ns_id, window_params(self.params))
+        if not report then return U.fail(400, "VALIDATION_ERROR", err) end
+        local res = U.ok(report)
         res.headers = { ["Cache-Control"] = "private, no-store" }
         return res
     end))
