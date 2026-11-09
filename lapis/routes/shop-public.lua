@@ -62,6 +62,10 @@
       GET    /legal/acceptances?email=           newest acceptance per document (BFF only; or X-Member-Token → own email)
 
     Survey funnel events (first-party, non-personal; reported at GET /api/v2/shop/admin/analytics/survey):
+      POST   /survey/lead-events                 (BFF only) { event: lead|chat|join, email, name?, phone?,
+                                                   ref?, answers?, product?, product_slug?, product_name?,
+                                                   marketing?, question?, answer?, plan? (year|month), tier? }
+                                                   → the customer's CRM lead
       POST   /survey-events                      one event { visitor_id, event, survey?, step?, question?, answer?,
                                                  product?, plan? } or { events: [ …up to 20 ] } → 202
                                                  Rate limited 120 req / 60 s per visitor IP even for the BFF
@@ -480,6 +484,52 @@ return function(app)
     end))
 
     -- survey funnel events --------------------------------------------------------------
+    -- "What do I need?" survey → the customer's CRM lead (one open lead per email, lib/shop-leads.lua).
+    -- Shop server only: it sends what the visitor submitted (build, answers, chat Q&A, Trade join) and
+    -- this appends a dated note and merges metadata.shop.survey. A new lead fires the usual alerts.
+    app:post(BASE .. "/survey/lead-events", public(function(self, ns_id)
+        if not is_bff(self) then return U.fail(403, "FORBIDDEN", "Only the shop server may record survey leads") end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local kind = body.event
+        if kind ~= "lead" and kind ~= "chat" and kind ~= "join" then
+            return U.fail(400, "INVALID_EVENT", "event must be lead, chat or join")
+        end
+        local Leads = require("lib.shop-leads")
+        if not Leads.email(body.email) then return U.fail(400, "VALIDATION_ERROR", "a valid email is required") end
+        local at = os.date("!%Y-%m-%d %H:%M UTC")
+        local survey = {
+            ref = body.ref, answers = body.answers, product = body.product, product_slug = body.product_slug,
+            product_name = body.product_name, at = at,
+        }
+        if body.marketing ~= nil then survey.marketing = body.marketing == true end
+        local ref = (type(body.ref) == "string" and body.ref:match("^WS%-[A-Z0-9]+$")) and (" " .. body.ref) or ""
+        local note
+        if kind == "lead" then
+            note = "\"What do I need?\" survey: build" .. ref .. " sent"
+                .. (type(body.product_name) == "string" and (", recommended " .. body.product_name:sub(1, 200)) or "")
+                .. (body.marketing == true and " (marketing opt-in: yes)" or " (marketing opt-in: no)")
+        elseif kind == "chat" then
+            survey.chat = { question = body.question, answer = body.answer }
+            local q = type(body.question) == "string" and body.question:gsub("%c", " "):sub(1, 300) or ""
+            local a = type(body.answer) == "string" and body.answer:gsub("%c", " "):sub(1, 600) or ""
+            note = "Survey question" .. ref .. ": " .. q .. " — AI engineer: " .. a
+        else
+            local plan = (body.plan == "year" or body.plan == "month") and body.plan or nil
+            if not plan then return U.fail(400, "VALIDATION_ERROR", "plan must be year or month") end
+            survey.join = { plan = plan, tier = body.tier }
+            note = "Started Trade checkout from the survey" .. ref .. ": " .. (plan == "year" and "yearly" or "monthly")
+                .. (type(body.tier) == "string" and (", " .. body.tier:sub(1, 16) .. " price") or "")
+        end
+        local Lead = require("queries.ShopLeadQueries")
+        local lead, err = Lead.upsert(ns_id, {
+            email = body.email, name = body.name, phone = body.phone, source = "shop_survey",
+            note = note, survey = survey,
+        })
+        if not lead then return U.from_err(err) end
+        return U.ok({ lead_uuid = lead.uuid }, 201)
+    end))
+
     app:post(BASE .. "/survey-events", public(function(self, ns_id)
         -- Per visitor, also for the BFF (whose key skips the shared shop_public limit).
         local key = "shop_survey:" .. visitor_ip(self)

@@ -97,8 +97,63 @@ local function push_unique(list, item, same)
     return list
 end
 
+-- "What do I need?" survey -----------------------------------------------------------------
+M.SURVEY_MAX_CHATS = 20
+M.SURVEY_MAX_JOINS = 10
+M.SURVEY_QUESTIONS = { "job", "who", "size", "where", "cond", "budget", "when" }
+local SURVEY_Q = {}
+for _, k in ipairs(M.SURVEY_QUESTIONS) do SURVEY_Q[k] = true end
+
+local function short(v, max)
+    if type(v) ~= "string" then return nil end
+    v = v:gsub("%c", " "):match("^%s*(.-)%s*$")
+    if v == "" then return nil end
+    return v:sub(1, max)
+end
+
+--- Merge one survey event into metadata.shop.survey (pure).
+-- s: { ref?, answers? {question = option}, product?, product_slug?, product_name?, marketing?, at?,
+--      chat? {question, answer}, join? {plan, tier} }
+function M.merge_survey(old, s)
+    local out = type(old) == "table" and old or {}
+    if type(s) ~= "table" then return out end
+    local ref = short(s.ref, 16)
+    if ref and ref:match("^WS%-[A-Z0-9]+$") then out.ref = ref end
+    if type(s.answers) == "table" then
+        local a = {}
+        for k, v in pairs(s.answers) do
+            local val = short(v, 24)
+            if SURVEY_Q[k] and val and val:match("^[%w]+$") then a[k] = val end
+        end
+        if next(a) then out.answers = a end
+    end
+    out.product = short(s.product, 16) or out.product
+    out.product_slug = short(s.product_slug, 120) or out.product_slug
+    out.product_name = short(s.product_name, 200) or out.product_name
+    if s.marketing ~= nil then out.marketing = s.marketing == true end
+    local at = short(s.at, 32)
+    if at then out.first_at = out.first_at or at; out.last_at = at end
+    if type(s.chat) == "table" then
+        local q, ans = short(s.chat.question, 500), short(s.chat.answer, 2000)
+        if q then
+            out.chats = type(out.chats) == "table" and out.chats or {}
+            out.chats[#out.chats + 1] = { at = at, question = q, answer = ans }
+            while #out.chats > M.SURVEY_MAX_CHATS do table.remove(out.chats, 1) end
+        end
+    end
+    if type(s.join) == "table" then
+        local plan = (s.join.plan == "year" or s.join.plan == "month") and s.join.plan or nil
+        if plan then
+            out.joins = type(out.joins) == "table" and out.joins or {}
+            out.joins[#out.joins + 1] = { at = at, plan = plan, tier = short(s.join.tier, 16) }
+            while #out.joins > M.SURVEY_MAX_JOINS do table.remove(out.joins, 1) end
+        end
+    end
+    return out
+end
+
 --- Merge one shop event into a lead's metadata table (mutates + returns it).
--- event: { chat_session_uuid?, quote = {uuid, number, total_minor}?, requirements?, improve_consent? }
+-- event: { chat_session_uuid?, quote = {uuid, number, total_minor}?, requirements?, improve_consent?, survey? }
 function M.merge_metadata(meta, event)
     meta = type(meta) == "table" and meta or {}
     local shop = type(meta.shop) == "table" and meta.shop or {}
@@ -107,6 +162,9 @@ function M.merge_metadata(meta, event)
     end
     if type(event.quote) == "table" and event.quote.uuid then
         shop.quotes = push_unique(shop.quotes, event.quote, function(a, b) return type(a) == "table" and a.uuid == b.uuid end)
+    end
+    if type(event.survey) == "table" then
+        shop.survey = M.merge_survey(shop.survey, event.survey)
     end
     if event.requirements then
         shop.requirements = M.merge_requirements(shop.requirements, event.requirements)
