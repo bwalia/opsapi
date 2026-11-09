@@ -4,7 +4,8 @@ The **Shop → Analytics** page in the dashboard (`/dashboard/shop/analytics`). 
 checkout, carts, quotes and the AI advisor for the Workstation shop. Every figure comes from rows
 the shop already stores (`shop_orders`, `shop_carts` and `shop_cart_lines`, `shop_quotes`,
 `shop_chat_sessions`, `shop_cart_events`, and `shop_memberships` when membership is deployed).
-Analytics adds no tables, needs no cookies and collects no visitor data.
+Apart from the survey funnel below, analytics adds no tables, needs no cookies and collects no visitor
+data.
 
 **Visitor analytics are off.** Unique and returning visitors, page views, traffic sources and
 devices are waiting on a UK privacy and cookie decision. That decision, and who has to sign it off,
@@ -29,7 +30,8 @@ from people who only handle fulfilment.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v2/shop/admin/analytics` | `?days=30` or `?from=YYYY-MM-DD&to=YYYY-MM-DD`, `&bucket=day\|week\|month`, `&compare=false` |
-| GET | `/api/v2/shop/admin/analytics/export` | `?report=daily\|products\|chat_tools` plus the same window params. Returns `text/csv` |
+| GET | `/api/v2/shop/admin/analytics/survey` | Survey funnel (see below). `?days=30` or `?from=&to=`, `&survey=what-do-i-need` |
+| GET | `/api/v2/shop/admin/analytics/export` | `?report=daily\|products\|chat_tools\|survey` plus the same window params. Returns `text/csv` |
 
 Rules for the date window:
 
@@ -66,6 +68,60 @@ How tool use is counted: the shop writes a structured `tools` list on each assis
 a `[tools: …]` suffix on the text that the admin chat view shows. Analytics use the list when it's
 present and fall back to the suffix for older transcripts, so a tool is never counted twice.
 
+## Survey funnel ("What do I need?")
+
+The Trade survey at `shop.workstation.co.uk/trade/what-do-i-need` sends first-party funnel events,
+stored in `shop_survey_events` (migration `zzs38`, `migrations/shop-survey.lua`).
+
+**What is stored:** the survey slug, a random `visitor_id` the browser makes up, the event, and the
+survey's own labels (step, question, answer, product, plan). **Not stored:** IP address, email, name,
+user agent or free text. Answers that look like an email address are refused. Rows are deleted after
+**13 months** by the daily market-sync job (`ShopInsightsQueries.dailySnapshot`).
+
+> Privacy: how the shop creates and keeps `visitor_id` decides whether this is "visitor tracking"
+> under `workstation-website/shop/docs/ANALYTICS-PRIVACY-SIGNOFF.md`. An id held in memory for one
+> survey run (no cookie, no `localStorage`) stores nothing on the device. A persistent id needs that
+> sign-off first.
+
+### Ingest (public)
+
+`POST /api/v2/public/shop/:namespace/survey-events`, behind the same `public()` wrapper as the other
+shop routes (active namespace, `X-Shop-Key` for the BFF). Body: one event, or `{ "events": [...] }`
+with 1 to 20 events. Any invalid event rejects the whole request with a 400 (`code` says which
+rule); unknown fields are dropped.
+
+| Field | Rule |
+|---|---|
+| `visitor_id` | required, 8–64 of `A-Z a-z 0-9 _ -` |
+| `event` | required: `view`, `start`, `answer`, `back`, `result`, `lead`, `ask`, `apply` |
+| `survey` | optional lower-case slug ≤ 48, default `what-do-i-need` |
+| `step` | optional whole number 0–100 (JSON number) |
+| `question` | text ≤ 120; required on `answer` events |
+| `answer` | text ≤ 120, not an email address |
+| `product` | key ≤ 32 (`A-Z a-z 0-9 . _ : -`) |
+| `plan` | key ≤ 8 (`y` / `m` on `apply`) |
+
+Returns `202 { "success": true, "data": { "accepted": n } }`. Rate limit: 120 requests a minute per
+visitor IP, also for BFF calls (the BFF's key skips only the shared `shop_public` limit). The BFF can
+name the visitor's IP in `X-Visitor-IP`; otherwise `helper/client-ip.lua` reads `X-Forwarded-For`.
+The IP is used for the counter only and is never stored.
+
+### Report
+
+`GET /api/v2/shop/admin/analytics/survey` (module `shop_analytics`, `read`). Every count is
+**distinct visitors**.
+
+| Key | Meaning |
+|---|---|
+| `visitors` | distinct visitors per event type (all eight) |
+| `funnel` | view → start → result → lead → apply, with `rate_from_previous` and `rate_from_view` (null, not 0, when there is nothing to divide by) |
+| `dropoff` | per step: visitors answering at that step, `lost_from_previous` (the first step is measured against `start`), and visitors per question |
+| `answers` | per question, the top 10 answers by visitors, using each visitor's **final** answer (going back and changing it counts once) |
+| `results_by_product` | visitors whose result recommended each product |
+| `apply_by_plan` | `{ y, m, total }` (and `unknown` when no plan was sent) |
+| `trade_signups` | all Trade memberships in the window from `shop_memberships`: `checkouts_started` (created), `joined`, `joined_by_plan { y, m }`. Not linked to survey visitors. `null` when membership is not deployed |
+| `complete` | false when the window starts more than 13 months ago (older events are deleted) |
+
 ## Performance
 
 Migration `zzs31` adds `(namespace_id, created_at)` indexes on orders, carts, quotes and chat
@@ -77,6 +133,8 @@ indexed, tenant-scoped aggregate queries, and every query filters on `namespace_
 ```bash
 luajit lapis/spec/shop-analytics_spec.lua      # CI (lapis-checks): windows, rates, transcript rules,
                                                # every query tenant-scoped with matching placeholders
+luajit lapis/spec/shop-survey_spec.lua         # CI: survey event validation, funnel/drop-off maths,
+                                               # tenant-scoped queries, route + migration wiring
 lapis/spec/shop-analytics-e2e/run.sh           # Docker sandbox: real migrations + Postgres, seeded month,
                                                # hand-worked figures, tenant isolation, 401/403, CSV, menu
 ```

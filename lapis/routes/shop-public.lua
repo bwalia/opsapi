@@ -60,6 +60,12 @@
       POST   /legal/acceptances                  { email, checkpoint, subject_ref?, ip?, user_agent?,
                                                    documents: [{ key, version, hash?, statement }] } (BFF only)
       GET    /legal/acceptances?email=           newest acceptance per document (BFF only; or X-Member-Token → own email)
+
+    Survey funnel events (first-party, non-personal; reported at GET /api/v2/shop/admin/analytics/survey):
+      POST   /survey-events                      one event { visitor_id, event, survey?, step?, question?, answer?,
+                                                 product?, plan? } or { events: [ …up to 20 ] } → 202
+                                                 Rate limited 120 req / 60 s per visitor IP even for the BFF
+                                                 (BFF: X-Visitor-IP, else X-Forwarded-For via helper/client-ip).
 ]]
 
 local U = require("lib.shop-util")
@@ -76,6 +82,8 @@ local Insights = require("queries.ShopInsightsQueries")
 local Membership = require("queries.ShopMembershipQueries")
 local CustomerAuth = require("queries.ShopCustomerAuthQueries")
 local Legal = require("queries.ShopLegalQueries")
+local SurveyRules = require("lib.shop-survey")
+local Survey = require("queries.ShopSurveyQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -107,6 +115,18 @@ local function public(handler)
         return handler(self, ns.id)
     end)
 end
+
+--- The visitor's IP for per-person rate limits. Never stored. The BFF may name it in X-Visitor-IP
+-- (it talks to us from one address for everyone); anyone else gets helper/client-ip's answer.
+local function visitor_ip(self)
+    if is_bff(self) then
+        local v = self.req.headers["x-visitor-ip"]
+        if type(v) == "string" and #v <= 45 and v:match("^[%x%.:]+$") then return v end
+    end
+    return ClientIP.get() or "unknown"
+end
+
+local SURVEY_RATE, SURVEY_WINDOW = 120, 60
 
 local function body_or_400()
     local body, err = U.read_json()
@@ -457,6 +477,25 @@ return function(app)
         local res, err = Legal.latestForEmail(ns_id, email)
         if not res then return U.from_err(err) end
         return U.ok(res)
+    end))
+
+    -- survey funnel events --------------------------------------------------------------
+    app:post(BASE .. "/survey-events", public(function(self, ns_id)
+        -- Per visitor, also for the BFF (whose key skips the shared shop_public limit).
+        local key = "shop_survey:" .. visitor_ip(self)
+        local allowed, remaining, retry = RateLimit.check(key, SURVEY_RATE, SURVEY_WINDOW)
+        ngx.header["X-RateLimit-Limit"] = tostring(SURVEY_RATE)
+        ngx.header["X-RateLimit-Remaining"] = tostring(remaining or 0)
+        if not allowed then
+            ngx.header["Retry-After"] = tostring(retry)
+            return U.fail(429, "RATE_LIMITED", "Too many requests", { retry_after = retry })
+        end
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local events, code, msg = SurveyRules.validate_body(body)
+        if not events then return U.fail(400, code, msg) end
+        local accepted = Survey.record(ns_id, events)
+        return U.ok({ accepted = accepted }, 202)
     end))
 
     app:get(BASE .. "/member/early-access", public(function(_, ns_id)

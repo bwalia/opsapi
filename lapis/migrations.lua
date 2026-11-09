@@ -174,6 +174,7 @@ local shop_supplier_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "m
 local shop_legal_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-legal") or {}
 local shop_analytics_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-analytics") or {}
 local shop_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-settings") or {}
+local shop_survey_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-survey") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -2657,6 +2658,8 @@ local _migrations = {
     ['zzs36_shop_settings'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_settings_migrations, 1),
     -- Legal acceptances: append-only record of the statements customers tick (terms, privacy, Trade, AI)
     ['zzs37_shop_legal_acceptances'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_legal_migrations, 1),
+    -- Survey funnel events: "What do I need?" view → start → answer → result → lead/ask/apply (non-personal, 13 months)
+    ['zzs38_shop_survey_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_survey_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

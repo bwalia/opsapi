@@ -567,8 +567,17 @@ local EXPORTS = {
         },
         rows = function(ns_id, w) return Q.chat_tools(ns_id, w.from, w.to_exclusive, 100) end,
     },
+    survey = {
+        title = "Survey funnel and drop-off",
+        columns = function() return require("queries.ShopSurveyQueries").EXPORT_COLUMNS end,
+        rows = function(ns_id, w, params)
+            local survey = require("lib.shop-survey").survey_param(params.survey)
+            if not survey then return nil, "survey must be a lower-case slug" end
+            return require("queries.ShopSurveyQueries").export_rows(ns_id, w, survey)
+        end,
+    },
 }
-Q.EXPORT_KEYS = { "daily", "products", "chat_tools" }
+Q.EXPORT_KEYS = { "daily", "products", "chat_tools", "survey" }
 
 --- Returns a report envelope for ReportCsv.render, or nil, status, message.
 function Q.export(ns_id, key, params)
@@ -576,10 +585,12 @@ function Q.export(ns_id, key, params)
     if not spec then return nil, 404, "Unknown export (use one of: " .. table.concat(Q.EXPORT_KEYS, ", ") .. ")" end
     local w, err = A.window(params or {}, Q.today())
     if not w then return nil, 400, err end
-    local rows = spec.rows(ns_id, w)
+    local rows, rows_err = spec.rows(ns_id, w, params or {})
+    if not rows then return nil, 400, rows_err end
+    local columns = type(spec.columns) == "function" and spec.columns() or spec.columns
     return {
         key = "shop-" .. key:gsub("_", "-") .. "-" .. w.from .. "-to-" .. w.to,
-        title = spec.title, columns = spec.columns, rows = rows, row_count = #rows,
+        title = spec.title, columns = columns, rows = rows, row_count = #rows,
         filters = { from = w.from, to = w.to, bucket = w.bucket },
     }
 end

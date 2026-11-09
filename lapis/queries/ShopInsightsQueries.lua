@@ -49,14 +49,17 @@ function ShopInsightsQueries.snapshotPrices(ns_id, product_ids)
     return #rows
 end
 
---- Daily job: snapshot every product, prune old basket events.
+--- Daily job: snapshot every product, prune old basket events and survey events.
 function ShopInsightsQueries.dailySnapshot(ns_id)
     local n = ShopInsightsQueries.snapshotPrices(ns_id)
     local pruned = db.query([[
         DELETE FROM shop_cart_events WHERE namespace_id = ? AND created_at < NOW() - (? || ' days')::interval
         RETURNING id
     ]], ns_id, tostring(EVENT_RETENTION_DAYS))
-    return { products_snapshotted = n, cart_events_pruned = #pruned }
+    -- Survey funnel events: 13-month retention (lib/shop-survey.lua). Never fails the snapshot.
+    local ok, survey_pruned = pcall(function() return require("queries.ShopSurveyQueries").prune(ns_id) end)
+    if not ok then ngx.log(ngx.WARN, "[shop-insights] survey events not pruned: ", tostring(survey_pruned)) end
+    return { products_snapshotted = n, cart_events_pruned = #pruned, survey_events_pruned = ok and survey_pruned or 0 }
 end
 
 --- Record one real add-to-basket. Never fails the caller's request.
