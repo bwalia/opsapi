@@ -78,5 +78,24 @@ check("name: first + rest", f == "Ada" and l == "King Lovelace")
 f, l = L.split_name("")
 check("name: unknown placeholder", f == "Shop customer" and l == nil)
 
+-- survey ---------------------------------------------------------------------------------------
+local sv = L.merge_survey(nil, { ref = "WS-ABC123", answers = { job = "team", size = "medium", evil = "x", who = "<b>" },
+    product = "p96", product_slug = "rtx-pro-6000-blackwell-server", marketing = true, at = "2026-11-09 19:00 UTC" })
+check("survey: ref kept", sv.ref == "WS-ABC123")
+check("survey: known answers only", sv.answers.job == "team" and sv.answers.size == "medium" and sv.answers.evil == nil)
+check("survey: unsafe answer dropped", sv.answers.who == nil)
+check("survey: product + marketing", sv.product == "p96" and sv.marketing == true)
+sv = L.merge_survey(sv, { chat = { question = "Is it enough?", answer = "Yes for 70B at 8-bit." }, at = "t2" })
+check("survey: chat appended", #sv.chats == 1 and sv.chats[1].question == "Is it enough?")
+check("survey: earlier fields kept", sv.ref == "WS-ABC123" and sv.answers.job == "team" and sv.first_at ~= "t2")
+sv = L.merge_survey(sv, { join = { plan = "year", tier = "founding" } })
+sv = L.merge_survey(sv, { join = { plan = "weekly" } })
+check("survey: join recorded, bad plan ignored", #sv.joins == 1 and sv.joins[1].plan == "year")
+for i = 1, 30 do sv = L.merge_survey(sv, { chat = { question = "q" .. i } }) end
+check("survey: chats capped", #sv.chats == L.SURVEY_MAX_CHATS and sv.chats[#sv.chats].question == "q30")
+check("survey: bad ref ignored", L.merge_survey({}, { ref = "drop table" }).ref == nil)
+local m = L.merge_metadata({ shop = { quotes = { { uuid = "q1" } } } }, { survey = { ref = "WS-ZZZ999" } })
+check("survey: merged into metadata.shop", m.shop.survey.ref == "WS-ZZZ999" and m.shop.quotes[1].uuid == "q1")
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
