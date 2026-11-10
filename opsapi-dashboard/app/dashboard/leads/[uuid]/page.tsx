@@ -19,12 +19,13 @@ import { ProtectedPage } from '@/components/permissions';
 import PropertyDealsLeadPanel from '@/components/property-deals/LeadPanel';
 import RecordFormResponses from '@/components/forms/RecordFormResponses';
 import { AiCard, type AiAction } from '@/components/leads/AiCard';
+import { ShopPanel } from '@/components/leads/ShopPanel';
 import {
   ConvertDialog, LogCallDialog, MeetingDialog, MeetingOutcomeDialog, PlanStepDialog, QualifyDialog, ReferDialog,
 } from '@/components/leads/LeadDialogs';
 import { StageModal } from '@/components/leads/StageModal';
 import {
-  Avatar, dateOnly, dateTime, dueText, fullName, money, StageBadge, STAGE_STYLE, STEP_LABEL,
+  Avatar, dateOnly, dateTime, dueText, fullName, money, Section, StageBadge, STAGE_STYLE, STEP_LABEL,
 } from '@/components/leads/ui';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
@@ -62,17 +63,6 @@ function StageTrack({ lead, labels }: { lead: Lead; labels: Record<string, strin
       })}
       {parked && <li className="ml-2"><StageBadge stage={lead.stage} label={labels[lead.stage]} /></li>}
     </ol>
-  );
-}
-
-function Section({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-secondary-200 bg-white p-5">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-secondary-900">{title}</h2>{action}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -463,6 +453,7 @@ function LeadContent() {
             </Section>
           )}
 
+          <ShopPanel metadata={lead.metadata} />
           <RecordFormResponses entityType="lead" entityUuid={lead.uuid} />
           <PropertyDealsLeadPanel leadUuid={lead.uuid} />
 

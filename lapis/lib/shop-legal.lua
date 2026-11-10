@@ -23,6 +23,16 @@ M.CHECKPOINTS = {
 local CHECKPOINT = {}
 for _, c in ipairs(M.CHECKPOINTS) do CHECKPOINT[c] = true end
 
+-- The one checkpoint that proves the email belongs to the person: the shop records "register" only for the
+-- signed-in member's own address (their sign-in code went to it). Every other checkpoint carries the email
+-- the visitor typed, which anyone could type. Those rows stay as evidence of what was ticked, but they never
+-- count as "this person has accepted" (GET /legal/acceptances, the shop's register gate).
+M.CONFIRMED_CHECKPOINT = "register"
+
+function M.email_confirmed(checkpoint)
+    return checkpoint == M.CONFIRMED_CHECKPOINT
+end
+
 M.MAX_DOCUMENTS = 12
 M.MAX_STATEMENT = 1000
 M.MAX_UA = 400

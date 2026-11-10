@@ -59,7 +59,8 @@
     document versions are current):
       POST   /legal/acceptances                  { email, checkpoint, subject_ref?, ip?, user_agent?,
                                                    documents: [{ key, version, hash?, statement }] } (BFF only)
-      GET    /legal/acceptances?email=           newest acceptance per document (BFF only; or X-Member-Token → own email)
+      GET    /legal/acceptances?email=           newest acceptance per document (BFF only; or X-Member-Token → own email).
+                                                 Only "register" rows count: the other checkpoints carry a typed email.
 
     Survey funnel events (first-party, non-personal; reported at GET /api/v2/shop/admin/analytics/survey):
       POST   /survey/lead-events                 (BFF only) { event: lead|chat|join, email, name?, phone?,

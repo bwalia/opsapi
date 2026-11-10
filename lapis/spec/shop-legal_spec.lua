@@ -92,6 +92,12 @@ local latest = L.latest({
 check("latest picks newest per document", latest["terms-of-sale"].version == "2026-11" and latest["terms-of-sale"].checkpoint == "checkout")
 check("latest keeps other documents", latest["privacy-notice"].version == "2026-11")
 
+-- whose email is proven ------------------------------------------------------------------
+check("register proves the email", L.email_confirmed("register") == true)
+for _, c in ipairs({ "quote", "checkout", "trade_join", "chat", "enquiry", "contact" }) do
+    check(c .. " does not prove the email (typed by the visitor)", L.email_confirmed(c) == false)
+end
+
 -- wiring -----------------------------------------------------------------------------
 local mig = read("lapis/migrations.lua")
 check("migration registered as zzs37", mig:find("zzs37_shop_legal_acceptances", 1, true) ~= nil)
@@ -108,6 +114,15 @@ check("POST is BFF only", post_at and pub:find("if not is_bff(self) then return 
 check("public GET /legal/acceptances exists", pub:find('app:get(BASE .. "/legal/acceptances"', 1, true) ~= nil)
 local admin = read("lapis/routes/shop-admin.lua")
 check("admin GET /legal/acceptances behind guard", admin:find('"/legal/acceptances", guard("read"', 1, true) ~= nil)
+check("erasure is POST behind shop.delete (email in the body, not the URL)",
+    admin:find('app:post(BASE .. "/legal/acceptances/erase", guard("delete"', 1, true) ~= nil)
+local q = read("lapis/queries/ShopLegalQueries.lua")
+check("latestForEmail counts only the proven checkpoint",
+    q:find("AND checkpoint = ?", 1, true) ~= nil and q:find("L.CONFIRMED_CHECKPOINT)", 1, true) ~= nil)
+check("erase is scoped to the workspace", q:find("DELETE FROM shop_legal_acceptances WHERE namespace_id = ? AND", 1, true) ~= nil)
+local lead = read("lapis/routes/crm-leads-public.lua")
+check("contact-form consent failures are logged, not swallowed",
+    lead:find("local ok_r, res, rec_err = pcall(Legal.record", 1, true) ~= nil and lead:find("if not ok_r or not res then", 1, true) ~= nil)
 
 print(failures == 0 and "\nall shop-legal checks passed" or ("\n" .. failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)

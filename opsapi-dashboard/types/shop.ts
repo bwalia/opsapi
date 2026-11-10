@@ -921,3 +921,33 @@ export interface ShopMarketUpsertResult {
   failed: number;
   errors: { index: number; product_sku: string | null; url: string | null; error: string }[];
 }
+
+// ---------------------------------------------------------------------------------------------
+// Legal record (GET /api/v2/shop/admin/legal/acceptances): what customers ticked, append-only.
+
+export const SHOP_LEGAL_CHECKPOINTS = ['register', 'quote', 'checkout', 'trade_join', 'chat', 'enquiry', 'contact'] as const;
+export type ShopLegalCheckpoint = (typeof SHOP_LEGAL_CHECKPOINTS)[number];
+
+export interface ShopLegalAcceptance {
+  uuid: string;
+  email: string;
+  document_key: string;
+  document_version: string;
+  content_hash: string | null;
+  statement: string;
+  checkpoint: ShopLegalCheckpoint;
+  subject_ref: string | null;
+  client_ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  /** True only for "register": the person was signed in, so the email is theirs. */
+  email_confirmed: boolean;
+}
+
+export interface ShopLegalListParams {
+  q?: string;
+  document_key?: string;
+  checkpoint?: ShopLegalCheckpoint | '';
+  limit?: number;
+  offset?: number;
+}

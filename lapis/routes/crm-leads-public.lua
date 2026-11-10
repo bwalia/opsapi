@@ -162,11 +162,17 @@ return function(app)
             if consent and data.email and data.email ~= "" then
                 local ok_q, Legal = pcall(require, "queries.ShopLegalQueries")
                 if ok_q then
-                    local ok_r, res_or_err = pcall(Legal.record, namespace.id, {
+                    -- Kept as evidence of what was ticked; checkpoint "contact" never counts as an acceptance by
+                    -- that email (anyone can type an address here), see lib/shop-legal.lua.
+                    local ok_r, res, rec_err = pcall(Legal.record, namespace.id, {
                         email = data.email, checkpoint = "contact", subject_ref = lead.uuid,
                         ip = RateLimit.getClientIP(), user_agent = user_agent, documents = consent.documents,
                     })
-                    if not ok_r then ngx.log(ngx.WARN, "[public-lead] legal acceptance not recorded: ", tostring(res_or_err)) end
+                    if not ok_r or not res then
+                        local why = not ok_r and tostring(res)
+                            or (type(rec_err) == "table" and tostring(rec_err.message) or tostring(rec_err))
+                        ngx.log(ngx.WARN, "[public-lead] legal acceptance not recorded: ", why)
+                    end
                 end
             end
 

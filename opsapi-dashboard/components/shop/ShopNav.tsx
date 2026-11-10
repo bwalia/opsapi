@@ -18,6 +18,7 @@ import {
   Scale,
   BarChart3,
   Settings,
+  ScrollText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -35,6 +36,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
   { href: '/dashboard/shop/credits', label: 'Credits', icon: Gift },
   { href: '/dashboard/shop/knowledge', label: 'Knowledge', icon: BookOpen },
+  { href: '/dashboard/shop/legal', label: 'Legal record', icon: ScrollText },
   { href: '/dashboard/shop/settings', label: 'Settings', icon: Settings },
   // Its own RBAC module: shown only to people who may see revenue.
   { href: '/dashboard/shop/analytics', label: 'Analytics', icon: BarChart3, module: 'shop_analytics' },

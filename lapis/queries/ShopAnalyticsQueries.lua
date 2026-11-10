@@ -487,14 +487,15 @@ function Q.report(ns_id, params)
         currency = "GBP",
         sales = cur.sales, checkout = cur.checkout, carts = cur.carts, quotes = cur.quotes,
         chat = cur.chat, trade = cur.trade,
-        series = Q.series(ns_id, w),
-        top_products = Q.top_products(ns_id, w.from, w.to_exclusive, 10),
-        basket_adds = Q.basket_adds(ns_id, w.from, w.to_exclusive, 10),
+        -- A.list: an empty list must reach the dashboard as [], not {} (it calls .slice/.map on them).
+        series = A.list(Q.series(ns_id, w)),
+        top_products = A.list(Q.top_products(ns_id, w.from, w.to_exclusive, 10)),
+        basket_adds = A.list(Q.basket_adds(ns_id, w.from, w.to_exclusive, 10)),
         -- Add-to-basket events older than the retention window are gone, so a
         -- longer window only covers its last 30 days.
         basket_adds_complete = w.days <= A.CART_EVENT_RETENTION_DAYS and w.includes_today,
-        chat_tools = Q.chat_tools(ns_id, w.from, w.to_exclusive, 20),
-        chat_countries = Q.chat_countries(ns_id, w.from, w.to_exclusive, 10),
+        chat_tools = A.list(Q.chat_tools(ns_id, w.from, w.to_exclusive, 20)),
+        chat_countries = A.list(Q.chat_countries(ns_id, w.from, w.to_exclusive, 10)),
         -- Visitor analytics (unique/returning visitors, page views, traffic
         -- sources) need a privacy/cookie decision first. Nothing is collected.
         visitor_tracking = { enabled = false, status = "awaiting_privacy_signoff" },
