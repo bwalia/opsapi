@@ -48,6 +48,11 @@ check("merge: new added", m.team_size == "4")
 check("requirements_line: fixed order, plain labels",
     L.requirements_line({ budget_gbp = "40000", goal = "Fine-tune Llama" }) == "Goal: Fine-tune Llama · Budget (£): 40000")
 check("requirements_line: empty", L.requirements_line({}) == "")
+check("requirements: delivery postcode and country kept",
+    L.requirements({ delivery_postcode = " SW1A 1AA ", delivery_country = "GB" }).delivery_postcode == "SW1A 1AA")
+check("requirements_line: delivery after the rest",
+    L.requirements_line({ delivery_country = "GB", delivery_postcode = "SW1A 1AA", goal = "RAG" })
+        == "Goal: RAG · Delivery postcode: SW1A 1AA · Delivery country: GB")
 
 -- metadata ------------------------------------------------------------------------------
 local meta = L.merge_metadata({ other = 1 }, { chat_session_uuid = "s1", improve_consent = true })
