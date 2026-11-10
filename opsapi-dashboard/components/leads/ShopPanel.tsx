@@ -21,6 +21,7 @@ const when = (v: unknown) => str(v)?.replace('T', ' ').replace(/(:\d\d)?Z$/, ' U
 const REQUIREMENTS: [string, string][] = [
   ['goal', 'Goal'], ['workloads', 'Workloads'], ['models', 'Models'], ['data_size', 'Data'], ['team_size', 'Team'],
   ['budget_gbp', 'Budget (£)'], ['deadline', 'Deadline'], ['in_house', 'Already has'], ['sector', 'Sector'], ['constraints', 'Constraints'],
+  ['delivery_postcode', 'Delivery postcode'], ['delivery_country', 'Delivery country'],
 ];
 
 const DOCS: Record<string, string> = {

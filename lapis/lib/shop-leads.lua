@@ -23,7 +23,7 @@ M.MAX_NOTES = 20000      -- chars of lead notes kept (oldest trimmed)
 --- The things the advisor asks about. Anything else is dropped.
 M.REQUIREMENT_KEYS = {
     "goal", "workloads", "models", "data_size", "team_size", "budget_gbp", "deadline", "in_house",
-    "sector", "constraints",
+    "sector", "constraints", "delivery_postcode", "delivery_country",
 }
 local KEYSET = {}
 for _, k in ipairs(M.REQUIREMENT_KEYS) do KEYSET[k] = true end
@@ -78,7 +78,7 @@ function M.requirements_line(req)
     local labels = {
         goal = "Goal", workloads = "Workloads", models = "Models", data_size = "Data", team_size = "Team",
         budget_gbp = "Budget (£)", deadline = "Deadline", in_house = "Already has", sector = "Sector",
-        constraints = "Constraints",
+        constraints = "Constraints", delivery_postcode = "Delivery postcode", delivery_country = "Delivery country",
     }
     local parts = {}
     for _, k in ipairs(M.REQUIREMENT_KEYS) do
