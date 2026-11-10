@@ -637,6 +637,24 @@ function Mail.send(opts)
         return false, "SMTP not configured. Set SMTP_USER and SMTP_PASSWORD environment variables."
     end
 
+    -- Never try addresses on reserved domains (lp-rep1@e2e.invalid, x@example.com, y@co.test): test
+    -- data uses them and SMTP only answers with a bounce in the sender's inbox. Every environment.
+    local Recipients = require("lib.mail-recipients")
+    local dropped = {}
+    local function keep(field)
+        local kept, gone = Recipients.filter(opts[field])
+        for _, a in ipairs(gone) do dropped[#dropped + 1] = a end
+        opts[field] = kept
+    end
+    keep("to")
+    if opts.cc then keep("cc") end
+    if opts.bcc then keep("bcc") end
+    if #dropped > 0 then
+        ngx.log(ngx.NOTICE, "[Mail] Skipped undeliverable test address(es): ", table.concat(dropped, ", "))
+    end
+    -- No real main recipient: it is test traffic (any cc/bcc are copies of it), so nothing is sent.
+    if not opts.to then return true end
+
     -- Suppress traffic to known E2E recipients on non-prod (stops the
     -- shared CI mailbox getting flooded). Logged so SREs can audit
     -- what got skipped. Production is unaffected (the check returns
