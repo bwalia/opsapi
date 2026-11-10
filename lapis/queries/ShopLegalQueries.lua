@@ -38,15 +38,17 @@ function Q.record(ns_id, body)
 end
 
 --- The newest acceptance of each document for one email: { [document_key] = { version, hash, checkpoint, accepted_at } }.
+--- Only acceptances made with the email proven (L.CONFIRMED_CHECKPOINT) count: anyone can type someone else's
+--- email into a quote or contact form, and that must not let them accept the terms on that person's behalf.
 function Q.latestForEmail(ns_id, email)
     email = L.email(email)
     if not email then return nil, U.err(400, "INVALID_EMAIL", "A valid email is required") end
     local rows = db.query([[
         SELECT DISTINCT ON (document_key) document_key, document_version, content_hash, checkpoint, created_at
         FROM shop_legal_acceptances
-        WHERE namespace_id = ? AND lower(email) = ?
+        WHERE namespace_id = ? AND lower(email) = ? AND checkpoint = ?
         ORDER BY document_key, created_at DESC, id DESC
-    ]], ns_id, email)
+    ]], ns_id, email, L.CONFIRMED_CHECKPOINT)
     return { email = email, documents = L.latest(rows) }
 end
 
@@ -79,11 +81,22 @@ function Q.adminList(ns_id, params)
     local total = rows[1] and tonumber(rows[1].total) or 0
     for _, r in ipairs(rows) do
         r.total = nil
+        r.email_confirmed = L.email_confirmed(r.checkpoint)
         for _, k in ipairs({ "content_hash", "subject_ref", "client_ip", "user_agent" }) do
             if r[k] == nil then r[k] = U.null end
         end
     end
     return U.arr(rows), { total = total, limit = limit, offset = offset }
+end
+
+--- Erasure request: delete every acceptance recorded for one email. Returns { erased = n } | nil, err
+--- (UPDATE stays refused by the trigger; DELETE is allowed so a person can be forgotten.)
+function Q.erase(ns_id, email)
+    email = L.email(email)
+    if not email then return nil, U.err(400, "INVALID_EMAIL", "A valid email is required") end
+    local rows = db.query("DELETE FROM shop_legal_acceptances WHERE namespace_id = ? AND lower(email) = ? RETURNING id",
+        ns_id, email)
+    return { erased = #rows }
 end
 
 return Q

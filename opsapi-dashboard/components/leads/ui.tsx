@@ -134,3 +134,15 @@ export function FieldError({ message }: { message?: string }) {
 export const STEP_LABEL: Record<string, string> = {
   call: 'Call', email: 'Email', follow_up: 'Follow up', meeting: 'Meeting', task: 'Task',
 };
+
+/** A titled white box on the lead page. */
+export function Section({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-secondary-200 bg-white p-5">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-secondary-900">{title}</h2>{action}
+      </div>
+      {children}
+    </section>
+  );
+}

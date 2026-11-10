@@ -3,7 +3,7 @@
  * RBAC module "shop_analytics" (read).
  */
 import apiClient from '@/lib/api-client';
-import type { ShopAnalyticsExport, ShopAnalyticsQuery, ShopAnalyticsReport } from '@/types/shop-analytics';
+import type { ShopAnalyticsExport, ShopAnalyticsQuery, ShopAnalyticsReport, ShopSurveyReport } from '@/types/shop-analytics';
 
 const BASE = '/api/v2/shop/admin/analytics';
 
@@ -23,6 +23,12 @@ export const shopAnalyticsService = {
   async getReport(q: ShopAnalyticsQuery, signal?: AbortSignal): Promise<ShopAnalyticsReport> {
     const res = await apiClient.get(BASE, { params: params(q), signal });
     return (res.data as { data: ShopAnalyticsReport }).data;
+  },
+
+  /** "What do I need?" survey funnel and drop-off for the same window. */
+  async getSurvey(q: ShopAnalyticsQuery, signal?: AbortSignal): Promise<ShopSurveyReport> {
+    const res = await apiClient.get(`${BASE}/survey`, { params: params({ from: q.from, to: q.to, days: q.days }), signal });
+    return (res.data as { data: ShopSurveyReport }).data;
   },
 
   /** The server's CSV for one export. Returns the file to save. */

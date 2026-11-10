@@ -170,4 +170,30 @@ export interface ShopAnalyticsQuery {
   compare?: boolean;
 }
 
-export type ShopAnalyticsExport = 'daily' | 'products' | 'chat_tools';
+export type ShopAnalyticsExport = 'daily' | 'products' | 'chat_tools' | 'survey';
+
+// ---------------------------------------------------------------------------------------------
+// "What do I need?" survey funnel (GET /api/v2/shop/admin/analytics/survey). Every count is distinct visitors.
+
+export type ShopSurveyEvent = 'view' | 'start' | 'answer' | 'back' | 'result' | 'lead' | 'ask' | 'apply';
+
+export interface ShopSurveyReport {
+  survey: string;
+  window: { from: string; to: string; days: number; timezone: string; includes_today: boolean };
+  generated_at: string;
+  visitors: Record<ShopSurveyEvent, number>;
+  funnel: { stage: ShopSurveyEvent; visitors: number; rate_from_previous?: number | null; rate_from_view?: number | null }[];
+  dropoff: {
+    step: number | null;
+    visitors: number;
+    previous_visitors?: number | null;
+    lost_from_previous?: number | null;
+    questions: { question: string | null; visitors: number }[];
+  }[];
+  answers: { question: string; step?: number | null; answers: { answer: string; visitors: number }[] }[];
+  results_by_product: { product: string; visitors: number }[];
+  apply_by_plan: { y: number; m: number; total: number; unknown?: number };
+  trade_signups: { checkouts_started: number; joined: number; joined_by_plan: { y: number; m: number } } | null;
+  retention_months: number;
+  complete: boolean;
+}

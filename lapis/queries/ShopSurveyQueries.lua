@@ -198,15 +198,20 @@ function Q.report(ns_id, params)
     local by_event = Q.visitors_by_event(ns_id, survey, from, to_excl)
     local apply = Q.apply_by_plan(ns_id, survey, from, to_excl)
     apply.total = by_event.apply
+    -- Lists go out as [] even when empty (the dashboard maps over them).
+    local dropoff = S.dropoff(Q.question_reach(ns_id, survey, from, to_excl), by_event.start)
+    for _, d in ipairs(dropoff) do A.list(d.questions) end
+    local answers = S.answers_by_question(Q.top_answers(ns_id, survey, from, to_excl, 10))
+    for _, a in ipairs(answers) do A.list(a.answers) end
     return {
         survey = survey,
         window = { from = w.from, to = w.to, days = w.days, timezone = w.timezone, includes_today = w.includes_today },
         generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         visitors = by_event,
-        funnel = S.funnel(by_event),
-        dropoff = S.dropoff(Q.question_reach(ns_id, survey, from, to_excl), by_event.start),
-        answers = S.answers_by_question(Q.top_answers(ns_id, survey, from, to_excl, 10)),
-        results_by_product = Q.results_by_product(ns_id, survey, from, to_excl, 20),
+        funnel = A.list(S.funnel(by_event)),
+        dropoff = A.list(dropoff),
+        answers = A.list(answers),
+        results_by_product = A.list(Q.results_by_product(ns_id, survey, from, to_excl, 20)),
         apply_by_plan = apply,
         trade_signups = Q.trade_signups(ns_id, from, to_excl),
         retention_months = S.RETENTION_MONTHS,

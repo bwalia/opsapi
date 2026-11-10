@@ -36,6 +36,7 @@ import {
   pounds,
   type TrendMetric,
 } from '@/components/shop/analytics/parts';
+import { SurveyPanel } from '@/components/shop/analytics/SurveyPanel';
 import { SHOP_ANALYTICS_MODULE, shopAnalyticsService } from '@/services/shop-analytics.service';
 import { cn, extractApiError } from '@/lib/utils';
 import { formatMoney } from '@/lib/shop';
@@ -54,6 +55,7 @@ const EXPORTS: { key: ShopAnalyticsExport; label: string }[] = [
   { key: 'daily', label: 'Trend by period' },
   { key: 'products', label: 'Products' },
   { key: 'chat_tools', label: 'AI tool use' },
+  { key: 'survey', label: '“What do I need?” survey' },
 ];
 
 const TOOL_LABELS: Record<string, string> = {
@@ -471,7 +473,7 @@ function AnalyticsContent() {
                 <Stat label="No reply" value={count(r.chat.no_reply)} hint="The AI returned nothing (timeout or provider error)" />
               </div>
               <p className="mt-3 text-xs text-secondary-500">
-                {r.chat.avg_user_messages !== null ? `${r.chat.avg_user_messages.toFixed(1)} visitor messages per chat · ` : ''}
+                {r.chat.avg_user_messages != null ? `${r.chat.avg_user_messages.toFixed(1)} visitor messages per chat · ` : ''}
                 {count(r.chat.member_chats)} from signed-in Trade members
               </p>
             </Card>
@@ -579,6 +581,9 @@ function AnalyticsContent() {
               </Card>
             </div>
           </div>
+
+          {/* "What do I need?" survey ------------------------------------------- */}
+          <SurveyPanel query={query} version={version} />
 
           {/* Visitors (off) + definitions ------------------------------------- */}
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">

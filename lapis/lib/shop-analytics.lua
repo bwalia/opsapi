@@ -13,6 +13,15 @@
 
 local A = {}
 
+-- Mark a list so cjson sends it as [] even when empty; the dashboard calls .map/.slice on these.
+-- A no-op where cjson isn't loaded (the standalone specs).
+local has_cjson, cjson = pcall(require, "cjson")
+function A.list(t)
+    t = t or {}
+    if has_cjson and cjson.array_mt then setmetatable(t, cjson.array_mt) end
+    return t
+end
+
 A.TIMEZONE = "Europe/London"
 A.DEFAULT_DAYS = 30
 A.MAX_DAYS = 731 -- two years: enough for year-on-year, bounded for cost

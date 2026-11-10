@@ -38,6 +38,8 @@
       POST              /reconcile
       GET               /legal/acceptances     legal confirmations customers ticked (?q=email&document_key=
                                                &checkpoint=&subject_ref=&limit=&offset=), newest first
+      POST              /legal/acceptances/erase  { email } erasure request: deletes that person's acceptances
+                                               (shop.delete; audited without the email)
 ]]
 
 local U = require("lib.shop-util")
@@ -371,6 +373,21 @@ return function(app)
     app:get(BASE .. "/legal/acceptances", guard("read", function(self, ns_id)
         local data, meta = Legal.adminList(ns_id, self.params)
         return U.ok(data, 200, meta)
+    end))
+
+    -- POST, not DELETE ?email=: the address stays out of URLs and access logs.
+    app:post(BASE .. "/legal/acceptances/erase", guard("delete", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local res, err = Legal.erase(ns_id, body.email)
+        if not res then return U.from_err(err) end
+        local ok_a, a_err = pcall(require("queries.NamespaceAuditLogQueries").log, {
+            namespace_id = ns_id, user_id = user_id(self), action = "shop_legal_acceptances.erased",
+            entity_type = "shop_legal_acceptances", new_values = { erased = res.erased },
+            ip_address = ngx.var.remote_addr,
+        })
+        if not ok_a then ngx.log(ngx.WARN, "[shop-legal] erasure not audited: ", tostring(a_err)) end
+        return U.ok(res)
     end))
 
     app:get(BASE .. "/waitlist", guard("read", function(self, ns_id)
