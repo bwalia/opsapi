@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, ShoppingCart } from 'lucide-react';
+import { Plus, Search, ShoppingCart } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Card, Input, Pagination, Table } from '@/components/ui';
+import { Button, Card, Input, Pagination, Table } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { shopService } from '@/services/shop.service';
 import { FilterSelect, OrderStatusBadge } from '@/components/shop/shared';
@@ -102,7 +103,16 @@ function OrdersContent() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Shop orders" description="Orders placed through Stripe Checkout on the shop" icon={<ShoppingCart className="h-5 w-5" />} />
+      <PageHeader
+        title="Shop orders"
+        description="Paid and pending orders. Build an order for a customer with Create order: they confirm it and pay online."
+        icon={<ShoppingCart className="h-5 w-5" />}
+        actions={
+          <Link href="/dashboard/shop/quotes/new">
+            <Button leftIcon={<Plus className="h-4 w-4" />}>Create order</Button>
+          </Link>
+        }
+      />
 
       <Card padding="md">
         <div className="flex flex-wrap items-center gap-4">

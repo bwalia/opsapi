@@ -27,6 +27,8 @@ local QUOTE_COLS = [[
     q.notes, q.internal_notes, q.lines::text AS lines, q.subtotal_minor, q.vat_minor, q.shipping_minor,
     q.total_minor, q.currency, q.valid_until, q.cart_id, q.chat_session_id, q.order_id, q.crm_lead_id,
     q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at, q.price_locked,
+    q.kind, q.discount_minor, q.discount_label, q.trade_discount_minor, q.delivery_method,
+    q.delivery_address::text AS delivery_address, q.sent_at, q.authorised_at, q.authorised_by_name,
     (q.valid_until < NOW()) AS is_past_validity
 ]]
 
@@ -36,6 +38,18 @@ end
 ShopQuoteQueries.urlPath = url_path
 
 local PAYABLE_STATUSES = { draft = true, sent = true, accepted = true }
+local KINDS = { quote = true, order = true }
+
+--- A staff-built order ("Order Authorisation") is priced and checked by staff, so its customer can pay
+-- even while public checkout is switched off.
+local function staff_order(q) return q.kind == "order" end
+ShopQuoteQueries.isStaffOrder = staff_order
+
+--- Whole-quote discount (staff + VIP Trade), ex VAT.
+local function discount_of(q)
+    return (tonumber(q.discount_minor) or 0) + (tonumber(q.trade_discount_minor) or 0)
+end
+ShopQuoteQueries.discountOf = discount_of
 
 --- Public Quote shape.
 function ShopQuoteQueries.shape(q, opts)
@@ -46,7 +60,7 @@ function ShopQuoteQueries.shape(q, opts)
         -- payable: what checkout will accept (checkout switched on, status, validity and
         -- every item priced); pending_pricing: items we still have to price before the customer can pay
         payable = PAYABLE_STATUSES[q.status] == true and q.is_past_validity ~= true and #unpriced == 0
-            and Settings.checkoutEnabled(q.namespace_id),
+            and (staff_order(q) or Settings.checkoutEnabled(q.namespace_id)),
         pending_pricing = U.arr(unpriced),
         uuid = q.uuid,
         quote_number = q.quote_number,
@@ -64,7 +78,21 @@ function ShopQuoteQueries.shape(q, opts)
         created_at = q.created_at,
         notes = q.notes or U.null,
         url_path = url_path(q),
+        kind = q.kind or "quote",
+        document_title = staff_order(q) and "Order Authorisation" or "Quote",
+        discount_minor = tonumber(q.discount_minor) or 0,
+        discount_label = q.discount_label or U.null,
+        trade_discount_minor = tonumber(q.trade_discount_minor) or 0,
+        delivery_method = q.delivery_method or U.null,
+        delivery_address = U.nz(q.delivery_address) and U.dec(q.delivery_address, nil) or U.null,
+        sent_at = q.sent_at or U.null,
+        authorised_at = q.authorised_at or U.null,
+        authorised_by_name = q.authorised_by_name or U.null,
     }
+    -- Before any discount, for the "Subtotal / Discount / Net" rows on the documents.
+    local list = Pricing.totals(lines, q.shipping_minor)
+    out.list_subtotal_minor = list.subtotal_minor
+    out.list_vat_minor = list.vat_minor
     if opts.admin then
         out.internal_notes = q.internal_notes or U.null
         out.viewed_at = q.viewed_at or U.null
@@ -126,6 +154,14 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
     local lines = {}
     for i, l in ipairs(inputs) do
         if type(l) ~= "table" then return nil, U.err(400, "VALIDATION_ERROR", "line " .. i .. " is invalid") end
+        if opts.admin and (l.custom == true or (not U.nz(l.product_slug) and U.nz(l.name))) then
+            -- Free-text line (a service, a membership month, a part from a supplier quote).
+            local line, cerr = Pricing.custom_line(l, U.nz(l.uuid) or Global.generateUUID())
+            if not line then return nil, U.err(400, "VALIDATION_ERROR", "Line " .. i .. ": " .. cerr) end
+            lines[#lines + 1] = line
+            goto continue
+        end
+        do
         local priced, bundle_or_err = Catalog.priceRequest(ns_id, l, { admin = opts.admin })
         if not priced then return nil, bundle_or_err end
         if not priced.valid and not opts.admin then
@@ -137,6 +173,8 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
             line = Pricing.apply_override(line, l.price_override_minor)
         end
         lines[#lines + 1] = line
+        end
+        ::continue::
     end
     return lines
 end
@@ -145,7 +183,8 @@ end
 -- params: { lines (priced snapshots), customer, notes, internal_notes, source, cart_id, chat_session_id,
 --           created_by_user_id, status, valid_until }
 function ShopQuoteQueries.insert(ns_id, params)
-    local t = Pricing.totals(params.lines, params.shipping_minor or 0)
+    local t = Pricing.discounted_totals(params.lines, params.shipping_minor or 0,
+        (params.discount_minor or 0) + (params.trade_discount_minor or 0))
     local row = db.query([[
         INSERT INTO shop_quotes (uuid, namespace_id, quote_number, access_token, status, source, customer, notes,
                                  internal_notes, lines, subtotal_minor, vat_minor, shipping_minor, total_minor,
@@ -159,6 +198,15 @@ function ShopQuoteQueries.insert(ns_id, params)
         U.nz(params.internal_notes) or db.NULL, U.enc(U.arr(params.lines)), t.subtotal_minor, t.vat_minor,
         t.shipping_minor, t.total_minor, U.nz(params.valid_until) or db.NULL, params.cart_id or db.NULL,
         params.chat_session_id or db.NULL, params.created_by_user_id or db.NULL)[1]
+    if params.kind or params.discount_minor or params.trade_discount_minor or params.delivery_method
+        or params.delivery_address then
+        db.query([[
+            UPDATE shop_quotes SET kind = ?, discount_minor = ?, discount_label = ?, trade_discount_minor = ?,
+                   delivery_method = ?, delivery_address = ?::jsonb WHERE id = ?
+        ]], params.kind or "quote", params.discount_minor or 0, U.nz(params.discount_label) or db.NULL,
+            params.trade_discount_minor or 0, U.nz(params.delivery_method) or db.NULL,
+            params.delivery_address and U.enc(params.delivery_address) or db.NULL, row.id)
+    end
     if params.chat_session_id then
         db.query("UPDATE shop_chat_sessions SET quote_id = ?, updated_at = NOW() WHERE id = ?", row.id,
             params.chat_session_id)
@@ -304,6 +352,188 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     return ShopQuoteQueries.shape(q)
 end
 
+
+-- ---------------------------------------------------------------------------
+-- back-office orders: discounts, delivery, VIP Trade discount
+-- ---------------------------------------------------------------------------
+
+local ADDRESS_KEYS = { "name", "company", "line1", "line2", "city", "county", "postcode", "country", "email",
+                       "phone", "vat_number" }
+
+--- Clean a delivery address (structured, for the supplier PO's "Deliver directly to").
+local function clean_address(a)
+    if a == nil or a == U.null then return nil end
+    if type(a) ~= "table" then return nil, "delivery_address must be an object" end
+    local out, any = {}, false
+    for _, k in ipairs(ADDRESS_KEYS) do
+        local v = U.nz(a[k])
+        if v ~= nil then out[k] = tostring(v):sub(1, 255); any = true end
+    end
+    return any and out or nil
+end
+ShopQuoteQueries.cleanAddress = clean_address
+
+--- Validate the back-office order fields of a create/update body. Returns (fields, err): only the keys
+-- present in the body are returned (kind, discount_minor, discount_label, delivery_method,
+-- delivery_address, trade = "apply" | "clear" | number).
+local function order_fields(body)
+    local f = {}
+    if body.kind ~= nil then
+        if not KINDS[body.kind] then return nil, "kind must be quote or order" end
+        f.kind = body.kind
+    end
+    if body.discount_minor ~= nil then
+        local d = U.int(body.discount_minor, nil)
+        if d == nil or d < 0 then return nil, "discount_minor must be 0 or more (pence, ex VAT)" end
+        f.discount_minor = d
+    end
+    if body.discount_label ~= nil then f.discount_label = U.nz(body.discount_label) and tostring(body.discount_label):sub(1, 120) or false end
+    if body.delivery_method ~= nil then f.delivery_method = U.nz(body.delivery_method) and tostring(body.delivery_method):sub(1, 160) or false end
+    if body.delivery_address ~= nil then
+        local a, aerr = clean_address(body.delivery_address)
+        if aerr then return nil, aerr end
+        f.delivery_address = a or false
+    end
+    if body.apply_trade_discount == true then
+        f.trade = "apply"
+    elseif body.apply_trade_discount == false then
+        f.trade = "clear"
+    elseif body.trade_discount_minor ~= nil then
+        local d = U.int(body.trade_discount_minor, nil)
+        if d == nil or d < 0 then return nil, "trade_discount_minor must be 0 or more (pence, ex VAT)" end
+        f.trade = d
+    end
+    return f
+end
+
+--- The VIP Trade discount this customer's membership gives an order of these lines (after the staff
+-- discount), or 0 when they hold no membership in force.
+local function trade_discount(ns_id, email, lines, shipping, staff_discount)
+    local Membership = require("queries.ShopMembershipQueries")
+    local t = Pricing.totals(lines, shipping)
+    local net = math.max(0, t.subtotal_minor - (staff_discount or 0))
+    local res = Membership.tradeDiscountFor(ns_id, email, net, Pricing.effective_vat_rate(t.subtotal_minor, t.vat_minor),
+        t.shipping_minor)
+    return res and res.discount_minor or 0, res
+end
+
+--- GET /quotes/:uuid/trade-discount preview for the dashboard ("Apply VIP discount" button).
+function ShopQuoteQueries.tradeDiscountPreview(ns_id, uuid)
+    local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not q then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    local email = U.dec(q.customer, {}).email
+    local amount, res = trade_discount(ns_id, email, U.dec(q.lines, {}), q.shipping_minor, tonumber(q.discount_minor) or 0)
+    return { member = res ~= nil, discount_minor = amount, tier = res and res.tier or U.null,
+             pct = res and res.pct or U.null, cap_remaining_minor = res and res.cap_remaining_minor or U.null }
+end
+
+--- The customer-facing PDF, rendered by the shop app (shop/src/lib/pdf/quote-pdf.tsx). Returns the
+-- bytes or (nil, reason). Best effort: the email still goes out with the link if this fails.
+local function fetch_pdf(q)
+    local base = U.env("SHOP_PUBLIC_URL")
+    if not base then return nil, "SHOP_PUBLIC_URL is not set" end
+    local url = base:gsub("/+$", "") .. "/api/quotes/" .. q.uuid .. "/pdf?t=" .. ngx.escape_uri(q.access_token)
+    local ok, res_or_err = pcall(function()
+        local http = require("resty.http").new()
+        http:set_timeout(20000)
+        return http:request_uri(url, { method = "GET", ssl_verify = true,
+            headers = { ["User-Agent"] = "opsapi-shop/1.0", Accept = "application/pdf" } })
+    end)
+    local res = ok and res_or_err or nil
+    if not res then return nil, ok and "no response" or tostring(res_or_err) end
+    if res.status ~= 200 or not res.body or res.body:sub(1, 4) ~= "%PDF" then
+        return nil, "shop returned " .. tostring(res.status)
+    end
+    return res.body
+end
+
+--- POST /quotes/:uuid/send — email the customer the Order Authorisation (or quote) with the PDF attached
+-- and the link to confirm and pay. Marks a draft as sent. Returns ({ to, attached, sent_at }) or (nil, err).
+function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
+    opts = opts or {}
+    local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not q then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    maybe_expire(q)
+    if q.status ~= "draft" and q.status ~= "sent" and q.status ~= "accepted" then
+        return nil, U.err(409, "QUOTE_NOT_SENDABLE", "This " .. (staff_order(q) and "order" or "quote")
+            .. " can't be sent (status " .. q.status .. ")")
+    end
+    local customer = U.dec(q.customer, {})
+    local to = U.nz(opts.to) or customer.email
+    if not to or not tostring(to):match("^[^@%s]+@[^@%s]+%.[^@%s]+$") then
+        return nil, U.err(400, "VALIDATION_ERROR", "The customer needs an email address")
+    end
+    if #Pricing.unpriced_lines(U.dec(q.lines, {})) > 0 then
+        return nil, U.err(409, "QUOTE_PRICING_PENDING", "Price every line before sending it")
+    end
+    local shaped = ShopQuoteQueries.shape(q, { admin = true })
+    local title = shaped.document_title
+    local pdf, perr = fetch_pdf(q)
+    -- The shop's PDF route reads the quote through the public endpoint, which stamps viewed_at; our own
+    -- fetch is not the customer viewing it.
+    if not U.nz(q.viewed_at) then db.query("UPDATE shop_quotes SET viewed_at = NULL WHERE id = ?", q.id) end
+    if not pdf then ngx.log(ngx.WARN, "[shop-quotes] PDF not attached to ", q.quote_number, ": ", tostring(perr)) end
+
+    local Mail = require("helper.mail")
+    local NamespaceMail = require("helper.namespace-mail")
+    local smtp = NamespaceMail.smtp(ns_id)
+    if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
+    if not smtp and not Mail.isConfigured() then
+        return nil, U.err(503, "EMAIL_NOT_CONFIGURED", "No email server is set up for this workspace")
+    end
+    local discount = discount_of(q)
+    local sent, merr = Mail.send({
+        to = to, subject = title .. " " .. q.quote_number .. " from Workstation", template = "shop_order_authorisation",
+        smtp = smtp, sync = true,
+        from_email = smtp and smtp.from_email or nil,
+        from_name = smtp and smtp.from_name or "Workstation",
+        reply_to = smtp and smtp.reply_to or nil,
+        data = {
+            app_name = "Workstation", document_title = title, number = q.quote_number, is_order = staff_order(q),
+            customer_name = customer.name, total = U.money(tonumber(q.total_minor) or 0),
+            discount = discount > 0 and U.money(discount) or nil, delivery_method = q.delivery_method,
+            valid_until = q.valid_until and tostring(q.valid_until):sub(1, 10) or nil,
+            link = shaped.public_url, attached = pdf ~= nil, call_phone = U.env("SHOP_CALL_PHONE") or "+44 7515 356 146",
+        },
+        attachments = pdf and { { filename = q.quote_number .. ".pdf", content_type = "application/pdf",
+                                  content_b64 = ngx.encode_base64(pdf) } } or nil,
+    })
+    if not sent then
+        ngx.log(ngx.ERR, "[shop-quotes] email for ", q.quote_number, " failed: ", tostring(merr))
+        return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent: " .. tostring(merr):sub(1, 200))
+    end
+    db.query([[UPDATE shop_quotes SET sent_at = NOW(), updated_at = NOW(),
+               status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END WHERE id = ?]], q.id)
+    return { to = to, attached = pdf ~= nil, pdf_error = pdf and U.null or perr, quote = ShopQuoteQueries.adminGet(ns_id, uuid) }
+end
+
+--- Public POST /quotes/:uuid/authorise — the customer confirms the order (the shop app has recorded
+-- their acceptance of the terms in the legal ledger first). Idempotent; returns the public shape.
+function ShopQuoteQueries.authorise(ns_id, uuid, token, body)
+    local q = ShopQuoteQueries.getWithToken(ns_id, uuid, token)
+    if not q then return nil, U.err(404, "QUOTE_NOT_FOUND", "Quote not found") end
+    maybe_expire(q)
+    if q.status == "expired" or q.is_past_validity then
+        return nil, U.err(409, "QUOTE_EXPIRED", "This has expired — please ask us for a new one")
+    end
+    if q.status ~= "draft" and q.status ~= "sent" and q.status ~= "accepted" then
+        return nil, U.err(409, "QUOTE_NOT_AUTHORISABLE", "This can no longer be confirmed (status " .. q.status .. ")")
+    end
+    if body.accept_terms ~= true then
+        return nil, U.err(400, "TERMS_REQUIRED", "Please accept the terms to confirm the order")
+    end
+    local name = U.nz(body.name) and tostring(body.name):sub(1, 160) or U.dec(q.customer, {}).name
+    db.query([[UPDATE shop_quotes SET status = 'accepted', authorised_at = COALESCE(authorised_at, NOW()),
+               authorised_by_name = COALESCE(authorised_by_name, ?), updated_at = NOW() WHERE id = ?]],
+        name or db.NULL, q.id)
+    if q.crm_lead_id then
+        pcall(Leads.safeUpsert, ns_id, { email = U.dec(q.customer, {}).email, source = "shop_quote",
+            note = (staff_order(q) and "Order " or "Quote ") .. q.quote_number .. " confirmed by the customer"
+                .. (name and (" (" .. name .. ")") or "") })
+    end
+    return ShopQuoteQueries.shape(ShopQuoteQueries.getByUuid(ns_id, uuid))
+end
+
 -- ---------------------------------------------------------------------------
 -- admin
 -- ---------------------------------------------------------------------------
@@ -357,10 +587,19 @@ function ShopQuoteQueries.adminCreate(ns_id, body, user_id)
     if body.status ~= nil and not STATUSES[body.status] then
         return nil, U.err(400, "VALIDATION_ERROR", "invalid status")
     end
+    local f, ferr = order_fields(body)
+    if not f then return nil, U.err(400, "VALIDATION_ERROR", ferr) end
+    local shipping = U.int(body.shipping_minor, 0)
+    local staff = f.discount_minor or 0
+    local trade = type(f.trade) == "number" and f.trade or 0
+    if f.trade == "apply" then trade = trade_discount(ns_id, customer.email, lines, shipping, staff) end
     local q = ShopQuoteQueries.insert(ns_id, {
         lines = lines, customer = customer, notes = body.notes, internal_notes = body.internal_notes,
         source = "admin", status = body.status or "draft", valid_until = body.valid_until,
-        shipping_minor = U.int(body.shipping_minor, 0), created_by_user_id = user_id,
+        shipping_minor = shipping, created_by_user_id = user_id,
+        kind = f.kind or "quote", discount_minor = staff, discount_label = f.discount_label or nil,
+        trade_discount_minor = trade, delivery_method = f.delivery_method or nil,
+        delivery_address = f.delivery_address or nil,
     })
     return ShopQuoteQueries.adminGet(ns_id, q.uuid)
 end
@@ -384,6 +623,19 @@ function ShopQuoteQueries.adminUpdate(ns_id, uuid, body)
         if not customer then return nil, U.err(400, "VALIDATION_ERROR", cerr) end
         fields.customer = db.raw(db.escape_literal(U.enc(customer)) .. "::jsonb")
     end
+    local f, ferr = order_fields(body)
+    if not f then return nil, U.err(400, "VALIDATION_ERROR", ferr) end
+    local pricing_change = f.discount_minor ~= nil or f.trade ~= nil
+    if (pricing_change or body.lines ~= nil or body.shipping_minor ~= nil) and q.status == "converted" then
+        return nil, U.err(409, "QUOTE_CONVERTED", "A paid (converted) quote's prices cannot be changed")
+    end
+    if f.kind then fields.kind = f.kind end
+    if f.discount_label ~= nil then fields.discount_label = f.discount_label or db.NULL end
+    if f.delivery_method ~= nil then fields.delivery_method = f.delivery_method or db.NULL end
+    if f.delivery_address ~= nil then
+        fields.delivery_address = f.delivery_address and db.raw(db.escape_literal(U.enc(f.delivery_address)) .. "::jsonb")
+            or db.NULL
+    end
     local shipping = body.shipping_minor ~= nil and U.int(body.shipping_minor, 0) or tonumber(q.shipping_minor)
     local lines
     if body.lines ~= nil then
@@ -393,11 +645,24 @@ function ShopQuoteQueries.adminUpdate(ns_id, uuid, body)
         local err
         lines, err = ShopQuoteQueries.priceLines(ns_id, body.lines, { admin = true })
         if not lines then return nil, err end
-    elseif body.shipping_minor ~= nil then
+    elseif body.shipping_minor ~= nil or pricing_change then
         lines = U.dec(q.lines, {})
     end
     if lines then
-        local t = Pricing.totals(lines, shipping)
+        local staff = f.discount_minor or tonumber(q.discount_minor) or 0
+        local trade = tonumber(q.trade_discount_minor) or 0
+        if f.trade == "apply" then
+            local email = (body.customer ~= nil and type(body.customer) == "table" and body.customer.email)
+                or U.dec(q.customer, {}).email
+            trade = trade_discount(ns_id, email, lines, shipping, staff)
+        elseif f.trade == "clear" then
+            trade = 0
+        elseif type(f.trade) == "number" then
+            trade = f.trade
+        end
+        local t = Pricing.discounted_totals(lines, shipping, staff + trade)
+        fields.discount_minor = staff
+        fields.trade_discount_minor = trade
         fields.lines = db.raw(db.escape_literal(U.enc(U.arr(lines))) .. "::jsonb")
         fields.subtotal_minor = t.subtotal_minor
         fields.vat_minor = t.vat_minor

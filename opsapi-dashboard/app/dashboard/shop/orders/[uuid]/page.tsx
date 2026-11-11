@@ -213,6 +213,19 @@ function OrderDetail() {
                 <p className="text-secondary-700">{formatAddress(order.shipping_address)}</p>
               </div>
             )}
+            {(order.delivery_method || order.delivery_address) && (
+              <div className="mt-4 border-t border-secondary-100 pt-3 text-sm">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-secondary-500">Deliver directly to (agreed on the order)</p>
+                {order.delivery_address && (
+                  <p className="text-secondary-700">
+                    {[order.delivery_address.name, order.delivery_address.company, order.delivery_address.line1, order.delivery_address.line2, order.delivery_address.city, order.delivery_address.postcode, order.delivery_address.country].filter(Boolean).join(', ')}
+                  </p>
+                )}
+                {order.delivery_address?.email && <p className="text-secondary-600">{order.delivery_address.email}</p>}
+                {order.delivery_address?.vat_number && <p className="text-secondary-600">VAT {order.delivery_address.vat_number}</p>}
+                {order.delivery_method && <p className="mt-1 text-secondary-700">Method: {order.delivery_method}</p>}
+              </div>
+            )}
             {order.billing_address && (
               <div className="mt-3 text-sm">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-secondary-500">Bill to</p>

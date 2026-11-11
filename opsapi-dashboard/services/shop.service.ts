@@ -45,6 +45,8 @@ import type {
   ShopProductListParams,
   ShopQuote,
   ShopQuoteCreate,
+  ShopQuoteSendResult,
+  ShopTradeDiscountPreview,
   ShopQuoteStatus,
   ShopQuoteUpdate,
   ShopReconcileResult,
@@ -295,6 +297,18 @@ export const shopService = {
   async createQuote(body: ShopQuoteCreate): Promise<ShopQuote> {
     const res = await apiClient.post(`${BASE}/quotes`, body, JSON_BODY);
     return unwrap<ShopQuote>(res);
+  },
+
+  /** Email the customer the Order Authorisation / quote (PDF attached, link to confirm and pay). */
+  async sendQuote(uuid: string, to?: string): Promise<ShopQuoteSendResult> {
+    const res = await apiClient.post(`${BASE}/quotes/${uuid}/send`, to ? { to } : {}, JSON_BODY);
+    return unwrap<ShopQuoteSendResult>(res);
+  },
+
+  /** The VIP Trade discount the customer's membership gives this quote. */
+  async getQuoteTradeDiscount(uuid: string): Promise<ShopTradeDiscountPreview> {
+    const res = await apiClient.get(`${BASE}/quotes/${uuid}/trade-discount`);
+    return unwrap<ShopTradeDiscountPreview>(res);
   },
 
   // ---------------- Chats ----------------

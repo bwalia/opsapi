@@ -269,6 +269,22 @@ return function(app)
         return created(Quote.adminCreate(ns_id, body, user_id(self)))
     end))
 
+    -- Email the customer the Order Authorisation / quote: PDF attached, link to confirm and pay.
+    -- Body { to? } (defaults to the customer's email).
+    app:post(BASE .. "/quotes/:uuid/send", guard("update", function(self, ns_id)
+        local body = body_or_400() or {}
+        local res, err = Quote.sendToCustomer(ns_id, self.params.uuid, { to = body.to })
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    -- The VIP Trade discount the customer's membership gives this quote (preview for "Apply VIP discount").
+    app:get(BASE .. "/quotes/:uuid/trade-discount", guard("read", function(self, ns_id)
+        local res, err = Quote.tradeDiscountPreview(ns_id, self.params.uuid)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
     app:match(BASE .. "/quotes/:uuid", function(self)
         local action = ngx.req.get_method() == "GET" and "read" or "update"
         return guard(action, method_router({

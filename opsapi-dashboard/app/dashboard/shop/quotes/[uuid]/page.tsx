@@ -3,10 +3,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, Copy, Download, ExternalLink, FileText, Pencil, Printer, Save, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Download, ExternalLink, FileText, Pencil, Printer, Save, Send, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Card, Input, Select, Textarea } from '@/components/ui';
+import { Button, Card, Input, Select, Textarea, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { shopService } from '@/services/shop.service';
@@ -24,6 +24,7 @@ import {
 } from '@/components/shop/shared';
 import { QuoteLinesEditor, draftsToPayload, lineToDraft, type LineDraft } from '@/components/shop/QuoteLinesEditor';
 import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type CustomerDraft } from '@/components/shop/CustomerForm';
+import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { humanize, minorToPounds, poundsToMinor, quotePdfUrl } from '@/lib/shop';
 import { SHOP_QUOTE_STATUSES, type ShopQuote, type ShopQuoteStatus } from '@/types/shop';
@@ -63,6 +64,7 @@ function QuoteDetail() {
   const [drafts, setDrafts] = useState<LineDraft[] | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [lineErrors, setLineErrors] = useState<string[]>([]);
+  const [terms, setTerms] = useState<OrderTermsDraft | null>(null);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -132,6 +134,47 @@ function QuoteDetail() {
     );
   };
 
+  const isOrder = quote.kind === 'order';
+  const docTitle = quote.document_title || (isOrder ? 'Order Authorisation' : 'Quote');
+  const noun = isOrder ? 'order' : 'quote';
+
+  const saveTerms = async () => {
+    if (!terms) return;
+    const { fields, errors } = draftToOrderFields(terms, (quote.trade_discount_minor ?? 0) > 0);
+    if (errors.length) {
+      toast.error(errors[0]);
+      return;
+    }
+    if (await save('terms', fields, 'Order terms saved')) setTerms(null);
+  };
+
+  const sendToCustomer = async () => {
+    const to = quote.customer?.email;
+    if (!to) {
+      toast.error('Add the customer’s email first');
+      return;
+    }
+    const ok = await confirmDialog({
+      title: `Email ${docTitle} ${quote.quote_number} to ${to}?`,
+      message: isOrder
+        ? 'They get the PDF and a link to confirm the order, accept the terms and pay online.'
+        : 'They get the PDF and a link to view and pay the quote.',
+      confirmText: 'Send',
+    });
+    if (!ok) return;
+    setSaving('send');
+    try {
+      const res = await shopService.sendQuote(quote.uuid);
+      toast.success(res.attached ? `Sent to ${res.to} with the PDF attached` : `Sent to ${res.to} (link only: the PDF could not be attached)`);
+      if (res.quote?.uuid) apply(res.quote);
+      else reload();
+    } catch (err) {
+      toast.error(extractApiError(err, `Could not send the ${noun}`));
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const saveCustomer = async () => {
     const errs = validateCustomer(customer);
     if (errs.length) {
@@ -167,7 +210,7 @@ function QuoteDetail() {
     <div className="space-y-6">
       <PrintStyles />
       <PageHeader
-        title={`Quote ${quote.quote_number}`}
+        title={`${docTitle} ${quote.quote_number}`}
         description={`Created ${formatDateTime(quote.created_at)}${quote.source ? ` · from ${humanize(quote.source)}` : ''}`}
         icon={<FileText className="h-5 w-5" />}
         actions={
@@ -185,8 +228,13 @@ function QuoteDetail() {
             )}
             {pdfUrl && (
               <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
-                <Button leftIcon={<Download className="h-4 w-4" />}>Download PDF</Button>
+                <Button variant="outline" leftIcon={<Download className="h-4 w-4" />}>Download PDF</Button>
               </a>
+            )}
+            {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (
+              <Button leftIcon={<Send className="h-4 w-4" />} isLoading={saving === 'send'} disabled={!!saving} onClick={sendToCustomer}>
+                {quote.sent_at ? 'Send again' : isOrder ? 'Send for authorisation' : 'Email to customer'}
+              </Button>
             )}
           </div>
         }
@@ -194,7 +242,14 @@ function QuoteDetail() {
 
       <div className="flex flex-wrap items-center gap-3">
         <QuoteStatusBadge status={quote.status} />
+        {quote.sent_at && <span className="text-sm text-secondary-500">Sent {formatDateTime(quote.sent_at)}</span>}
         {quote.viewed_at && <span className="text-sm text-secondary-500">Viewed by customer {formatDateTime(quote.viewed_at)}</span>}
+        {quote.authorised_at && (
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-success-700">
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+            Confirmed by {quote.authorised_by_name || 'the customer'} {formatDateTime(quote.authorised_at)}
+          </span>
+        )}
         {orderUuid && (
           <Link href={`/dashboard/shop/orders/${orderUuid}`} className="text-sm text-primary-600 hover:underline">
             Order {quote.order?.order_number ?? quote.order?.number ?? ''} →
@@ -247,6 +302,40 @@ function QuoteDetail() {
             <div className="mt-4 border-t border-secondary-200 pt-4">
               <TotalsBlock totals={quote} />
             </div>
+          </Card>
+
+          <Card className="print:hidden">
+            <SectionTitle
+              actions={
+                editable &&
+                !locked &&
+                (terms ? (
+                  <>
+                    <Button size="sm" variant="ghost" leftIcon={<X className="h-4 w-4" />} onClick={() => setTerms(null)}>Discard</Button>
+                    <Button size="sm" leftIcon={<Save className="h-4 w-4" />} isLoading={saving === 'terms'} onClick={saveTerms}>Save</Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="ghost" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setTerms(orderTermsToDraft(quote))}>Edit</Button>
+                ))
+              }
+            >
+              Order terms: discounts and delivery
+            </SectionTitle>
+            {terms ? (
+              <OrderTermsFields value={terms} onChange={setTerms} customer={customer} idPrefix="qt" tradeDiscountMinor={quote.trade_discount_minor} />
+            ) : (
+              <dl className="divide-y divide-secondary-100">
+                <KeyValue label="Document">{docTitle}</KeyValue>
+                <KeyValue label="VIP Trade discount">{(quote.trade_discount_minor ?? 0) > 0 ? `£${minorToPounds(quote.trade_discount_minor ?? 0)} ex VAT` : 'None'}</KeyValue>
+                <KeyValue label="Extra discount">{(quote.discount_minor ?? 0) > 0 ? `£${minorToPounds(quote.discount_minor ?? 0)} ex VAT${quote.discount_label ? ` (${quote.discount_label})` : ''}` : 'None'}</KeyValue>
+                <KeyValue label="Delivery method">{quote.delivery_method || '—'}</KeyValue>
+                <KeyValue label="Deliver to">
+                  {quote.delivery_address
+                    ? [quote.delivery_address.name, quote.delivery_address.company, quote.delivery_address.line1, quote.delivery_address.line2, quote.delivery_address.city, quote.delivery_address.postcode, quote.delivery_address.country, quote.delivery_address.email, quote.delivery_address.vat_number && `VAT ${quote.delivery_address.vat_number}`].filter(Boolean).join(', ')
+                    : '—'}
+                </KeyValue>
+              </dl>
+            )}
           </Card>
 
           <Card className="print:hidden">
@@ -321,7 +410,7 @@ function QuoteDetail() {
                 </div>
                 <p className="flex items-start gap-1.5 text-xs text-secondary-500">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning-500" />
-                  Anyone with this link can view and pay the quote. Share it only with the customer.
+                  Anyone with this link can view and pay the {noun}. Share it only with the customer.
                 </p>
               </div>
             ) : (
@@ -332,7 +421,7 @@ function QuoteDetail() {
           <Card>
             <SectionTitle>Details</SectionTitle>
             <dl className="divide-y divide-secondary-100">
-              <KeyValue label="Quote number">{quote.quote_number}</KeyValue>
+              <KeyValue label={isOrder ? 'Order number' : 'Quote number'}>{quote.quote_number}</KeyValue>
               <KeyValue label="Valid until">{quote.valid_until ? toDateInput(quote.valid_until) : '—'}</KeyValue>
               {quote.chat_session_uuid && (
                 <KeyValue label="Chat">

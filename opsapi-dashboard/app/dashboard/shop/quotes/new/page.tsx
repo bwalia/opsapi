@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, FilePlus2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -13,12 +13,16 @@ import { SectionTitle } from '@/components/shop/shared';
 import { QuoteLinesEditor, draftsToPayload, type LineDraft } from '@/components/shop/QuoteLinesEditor';
 import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type CustomerDraft } from '@/components/shop/CustomerForm';
 import { newKey } from '@/components/shop/editor-fields';
+import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
 import { extractApiError } from '@/lib/utils';
 import { poundsToMinor } from '@/lib/shop';
 import type { ShopQuoteStatus } from '@/types/shop';
 
 function NewQuote() {
   const router = useRouter();
+  const params = useSearchParams();
+  const [terms, setTerms] = useState<OrderTermsDraft>(() => orderTermsToDraft(null, params?.get('kind') === 'quote' ? 'quote' : 'order'));
+  const isOrder = terms.kind === 'order';
   const [customer, setCustomer] = useState<CustomerDraft>(() => customerToDraft(null));
   const [drafts, setDrafts] = useState<LineDraft[]>(() => [
     { key: newKey(), product_slug: '', product_name: '', qty: '1', selections: {}, override: '' },
@@ -37,6 +41,8 @@ function NewQuote() {
     if (!lines.length) errs.push('Add at least one line');
     const shippingMinor = poundsToMinor(shipping);
     if (shippingMinor === null || shippingMinor < 0) errs.push('Shipping must be a valid amount');
+    const { fields, errors: termErrs } = draftToOrderFields(terms);
+    errs.push(...termErrs);
     setErrors(errs);
     if (errs.length) return;
     setSaving(status);
@@ -50,11 +56,12 @@ function NewQuote() {
         internal_notes: internalNotes.trim() || undefined,
         valid_until: validUntil || undefined,
         shipping_minor: shippingMinor ?? 0,
+        ...fields,
       });
-      toast.success(`Quote ${q?.quote_number ?? ''} created`);
+      toast.success(`${isOrder ? 'Order' : 'Quote'} ${q?.quote_number ?? ''} created`);
       router.push(q?.uuid ? `/dashboard/shop/quotes/${q.uuid}` : '/dashboard/shop/quotes');
     } catch (err) {
-      toast.error(extractApiError(err, 'Failed to create quote'));
+      toast.error(extractApiError(err, isOrder ? 'Failed to create the order' : 'Failed to create quote'));
     } finally {
       setSaving(null);
     }
@@ -63,20 +70,32 @@ function NewQuote() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Create quote"
-        description="For phone and email enquiries — lines are priced by the pricing engine"
+        title={isOrder ? 'Create order' : 'Create quote'}
+        description={
+          isOrder
+            ? 'Build the order, then send it to the customer as an Order Authorisation to confirm and pay'
+            : 'For phone and email enquiries — lines are priced by the pricing engine'
+        }
         icon={<FilePlus2 className="h-5 w-5" />}
         actions={
           <>
             <Link href="/dashboard/shop/quotes">
               <Button variant="ghost" leftIcon={<ArrowLeft className="h-4 w-4" />}>Quotes</Button>
             </Link>
-            <Button variant="outline" isLoading={saving === 'draft'} disabled={!!saving} onClick={() => submit('draft')}>
-              Save draft
-            </Button>
-            <Button leftIcon={<Save className="h-4 w-4" />} isLoading={saving === 'sent'} disabled={!!saving} onClick={() => submit('sent')}>
-              Create &amp; mark sent
-            </Button>
+            {!isOrder && (
+              <Button variant="outline" isLoading={saving === 'draft'} disabled={!!saving} onClick={() => submit('draft')}>
+                Save draft
+              </Button>
+            )}
+            {isOrder ? (
+              <Button leftIcon={<Save className="h-4 w-4" />} isLoading={saving === 'draft'} disabled={!!saving} onClick={() => submit('draft')}>
+                Create order
+              </Button>
+            ) : (
+              <Button leftIcon={<Save className="h-4 w-4" />} isLoading={saving === 'sent'} disabled={!!saving} onClick={() => submit('sent')}>
+                Create &amp; mark sent
+              </Button>
+            )}
           </>
         }
       />
@@ -111,7 +130,11 @@ function NewQuote() {
             <CustomerForm value={customer} onChange={setCustomer} />
           </Card>
           <Card>
-            <SectionTitle>Terms</SectionTitle>
+            <SectionTitle>Order terms</SectionTitle>
+            <OrderTermsFields value={terms} onChange={setTerms} customer={customer} idPrefix="nq" />
+          </Card>
+          <Card>
+            <SectionTitle>Validity and shipping</SectionTitle>
             <div className="space-y-4">
               <Input label="Valid until" id="nq-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} helperText="Defaults to 30 days from creation" />
               <Input label="Shipping (£ ex VAT)" id="nq-ship" value={shipping} inputMode="decimal" onChange={(e) => setShipping(e.target.value)} />
@@ -125,8 +148,11 @@ function NewQuote() {
 
 export default function NewShopQuotePage() {
   return (
-    <ProtectedPage module="shop" action="create" title="Create Quote">
-      <NewQuote />
+    <ProtectedPage module="shop" action="create" title="Create order or quote">
+      {/* useSearchParams (?kind=quote) needs a Suspense boundary for the static build. */}
+      <Suspense fallback={null}>
+        <NewQuote />
+      </Suspense>
     </ProtectedPage>
   );
 }
