@@ -370,6 +370,15 @@ return function(app)
         return U.ok(Membership.adminMembers(ns_id, self.params))
     end))
 
+    -- VIP badges: which of these customer emails hold a membership in force. POST so the addresses
+    -- stay out of URLs and access logs. Body { emails = [...] } (at most LOOKUP_MAX are checked).
+    app:post(BASE .. "/membership/lookup", guard("read", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        if type(body.emails) ~= "table" then return U.fail(400, "VALIDATION_ERROR", "emails must be a list") end
+        return U.ok(Membership.lookup(ns_id, body.emails))
+    end))
+
     app:get(BASE .. "/legal/acceptances", guard("read", function(self, ns_id)
         local data, meta = Legal.adminList(ns_id, self.params)
         return U.ok(data, 200, meta)

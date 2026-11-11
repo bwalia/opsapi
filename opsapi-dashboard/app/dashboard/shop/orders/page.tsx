@@ -9,6 +9,8 @@ import { Card, Input, Pagination, Table } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { shopService } from '@/services/shop.service';
 import { FilterSelect, OrderStatusBadge } from '@/components/shop/shared';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipStatus } from '@/hooks/useVipStatus';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize } from '@/lib/shop';
 import { SHOP_ORDER_STATUSES, type ShopOrder, type ShopOrderStatus, type TableColumn } from '@/types';
@@ -49,6 +51,8 @@ function OrdersContent() {
     };
   }, [status, q, page]);
 
+  const vips = useVipStatus(rows.map((o) => o.email));
+
   const columns: TableColumn<ShopOrder>[] = [
     {
       key: 'order_number',
@@ -65,7 +69,10 @@ function OrdersContent() {
       header: 'Customer',
       render: (o) => (
         <div className="min-w-0">
-          <p className="truncate text-secondary-900">{o.customer?.name || o.email || '—'}</p>
+          <div className="flex items-center gap-2">
+            <p className="truncate text-secondary-900">{o.customer?.name || o.email || '—'}</p>
+            <VipBadge vip={vips[(o.email ?? '').toLowerCase()]} />
+          </div>
           <p className="truncate text-xs text-secondary-500">{o.customer?.company || (o.customer?.name ? o.email : '')}</p>
         </div>
       ),

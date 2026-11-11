@@ -430,6 +430,36 @@ local function issue_join_credits(m)
     end
 end
 
+--- Tell staff a VIP joined (owner email + Telegram, per Leads → Notifications), every time, even when
+-- the customer was already a lead: record_lead only notifies when it creates one, so a survey lead who
+-- later paid for membership used to arrive silently. Best effort, never fails the activation.
+local function vip_alert(m)
+    pcall(function()
+        local ns = db.query("SELECT id, name FROM namespaces WHERE id = ?", m.namespace_id)[1]
+        if not ns then return end
+        local lead = db.query([[
+            SELECT first_name, last_name, email, phone, company_name, job_title FROM crm_leads
+             WHERE namespace_id = ? AND lower(email) = lower(?) AND deleted_at IS NULL
+             ORDER BY (converted_at IS NULL) DESC, created_at DESC LIMIT 1
+        ]], m.namespace_id, m.email)[1] or { first_name = "", email = m.email }
+        local who = ((lead.first_name or "") .. " " .. (lead.last_name or "")):gsub("^%s+", ""):gsub("%s+$", "")
+        if who == "" or who == "Shop customer" then who = m.email end
+        local fee = U.money(tonumber(m.net_minor) or 0) .. " + VAT a " .. tostring(m.billing_interval)
+        local tier = m.tier == "founding" and "Founding member" or "Standard member"
+        require("queries.CrmLeadNotificationQueries").notify(ns, {
+            first_name = lead.first_name, last_name = lead.last_name, email = m.email, phone = lead.phone,
+            company_name = lead.company_name, job_title = lead.job_title, source = "shop_vip",
+            notes = tier .. ", " .. fee .. ". Trade terms " .. tostring(m.terms_version) .. ".",
+        }, { staff = {
+            subject = "New VIP member: " .. who,
+            headline = "New VIP member",
+            intro = who .. " has just paid for VIP membership (" .. tier:lower() .. ", " .. fee
+                .. "). Their Trade discount applies from now. Open Shop → Members in your dashboard.",
+            telegram_title = "⭐ <b>New VIP member</b>",
+        } })
+    end)
+end
+
 --- Make a membership active (first payment). Idempotent.
 local function activate(m, sub_id, customer_id)
     if m.joined_at then
@@ -446,6 +476,7 @@ local function activate(m, sub_id, customer_id)
     ]], sub_id or db.NULL, customer_id or db.NULL, m.id)
     m = reload(m.id)
     record_lead(m, "Joined VIP membership (" .. m.tier .. ", " .. m.billing_interval .. "ly)")
+    vip_alert(m)
     issue_join_credits(m)
     return m
 end
@@ -1230,21 +1261,60 @@ end
 
 function Q.adminMembers(ns_id, params)
     params = params or {}
-    local where, vals = { "namespace_id = ?", "status NOT IN ('pending', 'abandoned')" }, { ns_id }
+    local where, vals = { "m.namespace_id = ?", "m.status NOT IN ('pending', 'abandoned')" }, { ns_id }
     if nz(params.status) then
-        where[#where + 1] = "status = ?"
+        where[#where + 1] = "m.status = ?"
         vals[#vals + 1] = params.status
     end
     if nz(params.q) then
-        where[#where + 1] = "email ILIKE ?"
-        vals[#vals + 1] = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
+        local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
+        where[#where + 1] = "(m.email ILIKE ? OR l.company_name ILIKE ? OR (l.first_name || ' ' || COALESCE(l.last_name, '')) ILIKE ?)"
+        vals[#vals + 1] = like; vals[#vals + 1] = like; vals[#vals + 1] = like
     end
+    -- Name, company and phone come from the customer's CRM lead (memberships only store the email).
     return U.arr(db.query([[
-        SELECT uuid, email, tier, billing_interval, status, net_minor, vat_minor, joined_at, current_period_end,
-               cancel_at_period_end, fees_paid_net_minor, fees_credited_net_minor, terms_version
-          FROM shop_memberships WHERE ]] .. table.concat(where, " AND ") .. [[
-         ORDER BY joined_at DESC NULLS LAST LIMIT 1000
+        SELECT m.uuid, m.email, m.tier, m.billing_interval, m.status, m.net_minor, m.vat_minor, m.joined_at,
+               m.current_period_end, m.cancel_at_period_end, m.fees_paid_net_minor, m.fees_credited_net_minor,
+               m.terms_version, l.uuid AS lead_uuid,
+               NULLIF(TRIM(COALESCE(NULLIF(l.first_name, 'Shop customer'), '') || ' ' || COALESCE(l.last_name, '')), '') AS name,
+               l.company_name AS company, l.phone
+          FROM shop_memberships m
+          LEFT JOIN LATERAL (
+              SELECT uuid, first_name, last_name, company_name, phone FROM crm_leads
+               WHERE namespace_id = m.namespace_id AND lower(email) = lower(m.email) AND deleted_at IS NULL
+               ORDER BY (converted_at IS NULL) DESC, created_at DESC LIMIT 1
+          ) l ON true
+         WHERE ]] .. table.concat(where, " AND ") .. [[
+         ORDER BY m.joined_at DESC NULLS LAST LIMIT 1000
     ]], unpack(vals)))
+end
+
+--- VIP status for a page of customer emails (dashboard badges). Only memberships in force count:
+-- active or past_due (a cancelled one stays active until its period ends). Returns { [lower(email)] = row }.
+Q.LOOKUP_MAX = 200
+function Q.lookup(ns_id, emails)
+    local list, seen = {}, {}
+    for _, e in ipairs(type(emails) == "table" and emails or {}) do
+        local v = type(e) == "string" and e:lower():gsub("^%s+", ""):gsub("%s+$", "") or ""
+        if v ~= "" and #v <= 254 and v:find("@", 1, true) and not seen[v] then
+            seen[v] = true
+            list[#list + 1] = v
+            if #list >= Q.LOOKUP_MAX then break end
+        end
+    end
+    local out = {}
+    if #list == 0 then return out end
+    local marks = {}
+    for i = 1, #list do marks[i] = "?" end
+    local rows = db.query([[
+        SELECT DISTINCT ON (lower(email)) lower(email) AS email, uuid, tier, billing_interval, status, joined_at,
+               current_period_end, cancel_at_period_end
+          FROM shop_memberships
+         WHERE namespace_id = ? AND status IN ('active', 'past_due') AND lower(email) IN (]] .. table.concat(marks, ",") .. [[)
+         ORDER BY lower(email), joined_at DESC NULLS LAST
+    ]], ns_id, unpack(list))
+    for _, r in ipairs(rows) do out[r.email] = r end
+    return out
 end
 
 return Q

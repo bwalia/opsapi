@@ -1,6 +1,14 @@
+<% if headline and headline ~= "" then %>
+<h2><%= headline %><% if namespace_name and namespace_name ~= "" then %> — <%= namespace_name %><% end %></h2>
+<% else %>
 <h2>You've got a new lead<% if namespace_name and namespace_name ~= "" then %> — <%= namespace_name %><% end %></h2>
+<% end %>
 
+<% if intro and intro ~= "" then %>
+<p><%= intro %></p>
+<% else %>
 <p>A new enquiry has just come in. The details are below — log in to your dashboard and open <strong>Leads</strong> to follow up.</p>
+<% end %>
 
 <div class="info-box">
   <p><strong>Name:</strong> <%= first_name %><% if last_name and last_name ~= "" then %> <%= last_name %><% end %></p>

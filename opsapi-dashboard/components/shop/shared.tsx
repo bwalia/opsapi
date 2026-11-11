@@ -5,6 +5,8 @@ import { Loader2, AlertTriangle, X, History, Minus, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Badge, Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { shopService } from '@/services/shop.service';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipFor } from '@/hooks/useVipStatus';
 import { cn, extractApiError, formatDateTime } from '@/lib/utils';
 import {
   formatMoney,
@@ -232,12 +234,22 @@ export function formatAddress(a: ShopAddress | string | null | undefined): strin
 export function CustomerBlock({ customer, email }: { customer?: ShopCustomer | null; email?: string | null }) {
   const c = customer ?? {};
   const mail = c.email || email;
+  const vip = useVipFor(mail);
   const addr = formatAddress(c.address as ShopAddress | string | null | undefined);
   if (!c.name && !mail && !c.company) {
     return <p className="text-sm text-secondary-500">No customer details.</p>;
   }
   return (
     <dl className="space-y-1 text-sm">
+      {vip && (
+        <dd className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+          <VipBadge vip={vip} size="md" />
+          <span className="text-xs">
+            {vip.status === 'past_due' ? 'Membership payment overdue' : 'VIP customer: Trade discount terms apply'}
+            {vip.joined_at ? ` · member since ${formatDateTime(vip.joined_at)}` : ''}
+          </span>
+        </dd>
+      )}
       {c.name && <dd className="font-medium text-secondary-900">{c.name}</dd>}
       {c.company && <dd className="text-secondary-700">{c.company}</dd>}
       {mail && (

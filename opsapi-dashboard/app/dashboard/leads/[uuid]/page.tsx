@@ -20,6 +20,8 @@ import PropertyDealsLeadPanel from '@/components/property-deals/LeadPanel';
 import RecordFormResponses from '@/components/forms/RecordFormResponses';
 import { AiCard, type AiAction } from '@/components/leads/AiCard';
 import { ShopPanel } from '@/components/leads/ShopPanel';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipFor } from '@/hooks/useVipStatus';
 import {
   ConvertDialog, LogCallDialog, MeetingDialog, MeetingOutcomeDialog, PlanStepDialog, QualifyDialog, ReferDialog,
 } from '@/components/leads/LeadDialogs';
@@ -70,6 +72,7 @@ function LeadContent() {
   const { uuid } = useParams<{ uuid: string }>();
   const router = useRouter();
   const [lead, setLead] = useState<Lead | null>(null);
+  const vip = useVipFor(lead?.email);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [settings, setSettings] = useState<SettingsBundle | null>(null);
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -217,7 +220,10 @@ function LeadContent() {
         </Link>
         <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-bold tracking-tight text-secondary-900">{fullName(lead)}</h1>
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <h1 className="truncate text-2xl font-bold tracking-tight text-secondary-900">{fullName(lead)}</h1>
+              <VipBadge vip={vip} size="md" />
+            </div>
             <p className="mt-0.5 text-sm text-secondary-500">
               {[lead.job_title, lead.company_name].filter(Boolean).join(' at ') || 'No company given'}
               {lead.source ? ` · came from ${lead.source.replace(/_/g, ' ')}` : ''} · {dateOnly(lead.created_at)}

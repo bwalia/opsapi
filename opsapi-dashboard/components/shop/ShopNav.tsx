@@ -19,6 +19,7 @@ import {
   BarChart3,
   Settings,
   ScrollText,
+  Crown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -33,6 +34,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/price-changes', label: 'Price changes', icon: Scale },
   { href: '/dashboard/shop/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/shop/quotes', label: 'Quotes', icon: FileText },
+  { href: '/dashboard/shop/members', label: 'VIP members', icon: Crown },
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
   { href: '/dashboard/shop/credits', label: 'Credits', icon: Gift },
   { href: '/dashboard/shop/knowledge', label: 'Knowledge', icon: BookOpen },
