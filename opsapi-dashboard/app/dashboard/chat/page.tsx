@@ -6,6 +6,8 @@
 // the backend scopes channels + user search to the current tenant), so the rail
 // reloads when the active namespace changes.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { isEmbeddedInApp } from '@/lib/embed';
 import toast from 'react-hot-toast';
 import {
   Hash,
@@ -998,7 +1000,13 @@ export default function ChatPage() {
 
   return (
     <ProtectedPage module="chat" title="AI Navigator">
-      <div className="flex h-[calc(100dvh-9rem)] min-h-[520px] overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-sm">
+      <div
+        className={cn(
+          'flex overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-sm',
+          // Fill the screen below the top bar; inside the phone app there is no top bar or footer.
+          isEmbeddedInApp() ? 'h-[calc(100dvh-2.25rem)] min-h-[420px]' : 'h-[calc(100dvh-9rem)] min-h-[520px]'
+        )}
+      >
         {/* ---------- Left rail: channels + DMs ---------- */}
         <aside
           className={`w-full flex-col border-r border-secondary-200 bg-secondary-50 md:w-64 md:flex ${

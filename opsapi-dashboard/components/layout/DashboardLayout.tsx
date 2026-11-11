@@ -17,6 +17,7 @@ import { NamespaceProvider } from '@/contexts/NamespaceContext';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AUTH_TOKEN_KEY } from '@/lib/api-client';
+import { isEmbeddedInApp } from '@/lib/embed';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -131,41 +132,51 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
     return <LoadingScreen message="Redirecting to login..." />;
   }
 
+  // Inside a phone app the app has its own navigation: no top bar, sidebar or footer, and the page
+  // never scrolls sideways.
+  const embedded = isEmbeddedInApp();
+
   return (
     <NamespaceProvider>
       <PermissionsProvider>
         <ThemeStyles />
         <div className="min-h-screen bg-secondary-50">
           {/* Sidebar */}
-          <Sidebar
-            isOpen={isSidebarOpen}
-            isCollapsed={isSidebarCollapsed}
-            onClose={handleSidebarClose}
-            onToggleCollapse={handleSidebarToggleCollapse}
-          />
+          {!embedded && (
+            <Sidebar
+              isOpen={isSidebarOpen}
+              isCollapsed={isSidebarCollapsed}
+              onClose={handleSidebarClose}
+              onToggleCollapse={handleSidebarToggleCollapse}
+            />
+          )}
 
           {/* Main content wrapper — a full-height flex column so the footer
               sticks to the bottom of the viewport on short pages and sits after
               the content on long ones. */}
           <div
             className={cn(
-              'flex min-h-screen flex-col transition-all duration-300',
+              'flex min-h-screen min-w-0 flex-col transition-all duration-300',
               // Desktop: adjust margin based on sidebar state
-              isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
+              !embedded && (isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'),
               // Mobile: no margin (sidebar overlays)
               'ml-0'
             )}
           >
             {/* Header */}
-            <Header onMenuClick={handleSidebarOpen} />
+            {!embedded && <Header onMenuClick={handleSidebarOpen} />}
 
             {/* Main content — grows to fill, pushing the footer down */}
-            <main key={dataVersion} id="main-content" className="flex-1 p-4 sm:p-6">
+            <main
+              key={dataVersion}
+              id="main-content"
+              className={cn('flex-1 min-w-0', embedded ? 'overflow-x-hidden p-3 pb-6' : 'p-4 sm:p-6')}
+            >
               {children}
             </main>
 
             {/* Build/version stamp — so it's obvious which build is live */}
-            <BuildFooter />
+            {!embedded && <BuildFooter />}
           </div>
         </div>
 
