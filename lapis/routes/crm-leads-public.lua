@@ -24,6 +24,8 @@ local db = require("lapis.db")
 local RateLimit = require("middleware.rate-limit")
 local CrmLeadQueries = require("queries.CrmLeadQueries")
 local CrmLeadNotificationQueries = require("queries.CrmLeadNotificationQueries")
+local LeadConfirmation = require("lib.crm.lead-confirmation")
+local ShopUtil = require("lib.shop-util")
 
 return function(app)
     -- POST /api/v2/public/leads/:namespace_slug - Public lead submission
@@ -179,7 +181,16 @@ return function(app)
             -- Fresh capture succeeded — fire configured notifications (confirmation
             -- to submitter, admin email, Telegram). Deferred to a timer internally,
             -- so this never blocks the response; failures are logged, not fatal.
-            CrmLeadNotificationQueries.notify(namespace, lead)
+            -- The shop's survey (BFF, X-Shop-Key) may add bullet points and how to reach us to the
+            -- confirmation email. Never from an anonymous caller: see lib/crm/lead-confirmation.lua.
+            local confirmation
+            if data.confirmation ~= nil then
+                local key = ShopUtil.env("SHOP_BFF_KEY")
+                if key and ShopUtil.secure_equals(self.req.headers["x-shop-key"], key) then
+                    confirmation = LeadConfirmation.sanitize(data.confirmation)
+                end
+            end
+            CrmLeadNotificationQueries.notify(namespace, lead, { confirmation = confirmation })
 
             return { status = 201, json = { success = true, message = "Thank you for your submission" } }
         end)

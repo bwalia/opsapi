@@ -147,10 +147,13 @@ local function do_sends(p)
             if not Mail.isConfigured() then return end
             Mail.send({
                 to = lead.email,
-                subject = "We got your enquiry — thanks for getting in touch",
+                subject = (p.confirmation and p.confirmation.subject) or "We got your enquiry — thanks for getting in touch",
                 template = "lead_confirmation",
                 sync = true,
-                data = { first_name = lead.first_name, company_name = lead.company_name, notes = lead.notes, app_name = brand },
+                -- With `confirmation` the email reads back the visitor's answers instead of the raw
+                -- notes (which carry the team's internal build sheet).
+                data = { first_name = lead.first_name, company_name = lead.company_name, notes = lead.notes,
+                    confirmation = p.confirmation, app_name = brand },
             })
         end)
     end
@@ -191,7 +194,7 @@ end
 -- Call from a request handler: DB reads (settings + owner email) happen now, in
 -- request context; the actual sends are deferred to an ngx.timer so the caller's
 -- HTTP response returns immediately. Never throws.
-function CrmLeadNotificationQueries.notify(namespace, lead)
+function CrmLeadNotificationQueries.notify(namespace, lead, opts)
     local ok, err = pcall(function()
         local settings = CrmLeadNotificationQueries.getEffective(namespace.id)
         local admin_email = nil
@@ -202,6 +205,8 @@ function CrmLeadNotificationQueries.notify(namespace, lead)
         local payload = {
             namespace = { id = namespace.id, name = namespace.name },
             admin_email = admin_email,
+            -- Validated extra content for the submitter's email (shop survey only), or nil.
+            confirmation = opts and opts.confirmation or nil,
             settings = {
                 notify_admin = settings.notify_admin ~= false,
                 send_confirmation = settings.send_confirmation ~= false,

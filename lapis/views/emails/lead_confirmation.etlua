@@ -1,18 +1,49 @@
 <h2>Thank you<% if first_name and first_name ~= "" then %>, <%= first_name %><% end %>!</h2>
 
-<p>We've received your enquiry and one of our team will get back to you shortly. This email confirms your submission — no action is required from you right now.</p>
+<% if confirmation then %>
+  <p><%= confirmation.intro or "We've got your build and one of our engineers is looking at it now." %></p>
 
-<% if company_name and company_name ~= "" then %>
-  <p><strong>Company:</strong> <%= company_name %></p>
+  <% if confirmation.highlights and #confirmation.highlights > 0 then %>
+    <p><strong>Here's what we picked up from your answers:</strong></p>
+    <ul style="padding-left: 20px; margin: 0 0 16px;">
+      <% for i, h in ipairs(confirmation.highlights) do %>
+        <li style="margin-bottom: 6px;"><% if i == 1 then %><strong><%= h %></strong><% else %><%= h %><% end %></li>
+      <% end %>
+    </ul>
+  <% end %>
+
+  <% if confirmation.handover then %>
+    <p><%= confirmation.handover %></p>
+  <% end %>
+
+  <% if confirmation.call_phone or confirmation.book_url then %>
+    <div class="info-box">
+      <p style="margin: 0 0 8px;"><strong>Want to talk it through now?</strong></p>
+      <% if confirmation.call_phone then %>
+        <p style="margin: 0 0 6px;">Call us now on <% if confirmation.call_url then %><a href="<%= confirmation.call_url %>"><%= confirmation.call_phone %></a> (WhatsApp)<% else %><%= confirmation.call_phone %><% end %>.</p>
+      <% end %>
+      <% if confirmation.book_url then %>
+        <p style="margin: 0;">Or <a href="<%= confirmation.book_url %>">book a call at a time that suits you</a>.</p>
+      <% end %>
+    </div>
+  <% end %>
+
+  <p>If anything above looks wrong, just reply to this email and we'll pick it up.</p>
+<% else %>
+  <p>We've received your enquiry and one of our team will get back to you shortly.</p>
+
+  <% if company_name and company_name ~= "" then %>
+    <p><strong>Company:</strong> <%= company_name %></p>
+  <% end %>
+
+  <% if notes and notes ~= "" then %>
+    <p><strong>Your message:</strong></p>
+    <div class="info-box">
+      <%= notes %>
+    </div>
+  <% end %>
+
+  <p>If any of the details above look wrong, or you'd like to add anything, just reply to this email and we'll pick it up.</p>
 <% end %>
-
-<% if notes and notes ~= "" then %>
-  <p><strong>Your message:</strong></p>
-  <div class="info-box">
-    <%= notes %>
-  </div>
-<% end %>
-
-<p>If any of the details above look wrong, or you'd like to add anything, just reply to this email and we'll pick it up.</p>
 
 <p>Thanks,<br>The <%= app_name %> Team</p>
