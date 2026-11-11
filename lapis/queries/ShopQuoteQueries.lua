@@ -469,6 +469,9 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
     local shaped = ShopQuoteQueries.shape(q, { admin = true })
     local title = shaped.document_title
     local pdf, perr = fetch_pdf(q)
+    -- The shop's PDF route reads the quote through the public endpoint, which stamps viewed_at; our own
+    -- fetch is not the customer viewing it.
+    if not U.nz(q.viewed_at) then db.query("UPDATE shop_quotes SET viewed_at = NULL WHERE id = ?", q.id) end
     if not pdf then ngx.log(ngx.WARN, "[shop-quotes] PDF not attached to ", q.quote_number, ": ", tostring(perr)) end
 
     local Mail = require("helper.mail")
