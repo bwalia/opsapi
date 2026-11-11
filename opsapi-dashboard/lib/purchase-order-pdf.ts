@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { PurchaseOrder } from '@/services/purchase-orders.service';
+import { partyLines, type PurchaseOrder } from '@/services/purchase-orders.service';
 import type { InvoiceCompany } from '@/lib/invoice-pdf';
 
 // Same look as lib/invoice-pdf.ts (navy band, accent stripe, zebra table) so
@@ -87,6 +87,25 @@ function buildDoc(po: PurchaseOrder, company: InvoiceCompany): jsPDF {
     }
   }
 
+  // Drop-ship POs from shop orders: who pays (Bill to) under the supplier.
+  const billTo = partyLines(po.metadata?.bill_to);
+  if (billTo.length) {
+    by += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...MUTED);
+    doc.text('BILL TO', margin, by);
+    by += 16;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...DARK);
+    for (const line of billTo) {
+      const wrapped = doc.splitTextToSize(line, 230);
+      doc.text(wrapped, margin, by);
+      by += 13 * wrapped.length;
+    }
+  }
+
   const metaX = right - 200;
   const metaRows: [string, string][] = [
     ['Issue Date', po.issue_date || '—'],
@@ -104,11 +123,22 @@ function buildDoc(po: PurchaseOrder, company: InvoiceCompany): jsPDF {
     doc.text(String(value), right, my, { align: 'right' });
     my += 17;
   }
+  if (po.metadata?.delivery_method) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...MUTED);
+    doc.text('Delivery', metaX, my);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...DARK);
+    const m = doc.splitTextToSize(String(po.metadata.delivery_method), 120);
+    doc.text(m, right, my, { align: 'right' });
+    my += 17 * m.length;
+  }
   if (po.delivery_address) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...MUTED);
-    doc.text('DELIVER TO', metaX, my + 6);
+    doc.text(po.metadata?.drop_ship ? 'DELIVER DIRECTLY TO' : 'DELIVER TO', metaX, my + 6);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9.5);
     doc.setTextColor(...DARK);

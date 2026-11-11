@@ -2663,6 +2663,7 @@ local _migrations = {
     ['zzs38_shop_survey_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_survey_migrations, 1),
     -- Order Authorisation: staff-built orders, discounts, delivery (migrations/shop-order-authorisation.lua)
     ['zzs39_shop_order_authorisation'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_auth_migrations, 1),
+    ['zzs40_shop_po_bill_to'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_auth_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

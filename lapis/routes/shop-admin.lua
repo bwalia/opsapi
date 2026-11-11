@@ -250,6 +250,16 @@ return function(app)
         }))(self)
     end)
 
+    -- Draft a supplier purchase order for a paid order (Bill to us, deliver directly to the customer).
+    app:post(BASE .. "/orders/:uuid/purchase-order", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        local po, err = Orders.createPurchaseOrder(ns_id, self.params.uuid, body, u.uuid)
+        if not po then return U.from_err(err) end
+        return U.ok(po, 201)
+    end))
+
     app:post(BASE .. "/orders/:uuid/refund", guard("update", function(self, ns_id)
         local body, bad = body_or_400()
         if not body then return bad end

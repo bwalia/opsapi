@@ -19,7 +19,10 @@
         shop_orders: discount_minor (staff + Trade discount carried from the quote), delivery_method,
         delivery_address.
 
-    Registered in migrations.lua as zzs39. Idempotent.
+    [2] shop_settings.po_bill_to (jsonb): the "Bill to" block on supplier purchase orders raised from
+        paid shop orders (company, address, phone, email, VAT number).
+
+    Registered in migrations.lua as zzs39 ([1]) and zzs40 ([2]). Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -55,5 +58,8 @@ return {
                 ADD COLUMN IF NOT EXISTS delivery_method varchar(160),
                 ADD COLUMN IF NOT EXISTS delivery_address jsonb
         ]])
+    end,
+    [2] = function()
+        db.query("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS po_bill_to jsonb")
     end,
 }

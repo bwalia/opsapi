@@ -27,6 +27,7 @@ import { ProtectedPage } from '@/components/permissions';
 import { PurchaseOrderStatusBadge } from '@/components/purchase-orders/PurchaseOrderStatusBadge';
 import { PurchaseOrderFormModal } from '@/components/purchase-orders/PurchaseOrderFormModal';
 import {
+  partyLines,
   purchaseOrdersService,
   purchaseOrderError,
   type PurchaseOrder,
@@ -834,10 +835,32 @@ function PurchaseOrderDetailContent() {
               <dt className="inline text-secondary-500">Currency:</dt>
               <dd className="inline ml-2 text-secondary-900">{po.currency}</dd>
             </div>
+            {po.metadata?.delivery_method && (
+              <div>
+                <dt className="inline text-secondary-500">Delivery:</dt>
+                <dd className="inline ml-2 text-secondary-900">{po.metadata.delivery_method}</dd>
+              </div>
+            )}
             {po.delivery_address && (
               <div>
-                <dt className="text-secondary-500">Deliver to:</dt>
+                <dt className="text-secondary-500">{po.metadata?.drop_ship ? 'Deliver directly to:' : 'Deliver to:'}</dt>
                 <dd className="text-secondary-900 whitespace-pre-line">{po.delivery_address}</dd>
+              </div>
+            )}
+            {po.metadata?.bill_to && (
+              <div>
+                <dt className="text-secondary-500">Bill to:</dt>
+                <dd className="text-secondary-900 whitespace-pre-line">{partyLines(po.metadata.bill_to).join('\n')}</dd>
+              </div>
+            )}
+            {po.metadata?.shop_order_uuid && (
+              <div>
+                <dt className="inline text-secondary-500">Shop order:</dt>
+                <dd className="inline ml-2">
+                  <Link href={`/dashboard/shop/orders/${po.metadata.shop_order_uuid}`} className="text-primary-600 hover:underline">
+                    {po.metadata.shop_order_number || 'Open'}
+                  </Link>
+                </dd>
               </div>
             )}
             {po.project_uuid && (

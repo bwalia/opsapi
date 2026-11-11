@@ -466,6 +466,8 @@ export interface ShopOrder extends ShopTotals {
   discount_minor?: number;
   delivery_method?: string | null;
   delivery_address?: ShopDeliveryAddress | null;
+  /** Supplier POs raised from this order. */
+  purchase_orders?: { uuid: string; po_number: string; status: string; supplier_name: string; total: number | string; created_at: string }[];
 }
 
 export interface ShopOrderUpdate {
