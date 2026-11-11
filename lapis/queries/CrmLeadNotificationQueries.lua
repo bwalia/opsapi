@@ -112,11 +112,11 @@ function CrmLeadNotificationQueries.resolveAdminEmail(namespace_id, settings)
 end
 
 -- Build the Telegram HTML alert body for a captured lead.
-local function telegram_body(Telegram, namespace, lead)
+local function telegram_body(Telegram, namespace, lead, title)
     local esc = Telegram.esc
     local name = ((lead.first_name or "") .. " " .. (lead.last_name or "")):gsub("^%s+", ""):gsub("%s+$", "")
     local parts = {}
-    parts[#parts + 1] = "🎯 <b>New lead</b>" .. (namespace.name and (" — " .. esc(namespace.name)) or "")
+    parts[#parts + 1] = (title or "🎯 <b>New lead</b>") .. (namespace.name and (" — " .. esc(namespace.name)) or "")
     parts[#parts + 1] = ""
     if name ~= "" then parts[#parts + 1] = "<b>" .. esc(name) .. "</b>" end
     if lead.company_name and lead.company_name ~= "" then parts[#parts + 1] = "🏢 " .. esc(lead.company_name) end
@@ -141,8 +141,8 @@ local function do_sends(p)
     -- it nil so render_template falls back to the global from_name.
     local brand = (p.namespace.name and p.namespace.name ~= "") and p.namespace.name or nil
 
-    -- 1) Confirmation to the submitter
-    if s.send_confirmation ~= false and lead.email and lead.email ~= "" then
+    -- 1) Confirmation to the submitter (never for a staff-only alert)
+    if not p.staff and s.send_confirmation ~= false and lead.email and lead.email ~= "" then
         pcall(function()
             if not Mail.isConfigured() then return end
             Mail.send({
@@ -164,7 +164,8 @@ local function do_sends(p)
             if not Mail.isConfigured() then return end
             Mail.send({
                 to = p.admin_email,
-                subject = "New lead: " .. ((lead.first_name or "") .. " " .. (lead.last_name or "")):gsub("%s+$", ""),
+                subject = (p.staff and p.staff.subject)
+                    or ("New lead: " .. ((lead.first_name or "") .. " " .. (lead.last_name or "")):gsub("%s+$", "")),
                 template = "lead_admin_notification",
                 sync = true,
                 data = {
@@ -172,6 +173,8 @@ local function do_sends(p)
                     phone = lead.phone, company_name = lead.company_name, job_title = lead.job_title,
                     source = lead.source, notes = lead.notes, namespace_name = p.namespace.name,
                     app_name = brand,
+                    headline = p.staff and p.staff.headline or nil,
+                    intro = p.staff and p.staff.intro or nil,
                 },
             })
         end)
@@ -182,7 +185,7 @@ local function do_sends(p)
         pcall(function()
             local Telegram = require("helper.telegram")
             local ok, err = Telegram.send(s.telegram_bot_token, s.telegram_chat_id,
-                telegram_body(Telegram, p.namespace, lead))
+                telegram_body(Telegram, p.namespace, lead, p.staff and p.staff.telegram_title or nil))
             if not ok then
                 ngx.log(ngx.WARN, "[lead-notify] telegram failed for namespace ", p.namespace.id, ": ", tostring(err))
             end
@@ -207,6 +210,9 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
             admin_email = admin_email,
             -- Validated extra content for the submitter's email (shop survey only), or nil.
             confirmation = opts and opts.confirmation or nil,
+            -- Staff-only alert about an existing lead ({ subject, headline, intro, telegram_title }):
+            -- the owner email + Telegram go out, the submitter gets nothing.
+            staff = opts and type(opts.staff) == "table" and opts.staff or nil,
             settings = {
                 notify_admin = settings.notify_admin ~= false,
                 send_confirmation = settings.send_confirmation ~= false,

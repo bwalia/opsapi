@@ -24,6 +24,8 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import TourHost from '@/components/property-deals/Tour';
 import { CreateLeadModal, LeadNotificationsModal } from '@/components/crm/leads-shared';
 import { PipelineBoard } from '@/components/leads/PipelineBoard';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipStatus } from '@/hooks/useVipStatus';
 import { FunnelPanel } from '@/components/leads/FunnelPanel';
 import { MyStepsPanel } from '@/components/leads/MySteps';
 import {
@@ -70,6 +72,7 @@ function LeadsContent() {
   });
   const [search, setSearch] = useState('');
   const [list, setList] = useState<{ items: Lead[]; total: number; total_pages: number } | null>(null);
+  const vips = useVipStatus((list?.items ?? []).map((l) => l.email));
 
   const setViewAndUrl = (v: View) => {
     setView(v);
@@ -284,6 +287,7 @@ function LeadsContent() {
                         <td className="px-4 py-3">
                           <Link href={`/dashboard/leads/${l.uuid}`} className="font-medium text-secondary-900 hover:text-primary-600"
                             onClick={(e) => e.stopPropagation()}>{fullName(l)}</Link>
+                          <VipBadge vip={vips[(l.email ?? '').toLowerCase()]} className="ml-2 align-middle" />
                           <p className="text-xs text-secondary-500">{l.company_name || l.email || l.phone || ''}</p>
                         </td>
                         <td className="px-4 py-3"><StageBadge stage={l.stage} label={l.stage_label} /></td>

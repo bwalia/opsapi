@@ -11,6 +11,8 @@ import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { shopService } from '@/services/shop.service';
 import { FilterSelect, QuoteStatusBadge, SHOP_MODULE } from '@/components/shop/shared';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipStatus } from '@/hooks/useVipStatus';
 import { extractApiError, formatDate, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize } from '@/lib/shop';
 import { SHOP_QUOTE_STATUSES, type ShopQuote, type ShopQuoteStatus, type TableColumn } from '@/types';
@@ -54,6 +56,8 @@ function QuotesContent() {
 
   const expired = (qt: ShopQuote) => !!qt.valid_until && new Date(qt.valid_until) < new Date() && ['draft', 'sent'].includes(qt.status);
 
+  const vips = useVipStatus(rows.map((qt) => qt.customer?.email));
+
   const columns: TableColumn<ShopQuote>[] = [
     {
       key: 'quote_number',
@@ -73,7 +77,10 @@ function QuotesContent() {
       header: 'Customer',
       render: (qt) => (
         <div className="min-w-0">
-          <p className="truncate text-secondary-900">{qt.customer?.name || qt.customer?.email || '—'}</p>
+          <div className="flex items-center gap-2">
+            <p className="truncate text-secondary-900">{qt.customer?.name || qt.customer?.email || '—'}</p>
+            <VipBadge vip={vips[(qt.customer?.email ?? '').toLowerCase()]} />
+          </div>
           <p className="truncate text-xs text-secondary-500">{qt.customer?.company || qt.customer?.email}</p>
         </div>
       ),

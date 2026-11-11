@@ -20,6 +20,9 @@ import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { shopService } from '@/services/shop.service';
 import { OrderStatusBadge, QuoteStatusBadge, SHOP_MODULE, SectionTitle } from '@/components/shop/shared';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { VipMembersCard } from '@/components/shop/VipMembersCard';
+import { useVipStatus } from '@/hooks/useVipStatus';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize } from '@/lib/shop';
 import type { ShopDashboardKpis, ShopOrder, ShopQuote, ShopStockRow } from '@/types/shop';
@@ -91,6 +94,8 @@ function OverviewContent() {
     }
   };
 
+  const vips = useVipStatus([...(orders ?? []).map((o) => o.email), ...(quotes ?? []).map((q) => q.customer?.email)]);
+  const vipOf = (e: string | null | undefined) => vips[(e ?? '').trim().toLowerCase()];
   const cur = kpis?.currency ?? 'GBP';
   const loading = !kpis && !kpiError;
 
@@ -166,6 +171,8 @@ function OverviewContent() {
         />
       </div>
 
+      <VipMembersCard />
+
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Card>
           <SectionTitle actions={<Link href="/dashboard/shop/stock" className="text-sm text-primary-600 hover:underline">Stock sheet</Link>}>
@@ -207,7 +214,7 @@ function OverviewContent() {
                 <li key={o.uuid}>
                   <Link href={`/dashboard/shop/orders/${o.uuid}`} className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-secondary-50">
                     <div className="min-w-0">
-                      <p className="font-mono text-sm font-medium text-secondary-900">{o.order_number}</p>
+                      <p className="flex items-center gap-2 font-mono text-sm font-medium text-secondary-900">{o.order_number}<VipBadge vip={vipOf(o.email)} /></p>
                       <p className="truncate text-xs text-secondary-500">{o.customer?.company || o.customer?.name || o.email} · {formatDateTime(o.created_at)}</p>
                     </div>
                     <div className="shrink-0 text-right">
@@ -235,7 +242,7 @@ function OverviewContent() {
                 <li key={q.uuid}>
                   <Link href={`/dashboard/shop/quotes/${q.uuid}`} className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-secondary-50">
                     <div className="min-w-0">
-                      <p className="font-mono text-sm font-medium text-secondary-900">{q.quote_number}</p>
+                      <p className="flex items-center gap-2 font-mono text-sm font-medium text-secondary-900">{q.quote_number}<VipBadge vip={vipOf(q.customer?.email)} /></p>
                       <p className="truncate text-xs text-secondary-500">{q.customer?.company || q.customer?.name || q.customer?.email} · {formatDateTime(q.created_at)}</p>
                     </div>
                     <div className="shrink-0 text-right">

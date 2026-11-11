@@ -951,3 +951,40 @@ export interface ShopLegalListParams {
   limit?: number;
   offset?: number;
 }
+
+// ---------------- VIP (Trade) membership ----------------
+export type ShopMembershipTier = 'founding' | 'standard';
+export type ShopMembershipStatus = 'active' | 'past_due' | 'canceled' | 'expired';
+
+/** A row of GET /shop/admin/membership/members (name/company/phone come from the customer's CRM lead). */
+export interface ShopMember {
+  uuid: string;
+  email: string;
+  tier: ShopMembershipTier;
+  billing_interval: 'month' | 'year';
+  status: ShopMembershipStatus;
+  net_minor: number;
+  vat_minor: number;
+  joined_at: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  fees_paid_net_minor: number;
+  fees_credited_net_minor: number;
+  terms_version: string;
+  lead_uuid: string | null;
+  name: string | null;
+  company: string | null;
+  phone: string | null;
+}
+
+/** VIP status of one email (POST /shop/admin/membership/lookup): only memberships in force. */
+export interface ShopVipStatus {
+  email: string;
+  uuid: string;
+  tier: ShopMembershipTier;
+  billing_interval: 'month' | 'year';
+  status: 'active' | 'past_due';
+  joined_at: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}

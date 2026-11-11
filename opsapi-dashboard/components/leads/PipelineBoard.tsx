@@ -15,6 +15,8 @@ import {
   leadError, leadsService, type Board, type BoardCard, type LeadStage,
 } from '@/services/leads.service';
 import { Avatar, dueText, fullName, money, ScoreBadge, STAGE_STYLE, STEP_LABEL } from './ui';
+import { VipBadge } from '@/components/shop/VipBadge';
+import { useVipStatus } from '@/hooks/useVipStatus';
 import { StageModal } from './StageModal';
 
 export function PipelineBoard({
@@ -28,6 +30,7 @@ export function PipelineBoard({
   const [over, setOver] = useState<LeadStage | null>(null);
   const [parked, setParked] = useState<{ card: BoardCard; target: LeadStage } | null>(null);
   const [moving, setMoving] = useState<string | null>(null);
+  const vips = useVipStatus(board.stages.flatMap((c) => c.leads.map((l) => l.email)));
 
   const move = async (card: BoardCard, target: LeadStage) => {
     if (card.status === target) return;
@@ -108,6 +111,7 @@ export function PipelineBoard({
                             <Link href={`/dashboard/leads/${card.uuid}`} className="truncate text-sm font-semibold text-secondary-900 hover:text-primary-600 focus:outline-none focus-visible:underline">
                               {fullName(card)}
                             </Link>
+                            <VipBadge vip={vips[(card.email ?? '').toLowerCase()]} />
                             {card.ai_status === 'pending' || card.ai_status === 'running'
                               ? <Sparkles className="h-4 w-4 shrink-0 animate-pulse text-primary-400" aria-label="AI is analysing" />
                               : <ScoreBadge score={card.ai_score} />}

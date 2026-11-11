@@ -17,6 +17,7 @@ import { fetchPropertySummary, propertyStat, DealsAtRisk, type PropertySummary }
 import HotLeads from '@/components/property-deals/HotLeads';
 import DueSoon from '@/components/property-deals/DueSoon';
 import MyTasksToday from '@/components/dashboard/home/MyTasksToday';
+import { VipMembersCard } from '@/components/shop/VipMembersCard';
 import type { DashboardStats, HealthStatus as HealthStatusType, NamespaceModule } from '@/types';
 
 // Static icons - defined outside component to prevent recreation
@@ -175,6 +176,9 @@ export default function DashboardPage() {
           </RevealItem>
         ))}
       </Stagger>
+
+      {/* VIP (Trade) members: shown to shop staff once there is at least one, new joiners in gold. */}
+      <VipMembersCard limit={4} hideWhenEmpty />
 
       {/* Panels, in the layout's order. Chart + health share a row when both are shown. */}
       {(widgets.includes('orders_chart') || widgets.includes('health')) && (
