@@ -3670,10 +3670,10 @@ return function(app)
                                 field         = lock_field,
                                 locked_at     = tostring(current_lock),
                                 support_url   = "/support",
-                                support_email = "support@diytaxreturn.co.uk",
+                                support_email = IdentityLock.SUPPORT_EMAIL,
                                 error         = string.format(
-                                    "Your %s is on file and cannot be changed. To correct it, please chat with support (/support) or email support@diytaxreturn.co.uk.",
-                                    pretty_field
+                                    "Your %s is on file and cannot be changed. To correct it, %s",
+                                    pretty_field, IdentityLock.contact()
                                 ),
                             })
                             lock_action = "reject"

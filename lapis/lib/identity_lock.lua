@@ -59,7 +59,19 @@ local IdentityLock = {}
 -- render; per-tenant overrides can be added later via the settings row
 -- (announcement_banner_message is the closest existing knob).
 local DEFAULT_SUPPORT_URL   = "/support"
-local DEFAULT_SUPPORT_EMAIL = "support@diytaxreturn.co.uk"
+-- SUPPORT_EMAIL = the address people are told to write to. Unset: DIY Tax
+-- Return's (the app these checks were built for). Empty: no address, only the
+-- support chat (any other app on OpsAPI, e.g. Workstation).
+local SUPPORT_EMAIL_ENV = os.getenv("SUPPORT_EMAIL")
+local DEFAULT_SUPPORT_EMAIL = SUPPORT_EMAIL_ENV == nil and "support@diytaxreturn.co.uk"
+    or (SUPPORT_EMAIL_ENV ~= "" and SUPPORT_EMAIL_ENV or nil)
+IdentityLock.SUPPORT_EMAIL = DEFAULT_SUPPORT_EMAIL
+
+--- "please chat with support (/support) or email <address>." (no address when none is set)
+function IdentityLock.contact()
+    return "please chat with support (" .. DEFAULT_SUPPORT_URL .. ")"
+        .. (DEFAULT_SUPPORT_EMAIL and (" or email " .. DEFAULT_SUPPORT_EMAIL) or "") .. "."
+end
 
 -- ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -128,10 +140,8 @@ local function buildLockContext(field, locked_at)
         locked_at     = locked_at,
         support_url   = DEFAULT_SUPPORT_URL,
         support_email = DEFAULT_SUPPORT_EMAIL,
-        user_message  = string.format(
-            "Your %s is on file and cannot be changed. To correct it, please chat with support (%s) or email %s.",
-            pretty_field, DEFAULT_SUPPORT_URL, DEFAULT_SUPPORT_EMAIL
-        ),
+        user_message  = string.format("Your %s is on file and cannot be changed. To correct it, %s",
+            pretty_field, IdentityLock.contact()),
     }
 end
 
@@ -341,7 +351,8 @@ function IdentityLock.assertNinoUniqueInNamespace(current_user_id, namespace_id,
                     context = {
                         support_url   = DEFAULT_SUPPORT_URL,
                         support_email = DEFAULT_SUPPORT_EMAIL,
-                        user_message  = "This National Insurance Number is already registered on another account. If this is your NINO, please chat with support (" .. DEFAULT_SUPPORT_URL .. ") or email " .. DEFAULT_SUPPORT_EMAIL .. ".",
+                        user_message  = "This National Insurance Number is already registered on another "
+                            .. "account. If this is your NINO, " .. IdentityLock.contact(),
                     },
                 })
             end

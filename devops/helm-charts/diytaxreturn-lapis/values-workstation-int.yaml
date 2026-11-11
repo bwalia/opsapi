@@ -30,6 +30,8 @@ extraEnv:
   # Product name in sign-in and password-reset emails (a workspace can set its own
   # in Settings → Branding → "Name in emails").
   APP_NAME: "Workstation OpsAPI"
+  # No DIY Tax Return support address in tax ID-lock messages (only the support chat).
+  SUPPORT_EMAIL: ""
   # Voice for the assistant (lapis/routes/voice.lua): the self-hosted Speaches server
   # (faster-whisper + Kokoro) next to Ollama on the LAN. Audio never leaves our machines.
   # Server-to-server plain http on 8014; https://192.168.1.177:8015 (Caddy, self-signed) is for browsers
