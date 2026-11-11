@@ -7,6 +7,7 @@
  * Contract: workstation-website/shop/BUILD.prompt.md §5.
  */
 import apiClient, { buildQueryString } from '@/lib/api-client';
+import type { PurchaseOrder, PurchaseOrderParty } from '@/services/purchase-orders.service';
 import type {
   ShopCategory,
   ShopCategoryInput,
@@ -57,6 +58,19 @@ import type {
 } from '@/types/shop';
 
 const BASE = '/api/v2/shop/admin';
+
+export interface ShopOrderPurchaseOrderInput {
+  supplier_name: string;
+  supplier_email?: string;
+  supplier_phone?: string;
+  supplier_address?: string;
+  expected_date?: string;
+  delivery_method?: string;
+  notes?: string;
+  /** Supplier cost per order line, pounds ex VAT, by line uuid. */
+  costs?: Record<string, string>;
+  include_custom?: boolean;
+}
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 interface Envelope<T> {
@@ -141,6 +155,8 @@ export interface ShopPageParams {
 /** Shop-wide settings. checkout_enabled false = no online payment for orders, enquiries (quotes) only. */
 export interface ShopSettings {
   checkout_enabled: boolean;
+  /** "Bill to" on supplier purchase orders raised from paid shop orders. */
+  po_bill_to?: PurchaseOrderParty | null;
   updated_at: string | null;
 }
 
@@ -151,7 +167,7 @@ export const shopService = {
     return unwrap<ShopSettings>(res);
   },
 
-  async updateSettings(body: Pick<ShopSettings, 'checkout_enabled'>): Promise<ShopSettings> {
+  async updateSettings(body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to'>>): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);
   },
@@ -269,6 +285,12 @@ export const shopService = {
   async getOrder(uuid: string): Promise<ShopOrder> {
     const res = await apiClient.get(`${BASE}/orders/${uuid}`);
     return unwrap<ShopOrder>(res);
+  },
+
+  /** Draft a supplier PO for a paid order (Bill to us, deliver directly to the customer). */
+  async createOrderPurchaseOrder(uuid: string, body: ShopOrderPurchaseOrderInput): Promise<PurchaseOrder> {
+    const res = await apiClient.post(`${BASE}/orders/${uuid}/purchase-order`, body, JSON_BODY);
+    return unwrap<PurchaseOrder>(res);
   },
 
   async updateOrder(uuid: string, body: ShopOrderUpdate): Promise<ShopOrder> {

@@ -662,6 +662,7 @@ function ShopOrderQueries.adminGet(ns_id, uuid)
           LEFT JOIN shop_options op ON op.id = r.option_id
          WHERE r.order_id = ? ORDER BY r.id
     ]], o.id))
+    s.purchase_orders = ShopOrderQueries.purchaseOrdersFor(ns_id, o.uuid)
     return s
 end
 
@@ -786,6 +787,132 @@ function ShopOrderQueries.adminUpdate(ns_id, uuid, body)
     end)
     if err then return nil, err end
     return ShopOrderQueries.adminGet(ns_id, uuid)
+end
+
+-- ---------------------------------------------------------------------------
+-- supplier purchase order from a paid order
+-- ---------------------------------------------------------------------------
+
+local PO_STATUSES = { paid = true, processing = true, shipped = true, delivered = true }
+
+--- POs raised from this order (purchase_orders.metadata.shop_order_uuid). Empty when the invoicing
+-- feature (purchase orders) isn't deployed.
+function ShopOrderQueries.purchaseOrdersFor(ns_id, order_uuid)
+    local ok, rows = pcall(db.query, [[
+        SELECT uuid, po_number, status, supplier_name, total, created_at FROM purchase_orders
+         WHERE namespace_id = ? AND metadata->>'shop_order_uuid' = ? AND deleted_at IS NULL
+         ORDER BY created_at DESC
+    ]], ns_id, order_uuid)
+    return U.arr(ok and rows or {})
+end
+
+local function join_nonempty(parts, sep)
+    local out = {}
+    for _, p in ipairs(parts) do
+        if type(p) == "string" and p:match("%S") then out[#out + 1] = p end
+    end
+    return table.concat(out, sep)
+end
+
+--- "Deliver directly to": the delivery address agreed on the order, else the address the customer gave
+-- Stripe, with the customer's company, email and VAT number.
+local function ship_to_of(o)
+    local customer = U.dec(o.customer, {})
+    local agreed = U.nz(o.delivery_address) and U.dec(o.delivery_address, nil) or nil
+    if type(agreed) == "table" and next(agreed) then
+        local out = {}
+        for k, v in pairs(agreed) do out[k] = v end
+        out.email = out.email or customer.email or o.email
+        out.vat_number = out.vat_number or customer.vat_number
+        out.company = out.company or customer.company
+        return out
+    end
+    local ship = U.nz(o.shipping_address) and U.dec(o.shipping_address, {}) or {}
+    local a = type(ship.address) == "table" and ship.address or ship
+    return {
+        name = ship.name or customer.name, company = customer.company,
+        line1 = a.line1, line2 = a.line2, city = a.city, county = a.state,
+        postcode = a.postal_code or a.postcode, country = a.country,
+        email = customer.email or o.email, phone = customer.phone, vat_number = customer.vat_number,
+    }
+end
+
+local function address_text(a)
+    if type(a) ~= "table" then return nil end
+    local lines = {
+        join_nonempty({ a.name, a.company }, ", "), a.line1, a.line2,
+        join_nonempty({ a.city, a.county, a.postcode }, " "), a.country,
+        a.phone, a.email, a.vat_number and ("VAT " .. a.vat_number) or nil,
+    }
+    local s = join_nonempty(lines, "\n")
+    return s ~= "" and s or nil
+end
+ShopOrderQueries.addressText = address_text
+
+local function po_line_description(l)
+    local parts = { tostring(l.product_name or l.label or "Item") }
+    if U.nz(l.sku) then parts[#parts + 1] = "SKU " .. l.sku end
+    for _, b in ipairs(type(l.breakdown) == "table" and l.breakdown or {}) do
+        parts[#parts + 1] = (tonumber(b.qty) and tonumber(b.qty) > 1 and (b.qty .. "× ") or "") .. tostring(b.name or b.option or "")
+    end
+    return table.concat(parts, "\n")
+end
+
+--- POST /orders/:uuid/purchase-order — draft a supplier PO for a paid order: Bill to (shop settings),
+-- Deliver directly to (the order's delivery address), delivery method, the order's product lines
+-- (free-text lines only with include_custom) at the supplier costs given (pounds ex VAT, by line uuid;
+-- 0 when not given, to fill in on the PO).
+-- body: { supplier_name, supplier_email?, supplier_phone?, supplier_address?, expected_date?,
+--         delivery_method?, notes?, costs? = { [line_uuid] = "123.45" }, include_custom? }
+function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
+    local o = ShopOrderQueries.getByUuid(ns_id, uuid)
+    if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+    if not PO_STATUSES[o.status] then
+        return nil, U.err(409, "ORDER_NOT_PAID", "Raise the supplier PO once the order is paid (status " .. o.status .. ")")
+    end
+    local okPO, POQ = pcall(require, "queries.PurchaseOrderQueries")
+    if not okPO then return nil, U.err(501, "PURCHASE_ORDERS_UNAVAILABLE", "Purchase orders are not enabled here") end
+    if not U.nz(body.supplier_name) then return nil, U.err(400, "VALIDATION_ERROR", "supplier_name is required") end
+    local costs = type(body.costs) == "table" and body.costs or {}
+    local items = {}
+    for _, l in ipairs(U.dec(o.lines, {})) do
+        if not l.custom or body.include_custom == true then
+            local cost = costs[l.uuid]
+            items[#items + 1] = {
+                description = po_line_description(l),
+                quantity = tonumber(l.qty) or 1,
+                unit_price = (cost ~= nil and cost ~= U.null and tostring(cost) ~= "") and tostring(cost) or "0",
+                tax_rate = tostring(math.floor((tonumber(l.vat_rate) or 0.2) * 10000 + 0.5) / 100),
+            }
+        end
+    end
+    if #items == 0 then return nil, U.err(400, "VALIDATION_ERROR", "This order has no product lines to order") end
+    local bill_to = require("queries.ShopSettingsQueries").billTo(ns_id)
+    local ship_to = ship_to_of(o)
+    local method = U.nz(body.delivery_method) or U.nz(o.delivery_method)
+    local po, msg, code = POQ.create(ns_id, user_uuid, {
+        supplier_name = tostring(body.supplier_name):sub(1, 255),
+        supplier_email = U.nz(body.supplier_email), supplier_phone = U.nz(body.supplier_phone),
+        supplier_address = U.nz(body.supplier_address),
+        reference = o.order_number,
+        expected_date = U.nz(body.expected_date),
+        delivery_address = address_text(ship_to),
+        currency = o.currency or "GBP",
+        notes = join_nonempty({ method and ("Delivery method: " .. method) or nil, U.nz(body.notes) }, "\n\n"),
+        items = items,
+        metadata = {
+            shop_order_uuid = o.uuid, shop_order_number = o.order_number,
+            bill_to = bill_to or U.null, ship_to = ship_to, delivery_method = method or U.null,
+            drop_ship = true,
+        },
+    })
+    if not po then
+        return nil, U.err(code == "not_found" and 404 or 400, "PURCHASE_ORDER_FAILED", tostring(msg))
+    end
+    pcall(db.query, [[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
+                      WHERE id = ?]], "Supplier PO " .. tostring(po.po_number or po.uuid) .. " raised ("
+        .. tostring(body.supplier_name) .. ")", o.id)
+    return po
 end
 
 return ShopOrderQueries

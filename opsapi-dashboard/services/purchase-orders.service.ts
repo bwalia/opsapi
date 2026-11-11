@@ -98,7 +98,45 @@ export interface PurchaseOrderMetadata {
   /** Set when the order was closed short. */
   closed?: PurchaseOrderClosure;
   cancelled_reason?: string;
+  /** Raised from a paid shop order: drop-shipped to the customer. */
+  shop_order_uuid?: string;
+  shop_order_number?: string;
+  drop_ship?: boolean;
+  delivery_method?: string | null;
+  bill_to?: PurchaseOrderParty | null;
+  ship_to?: PurchaseOrderParty | null;
   [key: string]: unknown;
+}
+
+/** An address block on a PO (Bill to / Deliver directly to). */
+export interface PurchaseOrderParty {
+  name?: string;
+  company?: string;
+  line1?: string;
+  line2?: string;
+  city?: string;
+  county?: string;
+  postcode?: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+  vat_number?: string;
+}
+
+/** The lines of an address block, in print order. */
+export function partyLines(p?: PurchaseOrderParty | null): string[] {
+  if (!p) return [];
+  return [
+    [p.company, p.name && p.name !== p.company ? p.name : ''].filter(Boolean).join(', ') || p.name || '',
+    p.line1,
+    p.line2,
+    [p.city, p.county].filter(Boolean).join(', '),
+    p.postcode,
+    p.country,
+    p.phone,
+    p.email,
+    p.vat_number ? `VAT ${p.vat_number}` : '',
+  ].filter((x): x is string => !!x && String(x).trim() !== '');
 }
 
 export interface PurchaseOrderProjectLink {

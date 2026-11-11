@@ -3,9 +3,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, ExternalLink, Printer, Save, ShoppingCart, Truck } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Printer, Save, ShoppingCart, Truck, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -61,6 +62,7 @@ function OrderDetail() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ShopOrderStatus | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
+  const [poOpen, setPoOpen] = useState(false);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -123,6 +125,7 @@ function OrderDetail() {
   return (
     <div className="space-y-6">
       <PrintStyles />
+      {poOpen && <SupplierPoModal order={order} open={poOpen} onClose={() => setPoOpen(false)} />}
       <PageHeader
         title={`Order ${order.order_number}`}
         description={`Placed ${formatDateTime(order.created_at)}`}
@@ -135,6 +138,11 @@ function OrderDetail() {
             <Button variant="ghost" leftIcon={<Printer className="h-4 w-4" />} onClick={() => window.print()}>
               Print
             </Button>
+            {editable && ['paid', 'processing', 'shipped', 'delivered'].includes(order.status) && (
+              <Button leftIcon={<ClipboardList className="h-4 w-4" />} onClick={() => setPoOpen(true)}>
+                Create supplier PO
+              </Button>
+            )}
           </div>
         }
       />
@@ -204,6 +212,24 @@ function OrderDetail() {
         </div>
 
         <div className="space-y-6">
+          {(order.purchase_orders?.length ?? 0) > 0 && (
+            <Card>
+              <SectionTitle>Supplier purchase orders</SectionTitle>
+              <ul className="divide-y divide-secondary-100">
+                {order.purchase_orders!.map((po) => (
+                  <li key={po.uuid}>
+                    <Link href={`/dashboard/purchase-orders/${po.uuid}`} className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm hover:bg-secondary-50">
+                      <span className="min-w-0">
+                        <span className="font-mono font-medium text-secondary-900">{po.po_number}</span>
+                        <span className="block truncate text-xs text-secondary-500">{po.supplier_name}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-secondary-600">{humanize(po.status)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
           <Card>
             <SectionTitle>Customer</SectionTitle>
             <CustomerBlock customer={order.customer} email={order.email} />
