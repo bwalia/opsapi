@@ -9,6 +9,7 @@ export const meta = {
     tags: ['architecture', 'multi-tenancy', 'cost', 'platform'],
     audience: 'technical managers',
     readMinutes: 6,
+    image: '/blog/one-api-many-modules.png',
 };
 
 function CompareDiagram() {

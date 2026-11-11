@@ -11,7 +11,15 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }) {
     const { slug } = await params;
     const t = getPost(slug);
-    return t ? { title: t.title, description: t.summary } : {};
+    if (!t) return {};
+    // A post with an image gets a share card (LinkedIn, X, Slack); one without keeps the site default.
+    const images = t.image ? [{ url: t.image, width: 1200, height: 627, alt: t.title }] : undefined;
+    return {
+        title: t.title,
+        description: t.summary,
+        openGraph: { title: t.title, description: t.summary, url: `/blog/${t.slug}/`, type: 'article', images },
+        twitter: { card: images ? 'summary_large_image' : 'summary', title: t.title, description: t.summary, images },
+    };
 }
 
 export default async function BlogPostPage({ params }) {
