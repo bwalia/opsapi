@@ -45,13 +45,15 @@ interface Props {
   onStep?: (step: number, total: number) => void;
   /** Rendered inside the form, before the buttons (e.g. the honeypot). */
   children?: React.ReactNode;
+  /** Rendered on the last step only, before Submit (e.g. the "I'm human" check). */
+  finale?: React.ReactNode;
   accent?: string;
   upload?: UploadFn;
 }
 
 export default function FormRunner(props: Props) {
   const { fields, values, onChange, errors, setErrors, onSubmit, submitting, submitLabel = 'Submit', formError,
-    idPrefix = 'f', onStep, children, accent, upload } = props;
+    idPrefix = 'f', onStep, children, finale, accent, upload } = props;
   const [step, setStep] = useState(0);
   const ref = useRef<HTMLFormElement>(null);
 
@@ -118,6 +120,7 @@ export default function FormRunner(props: Props) {
       <FormRenderer fields={current.fields} values={values} errors={errors} disabled={submitting} idPrefix={idPrefix}
         shown={shown} onChange={onChange} upload={upload} />
       {children}
+      {last && finale}
       {formError && <p id={`${idPrefix}-form-error`} role="alert" className="mt-6 text-sm font-medium text-error-600">{formError}</p>}
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {at > 0 && (

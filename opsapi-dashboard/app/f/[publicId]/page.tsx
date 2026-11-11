@@ -29,6 +29,12 @@ type State =
 // Types a link may prefill (?key=value).
 const PREFILLABLE = ['short_text', 'long_text', 'email', 'phone', 'url', 'number', 'date', 'time', 'single_select', 'radio'];
 
+const draftKey = (publicId: string) => `opsapi-form-draft:${publicId}`;
+
+function clearDraft(publicId: string) {
+  try { sessionStorage.removeItem(draftKey(publicId)); } catch { /* storage off */ }
+}
+
 function prefill(fields: FormField[], query: URLSearchParams): Answers {
   const out: Answers = {};
   for (const f of fields) {
@@ -55,6 +61,8 @@ export default function PublicFormPage() {
   const [honeypot, setHoneypot] = useState('');
   const [embed, setEmbed] = useState(false);
   const [captcha, setCaptcha] = useState('');
+  // A new widget (and token) after a failed send: the server may have used the token up.
+  const [captchaRound, setCaptchaRound] = useState(0);
   const loadedAt = useRef(Date.now());
   const started = useRef(false);
   const lastStep = useRef(0);
@@ -71,7 +79,10 @@ export default function PublicFormPage() {
     formsPublic
       .form(publicId)
       .then((form) => {
-        setValues(prefill(form.fields, query));
+        // Answers typed before a reload of this tab (sessionStorage: gone when the tab closes).
+        let saved: Answers = {};
+        try { saved = JSON.parse(sessionStorage.getItem(draftKey(publicId)) || '{}') || {}; } catch { /* none */ }
+        setValues({ ...prefill(form.fields, query), ...saved });
         loadedAt.current = Date.now();
         setState({ kind: 'ready', form });
         document.title = form.title;
@@ -85,6 +96,11 @@ export default function PublicFormPage() {
         });
       });
   }, [publicId]);
+
+  useEffect(() => {
+    if (state.kind !== 'ready' || !started.current) return;
+    try { sessionStorage.setItem(draftKey(publicId), JSON.stringify(values)); } catch { /* storage off or full */ }
+  }, [values, state.kind, publicId]);
 
   // Embedded: tell the parent page how tall the form is.
   useEffect(() => {
@@ -148,17 +164,23 @@ export default function PublicFormPage() {
         },
       }, idempotencyKey);
       if (res.redirect_url && /^https:\/\//.test(res.redirect_url)) {
+        clearDraft(publicId);
         (embed ? window.top || window : window).location.assign(res.redirect_url);
         return;
       }
+      clearDraft(publicId);
       setState({ kind: 'done', message: res.message });
     } catch (err) {
       const e2 = err as PublicFormError;
+      if (!e2.errors && state.form.captcha) {
+        // Answers are checked before the token, so only answer errors leave it unused.
+        setCaptcha('');
+        setCaptchaRound((n) => n + 1);
+      }
       if (e2.errors) {
         setErrors(e2.errors);
         setFormError(e2.message);
       } else if (e2.code === 'captcha') {
-        setCaptcha('');
         setFormError(e2.message);
       } else if (e2.status === 409 || e2.status === 410) {
         setState({ kind: 'unavailable', title: state.form.title, message: e2.message });
@@ -218,7 +240,9 @@ export default function PublicFormPage() {
               <FormRunner fields={state.form.fields}
                 upload={(key, file) => formsPublic.upload(publicId, key, file, state.form.render_token)} values={values} errors={errors} setErrors={setErrors}
                 onChange={change} onSubmit={submit} submitting={submitting} formError={formError} onStep={onStep}
-                accent={theme?.primary_color} submitLabel={theme?.submit_label || 'Submit'}>
+                accent={theme?.primary_color} submitLabel={theme?.submit_label || 'Submit'}
+                finale={state.form.captcha?.site_key
+                  && <Turnstile key={captchaRound} siteKey={state.form.captcha.site_key} onToken={setCaptcha} />}>
                 {/* Honeypot: people never see or fill it; many bots do. */}
                 <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
                   <label>
@@ -227,7 +251,6 @@ export default function PublicFormPage() {
                       onChange={(e) => setHoneypot(e.target.value)} />
                   </label>
                 </div>
-                {state.form.captcha?.site_key && <Turnstile siteKey={state.form.captcha.site_key} onToken={setCaptcha} />}
               </FormRunner>
             </div>
           </div>

@@ -22,7 +22,7 @@ import {
 import { TARGET_LABEL } from './field-types';
 
 /** A human-readable answer (mirrors Fields.show on the server). */
-export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale'> | Column | undefined, v: unknown): string {
+export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale' | 'columns'> | Column | undefined, v: unknown): string {
   if (v === undefined || v === null || v === '') return '';
   const label = (val: unknown) => field?.options?.find((o) => o.value === val)?.label ?? String(val);
   switch (field?.type) {
@@ -31,7 +31,7 @@ export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale'> 
       return `${n.first || ''} ${n.last || ''}`.trim();
     }
     case 'address':
-      return ['line1', 'line2', 'city', 'postcode', 'country']
+      return ['line1', 'line2', 'city', 'region', 'postcode', 'country']
         .map((k) => (v as Record<string, string>)[k]).filter(Boolean).join(', ');
     case 'multi_select':
       return (Array.isArray(v) ? v : [v]).map(label).join(', ');
@@ -46,9 +46,34 @@ export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale'> 
       return `${v}/${field.scale || 5}`;
     case 'file_upload':
       return (Array.isArray(v) ? v : []).map((f) => (f as { name?: string })?.name || 'file').join(', ');
+    case 'table':
+      return (Array.isArray(v) ? (v as Record<string, unknown>[]) : []).map((row) => (field.columns || [])
+        .filter((c) => row?.[c.key] !== undefined && row[c.key] !== '').map((c) => `${c.label}: ${row[c.key]}`).join(', '))
+        .join('; ');
     default:
       return typeof v === 'object' ? JSON.stringify(v) : String(v);
   }
+}
+
+/** A table answer as a table. */
+function AnswerTable({ field, rows }: { field: FormField; rows: Record<string, unknown>[] }) {
+  const cols = field.columns || [];
+  return (
+    <div className="overflow-x-auto rounded-lg border border-secondary-200">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-secondary-50 text-xs text-secondary-600">
+          <tr>{cols.map((c) => <th key={c.key} scope="col" className={`px-3 py-2 font-medium ${c.number ? 'text-right' : ''}`}>{c.label}</th>)}</tr>
+        </thead>
+        <tbody className="divide-y divide-secondary-100">
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {cols.map((c) => <td key={c.key} className={`whitespace-pre-wrap px-3 py-2 ${c.number ? 'text-right tabular-nums' : ''}`}>{String(r?.[c.key] ?? '')}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 const STATUS_BADGE: Record<string, { label: string; variant: 'success' | 'warning' | 'error' }> = {
@@ -302,12 +327,14 @@ function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdat
               </p>
             ))}
             <dl className="divide-y divide-secondary-100">
-              {(s.fields || []).filter((f) => f.key && !['heading', 'paragraph'].includes(f.type)).map((f) => (
+              {(s.fields || []).filter((f) => f.key && !['heading', 'paragraph', 'page_break'].includes(f.type)).map((f) => (
                 <div key={f.key} className="grid gap-1 py-3 sm:grid-cols-3 sm:gap-4">
                   <dt className="text-sm text-secondary-500">{f.label}</dt>
                   <dd className="whitespace-pre-wrap break-words text-sm text-secondary-900 sm:col-span-2">
                     {f.type === 'file_upload' && Array.isArray(s.answers[f.key || '']) ? (
                       <Files formUuid={formUuid} sid={s.uuid} files={s.answers[f.key || ''] as { id: string; name: string; size: number }[]} />
+                    ) : f.type === 'table' && Array.isArray(s.answers[f.key || '']) ? (
+                      <AnswerTable field={f} rows={s.answers[f.key || ''] as Record<string, unknown>[]} />
                     ) : (showAnswer(f, s.answers[f.key || '']) || <span className="text-secondary-400">—</span>)}
                   </dd>
                 </div>

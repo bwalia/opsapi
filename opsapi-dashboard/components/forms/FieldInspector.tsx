@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { GitBranch, Lock, Plus, Trash2 } from 'lucide-react';
 import { Input, Select, Switch, Textarea } from '@/components/ui';
-import type { FieldLogic, FieldOption, FormField, LogicOp, LogicRule, MapsTo } from '@/services/forms.service';
+import type { FieldLogic, FieldOption, FormField, LogicOp, LogicRule, MapsTo, TableColumn } from '@/services/forms.service';
 import { FIELD_TYPE_BY_NAME, MAPS_TO_LABEL } from './field-types';
 import { opsFor } from './logic';
 
@@ -39,6 +39,20 @@ function parseOptions(text: string, previous: FieldOption[]): FieldOption[] {
     });
 }
 
+/** Columns from "one per line" text, keeping the key (and number flag) of every label that stays. */
+function parseColumns(text: string, previous: TableColumn[]): TableColumn[] {
+  const byLabel = new Map(previous.map((c) => [c.label, c]));
+  const taken = new Set<string>();
+  return text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 8).map((label, i) => {
+    const kept = byLabel.get(label);
+    if (kept && !taken.has(kept.key)) {
+      taken.add(kept.key);
+      return kept;
+    }
+    return { key: optionValue(label, taken, i).slice(0, 40).replace(/^([^a-z])/, 'c_$1'), label };
+  });
+}
+
 function num(v: string): number | undefined {
   if (v.trim() === '') return undefined;
   const n = Number(v);
@@ -58,10 +72,12 @@ export default function FieldInspector({ field, lockedBecause, onChange, earlier
   const locked = !!field.system;
   const v = field.validation || {};
   const [optionsText, setOptionsText] = useState((field.options || []).map((o) => o.label).join('\n'));
+  const [columnsText, setColumnsText] = useState((field.columns || []).map((c) => c.label).join('\n'));
 
-  // Re-seed the options box when another field is selected.
+  // Re-seed the options and columns boxes when another field is selected.
   useEffect(() => {
     setOptionsText((field.options || []).map((o) => o.label).join('\n'));
+    setColumnsText((field.columns || []).map((c) => c.label).join('\n'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [field.key]);
 
@@ -166,6 +182,22 @@ export default function FieldInspector({ field, lockedBecause, onChange, earlier
               {[1, 2, 5, 10].map((n) => <option key={n} value={n}>{n} MB</option>)}
             </Select>
           </div>
+        </>
+      )}
+      {field.type === 'table' && (
+        <>
+          <Textarea label="Columns (one per line, up to 8)" rows={4} value={columnsText}
+            onChange={(e) => {
+              setColumnsText(e.target.value);
+              onChange({ columns: parseColumns(e.target.value, field.columns || []) });
+            }} />
+          {(field.columns || []).map((c) => (
+            <ToggleRow key={c.key} label={`“${c.label}” takes numbers only`} checked={!!c.number}
+              onChange={(b) => onChange({ columns: (field.columns || []).map((x) => (x.key === c.key ? { ...x, number: b || undefined } : x)) })} />
+          ))}
+          <Select label="Most rows" value={String(field.max_rows || 20)} onChange={(e) => onChange({ max_rows: Number(e.target.value) })}>
+            {[5, 10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+          </Select>
         </>
       )}
       {field.type === 'hidden' && (

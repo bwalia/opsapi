@@ -48,6 +48,18 @@ Workspace owners and admins get `forms` when the feature is installed.
 
 ## 2. Building a form
 
+**New form** starts from a blank form, a template, or a draft the AI writes (§9). The templates:
+
+| Template | Notes |
+|---|---|
+| Contact us, Get a quote, Customer sign-up, Event registration, Customer feedback, Job application, Appointment request | Everyday forms |
+| End-user questionnaire (export licence) | The licence application questionnaire for datacenter GPUs, servers and DGX: purchase order, end user and installation site, installer, operator, end use, product and site security, remote access, the items (a table) and a typed signature with a declaration. Four steps. Confidential, with the "I'm human" check |
+| Business customer onboarding | Know your customer: company, directors and owners (a table), documents, declaration. Creates a customer. Confidential, with the "I'm human" check |
+| Supplier registration, Support request, Product return (RMA) | With the "I'm human" check |
+
+A template's "I'm human" check is turned on only when the workspace (or the platform) has Turnstile keys
+(§11); otherwise the form is created without it. Everything in a template can be changed before publishing.
+
 Open a form to get five tabs: **Build**, **Settings**, **Share**, **Responses** and **Insights**.
 
 The **Build** tab has three areas:
@@ -69,10 +81,11 @@ and offers to reload instead of overwriting their change.
 | Rating | 1–5 stars or 1–10 |
 | Name | First and last name |
 | Email, Phone, Website | Format-checked |
-| Address | Line 1, line 2, city, postcode, country |
+| Address | Line 1, line 2, city, state or region, postcode, country |
 | Consent | A statement the person ticks. A required consent must be ticked |
 | Hidden | Filled from the link's query string, e.g. `?utm_campaign=autumn` |
 | File upload | Up to 10 files of up to 10 MB each (you set both). Accepts images, documents, or either (see §11) |
+| Table | Rows under 1–8 columns you name, e.g. product model, description, quantity. A column can take numbers only. Up to 100 rows (you set it). Blank rows are dropped; a required table needs one filled row. Responses show it as a table; the CSV and emails as `Column: value` rows |
 | Heading, Text block | Display only; they don't take an answer |
 | Page break | Starts a new step (see below) |
 
@@ -98,7 +111,7 @@ conditions on the answers to questions **above** it, and choose whether all or a
 | is one of / is none of | choices |
 | contains | text and checkboxes |
 | more than / less than (after / before) | numbers, ratings and dates |
-| is answered / is empty | any answer |
+| is answered / is empty | any answer (the only conditions on a table) |
 
 A hidden question isn't required, and its answer is dropped. The server applies the same rules
 when the response arrives, so a visitor can't get around them. The name and email questions
@@ -288,6 +301,14 @@ posts its first six answers there, with a link to it.
 The emails are sent from the event outbox, so they are retried and survive a restart. Each one is
 sent at most once per response.
 
+**Confidential forms** (**Settings → Privacy → Confidential answers**) keep the answers in the dashboard,
+shown only to people with `forms.read`:
+- the new-response email and the chat post say a response arrived and link to it, without the answers;
+- the auto-reply's `{{answer_key}}` placeholders stay empty;
+- **Summarise with AI** shows the counts only: no answer is sent to the AI.
+
+Webhooks still carry the answers: they go only where a workspace admin points them (§8).
+
 - **New-response alert:** goes to the addresses in **Settings → Emails**, or to the person who
   created the form if none are set.
 - **Auto-reply:** goes to the email the person gave. Use `{{answer_key}}` to include an answer.
@@ -376,7 +397,7 @@ by the `forms` permissions above. Bodies are JSON.
 | POST | `/api/v2/forms/{uuid}/summary` | Counts plus the AI summary. `?numbers_only=true` skips the AI |
 | POST | `/api/v2/forms/generate` | `{prompt}` → a draft `{title, description, fields, targets, dropped}`. Nothing is saved |
 | GET | `/api/v2/forms/responses?entity_type=&entity_uuid=` | Responses linked to a record (`customer`, `lead`, `user` or `invitation`) |
-| GET / PUT | `/api/v2/forms/workspace-settings` | Turnstile keys. `PUT` needs `forms.manage`; the secret is write-only |
+| GET / PUT | `/api/v2/forms/workspace-settings` | Turnstile keys: `{turnstile: {site_key, has_secret, platform}}` (`platform` = the platform's keys cover this workspace). `PUT` needs `forms.manage`; the secret is write-only |
 | GET | `/api/v2/forms/domain` | The custom domain: `{available, target, domain?, status, records, last_error?}` |
 | PUT | `/api/v2/forms/domain` | `{domain}`: connect (replaces the current one) and check DNS. Needs `forms.manage` |
 | POST | `/api/v2/forms/domain/check` | Check DNS now (10 a minute). Needs `forms.manage` |
@@ -421,13 +442,19 @@ must be at least 2 seconds old when you submit (see §10).
 A response that fails them is answered as if it worked, then kept as spam for 30 days. No
 records are made and no emails sent.
 
-**"I'm not a robot" check** (Cloudflare Turnstile), for forms that attract spam anyway:
-1. A workspace owner or admin adds the site key and secret in **Forms → Spam protection**. The
-   secret is stored encrypted and is never shown again.
+**"I'm human" check** (Cloudflare Turnstile): the visitor ticks "Verify you are human" before
+sending.
+1. Keys: the platform's (`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`, §12) cover every workspace that
+   has none of its own. A workspace owner or admin can add the workspace's own site key and secret in
+   **Forms → Spam protection** (the secret is stored encrypted and never shown again). A Turnstile
+   widget only runs on the hostnames listed for it in Cloudflare, so a workspace on its own custom
+   domain needs its own keys listing that domain.
 2. Turn it on per form in **Settings → Spam protection**.
 
-The check fails closed: if Cloudflare can't be reached, the response is refused and the visitor
-can try again.
+The widget shows on the form's last step, next to **Submit**. The check fails closed: if Cloudflare
+can't be reached, the response is refused and the visitor can try again (with a fresh widget). For the
+same reason a workspace can't remove its keys while one of its forms has the check on and the platform
+has no keys.
 
 **Files:**
 - The type is decided by the file's extension, whatever the browser says: images (`jpg`, `jpeg`,
@@ -445,6 +472,9 @@ is ignored.
 
 **Privacy:**
 - The visitor's IP is stored only as a keyed hash.
+- **Confidential answers** (§7) keeps answers out of emails, chat posts and the AI.
+- While someone fills a form in, their answers are kept in that browser tab (`sessionStorage`), so a
+  reload doesn't lose them. They are gone when the tab closes or the form is sent.
 - **Settings → Keep responses** deletes responses after a number of days. Spam is always deleted
   after 30 days.
 
@@ -462,6 +492,7 @@ responses.
 | MinIO (`MINIO_*`) | File uploads. Without it, an upload is refused with "File uploads aren't available right now." |
 | `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` | AI drafts and summaries (same settings as the chat agent). If no model answers, a draft shows an error and a summary shows only the counts; everything else works |
 | `OPENSSL_SECRET_KEY`, `OPENSSL_SECRET_IV` | Encrypt the Turnstile secret |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | The platform's "I'm human" check (Cloudflare → Turnstile → Add widget, listing the dashboard's hostnames). Used by every workspace without its own keys. Unset = each workspace adds its own |
 | `TURNSTILE_VERIFY_URL` | Tests only: a stand-in for Cloudflare's check |
 | `FORMS_DOMAIN_TARGET` | The edge that custom domains point at (a host name for a CNAME, or an IP for an A record). Unset = custom domains are off |
 | `DOMAIN_VERIFY_RESOLVERS` | DNS servers the domain check asks (default `1.1.1.1,8.8.8.8`) |

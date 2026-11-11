@@ -3,6 +3,10 @@
 Talks to two API pods sharing one Postgres and Redis (A, B), plus a pod
 without the forms feature (C); reads Postgres through `docker exec psql` and
 the emails the SMTP sink wrote. Every check prints ok/FAIL; exit 1 on any FAIL.
+
+Addresses use formsink.net, not a reserved name such as .test: helper/mail.lua
+drops reserved domains before SMTP (they only bounce). Every email goes to the
+SMTP sink (workspace A's own server), so none leaves the run.
 """
 import base64, concurrent.futures as cf, email, email.policy, glob, hashlib, hmac, json, os, re, subprocess, sys, time, uuid
 import urllib.error, urllib.request
@@ -77,7 +81,7 @@ def call(method, path, user=None, ns=None, body=None, base=A, headers=None, raw=
 
 
 def user(name):
-    u = {"uuid": str(uuid.uuid4()), "email": name + "@forms.test", "name": name}
+    u = {"uuid": str(uuid.uuid4()), "email": name + "@forms.formsink.net", "name": name}
     sql("INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) "
         "VALUES ('%s', '%s', 'Test', '%s', '%s', 'x', true, now(), now())" % (u["uuid"], name, u["email"], name))
     return u
@@ -180,7 +184,7 @@ sql("""INSERT INTO namespace_user_roles (uuid, namespace_member_id, namespace_ro
        WHERE m.namespace_id = %s AND r.namespace_id = %s AND r.role_name = 'forms_editor'
          AND m.user_id = (SELECT id FROM users WHERE uuid = '%s')""" % (ID_A, ID_A, member_a["uuid"]))
 sql("""INSERT INTO namespace_mail_settings (namespace_id, enabled, host, port, security, from_email, updated_at)
-       VALUES (%s, true, 'smtp', 2525, 'none', 'forms@a.test', now())""" % ID_A)
+       VALUES (%s, true, 'smtp', 2525, 'none', 'forms@a.formsink.net', now())""" % ID_A)
 
 # ---------------------------------------------------------------------------
 print("== permissions and targets")
@@ -208,7 +212,7 @@ s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {
         {"type": "single_select", "label": "Budget", "options": ["Low", "High"]},
     ],
     "targets": ["customer", "lead", {"type": "user", "role": "member"}],
-    "settings": {"notify_emails": ["alerts@a.test"],
+    "settings": {"notify_emails": ["alerts@a.formsink.net"],
                  "auto_reply": {"enabled": True, "subject": "Thanks {{name}}", "body": "Hi {{name}},\nwe got it."}},
 })
 form = j.get("data") or {}
@@ -245,7 +249,7 @@ for m, p in (("PUT", ""), ("DELETE", ""), ("GET", "/submissions"), ("GET", "/exp
     s, _ = call(m, "/api/v2/forms/%s%s" % (FID, p), owner_b, NS_B, {} if m in ("PUT", "POST") else None)
     check("workspace B %s /forms/<A's form>%s -> 404" % (m, p), s == 404, s)
 
-ANS = {"name": {"first": "Ann", "last": "Lee"}, "email": "Ann@X.test", "company": "Acme",
+ANS = {"name": {"first": "Ann", "last": "Lee"}, "email": "Ann@X.formsink.net", "company": "Acme",
        "message": "Need a quote", "budget": "high"}
 print("== bots")
 s, j = submit(PUB, ANS, tok, ip())
@@ -254,7 +258,7 @@ time.sleep(2.2)
 s, j = submit(PUB, ANS, tok, ip(), hp="http://spam.test")
 check("... and so is a filled honeypot", s == 201, (s, j))
 check("both were stored as spam, creating no records",
-      count("form_submissions", "status = 'spam'") == 2 and count("customers", "lower(email) = 'ann@x.test'") == 0)
+      count("form_submissions", "status = 'spam'") == 2 and count("customers", "lower(email) = 'ann@x.formsink.net'") == 0)
 SPAM_HP = one("SELECT uuid FROM form_submissions WHERE meta->>'spam_reason' = 'honeypot'")
 
 print("== a response creates and links the records")
@@ -266,64 +270,64 @@ check("valid response -> 201 with the thank-you message", s == 201 and j.get("me
 row = sql("SELECT id, status, respondent_email FROM form_submissions WHERE status <> 'spam' ORDER BY id DESC LIMIT 1")[0]
 links = dict((r[0], (r[1], r[2])) for r in sql("SELECT target, outcome, entity_type FROM form_submission_links "
                                                  "WHERE submission_id = %s" % row[0]))
-check("response complete, email stored lower-case", row[1] == "complete" and row[2] == "ann@x.test", row)
+check("response complete, email stored lower-case", row[1] == "complete" and row[2] == "ann@x.formsink.net", row)
 check("links: customer created, lead created, user invited",
       links == {"customer": ("created", "customer"), "lead": ("created", "lead"), "user": ("invited", "invitation")},
       links)
 check("customer + lead are in workspace A, from the form",
-      count("customers", "namespace_id = %s AND lower(email) = 'ann@x.test'" % ID_A) == 1
-      and count("crm_leads", "namespace_id = %s AND lower(email) = 'ann@x.test' AND source = 'form' "
+      count("customers", "namespace_id = %s AND lower(email) = 'ann@x.formsink.net'" % ID_A) == 1
+      and count("crm_leads", "namespace_id = %s AND lower(email) = 'ann@x.formsink.net' AND source = 'form' "
                              "AND company_name = 'Acme' AND campaign = 'autumn'" % ID_A) == 1)
 check("one pending invitation for ann",
-      count("namespace_invitations", "namespace_id = %s AND email = 'ann@x.test' AND status = 'pending'" % ID_A) == 1)
+      count("namespace_invitations", "namespace_id = %s AND email = 'ann@x.formsink.net' AND status = 'pending'" % ID_A) == 1)
 
-s, j = submit(PUB, dict(ANS, email="ann@x.test", company="Changed Ltd"), tok, ip())
+s, j = submit(PUB, dict(ANS, email="ann@x.formsink.net", company="Changed Ltd"), tok, ip())
 row2 = one("SELECT id FROM form_submissions WHERE status <> 'spam' ORDER BY id DESC LIMIT 1")
 outcomes = sorted(r[0] for r in sql("SELECT outcome FROM form_submission_links WHERE submission_id = %s" % row2))
 check("same email again: all three matched", s == 201 and outcomes == ["matched"] * 3, outcomes)
 check("... and nothing duplicated or overwritten",
-      count("customers", "lower(email) = 'ann@x.test'") == 1 and count("crm_leads", "lower(email) = 'ann@x.test'") == 1
+      count("customers", "lower(email) = 'ann@x.formsink.net'") == 1 and count("crm_leads", "lower(email) = 'ann@x.formsink.net'") == 1
       and count("crm_leads", "company_name = 'Changed Ltd'") == 0
-      and count("namespace_invitations", "email = 'ann@x.test'") == 1)
+      and count("namespace_invitations", "email = 'ann@x.formsink.net'") == 1)
 
 key = str(uuid.uuid4())
 before = count("form_submissions", "status <> 'spam'")
-r1 = submit(PUB, dict(ANS, email="idem@x.test"), tok, ip(), key=key)
-r2 = submit(PUB, dict(ANS, email="idem@x.test"), tok, ip(), key=key, base=B)
+r1 = submit(PUB, dict(ANS, email="idem@x.formsink.net"), tok, ip(), key=key)
+r2 = submit(PUB, dict(ANS, email="idem@x.formsink.net"), tok, ip(), key=key, base=B)
 check("the same Idempotency-Key twice (two pods): both 201, one response",
       r1[0] == 201 and r2[0] == 201 and count("form_submissions", "status <> 'spam'") == before + 1, (r1, r2))
 
 print("== concurrency")
 def race(i):
-    return submit(PUB, dict(ANS, email="race@x.test", name={"first": "Race%d" % i, "last": ""}), tok, ip(),
+    return submit(PUB, dict(ANS, email="race@x.formsink.net", name={"first": "Race%d" % i, "last": ""}), tok, ip(),
                   base=A if i % 2 else B)[0]
 with cf.ThreadPoolExecutor(20) as ex:
     codes = list(ex.map(race, range(20)))
 check("20 concurrent responses with one email (two pods): all 201", codes == [201] * 20, codes)
 check("... exactly one customer, one lead and one invitation",
-      (count("customers", "lower(email) = 'race@x.test'"), count("crm_leads", "lower(email) = 'race@x.test'"),
-       count("namespace_invitations", "email = 'race@x.test'")) == (1, 1, 1),
-      (count("customers", "lower(email) = 'race@x.test'"), count("crm_leads", "lower(email) = 'race@x.test'"),
-       count("namespace_invitations", "email = 'race@x.test'")))
+      (count("customers", "lower(email) = 'race@x.formsink.net'"), count("crm_leads", "lower(email) = 'race@x.formsink.net'"),
+       count("namespace_invitations", "email = 'race@x.formsink.net'")) == (1, 1, 1),
+      (count("customers", "lower(email) = 'race@x.formsink.net'"), count("crm_leads", "lower(email) = 'race@x.formsink.net'"),
+       count("namespace_invitations", "email = 'race@x.formsink.net'")))
 check("... 20 responses, 1 created + 19 matched each",
       sql("SELECT outcome, COUNT(*) FROM form_submission_links l JOIN form_submissions s ON s.id = l.submission_id "
-          "WHERE s.respondent_email = 'race@x.test' AND l.target = 'customer' GROUP BY outcome ORDER BY outcome")
+          "WHERE s.respondent_email = 'race@x.formsink.net' AND l.target = 'customer' GROUP BY outcome ORDER BY outcome")
       == [["created", "1"], ["matched", "19"]])
 
 same_ip = ip()
-codes = [submit(PUB, dict(ANS, email="rl%d@x.test" % i), tok, same_ip)[0] for i in range(6)]
+codes = [submit(PUB, dict(ANS, email="rl%d@x.formsink.net" % i), tok, same_ip)[0] for i in range(6)]
 check("6 responses from one IP in a minute: the 6th is 429", codes == [201] * 5 + [429], codes)
 
 print("== emails (outbox)")
-alert = wait_mail(lambda m: "alerts@a.test" in m["rcpt"] and "Quote request" in m["text"])
+alert = wait_mail(lambda m: "alerts@a.formsink.net" in m["rcpt"] and "Quote request" in m["text"])
 check("new-response alert sent to the notify address", bool(alert))
-reply = wait_mail(lambda m: m["rcpt"] == "ann@x.test" and "Thanks Ann" in m["text"])
+reply = wait_mail(lambda m: m["rcpt"] == "ann@x.formsink.net" and "Thanks Ann" in m["text"])
 check("auto-reply sent to the respondent with {{name}} filled", bool(reply))
-inv = wait_mail(lambda m: m["rcpt"] == "ann@x.test" and "/invite/" in m["text"])
+inv = wait_mail(lambda m: m["rcpt"] == "ann@x.formsink.net" and "/invite/" in m["text"])
 check("invitation email sent with an /invite/<token> link", bool(inv))
 time.sleep(3)
 check("only one invitation email for ann (the repeat response matched)",
-      len([m for m in mails() if m["rcpt"] == "ann@x.test" and "/invite/" in m["text"]]) == 1)
+      len([m for m in mails() if m["rcpt"] == "ann@x.formsink.net" and "/invite/" in m["text"]]) == 1)
 check("no email for spam responses",
       not [m for m in mails() if "spam.test" in m["text"]])
 check("outbox deliveries to core.forms are done, none dead",
@@ -332,7 +336,7 @@ check("outbox deliveries to core.forms are done, none dead",
 check("responses are not copied into the audit trail", count("audit_events", "entity_type = 'form.submission'") == 0)
 
 print("== accepting the invitation")
-TOKEN = one("SELECT token FROM namespace_invitations WHERE email = 'ann@x.test'")
+TOKEN = one("SELECT token FROM namespace_invitations WHERE email = 'ann@x.formsink.net'")
 s, j = call("GET", "/api/v2/public/invitations/" + TOKEN)
 check("invitation page data: workspace, role, no account yet",
       s == 200 and j["data"]["workspace"]["name"] == "Forms A" and j["data"]["account_exists"] is False, (s, j))
@@ -345,7 +349,7 @@ check("accepting creates the account (201)", s == 201, (s, j))
 check("ann is now an active member of A with the member role",
       one("""SELECT r.role_name FROM users u JOIN namespace_members m ON m.user_id = u.id AND m.namespace_id = %s
              JOIN namespace_user_roles ur ON ur.namespace_member_id = m.id JOIN namespace_roles r ON r.id = ur.namespace_role_id
-             WHERE u.email = 'ann@x.test' AND m.status = 'active'""" % ID_A) == "member")
+             WHERE u.email = 'ann@x.formsink.net' AND m.status = 'active'""" % ID_A) == "member")
 s, _ = call("POST", "/api/v2/public/invitations/%s/accept" % TOKEN, body={"first_name": "Ann", "password": pw})
 check("the link can't be used twice (404)", s == 404, s)
 
@@ -358,17 +362,17 @@ page2 = j2.get("data") or []
 check("keyset pages: 2 + 2, no overlap", s == 200 and len(page1) == 2 and len(page2) == 2
       and not {x["uuid"] for x in page1} & {x["uuid"] for x in page2}, (s, j, j2))
 check("spam is hidden by default", all(x["status"] != "spam" for x in page1 + page2))
-ann_sub = one("SELECT uuid FROM form_submissions WHERE respondent_email = 'ann@x.test' ORDER BY id LIMIT 1")
+ann_sub = one("SELECT uuid FROM form_submissions WHERE respondent_email = 'ann@x.formsink.net' ORDER BY id LIMIT 1")
 s, j = call("GET", "/api/v2/forms/%s/submissions/%s" % (FID, ann_sub), owner_a, NS_A)
 recs = {l["target"]: l for l in (j.get("data") or {}).get("links", [])}
 check("a response shows its linked records", s == 200 and recs.get("customer", {}).get("record", {}).get("email")
       and recs.get("lead", {}).get("record"), (s, j))
 
-s, j = submit(PUB, dict(ANS, email="csv@x.test", message="=HYPERLINK(\"http://evil.test\")"), tok, ip())
+s, j = submit(PUB, dict(ANS, email="csv@x.formsink.net", message="=HYPERLINK(\"http://evil.test\")"), tok, ip())
 s, raw = call("GET", "/api/v2/forms/%s/export" % FID, owner_a, NS_A, raw=True)
 text = raw.decode("utf-8-sig", "replace")
 check("CSV export: header + rows", s == 200 and text.startswith("Submitted at (UTC),Status,Name,Email")
-      and "csv@x.test" in text, (s, text[:200]))
+      and "csv@x.formsink.net" in text, (s, text[:200]))
 check("CSV export defuses formulas", "'=HYPERLINK" in text and ",=HYPERLINK" not in text)
 
 print("== versions")
@@ -406,25 +410,25 @@ s, j = call("POST", "/api/v2/forms/%s/close" % FID, owner_a, NS_A)
 s1, _ = submit(PUB, ANS, tok, ip())
 check("closed form refuses responses (410)", s == 200 and s1 == 410, (s, s1))
 call("POST", "/api/v2/forms/%s/reopen" % FID, owner_a, NS_A)
-s1, _ = submit(PUB, dict(ANS, email="reopen@x.test"), tok, ip())
+s1, _ = submit(PUB, dict(ANS, email="reopen@x.formsink.net"), tok, ip())
 check("reopened form takes responses again", s1 == 201, s1)
 
 print("== failed targets and retry")
 sql("UPDATE namespaces SET max_users = 1 WHERE id = %s" % ID_A)
-s, j = submit(PUB, dict(ANS, email="full@x.test"), tok, ip())
+s, j = submit(PUB, dict(ANS, email="full@x.formsink.net"), tok, ip())
 sub = sql("SELECT s.uuid, s.status, l.outcome, l.error_code FROM form_submissions s JOIN form_submission_links l "
-          "ON l.submission_id = s.id AND l.target = 'user' WHERE s.respondent_email = 'full@x.test'")[0]
+          "ON l.submission_id = s.id AND l.target = 'user' WHERE s.respondent_email = 'full@x.formsink.net'")[0]
 check("a full workspace fails the invite but keeps the response (needs_attention)",
       s == 201 and sub[1:] == ["needs_attention", "failed", "workspace_full"], sub)
 check("... the customer and lead were still created",
-      count("customers", "lower(email) = 'full@x.test'") == 1 and count("crm_leads", "lower(email) = 'full@x.test'") == 1)
+      count("customers", "lower(email) = 'full@x.formsink.net'") == 1 and count("crm_leads", "lower(email) = 'full@x.formsink.net'") == 1)
 sql("UPDATE namespaces SET max_users = 100 WHERE id = %s" % ID_A)
 s, j = call("POST", "/api/v2/forms/%s/submissions/%s/retry" % (FID, sub[0]), owner_a, NS_A)
 check("retry after freeing seats: invited, response complete",
       s == 200 and j["data"]["status"] == "complete"
       and {l["target"]: l["outcome"] for l in j["data"]["links"]}.get("user") == "invited", (s, j))
-check("... still one customer and one lead", count("customers", "lower(email) = 'full@x.test'") == 1
-      and count("crm_leads", "lower(email) = 'full@x.test'") == 1)
+check("... still one customer and one lead", count("customers", "lower(email) = 'full@x.formsink.net'") == 1
+      and count("crm_leads", "lower(email) = 'full@x.formsink.net'") == 1)
 
 s, j = call("PUT", "/api/v2/forms/%s/submissions/%s" % (FID, SPAM_HP), owner_a, NS_A, {"status": "complete"})
 check("marking spam as not spam runs its targets", s == 200 and j["data"]["status"] == "complete"
@@ -437,7 +441,7 @@ check("deleting a response removes it and its links",
       and int(one("SELECT submission_count FROM forms WHERE uuid = '%s'" % FID)) == n_before - 1)
 
 sql("UPDATE namespaces SET status = 'suspended' WHERE id = %s" % ID_A)
-s1, _ = submit(PUB, dict(ANS, email="susp@x.test"), tok, ip())
+s1, _ = submit(PUB, dict(ANS, email="susp@x.formsink.net"), tok, ip())
 check("a suspended workspace's form refuses responses (404)", s1 == 404, s1)
 sql("UPDATE namespaces SET status = 'active' WHERE id = %s" % ID_A)
 s, _ = call("DELETE", "/api/v2/forms/" + F5, owner_a, NS_A)
@@ -450,15 +454,15 @@ check("form invitations are recorded as requests, not admin invitations",
       count("namespace_invitations", "namespace_id = %s AND source = 'form'" % ID_A) >= 10
       and count("namespace_invitations", "namespace_id = %s AND source = 'admin'" % ID_A) == 0)
 sql("UPDATE namespaces SET max_users = %d WHERE id = %s" % (active + 1, ID_A))
-s, j = submit(PUB, dict(ANS, email="seat1@x.test"), tok, ip())
+s, j = submit(PUB, dict(ANS, email="seat1@x.formsink.net"), tok, ip())
 check("with one seat free, a form request is created",
       one("""SELECT l.outcome FROM form_submission_links l JOIN form_submissions s ON s.id = l.submission_id
-             WHERE s.respondent_email = 'seat1@x.test' AND l.target = 'user'""") == "invited")
-s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin1@x.test"})
+             WHERE s.respondent_email = 'seat1@x.formsink.net' AND l.target = 'user'""") == "invited")
+s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin1@x.formsink.net"})
 check("a dozen pending form requests don't stop the admin inviting someone", s in (200, 201), (s, j))
-s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin2@x.test"})
+s, j = call("POST", "/api/v2/namespace/invitations", owner_a, NS_A, {"email": "admin2@x.formsink.net"})
 check("the admin's pending invitation holds the last seat", s == 400, (s, j))
-TOKEN_SEAT = one("SELECT token FROM namespace_invitations WHERE email = 'seat1@x.test'")
+TOKEN_SEAT = one("SELECT token FROM namespace_invitations WHERE email = 'seat1@x.formsink.net'")
 pw2 = "Qz" + uuid.uuid4().hex[:14] + "7K"
 s, j = call("POST", "/api/v2/public/invitations/%s/accept" % TOKEN_SEAT,
             body={"first_name": "Seat", "last_name": "One", "password": pw2})
@@ -587,7 +591,7 @@ check("only someone with forms.manage sets the CAPTCHA keys (403)", s == 403, s)
 s, j = call("PUT", "/api/v2/forms/workspace-settings", owner_a, NS_A,
             {"turnstile": {"site_key": "site-key-1", "secret": "test-secret"}})
 check("the owner saves the keys; the secret is never returned",
-      s == 200 and j["data"]["turnstile"] == {"site_key": "site-key-1", "has_secret": True}
+      s == 200 and j["data"]["turnstile"] == {"site_key": "site-key-1", "has_secret": True, "platform": False}
       and "test-secret" not in json.dumps(j), (s, j))
 check("the secret is stored encrypted", "test-secret" not in (one("SELECT turnstile_secret_encrypted FROM "
       "form_workspace_settings WHERE namespace_id = %s" % ID_A) or "test-secret"))
@@ -603,10 +607,76 @@ s2, _ = submit(LF["public_id"], ANS2, ctok, ip(), extra={"captcha_token": "forge
 s3, _ = submit(LF["public_id"], ANS2, ctok, ip(), extra={"captcha_token": "ok-token"})
 check("no / a forged CAPTCHA token is refused; a good one goes through",
       (s1, j1.get("code"), s2, s3) == (400, "captcha", 400, 201), (s1, j1, s2, s3))
+s, j = call("PUT", "/api/v2/forms/workspace-settings", owner_a, NS_A, {"turnstile": {"site_key": "", "secret": ""}})
+check("the keys can't be removed while a form uses the check (it would refuse every response)",
+      s == 422 and "Turn it off" in json.dumps(j), (s, j))
 call("PUT", "/api/v2/forms/" + LF["uuid"], owner_a, NS_A, {"settings": {"captcha": False}})
 
+print("== templates: the end-user questionnaire (table, region, confidential, I'm human)")
+s, j = call("GET", "/api/v2/forms/templates", owner_a, NS_A)
+tpl = {t["key"]: t for t in j.get("data") or []}
+check("the templates include the questionnaire, onboarding, supplier, support and returns",
+      s == 200 and {"end_user_questionnaire", "business_onboarding", "supplier_registration", "support_request",
+                    "product_return"} <= set(tpl) and tpl["end_user_questionnaire"]["captcha"] is True
+      and tpl["end_user_questionnaire"]["confidential"] is True, (s, sorted(tpl)))
+s, j = call("POST", "/api/v2/forms", owner_a, NS_A, {"template": "end_user_questionnaire"})
+QF = j.get("data") or {}
+check("a questionnaire made here starts confidential, with the check on (this workspace has keys)",
+      s == 201 and QF["settings"].get("captcha") is True and QF["settings"].get("confidential") is True, (s, j))
+s, j = call("POST", "/api/v2/forms", owner_b, NS_B, {"template": "end_user_questionnaire"})
+check("... and in a workspace without keys it is still made, with the check off",
+      s == 201 and not j["data"]["settings"].get("captcha") and j["data"]["settings"].get("confidential") is True, (s, j))
+call("PUT", "/api/v2/forms/" + QF["uuid"], owner_a, NS_A, {"settings": {"notify_emails": ["compliance@a.formsink.net"],
+     "auto_reply": {"enabled": True, "subject": "Got it", "body": "Your PO: {{purchase_order}}."}}})
+s, _ = call("POST", "/api/v2/forms/%s/publish" % QF["uuid"], owner_a, NS_A)
+qtok, _, qj = token_for(QF["public_id"])
+qf = {f.get("key"): f for f in (qj.get("data") or {}).get("fields", [])}
+check("the published questionnaire has its steps, the items table and the check",
+      s == 200 and [c["key"] for c in qf["items"]["columns"]] == ["model", "description", "qty"]
+      and sum(1 for f in qj["data"]["fields"] if f["type"] == "page_break") == 4
+      and (qj["data"].get("captcha") or {}).get("site_key") == "site-key-1", (s, qj.get("data", {}).get("captcha")))
+QA = {"purchase_order": "PO-777", "contact_email": "buyer@lab.formsink.net", "site_entity_name": "Santa Clara Labs",
+      "site_entity_address": {"line1": "1 Lab Way", "city": "Santa Clara", "region": "CA", "postcode": "95051",
+                              "country": "United States"},
+      "site_hq_address": "Same as above", "site_type": "commercial_entity", "end_user_business": "Drug discovery",
+      "installer_name": "Install Co", "installer_address": "2 Fit St", "installer_hq_address": "2 Fit St",
+      "third_parties": False, "operator_name": "Santa Clara Labs", "operator_address": "1 Lab Way",
+      "operator_hq_address": "1 Lab Way", "primary_purpose": ["training", "inferencing"],
+      "primary_purpose_details": "Protein models", "applications": ["healthcare"],
+      "applications_details": "Molecule search", "military_use": False, "advanced_weapons": False,
+      "restricted_party_access": False, "china_ai_training": False, "sensitive_information": True,
+      "sensitive_information_measures": "Encryption at rest", "third_party_software": False,
+      "cyber_activities": False, "site_security": "Badges and CCTV", "site_security_owner": "Facilities lead",
+      "product_access_control": "Role-based", "product_access_owner": "IT lead", "access_policies": "Yes, ISO 27001",
+      "remote_access_permitted": False, "remote_access_model": "should be dropped",
+      "items": [{"model": "DGX H100", "description": "8x H100 system", "qty": "2"}, {"model": "", "qty": ""}],
+      "signatory_name": "Ada Lee", "signatory_position": "CTO", "signature_date": "2026-11-11",
+      "signature": "Ada Lee", "declaration": True}
+time.sleep(2.2)
+s, j = submit(QF["public_id"], dict(QA, items=[]), qtok, ip(), extra={"captcha_token": "ok-token"})
+check("the items table is required", s == 400 and (j.get("errors") or {}).get("items") == "is required", (s, j))
+s, j = submit(QF["public_id"], QA, qtok, ip(), extra={"captcha_token": "ok-token"})
+check("a complete questionnaire is accepted", s == 201, (s, j))
+data = json.loads(one("SELECT data FROM form_submissions s JOIN forms f ON f.id = s.form_id WHERE f.uuid = '%s' "
+                      "ORDER BY s.id DESC LIMIT 1" % QF["uuid"]) or "{}")
+check("the table keeps its filled rows (numbers as numbers), the address its region, and a hidden follow-up is dropped",
+      data.get("items") == [{"model": "DGX H100", "description": "8x H100 system", "qty": 2}]
+      and data["site_entity_address"]["region"] == "CA" and "remote_access_model" not in data, data)
+alert = wait_mail(lambda m: "compliance@a.formsink.net" in m["rcpt"] and "End-user questionnaire" in m["text"])
+check("its alert email says a response arrived and links to it, without the answers",
+      bool(alert) and "PO-777" not in alert[0]["text"] and "Santa Clara Labs" not in alert[0]["text"]
+      and "/dashboard/forms/" + QF["uuid"] in alert[0]["text"], [m["text"][:300] for m in alert[:1]])
+reply = wait_mail(lambda m: m["rcpt"] == "buyer@lab.formsink.net" and "Got it" in m["text"])
+check("its auto-reply doesn't repeat answers either", bool(reply) and "PO-777" not in reply[0]["text"],
+      [m["text"][:300] for m in reply[:1]])
+s, j = call("POST", "/api/v2/forms/%s/summary" % QF["uuid"], owner_a, NS_A)
+check("its answers are never sent to AI (counts only)", s == 200 and not j["data"].get("summary")
+      and "confidential" in (j["data"].get("summary_error") or ""), (s, j))
+s, j = call("GET", "/api/v2/forms/%s/export" % QF["uuid"], owner_a, NS_A, raw=True)
+check("the CSV shows the table as readable rows", s == 200 and b"Product model no.: DGX H100" in j, (s, j[:200]))
+
 print("== phase 2: records' form responses, in-app and chat alerts")
-cust = one("SELECT uuid FROM customers WHERE lower(email) = 'race@x.test'")
+cust = one("SELECT uuid FROM customers WHERE lower(email) = 'race@x.formsink.net'")
 s, j = call("GET", "/api/v2/forms/responses?entity_type=customer&entity_uuid=" + cust, owner_a, NS_A)
 check("a customer's page can list the responses linked to them", s == 200 and len(j["data"]) == 20
       and j["data"][0]["form_title"] == "Quote request" and j["data"][0]["answers"], (s, len(j.get("data") or [])))
@@ -625,9 +695,9 @@ sql("INSERT INTO chat_channels (uuid, name, type, created_by, namespace_id, crea
 s, _ = call("PUT", "/api/v2/forms/" + FID, owner_a, NS_A, {"settings": {"chat_channel_uuid": CHB}})
 check("another workspace's chat channel is refused (422)", s == 422, s)
 s, _ = call("PUT", "/api/v2/forms/" + FID, owner_a, NS_A, {"settings": {"chat_channel_uuid": CH}})
-submit(PUB, dict(ANS, email="chat@x.test"), tok, ip())
+submit(PUB, dict(ANS, email="chat@x.formsink.net"), tok, ip())
 for _ in range(30):
-    if count("chat_messages", "channel_uuid = '%s' AND content LIKE '%%chat@x.test%%'" % CH):
+    if count("chat_messages", "channel_uuid = '%s' AND content LIKE '%%chat@x.formsink.net%%'" % CH):
         break
     time.sleep(1)
 check("a new response is posted to the chosen chat channel",
@@ -648,7 +718,7 @@ check("summary: exact counts plus the AI's text", s == 200 and d["responses"] > 
       and "VIP" in (d.get("summary") or ""), (s, j))
 prompts = sorted(glob.glob(os.path.join(STUB_DIR, "llm-*.json")))
 last = open(prompts[-1]).read() if prompts else ""
-check("no respondent's email was sent to the AI", prompts and "@x.test" not in last, last[:300])
+check("no respondent's email was sent to the AI", prompts and "@x.formsink.net" not in last, last[:300])
 check("AI calls are metered as feature 'forms'", count("ai_usage", "feature = 'forms'") >= 2)
 
 print("== phase 2: plan limits")

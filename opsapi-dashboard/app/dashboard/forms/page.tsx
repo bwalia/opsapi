@@ -154,7 +154,8 @@ function NewFormModal({ open, onClose }: { open: boolean; onClose: () => void })
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {option('', 'Blank form', 'Add your own questions.')}
             {templates.map((t) => option(t.key, t.title, t.description,
-              t.targets.length ? `Creates: ${t.targets.join(', ')}` : undefined))}
+              [t.targets.length ? `Creates: ${t.targets.join(', ')}` : '', t.captcha ? '“I’m human” check' : '',
+                t.confidential ? 'Confidential' : ''].filter(Boolean).join(' · ') || undefined))}
           </div>
         </div>
         <p className="flex items-start gap-2 rounded-lg bg-secondary-50 p-3 text-xs text-secondary-600">

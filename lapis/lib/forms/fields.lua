@@ -21,6 +21,7 @@
         scale        5 | 10                           (rating)
         text         the statement shown               (consent, paragraph)
         param        URL query parameter to read       (hidden)
+        columns      { { key, label, number }, ... }  (table; max_rows 1-100)
         maps_to      phone | company | job_title | address | notes | marketing_consent
         system       "contact.name" | "contact.email": added because the form
                      creates records; locked (always required, type fixed)
@@ -390,7 +391,7 @@ Fields.TYPES = {
         validate = function(value)
             if type(value) ~= "table" then return nil, "must be an address" end
             local out = {}
-            for _, k in ipairs({ "line1", "line2", "city", "postcode", "country" }) do
+            for _, k in ipairs({ "line1", "line2", "city", "region", "postcode", "country" }) do
                 local s, err = text(value[k] or "", 200)
                 if not s then return nil, k .. " " .. err end
                 out[k] = s
@@ -401,7 +402,7 @@ Fields.TYPES = {
         show = function(value)
             if type(value) ~= "table" then return "" end
             local parts = {}
-            for _, k in ipairs({ "line1", "line2", "city", "postcode", "country" }) do
+            for _, k in ipairs({ "line1", "line2", "city", "region", "postcode", "country" }) do
                 if value[k] and value[k] ~= "" then parts[#parts + 1] = value[k] end
             end
             return table.concat(parts, ", ")
@@ -452,6 +453,73 @@ Fields.TYPES = {
                 names[#names + 1] = type(v) == "table" and (v.name or v.id) or tostring(v)
             end
             return table.concat(names, ", ")
+        end,
+    },
+    -- Rows under fixed columns (line items: model, description, quantity). The
+    -- answer is a list of rows { [column key] = text | number }; blank rows are dropped.
+    table = {
+        define = function(f, raw)
+            local cols = raw.columns
+            if type(cols) ~= "table" or #cols == 0 or #cols > 8 then return "needs 1-8 columns" end
+            local out, taken = {}, {}
+            for i, c in ipairs(cols) do
+                if type(c) == "string" then c = { label = c } end
+                local label = type(c) == "table" and text(c.label, 100)
+                if not label or label == "" then return "column " .. i .. " needs a label (max 100)" end
+                local key = type(c.key) == "string" and c.key:match(KEY) and #c.key <= 40 and c.key or slug(label)
+                local base, n = key, 1
+                while taken[key] do
+                    n = n + 1
+                    key = base:sub(1, 36) .. "_" .. n
+                end
+                taken[key] = true
+                out[i] = { key = key, label = label, number = bool(c.number) == true or nil }
+            end
+            f.columns = setmetatable(out, cjson.array_mt)
+            local max = raw.max_rows == nil and 20 or int(raw.max_rows, 1, 100)
+            if not max then return "max_rows must be 1-100" end
+            f.max_rows = max
+        end,
+        validate = function(value, f)
+            if type(value) ~= "table" then return nil, "must be a list of rows" end
+            local rows = {}
+            for _, r in ipairs(value) do
+                if type(r) ~= "table" then return nil, "has a row that isn't valid" end
+                local row, filled = {}, false
+                for _, c in ipairs(f.columns) do
+                    local v = r[c.key]
+                    if v ~= nil and v ~= NULL and v ~= "" then
+                        if c.number then
+                            local n = tonumber(v)
+                            if not n or n ~= n or n == math.huge or n == -math.huge then
+                                return nil, c.label .. " must be a number"
+                            end
+                            row[c.key] = n
+                        else
+                            local s, err = text(v, 500)
+                            if not s then return nil, c.label .. " " .. err end
+                            row[c.key] = s ~= "" and s or nil
+                        end
+                        filled = filled or row[c.key] ~= nil
+                    end
+                end
+                if filled then rows[#rows + 1] = row end
+            end
+            if #rows > f.max_rows then return nil, "can have at most " .. f.max_rows .. " rows" end
+            return setmetatable(rows, cjson.array_mt)
+        end,
+        show = function(value, f)
+            local rows = {}
+            for _, r in ipairs(type(value) == "table" and value or {}) do
+                local cells = {}
+                for _, c in ipairs(f.columns or {}) do
+                    if type(r) == "table" and r[c.key] ~= nil then
+                        cells[#cells + 1] = c.label .. ": " .. tostring(r[c.key])
+                    end
+                end
+                rows[#rows + 1] = table.concat(cells, ", ")
+            end
+            return table.concat(rows, "; ")
         end,
     },
     heading = { input = false },
@@ -560,6 +628,9 @@ Fields.MAX_RULES = 10
 
 local function rule_value(src, op, value, where)
     if op == "filled" or op == "empty" then return nil end
+    if src.type == "table" then
+        return nil, where .. ": a table can only be checked for answered or not answered"
+    end
     if op == "in" or op == "not_in" then
         if not CHOICE[src.type] then return nil, where .. ": 'is one of' needs a choice question" end
         if type(value) ~= "table" or #value == 0 or #value > 50 then return nil, where .. ": choose 1-50 options" end

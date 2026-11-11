@@ -7,9 +7,18 @@
 
 import type { FieldType, FormField, LogicOp, LogicRule } from '@/services/forms.service';
 
+/** Is this answer given? A table with only blank rows isn't (the server drops blank rows). */
+function given(v: unknown): boolean {
+  if (v === undefined || v === null || v === '') return false;
+  if (!Array.isArray(v)) return true;
+  return v.some((x) => (x && typeof x === 'object'
+    ? Object.values(x as Record<string, unknown>).some((c) => c !== undefined && c !== null && String(c).trim() !== '')
+    : true));
+}
+
 function ruleOk(r: LogicRule, answers: Record<string, unknown>): boolean {
   const v = answers[r.field];
-  const present = !(v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0));
+  const present = given(v);
   if (r.op === 'filled') return present;
   if (r.op === 'empty') return !present;
   if (!present) return r.op === 'neq' || r.op === 'not_in';
@@ -80,7 +89,9 @@ const NUMERIC: FieldType[] = ['number', 'rating'];
 /** The conditions that make sense for a question of this type (builder). */
 export function opsFor(type: FieldType): { op: LogicOp; label: string }[] {
   const base: { op: LogicOp; label: string }[] = [];
-  if (CHOICE.includes(type)) {
+  if (type === 'table') {
+    // Only answered / not answered (the server allows nothing else).
+  } else if (CHOICE.includes(type)) {
     base.push({ op: 'eq', label: type === 'multi_select' ? 'includes' : 'is' }, { op: 'neq', label: type === 'multi_select' ? "doesn't include" : 'is not' },
       { op: 'in', label: 'is any of' }, { op: 'not_in', label: 'is none of' });
   } else if (type === 'boolean' || type === 'consent') {

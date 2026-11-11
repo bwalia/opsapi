@@ -100,9 +100,11 @@ return function(app)
         local out = {}
         for _, t in ipairs(Templates.list) do
             local schema = Fields.normalize({ fields = t.fields }, {})
+            local settings = t.settings or {}
             out[#out + 1] = { key = t.key, title = t.title, description = t.description,
                 targets = setmetatable({ unpack(t.targets) }, J.array_mt),
-                question_count = schema and #schema.fields or 0 }
+                question_count = schema and #schema.fields or 0,
+                captcha = settings.captcha == true, confidential = settings.confidential == true }
         end
         return ok(setmetatable(out, J.array_mt))
     end))

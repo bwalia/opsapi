@@ -10,7 +10,7 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
 export type FieldType =
   | 'short_text' | 'long_text' | 'email' | 'phone' | 'url' | 'number' | 'date' | 'time'
   | 'single_select' | 'radio' | 'multi_select' | 'boolean' | 'rating' | 'consent'
-  | 'name' | 'address' | 'file_upload' | 'hidden' | 'heading' | 'paragraph' | 'page_break';
+  | 'name' | 'address' | 'file_upload' | 'table' | 'hidden' | 'heading' | 'paragraph' | 'page_break';
 
 export type LogicOp = 'eq' | 'neq' | 'in' | 'not_in' | 'gt' | 'lt' | 'filled' | 'empty' | 'contains';
 
@@ -52,12 +52,22 @@ export interface FormField {
   max_files?: number;
   max_size_mb?: number;
   accept?: 'images' | 'documents' | 'any';
+  /** Table questions: the columns (a row is { [column key]: text | number }) and the most rows. */
+  columns?: TableColumn[];
+  max_rows?: number;
   param?: string;
   maps_to?: MapsTo;
   /** Set by the server: a contact field a target needs. Locked in the builder. */
   system?: 'contact.name' | 'contact.email';
   /** Show this field only when these rules hold (questions above it). */
   logic?: FieldLogic;
+}
+
+export interface TableColumn {
+  key: string;
+  label: string;
+  /** Takes numbers only. */
+  number?: boolean;
 }
 
 export type TargetType = 'customer' | 'lead' | 'user';
@@ -77,8 +87,10 @@ export interface FormSettings {
   auto_reply?: { enabled: boolean; subject?: string; body?: string };
   retention_days?: number;
   theme?: { primary_color?: string; background?: string; logo_url?: string; submit_label?: string; hide_branding?: boolean };
-  /** The workspace's Turnstile check on this form. */
+  /** The "I'm human" check (Turnstile: the workspace's keys, else the platform's). */
   captcha?: boolean;
+  /** Answers stay in the dashboard: none in emails, chat posts or auto-replies, never sent to AI. */
+  confidential?: boolean;
   /** In-app notification to the creator and notify addresses that are members (default on). */
   notify_in_app?: boolean;
   /** Post each response to this chat channel of the workspace. */
@@ -135,6 +147,9 @@ export interface FormTemplate {
   description: string;
   targets: TargetType[];
   question_count: number;
+  /** Starts with the "I'm human" check on (when keys exist) / as a confidential form. */
+  captcha?: boolean;
+  confidential?: boolean;
 }
 
 export interface SubmissionLink {
@@ -173,6 +188,7 @@ export interface Column {
   type: FieldType;
   options?: FieldOption[];
   scale?: number;
+  columns?: TableColumn[];
 }
 
 export interface FormInput {
@@ -220,7 +236,8 @@ export interface RecordResponse {
 }
 
 export interface WorkspaceFormsSettings {
-  turnstile: { site_key?: string; has_secret: boolean };
+  /** platform = the platform's keys cover forms here while the workspace has none of its own. */
+  turnstile: { site_key?: string; has_secret: boolean; platform?: boolean };
 }
 
 /** The workspace's custom domain for form links. */

@@ -7,7 +7,8 @@
 #   lapis/spec/forms-e2e/run.sh              # this checkout (HEAD + uncommitted changes)
 #   lapis/spec/forms-e2e/run.sh origin/main  # the same checks against main (fails: no forms there)
 #
-# Fresh database, no real credentials. Needs the lapis-lapis,
+# Fresh database, no real credentials; every email (the workspace's server and
+# the platform's) goes to the SMTP sink, never out. Needs the lapis-lapis,
 # pgvector/pgvector:pg15, redis:7-alpine, python:3.12-alpine and quay.io/minio/minio
 # images, and python3. stubs.py stands in for the AI model, Cloudflare Turnstile and DNS.
 set -euo pipefail
@@ -42,6 +43,7 @@ api() { # name project_code
     -e POSTGRES_HOST=pg -e POSTGRES_USER=pguser -e POSTGRES_PASSWORD=pgpassword -e POSTGRES_DB=forms \
     -e JWT_SECRET_KEY="$(cat "$W/jwt_secret")" -e PROJECT_CODE="$2" -e LAPIS_ENVIRONMENT=production -e OPSAPI_DEPLOY_ENV=test \
     -e REDIS_ENABLED=true -e REDIS_HOST=redis -e FRONTEND_URL=http://localhost:8039 -e OPSAPI_MAIL_ALLOW_PRIVATE=true \
+    -e SMTP_HOST=smtp -e SMTP_PORT=2525 \
     -e OPENSSL_SECRET_KEY="$(cat "$W/enc_key")" -e OPENSSL_SECRET_IV="$(cat "$W/enc_iv")" \
     -e AI_PROVIDER=openai -e AI_BASE_URL=http://stubs:8080/v1 -e AI_API_KEY=stub -e AI_MODEL=stub \
     -e AI_FALLBACK_PROVIDER=none -e TURNSTILE_VERIFY_URL=http://stubs:8080/turnstile \

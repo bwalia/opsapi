@@ -6,6 +6,11 @@
     stored encrypted and never returned); each form can then turn the check on
     (settings.captcha). The public page shows the widget and the server
     verifies its token with Cloudflare before accepting the response.
+
+    The platform's own keys (TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY) are used
+    by every workspace that hasn't added its own, so the check works without
+    any set-up. A Turnstile widget only runs on the hostnames listed for it in
+    Cloudflare, so a workspace on its own custom domain adds its own keys.
     TURNSTILE_VERIFY_URL overrides Cloudflare's endpoint (tests).
 ]]
 
@@ -26,12 +31,25 @@ local function val(v)
     return v
 end
 
---- The settings as the API shows them (never the secret).
+local function env(name)
+    local v = os.getenv(name)
+    return v and v:match(KEY) and v or nil
+end
+
+--- The platform's keys, when both are set. @return site_key, secret | nil
+local function platform()
+    local site, secret = env("TURNSTILE_SITE_KEY"), env("TURNSTILE_SECRET_KEY")
+    if site and secret then return site, secret end
+end
+
+--- The settings as the API shows them (never a secret). `platform` = the
+-- platform's keys cover forms here when the workspace has none of its own.
 function Workspace.get(namespace_id)
     local r = row(namespace_id)
     return { turnstile = {
         site_key = r and val(r.turnstile_site_key) or nil,
         has_secret = r ~= nil and val(r.turnstile_secret_encrypted) ~= nil,
+        platform = platform() ~= nil,
     } }
 end
 
@@ -56,6 +74,16 @@ function Workspace.save(namespace_id, actor_uuid, body)
             secret = Global.encryptSecret(t.secret)
         end
     end
+    -- Without keys (and no platform keys to fall back on), every form with the
+    -- check on would refuse all responses: the check fails closed.
+    if (site == nil or secret == nil) and not platform() then
+        local n = tonumber(db.query([[SELECT COUNT(*) AS n FROM forms WHERE namespace_id = ? AND deleted_at IS NULL
+            AND settings->>'captcha' = 'true']], namespace_id)[1].n) or 0
+        if n > 0 then
+            return nil, n .. " form(s) use the \"I'm human\" check. Turn it off in their Settings first, "
+                .. "or they can't take responses."
+        end
+    end
     db.query([[
         INSERT INTO form_workspace_settings (namespace_id, turnstile_site_key, turnstile_secret_encrypted,
             updated_by_uuid, updated_at)
@@ -67,10 +95,13 @@ function Workspace.save(namespace_id, actor_uuid, body)
     return Workspace.get(namespace_id)
 end
 
---- The keys, when both are set. @return site_key, secret | nil
+--- The workspace's keys when it has both, else the platform's.
+-- @return site_key, secret | nil
 function Workspace.turnstile(namespace_id)
     local ok, r = pcall(row, namespace_id)
-    if not ok or not r or not val(r.turnstile_site_key) or not val(r.turnstile_secret_encrypted) then return nil end
+    if not ok or not r or not val(r.turnstile_site_key) or not val(r.turnstile_secret_encrypted) then
+        return platform()
+    end
     local dok, secret = pcall(Global.decryptSecret, r.turnstile_secret_encrypted)
     if not dok or not secret then return nil end
     return r.turnstile_site_key, secret

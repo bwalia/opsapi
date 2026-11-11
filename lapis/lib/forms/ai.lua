@@ -26,14 +26,17 @@ AI.MAX_FIELDS = 40
 AI.SAMPLE = 60
 
 local TYPES_HELP = "short_text, long_text, email, phone, number, date, time, url, single_select (dropdown), radio, "
-    .. "multi_select (checkboxes), boolean (yes/no), rating, consent, name, address, file_upload, hidden, heading, "
+    .. "multi_select (checkboxes), boolean (yes/no), rating, consent, name, address, file_upload, table (rows under "
+    .. "columns, e.g. line items), hidden, heading, "
     .. "paragraph, page_break"
 
 local GENERATE_PROMPT = [[You design web forms for a business. Reply with JSON only, no prose:
 {"title": "...", "description": "...", "fields": [{"label": "...", "type": "...", "required": true|false,
-"options": ["..."], "help": "...", "text": "..."}], "create_records": ["customer" | "lead" | "user"]}
+"options": ["..."], "columns": ["..."], "help": "...", "text": "..."}],
+"create_records": ["customer" | "lead" | "user"]}
 Field types: ]] .. TYPES_HELP .. [[.
 Rules: choice types (single_select, radio, multi_select) need "options". "consent" and "paragraph" need "text".
+"table" needs "columns" (1-8 column names).
 Use "page_break" (with a short label) to split a long form into steps. Keep it as short as the purpose allows.
 Only fill "create_records" when the description asks to turn people into customers, leads or workspace users;
 then don't add name or email fields yourself: they are added automatically. At most 40 fields.]]
@@ -156,6 +159,10 @@ function AI.summarise(form, user_uuid, opts)
     end
     local result = { responses = #rows, fields = setmetatable(stats, cjson.array_mt) }
     if opts.numbers_only or #rows == 0 then return result end
+    if require("queries.FormQueries").decode(form.settings, {}).confidential then
+        result.summary_error = "This form is confidential, so its answers are never sent to AI."
+        return result
+    end
 
     -- The narrative: the numbers above plus free-text answers (no contact details).
     local lines = { ("Form: %s. %d responses (newest first, up to 500)."):format(form.title, #rows) }

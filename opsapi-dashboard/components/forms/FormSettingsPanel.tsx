@@ -5,12 +5,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { AlertTriangle, MailCheck } from 'lucide-react';
+import { AlertTriangle, Lock, MailCheck } from 'lucide-react';
 import { chatService, type ChatChannel } from '@/services/chat.service';
 import SpamProtectionModal from './SpamProtectionModal';
 import { Button, Card, Input, Select, Switch, Textarea } from '@/components/ui';
 import { apiError } from '@/components/field-service/shared';
-import { formsService, type Form, type FormSettings } from '@/services/forms.service';
+import { formsService, type Form, type FormSettings, type WorkspaceFormsSettings } from '@/services/forms.service';
 
 /** Where this workspace's emails go out from, with the way to set up its own server. */
 function EmailVia({ via }: { via?: Form['email_via'] }) {
@@ -44,6 +44,11 @@ function Section({ title, description, children }: { title: string; description?
   );
 }
 
+/** The check can run: the workspace's own keys, or the platform's. */
+function turnstileReady(w: WorkspaceFormsSettings) {
+  return (!!w.turnstile.site_key && w.turnstile.has_secret) || !!w.turnstile.platform;
+}
+
 /** "2026-12-31T17:00:00Z" <-> the local value of <input type="datetime-local">. */
 function toLocalInput(iso?: string) {
   if (!iso) return '';
@@ -69,7 +74,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
   useEffect(() => {
     chatService.listChannels().then(setChannels).catch(() => setChannels(null));
     formsService.workspaceSettings()
-      .then((w) => setSpamReady(!!w.turnstile.site_key && w.turnstile.has_secret)).catch(() => setSpamReady(null));
+      .then((w) => setSpamReady(turnstileReady(w))).catch(() => setSpamReady(null));
   }, []);
 
   useEffect(() => {
@@ -104,6 +109,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
         auto_reply: s.auto_reply?.enabled || s.auto_reply?.subject || s.auto_reply?.body ? s.auto_reply : null,
         theme: s.theme && Object.values(s.theme).some(Boolean) ? s.theme : null,
         captcha: !!s.captcha,
+        confidential: !!s.confidential,
         notify_in_app: s.notify_in_app !== false,
         chat_channel_uuid: clear(s.chat_channel_uuid),
       } as unknown as FormSettings);
@@ -137,6 +143,23 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
           onChange={(e) => setS({ ...s, closed_message: e.target.value })} />
       </Section>
 
+      <Section title="Privacy">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-1.5 text-sm font-medium text-secondary-800">
+              <Lock className="h-3.5 w-3.5" aria-hidden="true" /> Confidential answers
+            </p>
+            <p className="text-xs text-secondary-500">
+              Answers are shown only here, to people who can see forms. Emails and chat posts say a response arrived
+              and link to it, without the answers, auto-replies don&apos;t include answers, and answers are never sent
+              to AI.
+            </p>
+          </div>
+          <Switch checked={!!s.confidential} aria-label="Confidential answers"
+            onChange={(b) => setS({ ...s, confidential: b })} />
+        </div>
+      </Section>
+
       <Section title="Emails">
         <EmailVia via={form.email_via} />
         <Input label="Tell these people about each new response" value={emails} error={errors.notify_emails}
@@ -158,7 +181,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
               placeholder={'Hi {{name}},\nthanks for getting in touch. We will reply within one working day.'}
               error={errors.auto_reply} onChange={(e) => setS({ ...s, auto_reply: { ...reply, body: e.target.value } })} />
             <p className="text-xs text-secondary-500">
-              Answer keys: {form.schema.fields.filter((f) => f.key && !['heading', 'paragraph'].includes(f.type))
+              Answer keys: {form.schema.fields.filter((f) => f.key && !['heading', 'paragraph', 'page_break'].includes(f.type))
                 .map((f) => `{{${f.key}}}`).join('  ')}
             </p>
           </div>
@@ -209,9 +232,10 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
       <Section title="Spam protection" description="Bots are already filtered (a hidden trap field, a minimum time, rate limits).">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-secondary-800">&ldquo;I&apos;m not a robot&rdquo; check (Cloudflare Turnstile)</p>
+            <p className="text-sm font-medium text-secondary-800">&ldquo;I&apos;m human&rdquo; check (Cloudflare Turnstile)</p>
             <p className="text-xs text-secondary-500">
-              {spamReady === false ? 'Add your workspace’s Turnstile keys first. ' : 'For forms that attract spam. '}
+              {spamReady === false ? 'Add your workspace’s Turnstile keys first. '
+                : 'People tick “Verify you are human” before they can send the form. '}
               <button type="button" className="font-medium text-primary-600 hover:underline" onClick={() => setSpamOpen(true)}>
                 {spamReady ? 'Workspace keys' : 'Set up Turnstile'}
               </button>
@@ -222,7 +246,7 @@ export default function FormSettingsPanel({ form, onSave, readOnly }: {
         </div>
       </Section>
       <SpamProtectionModal open={spamOpen} onClose={() => setSpamOpen(false)}
-        onSaved={(w) => setSpamReady(!!w.turnstile.site_key && w.turnstile.has_secret)} />
+        onSaved={(w) => setSpamReady(turnstileReady(w))} />
 
       <Section title="Keep responses" description="Responses older than this are deleted automatically. Leave empty to keep them.">
         <Input label="Days" inputMode="numeric" value={s.retention_days ?? ''} placeholder="e.g. 365"
