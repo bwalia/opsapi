@@ -108,3 +108,5 @@ extraEnv:
   # Product name in sign-in and password-reset emails (a workspace can set its own
   # in Settings → Branding → "Name in emails").
   APP_NAME: "Workstation OpsAPI"
+  # No DIY Tax Return support address in tax ID-lock messages (only the support chat).
+  SUPPORT_EMAIL: ""

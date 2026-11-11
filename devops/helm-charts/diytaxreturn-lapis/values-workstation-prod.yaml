@@ -19,7 +19,10 @@ host: opsapi.workstation.co.uk
 # the int build that was verified end-to-end before go-live.
 projectCode: all
 
-frontendUrl: "https://app.diytaxreturn.co.uk"
+# Live Workstation dashboard. Every link in its emails (leads, password reset,
+# invitations, forms) and its default allowed redirect origin come from this —
+# it pointed at DIY Tax Return's app until 2026-11.
+frontendUrl: "https://opsapi-ui.workstation.co.uk"
 
 image:
   repository: bwalia/opsapi
@@ -134,6 +137,8 @@ extraEnv:
   # Product name in sign-in and password-reset emails (a workspace can set its own
   # in Settings → Branding → "Name in emails").
   APP_NAME: "Workstation OpsAPI"
+  # No DIY Tax Return support address in tax ID-lock messages (only the support chat).
+  SUPPORT_EMAIL: ""
   CMS_PUBLIC_S3_BUCKET: "workstation-website"
   CMS_PUBLIC_S3_REGION: "eu-west-2"
   CMS_PUBLIC_BASE_URL: "https://www.workstation.co.uk"
