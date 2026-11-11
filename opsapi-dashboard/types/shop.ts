@@ -330,15 +330,64 @@ export interface ShopLine extends ShopPriced {
   image?: string | null;
   /** Admin-only: overrides the unit price on quotes. */
   price_override_minor?: number | null;
+  /** Free-text (service) line typed in the back office: no product, no stock. */
+  custom?: boolean;
+  description?: string | null;
+  /** YYYY-MM-DD service period, e.g. a membership month. */
+  period_start?: string | null;
+  period_end?: string | null;
 }
 
 /** Line payload for admin quote create/edit — re-priced server-side. */
-export interface ShopLineInput {
-  uuid?: string;
-  product_slug: string;
-  qty: number;
-  selections: ShopSelections;
-  price_override_minor?: number | null;
+export type ShopLineInput =
+  | {
+      uuid?: string;
+      product_slug: string;
+      qty: number;
+      selections: ShopSelections;
+      price_override_minor?: number | null;
+    }
+  | {
+      uuid?: string;
+      custom: true;
+      name: string;
+      description?: string;
+      qty: number;
+      unit_price_minor: number;
+      vat_rate?: number;
+      period_start?: string;
+      period_end?: string;
+    };
+
+/** "Order Authorisation" (kind order) or an ordinary quote. */
+export type ShopQuoteKind = 'quote' | 'order';
+
+/** Structured delivery address (the supplier PO's "Deliver directly to"). */
+export interface ShopDeliveryAddress {
+  name?: string;
+  company?: string;
+  line1?: string;
+  line2?: string;
+  city?: string;
+  county?: string;
+  postcode?: string;
+  country?: string;
+  email?: string;
+  phone?: string;
+  vat_number?: string;
+}
+
+/** Back-office order fields shared by quote create/update. */
+export interface ShopQuoteOrderFields {
+  kind?: ShopQuoteKind;
+  /** Staff discount, pence ex VAT, off the whole order. */
+  discount_minor?: number;
+  discount_label?: string;
+  /** true: work out the VIP Trade discount from the membership terms; false: remove it. */
+  apply_trade_discount?: boolean;
+  trade_discount_minor?: number;
+  delivery_method?: string;
+  delivery_address?: ShopDeliveryAddress | null;
 }
 
 export interface ShopTotals {
@@ -413,6 +462,10 @@ export interface ShopOrder extends ShopTotals {
   public_url?: string;
   created_at: string;
   updated_at?: string;
+  member_discount_minor?: number;
+  discount_minor?: number;
+  delivery_method?: string | null;
+  delivery_address?: ShopDeliveryAddress | null;
 }
 
 export interface ShopOrderUpdate {
@@ -445,9 +498,39 @@ export interface ShopQuote extends ShopTotals {
   crm_lead_id?: number | null;
   created_at: string;
   updated_at?: string;
+  kind?: ShopQuoteKind;
+  /** "Order Authorisation" or "Quote". */
+  document_title?: string;
+  discount_minor?: number;
+  discount_label?: string | null;
+  trade_discount_minor?: number;
+  /** Before discounts. */
+  list_subtotal_minor?: number;
+  list_vat_minor?: number;
+  delivery_method?: string | null;
+  delivery_address?: ShopDeliveryAddress | null;
+  sent_at?: string | null;
+  authorised_at?: string | null;
+  authorised_by_name?: string | null;
+  payable?: boolean;
 }
 
-export interface ShopQuoteUpdate {
+export interface ShopQuoteSendResult {
+  to: string;
+  attached: boolean;
+  pdf_error?: string | null;
+  quote: ShopQuote;
+}
+
+export interface ShopTradeDiscountPreview {
+  member: boolean;
+  discount_minor: number;
+  tier: 'founding' | 'standard' | null;
+  pct: number | null;
+  cap_remaining_minor: number | null;
+}
+
+export interface ShopQuoteUpdate extends ShopQuoteOrderFields {
   status?: ShopQuoteStatus;
   notes?: string;
   internal_notes?: string;
@@ -457,7 +540,7 @@ export interface ShopQuoteUpdate {
   shipping_minor?: number;
 }
 
-export interface ShopQuoteCreate {
+export interface ShopQuoteCreate extends ShopQuoteOrderFields {
   customer: ShopCustomer;
   lines: ShopLineInput[];
   notes?: string;

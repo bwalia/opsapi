@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { PenLine, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Badge, Button, Input, Modal, SearchableSelect } from '@/components/ui';
 import { shopService } from '@/services/shop.service';
@@ -23,9 +23,30 @@ export interface LineDraft {
   override: string;
   /** Last server-priced snapshot (display only). */
   snapshot?: ShopLine;
+  /** Free-text line (a service, a membership month): name in product_name, unit price in `override`. */
+  custom?: boolean;
+  description?: string;
+  period_start?: string;
+  period_end?: string;
 }
 
 export function lineToDraft(l: ShopLine): LineDraft {
+  if (l.custom) {
+    return {
+      key: newKey(),
+      uuid: l.uuid,
+      custom: true,
+      product_slug: '',
+      product_name: l.product_name || l.label || '',
+      description: l.description ?? '',
+      period_start: l.period_start ?? '',
+      period_end: l.period_end ?? '',
+      qty: String(l.qty ?? 1),
+      selections: {},
+      override: minorToPounds(l.unit_price_minor),
+      snapshot: l,
+    };
+  }
   return {
     key: newKey(),
     uuid: l.uuid,
@@ -42,8 +63,25 @@ export function lineToDraft(l: ShopLine): LineDraft {
 /** Validate drafts → API payload. */
 export function draftsToPayload(drafts: LineDraft[]): { lines: ShopLineInput[]; errors: string[] } {
   const errors: string[] = [];
-  const lines = drafts.map((d, i) => {
+  const lines = drafts.map((d, i): ShopLineInput => {
     const qty = parseInt(d.qty, 10);
+    if (d.custom) {
+      const unit = poundsToMinor(d.override);
+      if (!d.product_name.trim()) errors.push(`Line ${i + 1}: describe the item`);
+      if (!Number.isInteger(qty) || qty < 1) errors.push(`Line ${i + 1}: quantity must be ≥ 1`);
+      if (unit === null || unit < 0) errors.push(`Line ${i + 1}: enter a unit price`);
+      if (d.period_start && d.period_end && d.period_end < d.period_start) errors.push(`Line ${i + 1}: the period ends before it starts`);
+      return {
+        ...(d.uuid ? { uuid: d.uuid } : {}),
+        custom: true,
+        name: d.product_name.trim(),
+        ...(d.description?.trim() ? { description: d.description.trim() } : {}),
+        qty: Number.isInteger(qty) ? qty : 1,
+        unit_price_minor: unit ?? 0,
+        ...(d.period_start ? { period_start: d.period_start } : {}),
+        ...(d.period_end ? { period_end: d.period_end } : {}),
+      };
+    }
     if (!d.product_slug) errors.push(`Line ${i + 1}: choose a product`);
     if (!Number.isInteger(qty) || qty < 1) errors.push(`Line ${i + 1}: quantity must be ≥ 1`);
     let override: number | null = null;
@@ -122,6 +160,55 @@ export function QuoteLinesEditor({
     <div className="space-y-3">
       {drafts.length === 0 && <p className="rounded-lg border border-dashed border-secondary-300 p-6 text-center text-sm text-secondary-500">No lines yet.</p>}
       {drafts.map((d, i) => {
+        if (d.custom) {
+          const unit = d.override.trim() ? poundsToMinor(d.override) : null;
+          return (
+            <div key={d.key} className="rounded-lg border border-secondary-200 p-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
+                <div className="md:col-span-5">
+                  <Input label="Item (free text)" id={`ql-${d.key}-name`} value={d.product_name} onChange={(e) => update(i, { product_name: e.target.value })} placeholder="e.g. Workstation VIP membership (founding member)" />
+                </div>
+                <div className="md:col-span-2">
+                  <Input label="Qty" id={`ql-${d.key}-qty`} value={d.qty} onChange={(e) => update(i, { qty: e.target.value.replace(/[^\d]/g, '') })} inputMode="numeric" />
+                </div>
+                <div className="md:col-span-3">
+                  <Input
+                    label="Unit price (£ ex VAT)"
+                    id={`ql-${d.key}-price`}
+                    value={d.override}
+                    onChange={(e) => update(i, { override: e.target.value })}
+                    onBlur={() => unit !== null && update(i, { override: minorToPounds(unit) })}
+                    inputMode="decimal"
+                    error={d.override.trim() && unit === null ? 'Invalid' : undefined}
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-0.5 md:col-span-2 md:pb-1.5">
+                  <ReorderButtons index={i} count={drafts.length} onMove={(dir) => onChange(moveItem(drafts, i, dir))} />
+                  <IconButton label="Remove line" danger onClick={() => onChange(drafts.filter((_, j) => j !== i))}>
+                    <Trash2 className="h-4 w-4" />
+                  </IconButton>
+                </div>
+                <div className="md:col-span-6">
+                  <Input label="Description (optional)" id={`ql-${d.key}-desc`} value={d.description ?? ''} onChange={(e) => update(i, { description: e.target.value })} />
+                </div>
+                <div className="md:col-span-3">
+                  <Input label="Period from" type="date" id={`ql-${d.key}-from`} value={d.period_start ?? ''} onChange={(e) => update(i, { period_start: e.target.value })} />
+                </div>
+                <div className="md:col-span-3">
+                  <Input label="Period to" type="date" id={`ql-${d.key}-to`} value={d.period_end ?? ''} onChange={(e) => update(i, { period_end: e.target.value })} />
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary-500">
+                <Badge size="sm" variant="secondary">Custom line · no stock</Badge>
+                {unit !== null && (
+                  <span className="tabular-nums">
+                    {formatMoney(unit, currency)} × {parseInt(d.qty, 10) || 1} = {formatMoney(unit * (parseInt(d.qty, 10) || 1), currency)} ex VAT
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        }
         const product = products.find((p) => p.slug === d.product_slug);
         const configurable = product ? product.price_mode === 'configurable' : Object.keys(d.selections ?? {}).length > 0;
         const overrideMinor = d.override.trim() ? poundsToMinor(d.override) : null;
@@ -180,15 +267,26 @@ export function QuoteLinesEditor({
           </div>
         );
       })}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        leftIcon={<Plus className="h-4 w-4" />}
-        onClick={() => onChange([...drafts, { key: newKey(), product_slug: '', product_name: '', qty: '1', selections: {}, override: '' }])}
-      >
-        Add line
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          leftIcon={<Plus className="h-4 w-4" />}
+          onClick={() => onChange([...drafts, { key: newKey(), product_slug: '', product_name: '', qty: '1', selections: {}, override: '' }])}
+        >
+          Add product
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          leftIcon={<PenLine className="h-4 w-4" />}
+          onClick={() => onChange([...drafts, { key: newKey(), custom: true, product_slug: '', product_name: '', qty: '1', selections: {}, override: '', description: '', period_start: '', period_end: '' }])}
+        >
+          Add custom line
+        </Button>
+      </div>
 
       <ConfigureModal
         open={configuring !== null}

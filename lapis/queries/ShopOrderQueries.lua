@@ -37,6 +37,7 @@ local ORDER_COLS = [[
     o.id, o.uuid, o.namespace_id, o.order_number, o.access_token, o.status, o.email, o.customer::text AS customer,
     o.shipping_address::text AS shipping_address, o.billing_address::text AS billing_address,
     o.lines::text AS lines, o.subtotal_minor, o.vat_minor, o.shipping_minor, o.total_minor, o.credit_minor, o.member_discount_minor, o.member_discount_pct, o.currency,
+    o.discount_minor, o.delivery_method, o.delivery_address::text AS delivery_address,
     o.refunded_minor, o.returned_net_minor, o.refund_clawback_minor,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at
@@ -65,6 +66,9 @@ function ShopOrderQueries.shape(o, opts)
         credit_minor = tonumber(o.credit_minor) or 0,
         member_discount_minor = tonumber(o.member_discount_minor) or 0,
         member_discount_pct = tonumber(o.member_discount_pct) or U.null,
+        discount_minor = tonumber(o.discount_minor) or 0,
+        delivery_method = o.delivery_method or U.null,
+        delivery_address = U.nz(o.delivery_address) and U.dec(o.delivery_address, U.null) or U.null,
         currency = o.currency,
         paid_at = o.paid_at or U.null,
         created_at = o.created_at,
@@ -214,7 +218,14 @@ local effective_vat_rate = Pricing.effective_vat_rate
 -- Returns ({order_uuid, order_token, checkout_url}) or (nil, err)
 function ShopOrderQueries.checkout(ns_id, body, cart_token)
     local PaymentProvider = require("lib.payment-provider")
-    if not require("queries.ShopSettingsQueries").checkoutEnabled(ns_id) then
+    -- A staff-built order (Order Authorisation) was priced and checked by staff, so its customer can pay
+    -- for it even while public checkout is switched off.
+    local staff_order = false
+    if body.from == "quote" then
+        local pq = Quote.getWithToken(ns_id, body.quote_uuid, body.quote_token)
+        staff_order = pq ~= nil and Quote.isStaffOrder(pq)
+    end
+    if not staff_order and not require("queries.ShopSettingsQueries").checkoutEnabled(ns_id) then
         return nil, U.err(409, "CHECKOUT_DISABLED",
             "Online checkout is closed — request a quote and we'll confirm your final price")
     end
@@ -288,6 +299,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     if email then customer.email = email end
 
     local totals
+    -- What the quote takes off (staff discount + VIP Trade discount agreed in the back office), ex VAT.
+    local quote_discount = quote and Quote.discountOf(quote) or 0
+    local quote_trade = quote and (tonumber(quote.trade_discount_minor) or 0) or 0
     if quote then
         totals = {
             subtotal_minor = tonumber(quote.subtotal_minor), vat_minor = tonumber(quote.vat_minor),
@@ -310,13 +324,18 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     -- Stripe line items are the undiscounted lines + undiscounted VAT; the coupon below takes off
     -- amount_off, so Stripe's total equals the order total exactly.
     local stripe_totals = totals
+    if quote_discount > 0 then
+        -- The quote's totals are already discounted: Stripe gets the list lines and the coupon the rest.
+        stripe_totals = Pricing.totals(lines, totals.shipping_minor)
+        gross_before = stripe_totals.total_minor
+    end
 
     -- Joining Trade with this order (body.membership): reserve the spot now, give this order the
     -- Trade discount for the tier they join at, and charge the first fee in the same Stripe payment.
     local join
     if type(body.membership) == "table" then
-        if from ~= "cart" then
-            return nil, U.err(400, "VALIDATION_ERROR", "Trade membership can only be added to a basket order")
+        if from ~= "cart" and quote_trade > 0 then
+            return nil, U.err(400, "VALIDATION_ERROR", "This quote already includes the Trade discount")
         end
         local Membership = require("queries.ShopMembershipQueries")
         local R = require("lib.shop-membership")
@@ -346,7 +365,8 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local R = require("lib.shop-membership")
         local vat_rate = effective_vat_rate(totals.subtotal_minor, totals.vat_minor)
         local m = member.membership
-        if from == "cart" and not trade and member.active and type(m) == "table"
+        -- Basket orders, and quotes that don't already carry a Trade discount agreed by staff.
+        if (from == "cart" or (quote and quote_trade == 0)) and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
             -- Limited to what is left of this membership year's cap (order discounts + join credits so far).
             local ms = Membership.settings(ns_id)
@@ -400,15 +420,20 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         local row = db.query([[
             INSERT INTO shop_orders (uuid, namespace_id, order_number, access_token, status, email, customer, lines,
                                      subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor,
-                                     member_discount_minor, member_discount_pct, currency,
-                                     cart_id, quote_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, 'GBP', ?, ?, NOW(), NOW())
+                                     member_discount_minor, member_discount_pct, discount_minor, delivery_method,
+                                     delivery_address, currency, cart_id, quote_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, 'GBP', ?, ?,
+                    NOW(), NOW())
             RETURNING id, uuid, order_number, access_token
         ]], Global.generateUUID(), ns_id, next_number(), token, email or db.NULL, U.enc(customer),
             U.enc(U.arr(lines)), totals.subtotal_minor, totals.vat_minor, totals.shipping_minor,
             totals.total_minor, credit and credit.credit_minor or 0,
-            trade and trade.discount_minor or 0, trade and trade.pct or db.NULL, cart and cart.id or db.NULL,
-            quote and quote.id or db.NULL)[1]
+            -- The quote's Trade discount counts towards the member's yearly cap like a basket one.
+            (trade and trade.discount_minor or 0) + quote_trade, trade and trade.pct or db.NULL,
+            quote_discount - quote_trade,
+            quote and U.nz(quote.delivery_method) or db.NULL,
+            quote and U.nz(quote.delivery_address) or db.NULL,
+            cart and cart.id or db.NULL, quote and quote.id or db.NULL)[1]
         Stock.hold(ns_id, row.id, demand, RESERVATION_MINUTES)
         if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
         return row
@@ -457,7 +482,10 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         -- go on as one one-off coupon.
         local coupon_name = (trade and credit) and "Trade discount + credit"
             or trade and (trade.pct and ("Trade discount " .. tostring(trade.pct) .. "%") or "Trade discount")
-            or "Workstation credit"
+            or credit and "Workstation credit"
+            or (quote_trade > 0 and quote_trade == quote_discount) and "VIP Trade discount"
+            or (quote and U.nz(quote.discount_label)) or "Discount"
+        if credit and quote_discount > 0 then coupon_name = "Discount + credit" end
         local coupon, cerr = stripe:_request("POST", "/coupons", {
             amount_off = amount_off, currency = "gbp", duration = "once", max_redemptions = 1,
             name = coupon_name, metadata = { order_uuid = order.uuid },
@@ -491,6 +519,11 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         return nil, U.err(502, "PAYMENT_PROVIDER_ERROR", "Could not start checkout — please try again or request a quote")
     end
     db.query("UPDATE shop_orders SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, order.id)
+    if staff_order then
+        -- Paying is confirming: the shop app recorded their acceptance of the terms before checkout.
+        db.query([[UPDATE shop_quotes SET status = CASE WHEN status IN ('draft', 'sent') THEN 'accepted' ELSE status END,
+                   authorised_at = COALESCE(authorised_at, NOW()), updated_at = NOW() WHERE id = ?]], quote.id)
+    end
     if join then
         db.query("UPDATE shop_memberships SET stripe_session_id = ?, updated_at = NOW() WHERE id = ?", session.id, join.m.id)
         db.query([[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],

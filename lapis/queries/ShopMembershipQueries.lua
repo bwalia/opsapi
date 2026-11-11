@@ -925,6 +925,20 @@ function Q.capRemaining(ns_id, m, s)
     return v.remaining
 end
 
+--- The VIP Trade discount a back-office order for this email earns under the membership terms
+-- (fixed tiers or %, within what is left of the yearly cap). Returns nil when the email holds no
+-- membership in force; else { discount_minor, tier, pct?, cap_remaining_minor? }.
+function Q.tradeDiscountFor(ns_id, email, subtotal_net, vat_rate, shipping_minor)
+    if not nz(email) then return nil end
+    local m = active_membership(ns_id, email)
+    if not m then return nil end
+    local s = Q.settings(ns_id)
+    local remaining = Q.capRemaining(ns_id, m, s)
+    local d = R.apply_trade(s, m.tier, subtotal_net, vat_rate, shipping_minor or 0, remaining)
+    return { discount_minor = d.discount_minor or 0, tier = m.tier, pct = d.pct,
+             cap_remaining_minor = remaining, membership_uuid = m.uuid }
+end
+
 --- POST /member/gap-claim — record a refund-the-gap claim for the year that just ended; staff refund it.
 function Q.gapClaim(ns_id, member)
     local m = member and member.membership

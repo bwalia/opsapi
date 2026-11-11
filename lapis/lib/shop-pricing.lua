@@ -543,6 +543,75 @@ function ShopPricing.totals(lines, shipping_minor)
     }
 end
 
+--- A free-text (service) line staff type into a back-office order, e.g. "Workstation VIP membership
+-- (founding member)", 11 Nov–11 Dec 2026, 1 × £75.00. Same shape as a priced catalogue line so totals,
+-- Stripe line items, PDFs and refunds treat it alike; no product, so no stock is held for it.
+-- input: { name, description?, qty?, unit_price_minor, vat_rate?, period_start?, period_end?, uuid? }
+-- Returns (line) or (nil, message).
+ShopPricing.MAX_CUSTOM_UNIT_MINOR = 100000000 -- £1,000,000
+function ShopPricing.custom_line(input, uuid)
+    if type(input) ~= "table" then return nil, "line is invalid" end
+    local function text(v)
+        v = str(v)
+        v = v and v:match("^%s*(.-)%s*$") or nil
+        return v ~= "" and v or nil
+    end
+    local name = text(input.name or input.product_name)
+    if not name then return nil, "a custom line needs a name" end
+    local unit = int(input.unit_price_minor, nil)
+    if unit == nil or unit < 0 or unit > ShopPricing.MAX_CUSTOM_UNIT_MINOR then
+        return nil, "a custom line needs a unit price (pence, 0 or more)"
+    end
+    local qty = int(input.qty, 1)
+    if qty < 1 or qty > 10000 then return nil, "qty must be between 1 and 10000" end
+    local rate = num(input.vat_rate, DEFAULT_VAT)
+    if rate < 0 or rate > 1 then return nil, "vat_rate must be between 0 and 1" end
+    local function date(v)
+        v = text(v)
+        return v and v:match("^%d%d%d%d%-%d%d%-%d%d$") and v or nil
+    end
+    local sub = unit * qty
+    local vat = round(sub * rate)
+    return {
+        uuid = uuid,
+        custom = true,
+        product_name = name:sub(1, 200),
+        label = name:sub(1, 200),
+        description = text(input.description) and text(input.description):sub(1, 1000) or nil,
+        period_start = date(input.period_start),
+        period_end = date(input.period_end),
+        qty = qty,
+        price_mode = "fixed",
+        valid = true,
+        vat_rate = rate,
+        unit_price_minor = unit,
+        line_subtotal_minor = sub,
+        line_vat_minor = vat,
+        line_total_minor = sub + vat,
+    }
+end
+
+--- Totals after a whole-order discount (ex VAT): the discount comes off the subtotal (never below 0),
+-- VAT is recomputed at the basket's effective rate and shipping is untouched. Also returns the list
+-- (undiscounted) figures and the discount actually applied.
+function ShopPricing.discounted_totals(lines, shipping_minor, discount_minor)
+    local t = ShopPricing.totals(lines, shipping_minor)
+    local d = math.max(0, math.min(int(discount_minor, 0), t.subtotal_minor))
+    local out = {
+        list_subtotal_minor = t.subtotal_minor, list_vat_minor = t.vat_minor, list_total_minor = t.total_minor,
+        discount_minor = d, shipping_minor = t.shipping_minor, item_count = t.item_count,
+    }
+    if d == 0 then
+        out.subtotal_minor, out.vat_minor, out.total_minor = t.subtotal_minor, t.vat_minor, t.total_minor
+        return out
+    end
+    local rate = ShopPricing.effective_vat_rate(t.subtotal_minor, t.vat_minor)
+    out.subtotal_minor = t.subtotal_minor - d
+    out.vat_minor = round(out.subtotal_minor * rate)
+    out.total_minor = out.subtotal_minor + out.vat_minor + t.shipping_minor
+    return out
+end
+
 --- A basket's effective VAT rate: its VAT ÷ its ex-VAT subtotal. Recomputing VAT after a discount
 -- (or for a refund clawback) with this rate shrinks every line's VAT in proportion, which stays right
 -- for mixed-rate baskets; any single line's rate does not.

@@ -1,0 +1,28 @@
+<h2><%= document_title %> <%= number %></h2>
+
+<p>Hello<% if customer_name and customer_name ~= "" then %> <%= customer_name %><% end %>,</p>
+
+<% if is_order then %>
+<p>Here is your order for authorisation. Please check the items, delivery details and total, then confirm the order and accept our terms using the button below. You can pay online straight away.</p>
+<% else %>
+<p>Here is your quote. Please check the items and total; you can accept it and pay online using the button below.</p>
+<% end %>
+
+<div class="info-box">
+  <p><strong>Total:</strong> <%= total %> inc VAT</p>
+  <% if discount and discount ~= "" then %><p><strong>Discount included:</strong> <%= discount %> ex VAT</p><% end %>
+  <% if delivery_method and delivery_method ~= "" then %><p><strong>Delivery:</strong> <%= delivery_method %></p><% end %>
+  <% if valid_until and valid_until ~= "" then %><p><strong>Valid until:</strong> <%= valid_until %></p><% end %>
+</div>
+
+<p style="text-align:center;margin:28px 0;">
+  <a href="<%= link %>" class="button" style="display:inline-block;padding:12px 28px;border-radius:8px;background:#e6007e;color:#ffffff;text-decoration:none;font-weight:600;"><%= is_order and "Review, confirm and pay" or "View and pay" %></a>
+</p>
+
+<% if attached then %>
+<p>The <%= document_title %> is attached as a PDF for your records. The link in it takes you to the same page.</p>
+<% end %>
+
+<p>Questions? Reply to this email<% if call_phone and call_phone ~= "" then %> or call us on <strong><%= call_phone %></strong><% end %>.</p>
+
+<p>Thanks,<br>The <%= app_name %> team</p>

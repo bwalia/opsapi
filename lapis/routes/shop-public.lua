@@ -286,6 +286,16 @@ return function(app)
         return U.ok(quote)
     end))
 
+    -- Order Authorisation: the customer confirms the order. The shop app records their acceptance of the
+    -- terms (legal ledger, checkpoint "checkout") before calling this. Body { t, accept_terms, name? }.
+    app:post(BASE .. "/quotes/:uuid/authorise", public(function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local quote, err = Quote.authorise(ns_id, self.params.uuid, body.t or self.params.t, body)
+        if not quote then return U.from_err(err) end
+        return U.ok(quote)
+    end))
+
     -- checkout + orders -----------------------------------------------------------
     app:post(BASE .. "/checkout", public(function(self, ns_id)
         local body, bad = body_or_400()

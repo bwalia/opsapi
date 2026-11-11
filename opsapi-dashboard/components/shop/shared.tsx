@@ -160,6 +160,10 @@ export function LinesTable({ lines, currency = 'GBP' }: { lines: ShopLine[]; cur
                 {l.label && l.label !== l.product_name && (
                   <p className="text-xs text-secondary-500">{l.label}</p>
                 )}
+                {l.description && <p className="text-xs text-secondary-600">{l.description}</p>}
+                {(l.period_start || l.period_end) && (
+                  <p className="text-xs text-secondary-500">Period {formatPeriod(l.period_start, l.period_end)}</p>
+                )}
                 {l.breakdown?.length > 0 && (
                   <ul className="mt-1 space-y-0.5 text-xs text-secondary-600">
                     {l.breakdown.map((b, j) => (
@@ -197,8 +201,36 @@ export function LinesTable({ lines, currency = 'GBP' }: { lines: ShopLine[]; cur
   );
 }
 
-export function TotalsBlock({ totals }: { totals: Partial<ShopTotals> }) {
+/** "11 Nov–11 Dec 2026" from two YYYY-MM-DD dates (either may be missing). */
+export function formatPeriod(from?: string | null, to?: string | null): string {
+  const d = (s?: string | null) => (s ? new Date(`${s}T00:00:00Z`) : null);
+  const a = d(from);
+  const b = d(to);
+  const day = (x: Date, year: boolean) =>
+    x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(year ? { year: 'numeric' } : {}), timeZone: 'UTC' });
+  if (a && b) return `${day(a, a.getUTCFullYear() !== b.getUTCFullYear())}–${day(b, true)}`;
+  if (a) return `from ${day(a, true)}`;
+  if (b) return `to ${day(b, true)}`;
+  return '';
+}
+
+export function TotalsBlock({
+  totals,
+}: {
+  totals: Partial<ShopTotals> & {
+    /** Quotes: before discounts. */
+    list_subtotal_minor?: number;
+    discount_minor?: number;
+    discount_label?: string | null;
+    trade_discount_minor?: number;
+    /** Orders: the Trade discount taken at checkout. */
+    member_discount_minor?: number;
+  };
+}) {
   const cur = totals.currency || 'GBP';
+  const trade = totals.trade_discount_minor ?? 0;
+  const staff = totals.discount_minor ?? 0;
+  const discounted = trade > 0 || staff > 0;
   const row = (label: string, v: number | undefined, strong = false) => (
     <div className={cn('flex justify-between gap-8', strong && 'border-t border-secondary-200 pt-2 text-base font-semibold')}>
       <dt className={strong ? 'text-secondary-900' : 'text-secondary-600'}>{label}</dt>
@@ -207,7 +239,11 @@ export function TotalsBlock({ totals }: { totals: Partial<ShopTotals> }) {
   );
   return (
     <dl className="ml-auto w-full max-w-xs space-y-1.5 text-sm">
-      {row('Subtotal (ex VAT)', totals.subtotal_minor)}
+      {discounted && totals.list_subtotal_minor !== undefined && row('Subtotal before discount', totals.list_subtotal_minor)}
+      {trade > 0 && row('VIP Trade discount', -trade)}
+      {staff > 0 && row(totals.discount_label || 'Discount', -staff)}
+      {!discounted && (totals.member_discount_minor ?? 0) > 0 && row('Trade discount (included)', -(totals.member_discount_minor ?? 0))}
+      {row(discounted ? 'Net (ex VAT)' : 'Subtotal (ex VAT)', totals.subtotal_minor)}
       {row('VAT', totals.vat_minor)}
       {row('Shipping', totals.shipping_minor)}
       {row('Total', totals.total_minor, true)}

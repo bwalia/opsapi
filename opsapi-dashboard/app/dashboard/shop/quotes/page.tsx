@@ -64,10 +64,14 @@ function QuotesContent() {
       header: 'Quote',
       render: (qt) => (
         <div>
-          <p className="font-mono font-medium text-secondary-900">{qt.quote_number}</p>
+          <p className="flex items-center gap-2 font-mono font-medium text-secondary-900">
+            {qt.quote_number}
+            {qt.kind === 'order' && <Badge size="sm" variant="info">Order</Badge>}
+          </p>
           <p className="text-xs text-secondary-500">
             {qt.source ? humanize(qt.source) : ''}
             {qt.viewed_at ? ' · viewed' : ''}
+            {qt.authorised_at ? ' · confirmed' : ''}
           </p>
         </div>
       ),
@@ -112,14 +116,19 @@ function QuotesContent() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Shop quotes"
-        description="Quotes from the cart, the AI assistant and phone/email enquiries"
+        title="Quotes and orders"
+        description="Quotes from the cart, the AI assistant and phone/email enquiries, and orders built here for customers to confirm and pay"
         icon={<FileText className="h-5 w-5" />}
         actions={
           canCreate(SHOP_MODULE) ? (
-            <Link href="/dashboard/shop/quotes/new">
-              <Button leftIcon={<Plus className="h-4 w-4" />}>Create quote</Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/dashboard/shop/quotes/new?kind=quote">
+                <Button variant="outline" leftIcon={<Plus className="h-4 w-4" />}>Create quote</Button>
+              </Link>
+              <Link href="/dashboard/shop/quotes/new">
+                <Button leftIcon={<Plus className="h-4 w-4" />}>Create order</Button>
+              </Link>
+            </div>
           ) : undefined
         }
       />
