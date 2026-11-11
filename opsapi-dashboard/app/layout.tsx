@@ -67,6 +67,12 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#0a2226',
+  width: 'device-width',
+  initialScale: 1,
+  // iPhones zoom the whole page in when you tap a box whose text is under 16px (most of ours are
+  // 14px) and stay zoomed, so pages look cut off. Pinch-to-zoom still works (Safari ignores this
+  // for pinching; the iOS app allows it too).
+  maximumScale: 1,
 };
 
 export default function RootLayout({

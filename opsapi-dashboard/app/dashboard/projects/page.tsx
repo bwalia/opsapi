@@ -29,7 +29,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { CreateProjectModal } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
 import type { KanbanProject, CreateKanbanProjectDto, KanbanProjectStatus } from '@/types';
-import { cn } from '@/lib/utils';
+import { cn, emojiIcon } from '@/lib/utils';
 
 // ============================================
 // Status Configuration
@@ -203,7 +203,7 @@ const ProjectCardItem = React.memo(function ProjectCardItem({
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              {project.icon && <span className="text-lg">{project.icon}</span>}
+              {emojiIcon(project.icon) && <span className="text-lg">{emojiIcon(project.icon)}</span>}
               <h3 className="font-semibold text-secondary-900 truncate">{project.name}</h3>
             </div>
             <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full', statusConfig.bgColor, statusConfig.color)}>
@@ -591,8 +591,8 @@ export default function ProjectsPage() {
       {/* Filters & Controls */}
       <div className="bg-surface rounded-xl border border-secondary-200 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          {/* Filter Tabs - Scrollable on mobile */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-2 lg:pb-0 -mx-1 px-1">
+          {/* Filter Tabs - Scrollable on mobile (tabs never shrink: Safari squashes them into each other) */}
+          <div className="flex items-center gap-1 overflow-x-auto -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {FILTER_TABS.map((tab) => {
               const Icon = tab.icon;
               return (
@@ -600,7 +600,7 @@ export default function ProjectsPage() {
                   key={tab.value}
                   onClick={() => setActiveTab(tab.value)}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors',
+                    'flex shrink-0 items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors',
                     activeTab === tab.value
                       ? 'bg-primary-50 text-primary-700'
                       : 'text-secondary-600 hover:bg-secondary-50 hover:text-secondary-900'

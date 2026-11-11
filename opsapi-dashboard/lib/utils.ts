@@ -219,3 +219,11 @@ export function extractApiError(err: unknown, fallback: string): string {
   }
   return data.message || data.title || fallback;
 }
+
+/**
+ * A project/board icon to show as text: only an emoji. Some projects carry an icon *name*
+ * (e.g. "Home", from the Property Deals workflow), which would otherwise print as a word.
+ */
+export function emojiIcon(icon?: string | null): string | null {
+  return icon && /[^\x00-\x7F]/.test(icon) ? icon : null;
+}

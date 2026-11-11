@@ -445,9 +445,10 @@ export default function ProjectDetailPage() {
   // Render
   return (
     <div className="h-full flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 px-3 md:px-6 py-3 md:py-4 border-b border-secondary-200 bg-surface">
-          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+        {/* Header: on a phone the project name gets its own line, the board picker and actions
+            the next, so neither squeezes the other. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 md:px-6 py-3 md:py-4 border-b border-secondary-200 bg-surface">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 sm:flex-1">
             <Button
               variant="ghost"
               size="sm"
@@ -469,7 +470,7 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          <div className="flex items-center justify-end gap-1.5 md:gap-2 shrink-0">
             {/* Board Selector */}
             {!boardsLoading && boards.length > 0 && (
               <BoardSelector

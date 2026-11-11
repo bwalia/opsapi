@@ -14,7 +14,7 @@ import {
   Archive,
   Settings,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { emojiIcon, cn } from '@/lib/utils';
 import type { KanbanProject } from '@/types';
 import {
   formatBudget,
@@ -260,7 +260,7 @@ const ProjectCard = memo(function ProjectCard({
             className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg"
             style={{ backgroundColor: project.color || '#6366f1' }}
           >
-            {project.icon || project.name[0].toUpperCase()}
+            {emojiIcon(project.icon) || project.name[0].toUpperCase()}
           </div>
 
           <div>
