@@ -49,7 +49,7 @@ function FormSubmissionQueries.columns(form)
             if def and def.input ~= false and not seen[f.key] then
                 seen[f.key] = f
                 cols[#cols + 1] = { key = f.key, label = f.label, type = f.type, options = f.options,
-                    scale = f.scale }
+                    scale = f.scale, columns = f.columns }
             end
         end
     end

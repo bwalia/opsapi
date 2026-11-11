@@ -219,6 +219,96 @@ check("the public form routes refuse another workspace's custom domain (view, up
 check("the TXT proof is required, not just DNS pointing at the edge",
     has(read("lapis/lib/forms/domains.lua"), "if found.owned and found.routed then"))
 
+print("tables, addresses, templates, confidential forms, the platform's Turnstile keys")
+local tbl = assert(Fields.normalize({ fields = { { type = "table", label = "Items", required = true, max_rows = 2,
+    columns = { "Product model no.", { label = "Qty", number = true }, { key = "model", label = "Model" } } } } }, {}))
+local tf = tbl.fields[1]
+check("a table's columns get keys from their labels, distinct, and a number flag",
+    tf.columns[1].key == "product_model_no" and tf.columns[2].key == "qty" and tf.columns[2].number == true
+    and tf.columns[3].key == "model" and tf.max_rows == 2)
+check("a table needs 1-8 labelled columns",
+    Fields.normalize({ fields = { { type = "table", label = "T" } } }, {}) == nil
+    and Fields.normalize({ fields = { { type = "table", label = "T", columns = { "" } } } }, {}) == nil)
+local rows = assert(Fields.validate(tbl, { items = {
+    { product_model_no = " DGX H100 ", qty = "2" }, { product_model_no = "", qty = "" }, { model = "x" } } }))
+check("blank rows are dropped, text is trimmed, numbers are numbers",
+    #rows.items == 2 and rows.items[1].product_model_no == "DGX H100" and rows.items[1].qty == 2)
+local _, terr = Fields.validate(tbl, { items = { { product_model_no = "", qty = "" } } })
+check("a required table with only blank rows is missing", terr and terr.items == "is required")
+_, terr = Fields.validate(tbl, { items = { { qty = "two" } } })
+check("a number column refuses text", terr and terr.items == "Qty must be a number")
+_, terr = Fields.validate(tbl, { items = { { model = "a" }, { model = "b" }, { model = "c" } } })
+check("a table keeps to its row limit", terr and terr.items:find("at most 2 rows", 1, true))
+check("a table answer reads as label: value rows",
+    Fields.show(tf, rows.items) == "Product model no.: DGX H100, Qty: 2; Model: x")
+check("a table can only be checked for answered or not",
+    Fields.normalize({ fields = { tf, { type = "short_text", label = "Q",
+        logic = { rules = { { field = "items", op = "eq", value = "x" } } } } } }, {}) == nil
+    and Fields.normalize({ fields = { tf, { type = "short_text", label = "Q",
+        logic = { rules = { { field = "items", op = "filled" } } } } } }, {}) ~= nil)
+local addr = assert(Fields.normalize({ fields = { { type = "address", label = "A" } } }, {}))
+local av = assert(Fields.validate(addr, { a = { line1 = "2788 San Tomas Expressway", city = "Santa Clara",
+    region = "CA", postcode = "95051", country = "United States" } }))
+check("an address has a state or region", av.a.region == "CA"
+    and Fields.show(addr.fields[1], av.a) == "2788 San Tomas Expressway, Santa Clara, CA, 95051, United States")
+
+local Templates = require("lib.forms.templates")
+local bad = {}
+for _, t in ipairs(Templates.list) do
+    local roles = {}
+    for _, target in ipairs(t.targets) do
+        if target == "customer" or target == "lead" or target == "user" then
+            roles["contact.name"], roles["contact.email"] = true, true
+        end
+    end
+    local ok_t, err_t = Fields.normalize({ fields = t.fields }, roles)
+    if not ok_t then bad[#bad + 1] = t.key .. ": " .. tostring(err_t) end
+end
+check("every template is a valid form", #bad == 0, table.concat(bad, "; "))
+local q = Templates.get("end_user_questionnaire")
+local qs = assert(Fields.normalize({ fields = q.fields }, {}))
+local by = {}
+for _, f in ipairs(qs.fields) do by[f.key] = f end
+check("the questionnaire keeps its answer keys, steps and follow-up questions",
+    by.purchase_order and by.items and by.items.type == "table" and by.declaration
+    and by.third_parties_details.logic.rules[1].field == "third_parties"
+    and by.remote_access_security.logic.rules[1].field == "remote_access_permitted"
+    and by.product_access_control and by.remote_access_permitted.type == "boolean")
+check("the questionnaire asks for the \"I'm human\" check and is confidential",
+    q.settings.captcha == true and q.settings.confidential == true)
+local qa = { purchase_order = "PO-1", contact_email = "a@b.co", remote_access_permitted = false, third_parties = true }
+local _, qerr = Fields.validate(qs, qa)
+check("a follow-up is required only when its question is answered Yes",
+    qerr and qerr.third_parties_details == "is required" and qerr.remote_access_model == nil)
+check("a template's \"I'm human\" check is dropped while the workspace has no keys",
+    has(read("lapis/queries/FormQueries.lua"),
+        "raw_settings.captcha and not require(\"lib.forms.workspace\").turnstile"))
+
+check("the public form gets a table's columns and row limit",
+    has(read("lapis/queries/FormQueries.lua"), '"accept", "columns", "max_rows" }'))
+
+local jobs = read("lapis/lib/forms/jobs.lua")
+check("a confidential form's answers stay out of alert emails, chat posts and auto-replies",
+    has(jobs, "if settings.confidential then list, text = {}, \"\" end")
+    and has(jobs, "settings.confidential and {} or schema.fields"))
+check("a confidential form's answers are never sent to AI",
+    has(read("lapis/lib/forms/ai.lua"), "decode(form.settings, {}).confidential then"))
+
+local real_getenv = os.getenv
+local env = {}
+os.getenv = function(k) if env[k] ~= nil then return env[k] end return real_getenv(k) end -- luacheck: ignore
+package.loaded["lapis.db"] = package.loaded["lapis.db"] or { NULL = {}, query = function() return {} end }
+package.loaded["helper.global"] = package.loaded["helper.global"] or {}
+local Workspace = require("lib.forms.workspace")
+check("no platform keys and no workspace keys: no check", Workspace.turnstile(1) == nil)
+env.TURNSTILE_SITE_KEY, env.TURNSTILE_SECRET_KEY = "1x00000000000000000000AA", "1x0000000000000000000000000000000AA"
+local site, sec = Workspace.turnstile(1)
+check("a workspace without keys uses the platform's", site == "1x00000000000000000000AA"
+    and sec == "1x0000000000000000000000000000000AA")
+env.TURNSTILE_SECRET_KEY = "bad key!"
+check("a malformed platform key is ignored", Workspace.turnstile(1) == nil)
+os.getenv = real_getenv -- luacheck: ignore
+
 print("")
 print(failures == 0 and "All checks passed." or (failures .. " check(s) failed."))
 os.exit(failures == 0 and 0 or 1)

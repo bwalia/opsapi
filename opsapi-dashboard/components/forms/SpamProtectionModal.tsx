@@ -47,9 +47,10 @@ export default function SpamProtectionModal({ open, onClose, onSaved }: {
   };
 
   const ready = !!current?.turnstile.site_key && current.turnstile.has_secret;
+  const platform = !!current?.turnstile.platform;
   return (
     <Modal isOpen={open} onClose={onClose} title="Spam protection" size="lg"
-      description="Every form already blocks most bots (a hidden trap field, a minimum time and rate limits). Add Cloudflare Turnstile for an extra “I'm not a robot” check on the forms you choose."
+      description="Every form already blocks most bots (a hidden trap field, a minimum time and rate limits). Cloudflare Turnstile adds an “I'm human” check on the forms you choose."
       footer={
         <div className="flex w-full items-center gap-2">
           {ready && <Button variant="ghost" className="text-error-600" onClick={() => save(true)} disabled={busy}>Remove keys</Button>}
@@ -64,8 +65,16 @@ export default function SpamProtectionModal({ open, onClose, onSaved }: {
       <div className="space-y-4">
         <div className={`flex items-center gap-2 rounded-lg p-3 text-sm ${ready ? 'bg-success-500/10 text-success-600' : 'bg-secondary-50 text-secondary-600'}`}>
           <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-          {ready ? 'Turnstile is set up. Turn it on per form in its Settings tab.' : 'Not set up yet.'}
+          {ready ? 'Your own Turnstile keys are set up. Turn the check on per form in its Settings tab.'
+            : platform ? 'Ready to use: the platform’s Turnstile keys cover your forms. Turn the check on per form in its Settings tab.'
+              : 'Not set up yet.'}
         </div>
+        {platform && !ready && (
+          <p className="text-sm text-secondary-600">
+            You only need your own keys to use your own Cloudflare account, or if your forms are on your own custom
+            domain (the platform&apos;s keys only cover the platform&apos;s addresses).
+          </p>
+        )}
         <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary-600">
           <li>In the Cloudflare dashboard, open <strong>Turnstile → Add widget</strong>{' '}and add the domains your forms are on (this dashboard&apos;s, and your custom domain if you use one).</li>
           <li>Copy the <strong>site key</strong> and the <strong>secret key</strong> here.</li>

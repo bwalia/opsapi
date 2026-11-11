@@ -1,9 +1,18 @@
 --[[
     Starter forms (GET /api/v2/forms/templates; the agent's create_form can
-    start from one). Each is a title, description, fields and targets; it is
-    normalized like any other form when used, so targets the deployment lacks
-    are dropped by the caller (FormQueries.create).
+    start from one). Each is a title, description, fields, targets and
+    optional settings; it is normalized like any other form when used, so
+    targets the deployment lacks are dropped by the caller (FormQueries.create),
+    and so is the "I'm human" check while the workspace has no Turnstile keys.
 ]]
+
+-- "Show only when <key> is Yes."
+local function if_yes(key)
+    return { match = "all", rules = { { field = key, op = "eq", value = true } } }
+end
+
+local DECLARATION = "I confirm that the information in this form is true, complete and accurate to the best of my "
+    .. "knowledge, and that I am authorised to give it on behalf of the organisation named."
 
 local Templates = {
     {
@@ -99,6 +108,258 @@ local Templates = {
             { type = "date", label = "Preferred date", required = true },
             { type = "time", label = "Preferred time" },
             { type = "long_text", label = "Reason for the appointment", maps_to = "notes" },
+        },
+    },
+    {
+        key = "support_request",
+        title = "Support request",
+        description = "Customers report a problem with a product or order, with screenshots or logs.",
+        targets = {},
+        settings = { captcha = true },
+        fields = {
+            { type = "name", label = "Your name", required = true },
+            { type = "email", label = "Email", required = true },
+            { type = "phone", label = "Phone" },
+            { type = "short_text", label = "Order or purchase order number", width = "half" },
+            { type = "short_text", label = "Product or serial number", width = "half" },
+            { type = "radio", label = "How urgent is it?", required = true,
+              options = { "Something is down", "Something isn't working properly", "A question" } },
+            { type = "long_text", label = "What happened?", required = true,
+              help = "What you expected, what happened instead, and any error messages." },
+            { type = "file_upload", label = "Screenshots or logs", max_files = 3 },
+        },
+    },
+    {
+        key = "product_return",
+        title = "Product return (RMA)",
+        description = "Customers ask to return a product: order, serial number, reason and photos.",
+        targets = {},
+        settings = { captcha = true },
+        fields = {
+            { type = "name", label = "Your name", required = true },
+            { type = "email", label = "Email", required = true },
+            { type = "phone", label = "Phone" },
+            { type = "short_text", label = "Order number", required = true, width = "half" },
+            { type = "short_text", label = "Serial number", required = true, width = "half" },
+            { type = "short_text", label = "Product model", required = true },
+            { type = "radio", label = "Why are you returning it?", required = true,
+              options = { "Faulty", "Damaged in delivery", "Wrong item", "No longer needed", "Other" } },
+            { type = "long_text", label = "Tell us more", required = true },
+            { type = "file_upload", label = "Photos", max_files = 5, accept = "images" },
+            { type = "address", label = "Collection address", required = true },
+        },
+    },
+    {
+        key = "supplier_registration",
+        title = "Supplier registration",
+        description = "New suppliers register their company, contacts, what they supply and their certificates.",
+        targets = {},
+        settings = { captcha = true },
+        fields = {
+            { type = "short_text", label = "Company name", required = true },
+            { type = "short_text", label = "Company registration number", width = "half" },
+            { type = "short_text", label = "VAT or tax number", width = "half" },
+            { type = "address", label = "Address", required = true },
+            { type = "url", label = "Website" },
+            { type = "name", label = "Contact name", required = true },
+            { type = "email", label = "Contact email", required = true },
+            { type = "phone", label = "Contact phone" },
+            { type = "long_text", label = "What products or services do you supply?", required = true },
+            { type = "file_upload", label = "Certificates (for example ISO 9001, insurance)", max_files = 5,
+              accept = "documents" },
+            { type = "consent", label = "Declaration", required = true, text = DECLARATION },
+        },
+    },
+    {
+        key = "business_onboarding",
+        title = "Business customer onboarding",
+        description = "Know your customer: company details, owners and documents, with a signed declaration.",
+        targets = { "customer" },
+        settings = { captcha = true, confidential = true },
+        fields = {
+            { type = "heading", label = "Company" },
+            { type = "short_text", label = "Company legal name", required = true, maps_to = "company" },
+            { type = "short_text", label = "Trading name (if different)" },
+            { type = "short_text", label = "Company registration number", required = true, width = "half" },
+            { type = "short_text", label = "VAT or tax number", width = "half" },
+            { type = "short_text", label = "Country of incorporation", required = true, width = "half" },
+            { type = "url", label = "Website", width = "half" },
+            { type = "address", label = "Registered address", required = true, maps_to = "address" },
+            { type = "long_text", label = "Trading address, if different" },
+            { type = "long_text", label = "What does the business do?", required = true },
+            { type = "heading", label = "Directors and owners" },
+            { type = "table", label = "Directors and owners of 25% or more", required = true, max_rows = 20,
+              columns = { "Full name", "Role", { label = "Ownership %", number = true } } },
+            { type = "heading", label = "Contact" },
+            { type = "name", label = "Your name", required = true },
+            { type = "email", label = "Your email", required = true },
+            { type = "phone", label = "Your phone", maps_to = "phone" },
+            { type = "short_text", label = "Your job title", maps_to = "job_title" },
+            { type = "file_upload", label = "Documents", max_files = 5, accept = "documents",
+              help = "For example the certificate of incorporation and a recent proof of address." },
+            { type = "consent", label = "Declaration", required = true, text = DECLARATION },
+        },
+    },
+    {
+        key = "end_user_questionnaire",
+        title = "End-user questionnaire (export licence)",
+        description = "Licence application questionnaire for datacenter GPUs, servers and DGX: end user, end use, "
+            .. "security, items and signature.",
+        targets = {},
+        settings = {
+            captcha = true,
+            confidential = true,
+            success_message = "Thank you. We have received your questionnaire and will keep it confidential.",
+        },
+        fields = {
+            { type = "paragraph", label = "", text = "HIGHLY CONFIDENTIAL BUSINESS INFORMATION\n\n"
+                .. "Please complete this form with the information needed for a licence application to the Bureau "
+                .. "of Industry and Security (BIS).\n\n"
+                .. "For entity names, give the full legal name of the entity and, if applicable, the relevant "
+                .. "department or agency. For entity addresses, give the street address, city, state or region, "
+                .. "postal code and country." },
+            { type = "short_text", key = "purchase_order", label = "Your purchase order number", required = true,
+              help = "The purchase order this questionnaire refers to." },
+            { type = "email", key = "contact_email", label = "Your email", required = true,
+              help = "We'll contact you here if we have questions about your answers." },
+            { type = "phone", key = "contact_phone", label = "Your phone" },
+            { type = "heading", label = "1. Applicant" },
+            { type = "paragraph", label = "", text = "Entity name: NVIDIA Corporation\n"
+                .. "Entity address: 2788 San Tomas Expressway, Santa Clara, CA 95051" },
+
+            { type = "page_break", label = "End users and end use" },
+            { type = "heading", label = "2. End users and end use" },
+            { type = "paragraph", label = "",
+              text = "Where will the end-product (system, server, other) be installed?" },
+            { type = "short_text", key = "site_entity_name", label = "Entity name", required = true },
+            { type = "address", key = "site_entity_address", label = "Entity address", required = true },
+            { type = "long_text", key = "site_hq_address", label = "Headquarters address", required = true,
+              help = "If there is more than one headquarters, list them all. If it is the address above, say so." },
+            { type = "radio", key = "site_type", required = true,
+              label = "Is this location a government facility, a commercial entity or a private residence?",
+              options = { "Government facility", "Commercial entity", "Private residence" } },
+            { type = "long_text", key = "end_user_business", required = true,
+              label = "Please give a brief description of the end user's business activities." },
+            { type = "long_text", key = "site_relationship",
+              label = "If the installation location is different from the end user's address, please explain the "
+                .. "relationship between these entities." },
+
+            { type = "heading", label = "Installation" },
+            { type = "short_text", key = "installer_name", required = true,
+              label = "Who will be responsible for and perform installation? Entity name",
+              help = "If more than one entity, list them all." },
+            { type = "long_text", key = "installer_address", label = "Installer's address", required = true,
+              help = "Street address, city, region or province, postal code and country." },
+            { type = "long_text", key = "installer_hq_address", label = "Installer's headquarters address",
+              required = true, help = "Street address, city, region or province, postal code and country." },
+            { type = "boolean", key = "third_parties", required = true,
+              label = "Will any third parties be involved in the installation process besides the entity listed?" },
+            { type = "long_text", key = "third_parties_details", label = "Please give the third parties' details.",
+              required = true, logic = if_yes("third_parties") },
+
+            { type = "heading", label = "Operation and use" },
+            { type = "short_text", key = "operator_name", required = true,
+              label = "Who will be responsible for the operation and use of the end-product? Entity name",
+              help = "If more than one entity, list them all." },
+            { type = "long_text", key = "operator_address", label = "Operator's address", required = true,
+              help = "Street address, city, region or province, postal code and country." },
+            { type = "long_text", key = "operator_hq_address", label = "Operator's headquarters address",
+              required = true, help = "Street address, city, region or province, postal code and country." },
+
+            { type = "heading", label = "End use" },
+            { type = "multi_select", key = "primary_purpose", required = true,
+              label = "What is the primary purpose of the end-product?",
+              options = { "Training", "Inferencing", "Recommendation", "Scientific computing", "Others" } },
+            { type = "long_text", key = "primary_purpose_details", required = true,
+              label = "Please give a detailed explanation of the primary purpose(s) selected above." },
+            { type = "multi_select", key = "applications", required = true,
+              label = "What applications will run on the end-product?",
+              options = { "Autonomous driving", "AI chatbots and personal assistants", "Healthcare",
+                  "Financial services", "Manufacturing", "Energy", "Defense or any military usage",
+                  "Public sector and research", "Generative AI and data analytics", "Others" } },
+            { type = "long_text", key = "applications_details", required = true,
+              label = "Please give details of the applications selected above." },
+            { type = "boolean", key = "military_use", required = true,
+              label = "Will users be permitted to train, run or develop applications for military end use, or "
+                .. "military-intelligence end use, on the system?" },
+            { type = "long_text", key = "military_use_details", required = true, logic = if_yes("military_use"),
+              label = "Which applications will be permitted, and under what conditions?" },
+            { type = "boolean", key = "advanced_weapons", required = true,
+              label = "Will the system be used for the development, production or use of advanced weapons systems?" },
+
+            { type = "page_break", label = "Product security" },
+            { type = "heading", label = "3. Product security" },
+            { type = "boolean", key = "restricted_party_access", required = true,
+              label = "Will the system, or any data processed or stored on it, be accessible to any individuals or "
+                .. "entities employed by, affiliated with or acting on behalf of any party on the Entity List or "
+                .. "any other restrictive list?",
+              help = "This includes physical access, logical or network access, and remote access." },
+            { type = "long_text", key = "restricted_party_access_details", required = true,
+              logic = if_yes("restricted_party_access"), label = "Which parties, and what access will they have?" },
+            { type = "boolean", key = "china_ai_training", required = true,
+              label = "Will the system be used to train AI models, directly or indirectly, on behalf of (1) any "
+                .. "company headquartered in China, (2) any company with an ultimate parent headquartered in China, "
+                .. "or (3) any government entity in China?" },
+            { type = "boolean", key = "sensitive_information", required = true,
+              label = "Will the system handle or store any sensitive or proprietary information?" },
+            { type = "long_text", key = "sensitive_information_measures", required = true,
+              logic = if_yes("sensitive_information"),
+              label = "What measures will be in place to protect this information?",
+              help = "For example encryption and access controls." },
+            { type = "boolean", key = "third_party_software", required = true,
+              label = "Will any third-party software or services be used in conjunction with the system?" },
+            { type = "long_text", key = "third_party_software_details", required = true,
+              logic = if_yes("third_party_software"),
+              label = "Please identify them and describe any potential security implications." },
+            { type = "boolean", key = "cyber_activities", required = true,
+              label = "Will the system be used in any activities related to cyber espionage or cyber warfare?" },
+            { type = "long_text", key = "cyber_activities_details", required = true,
+              logic = if_yes("cyber_activities"), label = "Please specify." },
+
+            { type = "page_break", label = "Site, access and remote access" },
+            { type = "heading", label = "4. Site security" },
+            { type = "long_text", key = "site_security", required = true,
+              label = "Describe the security measures in place for controlling physical access to the site of the "
+                .. "end-product.",
+              help = "For example entry points and perimeter security, surveillance, authentication methods, "
+                .. "security staff, intrusion detection, and data centre or server room security." },
+            { type = "short_text", key = "site_security_owner", required = true,
+              label = "Who is responsible for overseeing physical security at the site?" },
+            { type = "heading", label = "Product access" },
+            { type = "long_text", key = "product_access_control", required = true,
+              label = "How do you manage and control access to the end-product within the site?" },
+            { type = "short_text", key = "product_access_owner", required = true,
+              label = "Who is responsible for managing and controlling access to the end-product?" },
+            { type = "long_text", key = "access_policies", required = true,
+              label = "Are there any internal security policies or procedures specific to accessing and using the "
+                .. "end-product?", help = "If there are, describe them. If not, say so." },
+            { type = "heading", label = "Remote access" },
+            { type = "boolean", key = "remote_access_permitted", required = true,
+              label = "Is remote access to the end-product permitted for any purpose (for example maintenance, "
+                .. "support or operation)?" },
+            { type = "long_text", key = "remote_access_model", required = true,
+              logic = if_yes("remote_access_permitted"),
+              label = "What is the business model, and how is remote access controlled and monitored?" },
+            { type = "long_text", key = "remote_access_security", required = true,
+              logic = if_yes("remote_access_permitted"),
+              label = "What protocols or technologies are in place to secure remote connections and ensure proper "
+                .. "permissions?" },
+
+            { type = "page_break", label = "Items and signature" },
+            { type = "heading", label = "5. Items to be exported under the licence" },
+            { type = "table", key = "items", label = "Items", required = true, max_rows = 50,
+              help = "One row per product model.",
+              columns = { { key = "model", label = "Product model no." },
+                  { key = "description", label = "Description" },
+                  { key = "qty", label = "Qty", number = true } } },
+            { type = "heading", label = "6. Signature" },
+            { type = "short_text", key = "signatory_name", label = "Name of signatory", required = true },
+            { type = "short_text", key = "signatory_position", label = "Position of signatory in the company",
+              required = true },
+            { type = "date", key = "signature_date", label = "Date of signature", required = true },
+            { type = "short_text", key = "signature", label = "Signature", required = true,
+              placeholder = "Type your full name", help = "Typing your full name here counts as your signature." },
+            { type = "consent", key = "declaration", label = "Declaration", required = true, text = DECLARATION },
         },
     },
 }

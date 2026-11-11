@@ -6,7 +6,7 @@
 
 import {
   AlignLeft, AtSign, CalendarDays, CircleDot, Clock, EyeOff, FileUp, Hash, Heading, Link2, ListChecks,
-  ListFilter, MapPin, Phone, Pilcrow, ShieldCheck, SplitSquareVertical, Star, ToggleLeft, Type, UserRound,
+  ListFilter, MapPin, Phone, Pilcrow, ShieldCheck, SplitSquareVertical, Star, Table, ToggleLeft, Type, UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import type { FieldType, FormField, MapsTo } from '@/services/forms.service';
@@ -54,6 +54,10 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     defaults: () => ({ label: 'Website' }) },
   { type: 'file_upload', label: 'File upload', icon: FileUp, group: 'Other', input: true,
     defaults: () => ({ label: 'Upload a file', max_files: 1, max_size_mb: 10, accept: 'any' }) },
+  { type: 'table', label: 'Table', icon: Table, group: 'Other', input: true,
+    defaults: () => ({ label: 'Items', max_rows: 20, columns: [
+      { key: 'item', label: 'Item' }, { key: 'description', label: 'Description' }, { key: 'qty', label: 'Qty', number: true },
+    ] }) },
   { type: 'consent', label: 'Consent', icon: ShieldCheck, group: 'Other', input: true, maps: ['marketing_consent'],
     defaults: () => ({ label: 'Consent', text: 'I agree to the privacy policy.', required: true }) },
   { type: 'hidden', label: 'Hidden (from link)', icon: EyeOff, group: 'Other', input: true,

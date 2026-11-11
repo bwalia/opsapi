@@ -132,11 +132,14 @@ function FormQueries.cleanSettings(raw, current, namespace_id)
         captcha = function(v)
             if v ~= true and v ~= "true" then return false end
             if namespace_id and not require("lib.forms.workspace").turnstile(namespace_id) then
-                return nil, "needs your workspace's Turnstile keys first (Forms → Spam protection)"
+                return nil, "needs Turnstile keys first (Forms → Spam protection)"
             end
             return true
         end,
         notify_in_app = function(v) return v == true or v == "true" end,
+        -- Answers stay in the dashboard: no answers in alert emails, chat posts
+        -- or auto-replies, and never sent to AI (lib/forms/jobs.lua, ai.lua).
+        confidential = function(v) return v == true or v == "true" end,
         -- Post each new response to one of this workspace's chat channels.
         chat_channel_uuid = function(v)
             if type(v) ~= "string" or not v:match(UUID) then return nil, "must be a chat channel" end
@@ -361,7 +364,17 @@ function FormQueries.create(namespace_id, actor_uuid, body, auth, origin)
         or (template and { fields = template.fields }) or { fields = {} }
     local schema, serr = Fields.normalize(raw_schema, roles)
     if not schema then return nil, serr end
-    local settings, err = FormQueries.cleanSettings(body.settings, {}, namespace_id)
+    local raw_settings = body.settings
+    if raw_settings == nil and template and template.settings then
+        -- A template's settings are suggestions too: its "I'm human" check
+        -- needs keys this workspace may not have yet.
+        raw_settings = {}
+        for k, v in pairs(template.settings) do raw_settings[k] = v end
+        if raw_settings.captcha and not require("lib.forms.workspace").turnstile(namespace_id) then
+            raw_settings.captcha = nil
+        end
+    end
+    local settings, err = FormQueries.cleanSettings(raw_settings, {}, namespace_id)
     if not settings then return nil, err end
 
     for _ = 1, 3 do -- a public_id collision (62^12 space) is astronomically rare; retry anyway
@@ -543,7 +556,7 @@ end
 
 -- What a visitor's browser gets: the published fields without internals.
 local PUBLIC_FIELD_KEYS = { "key", "type", "label", "help", "placeholder", "required", "options", "validation",
-    "scale", "text", "param", "width", "logic", "max_files", "max_size_mb", "accept" }
+    "scale", "text", "param", "width", "logic", "max_files", "max_size_mb", "accept", "columns", "max_rows" }
 
 function FormQueries.publicSchema(schema)
     local fields = {}
@@ -551,6 +564,7 @@ function FormQueries.publicSchema(schema)
         local out = {}
         for _, k in ipairs(PUBLIC_FIELD_KEYS) do out[k] = f[k] end
         if out.options then out.options = setmetatable(out.options, cjson.array_mt) end
+        if out.columns then out.columns = setmetatable(out.columns, cjson.array_mt) end
         fields[#fields + 1] = out
     end
     return setmetatable(fields, cjson.array_mt)

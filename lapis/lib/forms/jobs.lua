@@ -84,6 +84,9 @@ local function deliver(event)
     local brand = { app_name = s.namespace_name }
     local origin = origin_of(s)
     local list, text = answer_lines(schema, answers)
+    -- A confidential form's answers stay in the dashboard (the email and chat
+    -- post still link to the response).
+    if settings.confidential then list, text = {}, "" end
 
     -- 4/5 (no email needed): the in-app alert and the chat channel post.
     local alerts_ok, alerts_err = pcall(FormJobs.alerts, s, settings, sent, list, origin)
@@ -118,7 +121,7 @@ local function deliver(event)
     local to = nonnull(s.respondent_email)
     if reply.enabled and to and not sent.auto_reply then
         local vars = { form_title = s.title }
-        for _, f in ipairs(schema.fields or {}) do
+        for _, f in ipairs(settings.confidential and {} or schema.fields or {}) do
             if answers[f.key] ~= nil then vars[f.key] = Fields.show(f, answers[f.key]) end
         end
         local ok, err = NamespaceMail.send(s.namespace_id, "forms.auto_reply", to, {

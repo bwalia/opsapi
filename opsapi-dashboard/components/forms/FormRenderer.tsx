@@ -8,7 +8,7 @@
  */
 
 import React, { useRef, useState } from 'react';
-import { FileUp, Loader2, Paperclip, Star, X } from 'lucide-react';
+import { FileUp, Loader2, Paperclip, Plus, Star, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FormField } from '@/services/forms.service';
 import type { UploadedFile } from '@/services/forms-public.service';
@@ -35,6 +35,14 @@ function str(v: unknown): string {
   return typeof v === 'string' || typeof v === 'number' ? String(v) : '';
 }
 
+type Row = Record<string, unknown>;
+
+/** The rows of a table answer that have something in them (the server drops the blank ones too). */
+export function filledRows(v: unknown): Row[] {
+  if (!Array.isArray(v)) return [];
+  return (v as Row[]).filter((r) => r && typeof r === 'object' && Object.values(r).some((c) => str(c).trim() !== ''));
+}
+
 /** Client-side required check (the server re-checks everything). */
 export function missingRequired(fields: FormField[], values: Answers, shown?: Set<string>): Record<string, string> {
   const errors: Record<string, string> = {};
@@ -45,6 +53,7 @@ export function missingRequired(fields: FormField[], values: Answers, shown?: Se
     let empty = v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
     if (f.type === 'name') empty = !str((v as { first?: string })?.first).trim();
     if (f.type === 'address') empty = !str((v as { line1?: string })?.line1).trim();
+    if (f.type === 'table') empty = filledRows(v).length === 0;
     if (f.type === 'consent') empty = v !== true;
     if (empty) errors[f.key] = f.type === 'consent' ? 'Please tick this box.' : 'This field is required.';
   }
@@ -221,6 +230,9 @@ function Field({ field: f, value, error, onChange, disabled, id, upload }: {
     case 'file_upload':
       return <FileField field={f} value={value} error={error} onChange={onChange} disabled={disabled} id={id} upload={upload} />;
 
+    case 'table':
+      return <TableField field={f} value={value} error={error} onChange={onChange} disabled={disabled} id={id} />;
+
     case 'consent':
       return (
         <div>
@@ -269,8 +281,9 @@ function Field({ field: f, value, error, onChange, disabled, id, upload }: {
             {part('line1', 'Address line 1', 'address-line1', 'sm:col-span-2')}
             {part('line2', 'Address line 2', 'address-line2', 'sm:col-span-2')}
             {part('city', 'Town or city', 'address-level2')}
-            {part('postcode', 'Postcode', 'postal-code')}
-            {part('country', 'Country', 'country-name', 'sm:col-span-2')}
+            {part('region', 'State, county or region', 'address-level1')}
+            {part('postcode', 'Postcode or ZIP', 'postal-code')}
+            {part('country', 'Country', 'country-name')}
           </div>
           <Help id={id} field={f} error={error} />
         </fieldset>
@@ -300,6 +313,62 @@ function Field({ field: f, value, error, onChange, disabled, id, upload }: {
       );
     }
   }
+}
+
+/**
+ * A table question: rows under fixed columns (line items). A row per line on
+ * wider screens; on a phone each row is a card with its column labels.
+ */
+function TableField({ field: f, value, error, onChange, disabled, id }: {
+  field: FormField; value: unknown; error?: string; onChange: (v: unknown) => void; disabled?: boolean; id: string;
+}) {
+  const cols = f.columns || [];
+  const rows: Row[] = Array.isArray(value) && value.length ? (value as Row[]) : [{}];
+  const max = f.max_rows || 20;
+  const grid = { '--cols': `${cols.map((c) => (c.number ? 'minmax(0,0.5fr)' : 'minmax(0,1fr)')).join(' ')} 2.75rem` } as React.CSSProperties;
+  const gridCls = 'grid grid-cols-1 gap-2 sm:[grid-template-columns:var(--cols)] sm:items-center';
+  const set = (i: number, key: string, v: string) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
+  return (
+    <fieldset aria-describedby={describedBy(id, f, error)}>
+      <Label field={f} as="legend" />
+      <div style={grid} className="space-y-2">
+        <div className={cn(gridCls, 'hidden px-1 text-xs font-medium text-secondary-500 sm:grid')} aria-hidden="true">
+          {cols.map((c) => <span key={c.key}>{c.label}</span>)}
+          <span />
+        </div>
+        {rows.map((r, i) => (
+          <div key={i} className={cn(gridCls, 'rounded-lg border border-secondary-200 p-3 sm:border-0 sm:p-0')}>
+            {cols.map((c) => (
+              <label key={c.key} className="block">
+                <span className="mb-1 block text-xs font-medium text-secondary-500 sm:sr-only">{c.label}</span>
+                <span className="sr-only">{`, row ${i + 1}`}</span>
+                <input value={str(r[c.key])} disabled={disabled} inputMode={c.number ? 'decimal' : undefined}
+                  maxLength={c.number ? 30 : 500} onChange={(e) => set(i, c.key, e.target.value)}
+                  aria-invalid={error ? true : undefined}
+                  className={cn(control, border(error), 'py-2 text-sm')} />
+              </label>
+            ))}
+            <div className="flex justify-end sm:justify-center">
+              {rows.length > 1 && (
+                <button type="button" disabled={disabled} aria-label={`Remove row ${i + 1}`}
+                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md text-secondary-500 hover:bg-secondary-100">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {rows.length < max && (
+        <button type="button" disabled={disabled} onClick={() => onChange([...rows, {}])}
+          className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[var(--form-accent,var(--color-primary-600))] hover:underline">
+          <Plus className="h-4 w-4" aria-hidden="true" /> Add a row
+        </button>
+      )}
+      <Help id={id} field={f} error={error} />
+    </fieldset>
+  );
 }
 
 const ACCEPT: Record<string, string> = {
