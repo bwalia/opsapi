@@ -321,9 +321,13 @@ export const shopService = {
     return unwrap<ShopQuote>(res);
   },
 
-  /** Email the customer the Order Authorisation / quote (PDF attached, link to confirm and pay). */
-  async sendQuote(uuid: string, to?: string): Promise<ShopQuoteSendResult> {
-    const res = await apiClient.post(`${BASE}/quotes/${uuid}/send`, to ? { to } : {}, JSON_BODY);
+  /** Email the customer the Order Authorisation / quote (PDF attached, link to confirm and pay).
+   *  opts.test: send it to you instead, marked TEST, with a preview link; the quote isn't marked as sent. */
+  async sendQuote(uuid: string, to?: string, opts: { test?: boolean } = {}): Promise<ShopQuoteSendResult> {
+    const body: Record<string, unknown> = {};
+    if (to) body.to = to;
+    if (opts.test) body.test = true;
+    const res = await apiClient.post(`${BASE}/quotes/${uuid}/send`, body, JSON_BODY);
     return unwrap<ShopQuoteSendResult>(res);
   },
 

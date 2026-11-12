@@ -603,8 +603,19 @@ end
 
 --- POST /quotes/:uuid/send — email the customer the Order Authorisation (or quote) with the PDF attached
 -- and the link to confirm and pay. Marks a draft as sent. Returns ({ to, attached, sent_at }) or (nil, err).
+-- opts.test: a test send to staff (opts.to, else the signed-in user, else the workspace owner) — the same
+-- email marked TEST, its link opens the page in preview (confirm and pay turned off), and the quote is not
+-- marked as sent.
 function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
     opts = opts or {}
+    if opts.test and not U.nz(opts.to) then
+        local me = opts.user_id and db.query("SELECT email FROM users WHERE id = ?", opts.user_id)[1]
+        opts.to = me and U.nz(me.email) or nil
+        if not opts.to then
+            local N = require("queries.CrmLeadNotificationQueries")
+            opts.to = N.resolveAdminEmail(ns_id, N.getEffective(ns_id))
+        end
+    end
     local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
     if not q then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
     maybe_expire(q)
@@ -615,7 +626,8 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
     local customer = U.dec(q.customer, {})
     local to = U.nz(opts.to) or customer.email
     if not to or not tostring(to):match("^[^@%s]+@[^@%s]+%.[^@%s]+$") then
-        return nil, U.err(400, "VALIDATION_ERROR", "The customer needs an email address")
+        return nil, U.err(400, "VALIDATION_ERROR", opts.test and "No email address to send the test to"
+            or "The customer needs an email address")
     end
     if #Pricing.unpriced_lines(U.dec(q.lines, {})) > 0 then
         return nil, U.err(409, "QUOTE_PRICING_PENDING", "Price every line before sending it")
@@ -637,7 +649,8 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
     end
     local discount = discount_of(q)
     local sent, merr = Mail.send({
-        to = to, subject = title .. " " .. q.quote_number .. " from Workstation", template = "shop_order_authorisation",
+        to = to, subject = (opts.test and "[TEST] " or "") .. title .. " " .. q.quote_number .. " from Workstation",
+        template = "shop_order_authorisation",
         smtp = smtp, sync = true,
         from_email = smtp and smtp.from_email or nil,
         from_name = smtp and smtp.from_name or "Workstation",
@@ -647,7 +660,8 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
             customer_name = customer.name, total = U.money(tonumber(q.total_minor) or 0),
             discount = discount > 0 and U.money(discount) or nil, delivery_method = q.delivery_method,
             valid_until = q.valid_until and tostring(q.valid_until):sub(1, 10) or nil,
-            link = shaped.public_url, attached = pdf ~= nil, call_phone = U.env("SHOP_CALL_PHONE") or "+44 7515 356 146",
+            test = opts.test == true, test_customer = opts.test and customer.email or nil,
+            link = opts.test and (shaped.public_url .. "&preview=1") or shaped.public_url, attached = pdf ~= nil, call_phone = U.env("SHOP_CALL_PHONE") or "+44 7515 356 146",
         },
         attachments = pdf and { { filename = q.quote_number .. ".pdf", content_type = "application/pdf",
                                   content_b64 = ngx.encode_base64(pdf) } } or nil,
@@ -656,9 +670,11 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
         ngx.log(ngx.ERR, "[shop-quotes] email for ", q.quote_number, " failed: ", tostring(merr))
         return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent: " .. tostring(merr):sub(1, 200))
     end
-    db.query([[UPDATE shop_quotes SET sent_at = NOW(), updated_at = NOW(),
-               status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END WHERE id = ?]], q.id)
-    return { to = to, attached = pdf ~= nil, pdf_error = pdf and U.null or perr, quote = ShopQuoteQueries.adminGet(ns_id, uuid) }
+    if not opts.test then
+        db.query([[UPDATE shop_quotes SET sent_at = NOW(), updated_at = NOW(),
+                   status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END WHERE id = ?]], q.id)
+    end
+    return { to = to, test = opts.test == true, attached = pdf ~= nil, pdf_error = pdf and U.null or perr, quote = ShopQuoteQueries.adminGet(ns_id, uuid) }
 end
 
 --- Public POST /quotes/:uuid/authorise — the customer confirms the order (the shop app has recorded

@@ -1,3 +1,8 @@
+<% if test then %>
+<div style="border:2px dashed #e6007e;border-radius:8px;padding:12px 16px;margin:0 0 20px;background:#fff0f7;">
+  <p style="margin:0;"><strong>TEST SEND, not sent to the customer.</strong> This is the email <%= test_customer or "the customer" %> will get. The link opens a preview: confirm and pay are turned off, and nothing is marked as sent or viewed.</p>
+</div>
+<% end %>
 <h2><%= document_title %> <%= number %></h2>
 
 <p>Hello<% if customer_name and customer_name ~= "" then %> <%= customer_name %><% end %>,</p>
