@@ -281,7 +281,8 @@ return function(app)
     end))
 
     app:get(BASE .. "/quotes/:uuid", public(function(self, ns_id)
-        local quote = Quote.publicView(ns_id, self.params.uuid, self.params.t)
+        -- track=0: a PDF download or staff, not the customer opening the page.
+        local quote = Quote.publicView(ns_id, self.params.uuid, self.params.t, { track = self.params.track ~= "0" })
         if not quote then return U.fail(404, "QUOTE_NOT_FOUND", "Quote not found") end
         return U.ok(quote)
     end))

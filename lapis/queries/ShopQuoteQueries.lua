@@ -246,10 +246,11 @@ local function maybe_expire(q)
 end
 ShopQuoteQueries.maybeExpire = maybe_expire
 
-function ShopQuoteQueries.publicView(ns_id, uuid, token)
+function ShopQuoteQueries.publicView(ns_id, uuid, token, opts)
     local q = ShopQuoteQueries.getWithToken(ns_id, uuid, token)
     if not q then return nil end
-    if not U.nz(q.viewed_at) then
+    -- opts.track == false: not the customer viewing the page (a PDF download, staff, our own email fetch).
+    if not (opts and opts.track == false) and not U.nz(q.viewed_at) then
         db.query("UPDATE shop_quotes SET viewed_at = NOW() WHERE id = ? AND viewed_at IS NULL", q.id)
     end
     return ShopQuoteQueries.shape(maybe_expire(q))
@@ -445,6 +446,159 @@ local function fetch_pdf(q)
         return nil, "shop returned " .. tostring(res.status)
     end
     return res.body
+end
+
+
+--- POST /quotes/:uuid/order-authorisation — turn a quote (e.g. one the customer requested online) into a
+-- new Order Authorisation: same lines at the quoted prices, the customer (with any completed details),
+-- the VIP Trade discount when they are a member (unless apply_trade_discount = false), the delivery
+-- address (default: the customer's address). The source quote is noted and left as it is.
+-- body: { customer?, delivery_address?, delivery_method?, apply_trade_discount?, discount_minor?,
+--         discount_label?, valid_until?, notes? }
+function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
+    body = body or {}
+    local src = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not src then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    if src.status == "cancelled" then return nil, U.err(409, "QUOTE_CANCELLED", "This quote is cancelled") end
+    -- Lines keep the price on the quote: catalogue lines are re-priced with that price as the override
+    -- (so a catalogue change since doesn't move it); free-text lines are copied.
+    local inputs = {}
+    for _, l in ipairs(U.dec(src.lines, {})) do
+        if l.custom then
+            inputs[#inputs + 1] = { custom = true, name = l.product_name or l.label, description = l.description,
+                qty = l.qty, unit_price_minor = l.unit_price_minor, vat_rate = l.vat_rate,
+                period_start = l.period_start, period_end = l.period_end }
+        else
+            local slug = l.product_slug
+            if not U.nz(slug) and U.nz(l.product_uuid) then
+                local p = db.query("SELECT slug FROM shop_products WHERE namespace_id = ? AND uuid = ?", ns_id, l.product_uuid)[1]
+                slug = p and p.slug
+            end
+            if not U.nz(slug) then
+                return nil, U.err(409, "PRODUCT_GONE", "A product on this quote is no longer in the catalogue: "
+                    .. tostring(l.product_name))
+            end
+            inputs[#inputs + 1] = { product_slug = slug, qty = l.qty, selections = l.selections,
+                price_override_minor = l.price_override_minor or l.unit_price_minor }
+        end
+    end
+    local customer = U.dec(src.customer, {})
+    if type(body.customer) == "table" then
+        for k, v in pairs(body.customer) do customer[k] = v end
+    end
+    local delivery = body.delivery_address
+    if delivery == nil then
+        local a = type(customer.address) == "table" and customer.address or {}
+        delivery = {
+            name = customer.name, company = customer.company, line1 = a.line1, line2 = a.line2, city = a.city,
+            county = a.state or a.county, postcode = a.postal_code or a.postcode, country = a.country,
+            email = customer.email, phone = customer.phone, vat_number = customer.vat_number,
+        }
+    end
+    local notes = { "Order Authorisation from quote " .. src.quote_number .. "." }
+    if U.nz(src.notes) then notes[#notes + 1] = "Customer's note on the quote: " .. src.notes end
+    if U.nz(src.internal_notes) then notes[#notes + 1] = src.internal_notes end
+    local res, err = ShopQuoteQueries.adminCreate(ns_id, {
+        kind = "order", status = "draft", customer = customer, lines = inputs,
+        shipping_minor = tonumber(src.shipping_minor) or 0,
+        apply_trade_discount = body.apply_trade_discount ~= false,
+        discount_minor = body.discount_minor, discount_label = body.discount_label,
+        delivery_address = delivery, delivery_method = body.delivery_method,
+        valid_until = body.valid_until, notes = body.notes,
+        internal_notes = table.concat(notes, "\n\n"),
+    }, user_id)
+    if not res then return nil, err end
+    db.query([[UPDATE shop_quotes SET internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
+               WHERE id = ?]], "Order Authorisation " .. res.quote_number .. " created from this quote.", src.id)
+    if src.crm_lead_id then
+        db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE uuid = ? AND namespace_id = ?", src.crm_lead_id, res.uuid, ns_id)
+    end
+    return ShopQuoteQueries.adminGet(ns_id, res.uuid)
+end
+
+--- POST /quotes/:uuid/crm-customer — save the quote's customer to the CRM: the company as an account
+-- (address and VAT number from the delivery address or the customer) and the person as a contact in it.
+-- Reuses an account with the same name and a contact with the same email; fills in what they lack.
+-- Returns { account_uuid, contact_uuid, account_created, contact_created }.
+function ShopQuoteQueries.saveCrmCustomer(ns_id, uuid, owner_uuid)
+    local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not q then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    if not U.nz(owner_uuid) then return nil, U.err(403, "USER_REQUIRED", "Sign in as a user to save CRM records") end
+    local c = U.dec(q.customer, {})
+    local d = U.nz(q.delivery_address) and U.dec(q.delivery_address, {}) or {}
+    local ca = type(c.address) == "table" and c.address or {}
+    local company = U.nz(c.company) or U.nz(d.company)
+    local email = U.nz(c.email) and tostring(c.email):lower() or nil
+    if not company and not email then
+        return nil, U.err(400, "VALIDATION_ERROR", "The customer needs a company or an email")
+    end
+    local addr = {
+        line1 = U.nz(ca.line1) or U.nz(d.line1), line2 = U.nz(ca.line2) or U.nz(d.line2),
+        city = U.nz(ca.city) or U.nz(d.city), state = U.nz(ca.state) or U.nz(ca.county) or U.nz(d.county),
+        postal_code = U.nz(ca.postal_code) or U.nz(ca.postcode) or U.nz(d.postcode),
+        country = U.nz(ca.country) or U.nz(d.country),
+    }
+    local vat = U.nz(c.vat_number) or U.nz(d.vat_number)
+    local out = { account_created = false, contact_created = false }
+    local ok, terr = pcall(U.tx, function()
+        local account
+        if company then
+            account = db.query([[SELECT * FROM crm_accounts WHERE namespace_id = ? AND lower(name) = lower(?) AND deleted_at IS NULL
+                                 ORDER BY created_at LIMIT 1]], ns_id, company)[1]
+            local meta = { vat_number = vat, from_shop_quote = q.quote_number }
+            if not account then
+                account = db.query([[
+                    INSERT INTO crm_accounts (uuid, namespace_id, name, phone, email, address_line1, address_line2, city,
+                                              state, postal_code, country, owner_user_uuid, status, metadata,
+                                              created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?::jsonb, NOW(), NOW()) RETURNING *
+                ]], Global.generateUUID(), ns_id, company, U.nz(c.phone) or db.NULL, email or db.NULL,
+                    addr.line1 or db.NULL, addr.line2 or db.NULL, addr.city or db.NULL, addr.state or db.NULL,
+                    addr.postal_code or db.NULL, addr.country or db.NULL, owner_uuid, U.enc(meta))[1]
+                out.account_created = true
+            else
+                -- Fill in only what the account lacks; never overwrite what staff typed in the CRM.
+                db.query([[
+                    UPDATE crm_accounts SET phone = COALESCE(phone, ?), email = COALESCE(email, ?),
+                           address_line1 = COALESCE(address_line1, ?), address_line2 = COALESCE(address_line2, ?),
+                           city = COALESCE(city, ?), state = COALESCE(state, ?), postal_code = COALESCE(postal_code, ?),
+                           country = COALESCE(country, ?),
+                           -- existing keys win (the right side of || overrides)
+                           metadata = jsonb_strip_nulls(?::jsonb) || COALESCE(metadata, '{}'::jsonb), updated_at = NOW()
+                     WHERE id = ?
+                ]], U.nz(c.phone) or db.NULL, email or db.NULL, addr.line1 or db.NULL, addr.line2 or db.NULL,
+                    addr.city or db.NULL, addr.state or db.NULL, addr.postal_code or db.NULL, addr.country or db.NULL,
+                    U.enc({ vat_number = vat }), account.id)
+            end
+            out.account_uuid = account.uuid
+        end
+        if email then
+            local contact = db.query([[SELECT * FROM crm_contacts WHERE namespace_id = ? AND lower(email) = ? AND deleted_at IS NULL
+                                       ORDER BY created_at LIMIT 1]], ns_id, email)[1]
+            if not contact then
+                local name = tostring(U.nz(c.name) or email)
+                local first, last = name:match("^%s*(%S+)%s+(.-)%s*$")
+                contact = db.query([[
+                    INSERT INTO crm_contacts (uuid, namespace_id, account_id, first_name, last_name, email, phone,
+                                              owner_user_uuid, status, metadata, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?::jsonb, NOW(), NOW()) RETURNING *
+                ]], Global.generateUUID(), ns_id, account and account.id or db.NULL, first or name, last or db.NULL,
+                    email, U.nz(c.phone) or db.NULL, owner_uuid, U.enc({ from_shop_quote = q.quote_number }))[1]
+                out.contact_created = true
+            elseif account and not contact.account_id then
+                db.query("UPDATE crm_contacts SET account_id = ?, updated_at = NOW() WHERE id = ?", account.id, contact.id)
+            end
+            out.contact_uuid = contact.uuid
+        end
+        return true
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[shop-quotes] CRM customer not saved for ", q.quote_number, ": ", tostring(terr))
+        return nil, U.err(500, "CRM_SAVE_FAILED", "Could not save the customer to the CRM")
+    end
+    out.account_uuid = out.account_uuid or U.null
+    out.contact_uuid = out.contact_uuid or U.null
+    return out
 end
 
 --- POST /quotes/:uuid/send — email the customer the Order Authorisation (or quote) with the PDF attached

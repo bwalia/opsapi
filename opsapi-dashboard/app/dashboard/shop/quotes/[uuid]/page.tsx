@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Download, ExternalLink, FileText, Pencil, Printer, Save, Send, X } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Copy, Download, ExternalLink, FileText, Pencil, Printer, Save, Send, UserPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Select, Textarea, confirmDialog } from '@/components/ui';
@@ -52,8 +52,11 @@ function detailsOf(q: ShopQuote): DetailsDraft {
 function QuoteDetail() {
   const params = useParams();
   const uuid = String(params?.uuid ?? '');
-  const { canUpdate } = usePermissions();
+  const router = useRouter();
+  const { canUpdate, canCreate, hasPermission } = usePermissions();
   const editable = canUpdate(SHOP_MODULE);
+  const mayCreate = canCreate(SHOP_MODULE);
+  const mayCrm = hasPermission('crm_accounts', 'create') && hasPermission('crm_contacts', 'create');
 
   const [quote, setQuote] = useState<ShopQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +151,41 @@ function QuoteDetail() {
     if (await save('terms', fields, 'Order terms saved')) setTerms(null);
   };
 
+  const createOrder = async () => {
+    const ok = await confirmDialog({
+      title: `Create an Order Authorisation from ${quote.quote_number}?`,
+      message: 'A new order with the same lines and prices, the VIP Trade discount if the customer is a member, and their address as the delivery address. This quote stays as it is.',
+      confirmText: 'Create order',
+    });
+    if (!ok) return;
+    setSaving('order');
+    try {
+      const o = await shopService.createOrderFromQuote(quote.uuid);
+      toast.success(`Order Authorisation ${o.quote_number} created`);
+      router.push(`/dashboard/shop/quotes/${o.uuid}`);
+    } catch (err) {
+      toast.error(extractApiError(err, 'Could not create the order'));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const saveToCrm = async () => {
+    setSaving('crm');
+    try {
+      const r = await shopService.saveQuoteCustomerToCrm(quote.uuid);
+      const what = [r.account_created ? 'company account created' : r.account_uuid ? 'company account updated' : '', r.contact_created ? 'contact created' : r.contact_uuid ? 'contact linked' : '']
+        .filter(Boolean)
+        .join(', ');
+      toast.success(`Saved to the CRM${what ? `: ${what}` : ''}`);
+      if (r.account_uuid) router.push(`/dashboard/crm/${r.account_uuid}`);
+    } catch (err) {
+      toast.error(extractApiError(err, 'Could not save the customer to the CRM'));
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const sendToCustomer = async () => {
     const to = quote.customer?.email;
     if (!to) {
@@ -230,6 +268,11 @@ function QuoteDetail() {
               <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" leftIcon={<Download className="h-4 w-4" />}>Download PDF</Button>
               </a>
+            )}
+            {mayCreate && !isOrder && quote.status !== 'cancelled' && (
+              <Button variant="outline" leftIcon={<ClipboardCheck className="h-4 w-4" />} isLoading={saving === 'order'} disabled={!!saving} onClick={createOrder}>
+                Create Order Authorisation
+              </Button>
             )}
             {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (
               <Button leftIcon={<Send className="h-4 w-4" />} isLoading={saving === 'send'} disabled={!!saving} onClick={sendToCustomer}>
@@ -387,9 +430,16 @@ function QuoteDetail() {
                     <Button size="sm" isLoading={saving === 'customer'} onClick={saveCustomer}>Save</Button>
                   </>
                 ) : (
-                  <Button size="sm" variant="ghost" className="print:hidden" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setEditCustomer(true)}>
-                    Edit
-                  </Button>
+                  <>
+                    {mayCrm && (
+                      <Button size="sm" variant="ghost" className="print:hidden" leftIcon={<UserPlus className="h-4 w-4" />} isLoading={saving === 'crm'} disabled={!!saving} onClick={saveToCrm}>
+                        Save to CRM
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" className="print:hidden" leftIcon={<Pencil className="h-4 w-4" />} onClick={() => setEditCustomer(true)}>
+                      Edit
+                    </Button>
+                  </>
                 ))
               }
             >
