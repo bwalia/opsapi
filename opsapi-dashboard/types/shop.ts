@@ -519,6 +519,7 @@ export interface ShopQuote extends ShopTotals {
 
 export interface ShopQuoteSendResult {
   to: string;
+  test?: boolean;
   attached: boolean;
   pdf_error?: string | null;
   quote: ShopQuote;

@@ -213,6 +213,18 @@ function QuoteDetail() {
     }
   };
 
+  const sendTest = async () => {
+    setSaving('test');
+    try {
+      const res = await shopService.sendQuote(quote.uuid, undefined, { test: true });
+      toast.success(`Test sent to ${res.to}${res.attached ? ' with the PDF attached' : ' (link only: the PDF could not be attached)'}. The customer got nothing.`);
+    } catch (err) {
+      toast.error(extractApiError(err, `Could not send the test ${noun}`));
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const saveCustomer = async () => {
     const errs = validateCustomer(customer);
     if (errs.length) {
@@ -272,6 +284,18 @@ function QuoteDetail() {
             {mayCreate && !isOrder && quote.status !== 'cancelled' && (
               <Button variant="outline" leftIcon={<ClipboardCheck className="h-4 w-4" />} isLoading={saving === 'order'} disabled={!!saving} onClick={createOrder}>
                 Create Order Authorisation
+              </Button>
+            )}
+            {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (
+              <Button
+                variant="outline"
+                leftIcon={<Send className="h-4 w-4" />}
+                isLoading={saving === 'test'}
+                disabled={!!saving}
+                onClick={sendTest}
+                title="Sends this email to you, marked TEST. The link opens a preview with confirm and pay turned off."
+              >
+                Send test to me
               </Button>
             )}
             {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (

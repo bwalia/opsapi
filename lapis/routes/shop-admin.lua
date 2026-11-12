@@ -283,7 +283,8 @@ return function(app)
     -- Body { to? } (defaults to the customer's email).
     app:post(BASE .. "/quotes/:uuid/send", guard("update", function(self, ns_id)
         local body = body_or_400() or {}
-        local res, err = Quote.sendToCustomer(ns_id, self.params.uuid, { to = body.to })
+        local res, err = Quote.sendToCustomer(ns_id, self.params.uuid, { to = body.to,
+            test = body.test == true, user_id = body.test == true and user_id(self) or nil })
         if not res then return U.from_err(err) end
         return U.ok(res)
     end))
