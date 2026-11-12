@@ -327,6 +327,18 @@ export const shopService = {
     return unwrap<ShopQuoteSendResult>(res);
   },
 
+  /** New Order Authorisation from a quote: same lines and prices, VIP discount, delivery = customer address. */
+  async createOrderFromQuote(uuid: string, body: { apply_trade_discount?: boolean } = {}): Promise<ShopQuote> {
+    const res = await apiClient.post(`${BASE}/quotes/${uuid}/order-authorisation`, body, JSON_BODY);
+    return unwrap<ShopQuote>(res);
+  },
+
+  /** Save the quote's customer to the CRM (company account + contact). */
+  async saveQuoteCustomerToCrm(uuid: string): Promise<{ account_uuid: string | null; contact_uuid: string | null; account_created: boolean; contact_created: boolean }> {
+    const res = await apiClient.post(`${BASE}/quotes/${uuid}/crm-customer`, {}, JSON_BODY);
+    return unwrap(res);
+  },
+
   /** The VIP Trade discount the customer's membership gives this quote. */
   async getQuoteTradeDiscount(uuid: string): Promise<ShopTradeDiscountPreview> {
     const res = await apiClient.get(`${BASE}/quotes/${uuid}/trade-discount`);

@@ -288,6 +288,26 @@ return function(app)
         return U.ok(res)
     end))
 
+    -- New Order Authorisation from a quote (same lines and prices, VIP discount, delivery address).
+    app:post(BASE .. "/quotes/:uuid/order-authorisation", guard("create", function(self, ns_id)
+        local body = body_or_400() or {}
+        local q, err = Quote.orderFromQuote(ns_id, self.params.uuid, body, user_id(self))
+        if not q then return U.from_err(err) end
+        return U.ok(q, 201)
+    end))
+
+    -- Save the quote's customer to the CRM (company account + contact). Needs CRM permission too.
+    app:post(BASE .. "/quotes/:uuid/crm-customer", guard("update", function(self, ns_id)
+        local NS = require("middleware.namespace")
+        if not (NS.hasPermission(self, "crm_accounts", "create") and NS.hasPermission(self, "crm_contacts", "create")) then
+            return U.fail(403, "FORBIDDEN", "You need permission to create CRM accounts and contacts")
+        end
+        local u = self.current_user or {}
+        local res, err = Quote.saveCrmCustomer(ns_id, self.params.uuid, u.uuid)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
     -- The VIP Trade discount the customer's membership gives this quote (preview for "Apply VIP discount").
     app:get(BASE .. "/quotes/:uuid/trade-discount", guard("read", function(self, ns_id)
         local res, err = Quote.tradeDiscountPreview(ns_id, self.params.uuid)
