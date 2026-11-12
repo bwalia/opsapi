@@ -76,6 +76,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
     }
   }, [token, isAuthenticated, _hasHydrated, router, setToken]);
 
+  // Inside a phone app, mark the page so CSS can leave out what the app already provides
+  // (globals.css: the "Skip to main content" link).
+  useEffect(() => {
+    if (isEmbeddedInApp()) document.documentElement.dataset.embed = 'app';
+  }, []);
+
   // Close sidebar on route change (mobile)
   useEffect(() => {
     setIsSidebarOpen(false);

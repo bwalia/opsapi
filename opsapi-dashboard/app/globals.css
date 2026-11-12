@@ -428,3 +428,9 @@ select:-webkit-autofill:focus {
   box-shadow: 0 0 0 1000px var(--color-surface) inset;
   transition: background-color 600000s 0s, color 600000s 0s;
 }
+
+/* Inside the phone apps (lib/embed.ts) the app supplies navigation, so the keyboard "Skip to main
+   content" link isn't needed — and Android's web view shows it over the page title on load. */
+html[data-embed='app'] a[href='#main-content'] {
+  display: none;
+}

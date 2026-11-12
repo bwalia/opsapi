@@ -2,6 +2,7 @@
 
 import React, { useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Loader2, Users, ShoppingCart, Package, Store, DollarSign, Handshake, CalendarClock, AlertTriangle, Flame, PoundSterling, Hammer, Inbox } from 'lucide-react';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useMenu } from '@/hooks';
@@ -50,7 +51,12 @@ export default function DashboardPage() {
   const router = useRouter();
   const { isLoading: permsLoading, landingPath, canRead } = usePermissions();
   const { currentNamespace } = useNamespace();
-  const { isHydrated: menuHydrated, isLoading: menuLoading } = useMenu();
+  const { isHydrated: menuHydrated, isLoading: menuLoading, mainMenu } = useMenu();
+  // The pages this person can open (their menu), for when the dashboard has no panels for their role.
+  const shortcuts = useMemo(
+    () => mainMenu.filter((item) => item.path && item.key !== 'dashboard' && item.path !== '/dashboard').slice(0, 8),
+    [mainMenu]
+  );
 
   // Post-login landing is DATA-DRIVEN: each namespace role carries a
   // `landing_path` (configured per tenant when the role is created/edited), so a
@@ -200,13 +206,32 @@ export default function DashboardPage() {
 
       {widgets.length === 0 && (
         <RevealItem>
-          <div className="rounded-2xl border border-secondary-200 bg-surface-elevated p-6 text-center" data-testid="dashboard-no-access">
-            <p className="font-semibold text-secondary-900">Nothing to show here yet</p>
-            <p className="mt-1 text-sm text-secondary-600 max-w-lg mx-auto">
-              If the menu on the left is empty too, your role doesn&apos;t give you access to anything yet. Ask the
-              person who manages this workspace to give you a role with access, for example Developer.
-            </p>
-          </div>
+          {shortcuts.length > 0 ? (
+            // No dashboard panels for this role (e.g. sales): offer the pages it can use instead.
+            <div className="rounded-2xl border border-secondary-200 bg-surface-elevated p-5 sm:p-6" data-testid="dashboard-shortcuts">
+              <p className="font-semibold text-secondary-900">Jump to your work</p>
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {shortcuts.map((item) => (
+                  <Link
+                    key={item.key}
+                    href={item.path}
+                    className="flex items-center gap-3 rounded-xl border border-secondary-200 bg-surface px-3 py-3 text-sm font-medium text-secondary-800 transition hover:border-primary-300 hover:bg-primary-50"
+                  >
+                    <item.IconComponent className="h-5 w-5 shrink-0 text-primary-600" />
+                    <span className="min-w-0 truncate">{item.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-secondary-200 bg-surface-elevated p-6 text-center" data-testid="dashboard-no-access">
+              <p className="font-semibold text-secondary-900">Nothing to show here yet</p>
+              <p className="mt-1 text-sm text-secondary-600 max-w-lg mx-auto">
+                Your role doesn&apos;t give you access to anything in this workspace yet. Ask the person who
+                manages it to give you a role with access, for example Developer.
+              </p>
+            </div>
+          )}
         </RevealItem>
       )}
 

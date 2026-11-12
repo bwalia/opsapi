@@ -1456,9 +1456,13 @@ export default function ChatPage() {
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="mt-1 px-1 text-[11px] text-secondary-400">
+                {/* Keyboard hint on computers; on a touch screen (phone, the iOS app) you tap the arrow. */}
+                <p className="mt-1 px-1 text-[11px] text-secondary-400 [@media(pointer:coarse)]:hidden">
                   <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift</kbd>+
                   <kbd className="font-sans">Enter</kbd> for a new line
+                </p>
+                <p className="mt-1 hidden px-1 text-[11px] text-secondary-400 [@media(pointer:coarse)]:block">
+                  Tap the arrow to send.
                 </p>
               </div>
             </>

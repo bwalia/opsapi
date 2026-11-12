@@ -544,6 +544,8 @@ export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChange
         </div>
         <p className="mt-1 px-1 text-[11px] text-secondary-400">
           The assistant can create and change data in your workspace — review what it does.
+          {/* On a touch screen (phone, the iOS app) you send with the arrow. */}
+          <span className="hidden [@media(pointer:coarse)]:inline"> Tap the arrow to send.</span>
           {voice.state === 'listening' && ' · Listening… press ■ to send.'}
         </p>
       </div>
