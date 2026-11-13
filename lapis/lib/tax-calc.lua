@@ -190,6 +190,8 @@ end
 --   se_turnover, se_expenses, se_capital_allowances (or trading_profit directly);
 --   property_rents, property_expenses (or property_profit), property_finance_costs,
 --   finance_costs_brought_forward; savings_interest; dividends; gift_aid_net, pension_ras;
+--   pension_income (State + private pensions) and other_income (net of its costs) — both
+--   non-savings, no NIC; tax_deducted_at_source (tax taken off those, credited like PAYE);
 --   payments_on_account_made. `rates` overrides any 2025/26 default below.
 function TaxCalc.compute_full(inp, rates)
     inp = inp or {}
@@ -237,9 +239,11 @@ function TaxCalc.compute_full(inp, rates)
     local finance_costs = num(inp.property_finance_costs) + num(inp.finance_costs_brought_forward)
     local savings = num(inp.savings_interest)
     local dividends = num(inp.dividends)
+    local pension_income = math.max(0, num(inp.pension_income))
+    local other_income = math.max(0, num(inp.other_income))
 
     -- Step 2 + 3: total and adjusted net income.
-    local non_savings = employment + trading_profit + property_profit
+    local non_savings = employment + trading_profit + property_profit + pension_income + other_income
     local total_income = non_savings + savings + dividends
     local gift_aid_gross = r2(num(inp.gift_aid_net) * 100 / 80)
     local pension_gross = r2(num(inp.pension_ras) * 100 / 80)
@@ -345,7 +349,7 @@ function TaxCalc.compute_full(inp, rates)
 
     -- Step 10: total, tax at source, payments on account.
     local total_liability = r2(income_tax_due + class4 + class2)
-    local paye = num(inp.paye_deducted)
+    local paye = num(inp.paye_deducted) + num(inp.tax_deducted_at_source)
     local balancing = r2(total_liability - paye - num(inp.payments_on_account_made))
     local relevant_for_poa = r2(total_liability - paye) -- income tax + Class 4 not collected at source
     local collected_pct = total_liability > 0 and (paye / total_liability) or 0
@@ -355,6 +359,7 @@ function TaxCalc.compute_full(inp, rates)
         schedules = {
             employment = employment, trading_profit = trading_profit, property_profit = property_profit,
             savings = savings, dividends = dividends, finance_costs = finance_costs,
+            pension_income = pension_income, other_income = other_income,
         },
         non_savings = non_savings, savings_income = savings, dividend_income = dividends,
         total_income = total_income,

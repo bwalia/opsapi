@@ -52,10 +52,38 @@ local function take(list, n)
     return out
 end
 
-local VALID_INCOME_TYPES = {
-    self_employment = true, uk_property = true, employment = true,
-    dividends = true, savings_interest = true, other = true,
+local IncomeTypes = require("lib.income-types")
+
+-- Income types are rows in income_types (system defaults + the workspace's own /
+-- overrides — Tax → Income types), not a hard-coded list. The agent's original keys
+-- (employment, uk_property, savings_interest) keep working via IncomeTypes.AGENT_ALIASES.
+-- If the catalogue can't be read (e.g. no DB in a unit test) this fallback — the old
+-- hard-coded set, in catalogue keys — is used.
+local FALLBACK_INCOME_TYPES = {
+    self_employment = true, salary = true, rental = true,
+    dividends = true, interest = true, other = true,
 }
+
+--- The catalogue: { keys = { key = true }, list = { { key, name }, ... } } for a namespace.
+local function income_catalogue(namespace_id)
+    local ok, Q = pcall(require, "queries.TaxIncomeQueries")
+    if ok and namespace_id then
+        local ok2, types = pcall(Q.types_for, namespace_id)
+        if ok2 and type(types) == "table" and #types > 0 then
+            local keys, list = {}, {}
+            for _, t in ipairs(types) do
+                keys[t.income_type_key] = true
+                list[#list + 1] = { key = t.income_type_key, name = t.display_name }
+            end
+            return { keys = keys, list = list }
+        end
+    end
+    local list = {}
+    for k in pairs(FALLBACK_INCOME_TYPES) do list[#list + 1] = { key = k, name = k } end
+    table.sort(list, function(a, b) return a.key < b.key end)
+    return { keys = FALLBACK_INCOME_TYPES, list = list }
+end
+TaxTools.income_catalogue = income_catalogue
 
 -- Profile keys that hold figures for ONE tax year (cleared when the year changes).
 local YEAR_FIGURES = { "property_finance_costs", "property_rents", "property_expenses" }
@@ -153,16 +181,17 @@ register({
 register({
     name = "set_tax_profile",
     description = "Record the user's tax profile once you know it: their income "
-        .. "type(s) and tax year. income_types: self_employment, uk_property, "
-        .. "employment, dividends, savings_interest, other. Call this before "
+        .. "type(s) and tax year. income_types are keys from the workspace's income type "
+        .. "list (e.g. self_employment, salary, rental, dividends, interest, pension, other; "
+        .. "employment / uk_property / savings_interest also work). Call this before "
         .. "collecting figures.",
     parameters = {
         type = "object",
         properties = {
             income_types = {
                 type = "array",
-                description = "One or more of: self_employment, uk_property, employment, "
-                    .. "dividends, savings_interest, other.",
+                description = "One or more income type keys, e.g. self_employment, salary, "
+                    .. "rental, dividends, interest, pension, other.",
                 items = { type = "string" },
             },
             tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." },
@@ -171,15 +200,12 @@ register({
         required = { "income_types" },
     },
     handler = function(ctx, args)
-        local types_in = type(args.income_types) == "table" and args.income_types or {}
-        local clean, bad = {}, {}
-        for _, t in ipairs(types_in) do
-            t = tostring(t):lower()
-            if VALID_INCOME_TYPES[t] then clean[#clean + 1] = t else bad[#bad + 1] = t end
-        end
+        local catalogue = income_catalogue(ctx.namespace_id)
+        local clean, bad = IncomeTypes.normalise_agent_types(args.income_types, catalogue.keys)
         if #clean == 0 then
-            return nil, "No valid income type given. Use one or more of: "
-                .. "self_employment, uk_property, employment, dividends, savings_interest, other."
+            local names = {}
+            for _, t in ipairs(catalogue.list) do names[#names + 1] = t.key end
+            return nil, "No valid income type given. Use one or more of: " .. table.concat(names, ", ") .. "."
         end
         local tax_year = year_of(ctx, args)
         local patch = {
@@ -472,8 +498,21 @@ function TaxTools.profile_for(user_id, tax_year, namespace_id)
     end
     if type(profile.income_types) ~= "table" or #profile.income_types == 0 then
         profile.income_types = { "self_employment" }
+        -- Not stated by the user: the estimate may take the income types from My Income.
+        profile._defaulted = true
     end
     return profile
+end
+
+--- The user's My Income figures for a year as compute_full inputs (lib/income-types
+-- estimator_inputs shape). Never fails the estimate: on any error, no My Income.
+function TaxTools.my_income_for(user_id, tax_year, namespace_id)
+    local ok, Q = pcall(require, "queries.TaxIncomeQueries")
+    if ok then
+        local ok2, res = pcall(Q.estimator_inputs, user_id, tax_year, namespace_id)
+        if ok2 and type(res) == "table" then return res end
+    end
+    return IncomeTypes.estimator_inputs({}, {})
 end
 
 --- Full UK estimate for a year from money in / allowable money out (lib/tax-calc
@@ -481,11 +520,44 @@ end
 -- Routes the bank-statement totals to the right schedule from the profile, then adds
 -- any other income the agent gathered (employment, savings, dividends, Gift Aid). The
 -- engine applies the bands, allowances and NIC (Class 4 on trading profit only).
--- opts: { unreviewed = n, finance_interest = n (interest already inside `expenses`) }
+-- opts: { unreviewed = n, finance_interest = n (interest already inside `expenses`),
+--         my_income = TaxTools.my_income_for(...) }
+--
+-- My Income (figures the user typed per income type) takes priority over the bank
+-- totals and the chat profile, schedule by schedule:
+--   * types: if the user never stated income types to the agent, they come from My
+--     Income; otherwise My Income's types are added to the stated ones;
+--   * property: My Income's rents/expenses are used as the split of the bank totals
+--     (the same rule as figures stated in the chat), and replace them;
+--   * self-employment: My Income's figures replace the bank-statement totals;
+--   * every other input (employment, pensions, savings, dividends, ...) overrides the
+--     chat profile's figure.
 function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     opts = opts or {}
     profile = profile or {}
+    local mi = type(opts.my_income) == "table" and opts.my_income or nil
+    if mi and not mi.has_data then mi = nil end
     local types = type(profile.income_types) == "table" and profile.income_types or {}
+    if mi then
+        local merged, seen = {}, {}
+        local base = profile._defaulted and {} or types
+        for _, list in ipairs({ base, mi.agent_types or {} }) do
+            for _, t in ipairs(list) do
+                if not seen[t] then seen[t] = true; merged[#merged + 1] = t end
+            end
+        end
+        -- bank totals with no schedule from My Income still need somewhere to go
+        if #merged == 0 then merged = { "self_employment" } end
+        types = merged
+        if mi.groups.property then
+            local split = {}
+            for k, v in pairs(profile) do split[k] = v end
+            split.property_rents = mi.inputs.property_rents or 0
+            split.property_expenses = mi.inputs.property_expenses or 0
+            split.property_finance_costs = mi.inputs.property_finance_costs or 0
+            profile = split
+        end
+    end
     local has_se, only_property = false, #types > 0
     for _, t in ipairs(types) do
         if t == "self_employment" then has_se = true end
@@ -534,6 +606,22 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
         end
     end
 
+    if mi then
+        local group_of = {}
+        for g, list in pairs(IncomeTypes.GROUPS) do for _, k in ipairs(list) do group_of[k] = g end end
+        if mi.groups.self_employment then
+            for _, k in ipairs(IncomeTypes.GROUPS.self_employment) do inp[k] = mi.inputs[k] or 0 end
+            notes[#notes + 1] = "Self-employment figures come from My Income (they replace the bank-statement "
+                .. "totals for your business)."
+        end
+        if mi.groups.property then
+            for _, k in ipairs(IncomeTypes.GROUPS.property) do inp[k] = mi.inputs[k] or 0 end
+        end
+        for k, v in pairs(mi.inputs) do
+            if not group_of[k] then inp[k] = v end
+        end
+    end
+
     local rates = TaxCalc.load_rates(tax_year)
     local full = TaxCalc.compute_full(inp, rates)
     full.tax_year = tax_year
@@ -547,7 +635,8 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     -- "NIC applies to this profile?" — true for self-employment (even at a loss,
     -- where the amount is just £0), false only for property-only income (no Class
     -- 2/4). The frontend shows "N/A — property income" only when this is false.
-    full.nic_applied = not (only_property and not has_se)
+    full.nic_applied = not (only_property and not has_se) or (mi ~= nil and mi.groups.self_employment == true)
+    full.my_income_inputs = mi and mi.inputs or nil
     local by_name = {}
     for _, b in ipairs(full.income_tax_bands or {}) do by_name[b.name] = b end
     local function band(name, rate)
@@ -572,11 +661,14 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     return full
 end
 
---- The estimate for a user's tax year from their classified transactions.
-function TaxTools.compute_year(user_id, tax_year, profile)
+--- The estimate for a user's tax year from their classified transactions plus the
+-- figures they typed under My Income. namespace_id is optional (see
+-- TaxIncomeQueries.estimator_inputs for the rule without one).
+function TaxTools.compute_year(user_id, tax_year, profile, namespace_id)
     local totals = TaxTools.year_totals(user_id, tax_year)
     return TaxTools.estimate(totals.income, totals.expenses, tax_year, profile,
-        { unreviewed = totals.unreviewed, finance_interest = totals.finance_interest })
+        { unreviewed = totals.unreviewed, finance_interest = totals.finance_interest,
+          my_income = TaxTools.my_income_for(user_id, tax_year, namespace_id) })
 end
 
 -- The deterministic running estimate. The ONLY tax figure the user sees — computed
@@ -593,7 +685,63 @@ register({
         properties = { tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." } },
     },
     handler = function(ctx, args)
-        return TaxTools.compute_year(ctx.user_id, year_of(ctx, args), ctx._profile)
+        return TaxTools.compute_year(ctx.user_id, year_of(ctx, args), ctx._profile, ctx.namespace_id)
+    end,
+})
+
+-- What the user typed under Tax -> My Income (jobs, properties, pensions, dividends...).
+-- Read-only; these figures already feed compute_estimate.
+register({
+    name = "get_my_income",
+    description = "Read the income the user has entered under Tax > My Income for the tax year "
+        .. "(jobs, businesses, properties, pensions, savings, dividends): which income types they "
+        .. "have, how far through each they are, and the totals. These figures already feed "
+        .. "compute_estimate. Use it to avoid asking for figures they've already given, and point "
+        .. "them to My Income to add or correct them.",
+    perms = { { "tax_transactions", "read" } },
+    parameters = {
+        type = "object",
+        properties = { tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." } },
+    },
+    handler = function(ctx, args)
+        local tax_year = year_of(ctx, args)
+        local Q = require("queries.TaxIncomeQueries")
+        local types = Q.types_for(ctx.namespace_id, { include_inactive = true })
+        local records = Q.records(ctx.namespace_id, ctx.user_id, tax_year)
+        local by_key = Q.by_key(types)
+        local per = {}
+        for _, r in ipairs(records) do
+            local t = by_key[r.income_type_key]
+            if t then
+                local e = per[r.income_type_key]
+                if not e then
+                    e = { key = r.income_type_key, name = t.display_name, records = 0, done = 0,
+                        not_applicable = false, totals = { income = 0, expense = 0, tax_paid = 0, relief = 0 } }
+                    per[r.income_type_key] = e
+                end
+                if r.status == "not_applicable" then
+                    e.not_applicable = true
+                else
+                    e.records = e.records + 1
+                    if r.status == "done" then e.done = e.done + 1 end
+                    for k, v in pairs(IncomeTypes.record_totals(t.field_schema, r.values)) do
+                        e.totals[k] = e.totals[k] + v
+                    end
+                end
+            end
+        end
+        local list = {}
+        for _, t in ipairs(types) do
+            if per[t.income_type_key] then list[#list + 1] = per[t.income_type_key] end
+        end
+        local est = IncomeTypes.estimator_inputs(by_key, records)
+        return {
+            tax_year = tax_year,
+            income_types = list,
+            estimate_inputs = est.inputs,
+            note = #list == 0 and "Nothing entered under My Income for this year yet."
+                or "These figures are already included in compute_estimate.",
+        }
     end,
 })
 

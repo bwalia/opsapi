@@ -21,7 +21,13 @@ local IncomeTypeQueries = {}
 
 -- JSONB columns are returned by pgmoon as raw strings; decode them so API
 -- consumers get real arrays/objects (matches what FastAPI's SQLModel sees).
-local JSON_COLS = { "required_documents", "keyword_rules", "category_affinity", "hmrc_mapping" }
+local JSON_COLS = { "required_documents", "keyword_rules", "category_affinity", "hmrc_mapping",
+    "field_schema", "estimator_mapping" }
+
+-- System (platform-wide) rows only. A workspace's own income types (namespace_id set,
+-- created from the dashboard — routes/tax-my-income.lua) must never appear in this
+-- shared, non-namespaced catalogue or pass its validation.
+local SYSTEM_ONLY = "COALESCE(namespace_id, 0) = 0"
 local function decode_row(row)
     if not row then return row end
     for _, c in ipairs(JSON_COLS) do
@@ -64,7 +70,7 @@ end
 function IncomeTypeQueries.list_active()
     local rows = db.query([[
         SELECT * FROM income_types
-        WHERE is_active = true
+        WHERE is_active = true AND ]] .. SYSTEM_ONLY .. [[
         ORDER BY display_order ASC, display_name ASC
     ]])
     return decode_rows(rows)
@@ -72,7 +78,7 @@ end
 
 -- Set of active keys for O(1) validation: { salary = true, ... }
 function IncomeTypeQueries.active_keys()
-    local rows = db.query("SELECT income_type_key FROM income_types WHERE is_active = true")
+    local rows = db.query("SELECT income_type_key FROM income_types WHERE is_active = true AND " .. SYSTEM_ONLY)
     local set = {}
     for _, r in ipairs(rows or {}) do set[r.income_type_key] = true end
     return set
@@ -85,7 +91,8 @@ end
 -- validates against THIS set.
 function IncomeTypeQueries.manual_entry_keys()
     local rows = db.query(
-        "SELECT income_type_key FROM income_types WHERE is_active = true AND allows_manual_entry = true")
+        "SELECT income_type_key FROM income_types WHERE is_active = true AND allows_manual_entry = true AND "
+        .. SYSTEM_ONLY)
     local set = {}
     for _, r in ipairs(rows or {}) do set[r.income_type_key] = true end
     return set
@@ -96,9 +103,9 @@ end
 -- params: { include_inactive? = "false" }. Each row carries usage_count.
 function IncomeTypeQueries.admin_list(params)
     params = params or {}
-    local where = ""
+    local where = "WHERE COALESCE(it.namespace_id, 0) = 0"
     if params.include_inactive ~= "true" and params.include_inactive ~= true then
-        where = "WHERE is_active = true"
+        where = where .. " AND it.is_active = true"
     end
     local rows = db.query([[
         SELECT it.*,

@@ -557,6 +557,9 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "tax_file", name = "HMRC Filing", description = "Submit tax returns to HMRC", category = "Tax", allowed_actions = {"access"} },
         -- The accountant's queue of "file it for me" requests (read = see + download, update = change status).
         { machine_name = "tax_filing_requests", name = "Filing Requests", description = "Accountant queue: returns customers asked us to file", category = "Tax" },
+        -- Maintain the income types customers fill in under My Income (read = see the
+        -- list; create/update = add types, edit forms, reorder, hide/show).
+        { machine_name = "tax_income_types", name = "Income types", description = "Maintain the income types customers fill in under My Income", category = "Tax" },
     },
 
     -- CRM modules
