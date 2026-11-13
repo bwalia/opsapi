@@ -104,6 +104,7 @@ local tax_agent_sessions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX
 local tax_agent_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-agent-menu-item") or {}
 local tax_filing_requests_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-filing-requests") or {}
 local tax_statement_year_backfill = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-year-backfill") or {}
+local tax_menu_file_my_tax = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-menu-file-my-tax") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -2111,6 +2112,9 @@ local _migrations = {
     ['zz_tax_filing_requests_2'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_filing_requests_migrations, 2),
     -- Statements uploaded before the extract step stamped their tax year (#830).
     ['zz_tax_statement_year_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_statement_year_backfill, 1),
+    -- Tax menu rename: "Tax Dashboard", "File My Tax", hide "File with AI". Sorts after
+    -- 'zz_tax_agent_zz_menu' (and every numbered tax menu seed), so all rows exist.
+    ['zz_tax_menu_file_my_tax'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_menu_file_my_tax, 1),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),

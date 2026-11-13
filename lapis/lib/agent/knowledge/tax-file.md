@@ -1,5 +1,5 @@
 ---
-title: File your tax (HMRC)
+title: File My Tax (HMRC)
 pages: /dashboard/tax/file
 api:
 modules:
@@ -7,7 +7,9 @@ tools:
 suggestions: Walk me through filing my tax return | Why is step 4 blocking my return? | What does the final declaration do?
 readonly: true
 ---
-# File your tax
+# File My Tax
+At the top the user chooses how to file: "Do it with the AI assistant" opens the tax chat assistant in a side panel (same tax year) alongside the wizard; "Do it myself" keeps just the wizard. The choice is remembered. The assistant is also reachable at /dashboard/tax/agent.
+
 A 6-step guided wizard that files a UK Self Assessment (self-employment) return with HMRC through Making Tax Digital. Steps unlock in order and show as done, active or locked. You only explain: every step talks to HMRC or is legally binding, so the user clicks each button themselves.
 
 ## Using the page

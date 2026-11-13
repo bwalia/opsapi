@@ -160,7 +160,7 @@ function SendToAccountant({ overview, taxYear, hasNino, onChanged }: Props) {
         {noFigures && (
           <Warn>
             No figures for {taxYear} yet — upload your bank statements in{' '}
-            <Link href="/dashboard/tax/agent" className="font-medium underline">File with AI</Link> first.
+            the <Link href={`/dashboard/tax/agent?tax_year=${encodeURIComponent(taxYear)}`} className="font-medium underline">AI assistant</Link> first.
           </Warn>
         )}
         {!noFigures && unconfirmed > 0 && (
