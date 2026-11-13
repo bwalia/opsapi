@@ -57,6 +57,11 @@ local VALID_INCOME_TYPES = {
     dividends = true, savings_interest = true, other = true,
 }
 
+-- Profile keys that hold figures for ONE tax year (cleared when the year changes).
+local YEAR_FIGURES = { "property_finance_costs", "property_rents", "property_expenses" }
+
+local save_profile_patch -- defined below (needs TaxTools.merge_profile)
+
 local function money(n) return string.format("£%.2f", tonumber(n) or 0) end
 
 local function year_of(ctx, args)
@@ -89,6 +94,35 @@ local function hmrc_error(r)
     if type(e.detail) == "string" and e.detail ~= "" then msg = msg .. " (" .. e.detail .. ")" end
     if type(e.hmrc) == "table" and e.hmrc.code then msg = msg .. " [" .. tostring(e.hmrc.code) .. "]" end
     return msg
+end
+
+--- Shallow-merge a profile patch over an existing profile (pure; for tests too).
+-- Keys in `patch` win; every other existing key is kept. Never mutates its inputs.
+function TaxTools.merge_profile(existing, patch)
+    local out = {}
+    for k, v in pairs(type(existing) == "table" and existing or {}) do out[k] = v end
+    for k, v in pairs(type(patch) == "table" and patch or {}) do out[k] = v end
+    return out
+end
+
+-- Persist a profile patch for the caller's session, merged server-side with
+-- jsonb `||` (top-level keys in the patch replace, all others are kept), and
+-- mirror it into ctx._profile so a compute_estimate later in the SAME turn sees it.
+-- cols: optional { income_types = {...}, tax_year = "..." } column updates.
+-- Scoped by namespace_id + user_id; never trusts a client-supplied session id.
+save_profile_patch = function(ctx, patch, cols)
+    cols = cols or {}
+    db.query([[UPDATE tax_agent_sessions
+        SET profile = COALESCE(profile, '{}'::jsonb) || ?::jsonb,
+            income_types = COALESCE(?::jsonb, income_types),
+            tax_year = COALESCE(?, tax_year),
+            updated_at = NOW()
+        WHERE id = ? AND namespace_id = ? AND user_id = ?]],
+        cjson.encode(patch),
+        cols.income_types and cjson.encode(cols.income_types) or db.NULL,
+        cols.tax_year or db.NULL,
+        ctx.session_id, ctx.namespace_id, ctx.user_id)
+    ctx._profile = TaxTools.merge_profile(ctx._profile, patch)
 end
 
 -- ============================ tools ============================
@@ -148,17 +182,21 @@ register({
                 .. "self_employment, uk_property, employment, dividends, savings_interest, other."
         end
         local tax_year = year_of(ctx, args)
-        local profile = {
+        local patch = {
             income_types = clean,
             is_scottish_taxpayer = args.is_scottish_taxpayer == true,
             tax_year = tax_year,
         }
-        -- Session is scoped by namespace_id + user_id; never trust a client-supplied id.
-        db.query([[UPDATE tax_agent_sessions
-            SET income_types = ?::jsonb, profile = ?::jsonb, tax_year = ?, updated_at = NOW()
-            WHERE id = ? AND namespace_id = ? AND user_id = ?]],
-            cjson.encode(clean), cjson.encode(profile), tax_year,
-            ctx.session_id, ctx.namespace_id, ctx.user_id)
+        -- Year-specific figures belong to the year they were given for: switching
+        -- year clears them (JSON null) instead of carrying them over.
+        if ctx.tax_year and tax_year ~= ctx.tax_year then
+            for _, k in ipairs(YEAR_FIGURES) do patch[k] = cjson.null end
+        end
+        -- MERGE into the stored profile (jsonb ||) so figures another tool saved
+        -- (e.g. property_finance_costs) survive a later profile update.
+        save_profile_patch(ctx, patch, { income_types = clean, tax_year = tax_year })
+        ctx.tax_year = tax_year
+        local profile = patch
         return {
             saved = true,
             income_types = clean,
@@ -167,6 +205,75 @@ register({
             ignored = #bad > 0 and bad or nil,
             note = "Profile saved. Next, ask the user to upload a bank statement so we can "
                 .. "extract and classify their income and expenses.",
+        }
+    end,
+})
+
+-- Landlord figures the bank statement can't tell us. Section 24 (ITTOIA 2005
+-- s272A / ITA 2007 s399A): finance costs on RESIDENTIAL lets are not deducted from
+-- rental profit; instead they give a basic-rate (20%) tax reduction — 20% of the
+-- lowest of (finance costs, property profit, adjusted total income above the
+-- personal allowance). Commercial (non-residential) mortgage interest is NOT
+-- restricted: it stays an ordinary deductible expense, so it must NOT be given here
+-- (leave it classified as Loan Interest in their transactions).
+register({
+    name = "set_property_finance_costs",
+    description = "Record a LANDLORD's residential property finance costs for the tax year: the "
+        .. "mortgage/loan INTEREST (plus arrangement fees) on residential let property — NOT capital "
+        .. "repayments, and NOT interest on commercial property (that stays a normal expense). Bank "
+        .. "statements can't separate interest from capital, so whenever the user has uk_property "
+        .. "income ASK them for this year's residential mortgage interest before giving an estimate; "
+        .. "if they have none, record 0. It earns a 20% tax credit (Section 24) in the estimate. "
+        .. "If they ALSO have self-employment, also ask for their total rental income and rental "
+        .. "expenses (property_income, property_expenses) so the bank totals can be split; without "
+        .. "them no finance-cost credit can be applied.",
+    perms = { { "tax_transactions", "read" } },
+    parameters = {
+        type = "object",
+        properties = {
+            residential_finance_costs = {
+                type = "number",
+                description = "Residential mortgage/loan INTEREST + finance fees for the tax year in £ "
+                    .. "(not capital repayments). 0 if none.",
+            },
+            property_income = {
+                type = "number",
+                description = "Optional, only for users who are ALSO self-employed: total rents "
+                    .. "received for the year in £.",
+            },
+            property_expenses = {
+                type = "number",
+                description = "Optional, with property_income: allowable rental expenses for the year "
+                    .. "in £ (excluding residential finance costs).",
+            },
+            tax_year = { type = "string", description = "UK tax year, e.g. 2025-26." },
+        },
+        required = { "residential_finance_costs" },
+    },
+    handler = function(ctx, args)
+        local fc = tonumber(args.residential_finance_costs)
+        if not fc or fc ~= fc or fc < 0 or fc == math.huge then
+            return nil, "residential_finance_costs must be a number of pounds, 0 or more."
+        end
+        local patch = { property_finance_costs = math.floor(fc * 100 + 0.5) / 100 }
+        local rents, pexp = tonumber(args.property_income), tonumber(args.property_expenses)
+        if args.property_income ~= nil then
+            if not rents or rents < 0 then return nil, "property_income must be 0 or more." end
+            patch.property_rents = math.floor(rents * 100 + 0.5) / 100
+        end
+        if args.property_expenses ~= nil then
+            if not pexp or pexp < 0 then return nil, "property_expenses must be 0 or more." end
+            patch.property_expenses = math.floor(pexp * 100 + 0.5) / 100
+        end
+        save_profile_patch(ctx, patch)
+        return {
+            saved = true,
+            property_finance_costs = patch.property_finance_costs,
+            property_rents = patch.property_rents,
+            property_expenses = patch.property_expenses,
+            tax_credit_rate = 0.20,
+            note = "Saved. Residential finance costs are not deducted from rental profit; they give a "
+                .. "20% tax reduction instead. Call compute_estimate to show the updated estimate.",
         }
     end,
 })
@@ -318,7 +425,7 @@ register({
 -- loan is not taxable income. (is_tax_deductible applies to EXPENSES; every income
 -- category is stored is_tax_deductible=false.) Expenses = debits the classifier marked
 -- deductible. A statement belongs to the year stamped on it (tax_statements.tax_year).
--- @return { income, expenses, unreviewed }
+-- @return { income, expenses, finance_interest, unreviewed }
 function TaxTools.year_totals(user_id, tax_year)
     local agg = db.query([[
         SELECT
@@ -327,6 +434,8 @@ function TaxTools.year_totals(user_id, tax_year)
                THEN t.amount ELSE 0 END), 0) AS gross_income,
           COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
                THEN t.amount ELSE 0 END), 0) AS total_expenses,
+          COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' AND t.is_tax_deductible = true
+               AND t.hmrc_category = 'interest_finance' THEN t.amount ELSE 0 END), 0) AS finance_interest,
           COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed
         FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
         WHERE t.user_id = ? AND s.tax_year = ?]],
@@ -335,6 +444,8 @@ function TaxTools.year_totals(user_id, tax_year)
     return {
         income = tonumber(row.gross_income) or 0,
         expenses = tonumber(row.total_expenses) or 0,
+        -- the part of `expenses` classified as loan/finance interest (HMRC interest_finance)
+        finance_interest = tonumber(row.finance_interest) or 0,
         unreviewed = tonumber(row.unreviewed) or 0,
     }
 end
@@ -370,7 +481,7 @@ end
 -- Routes the bank-statement totals to the right schedule from the profile, then adds
 -- any other income the agent gathered (employment, savings, dividends, Gift Aid). The
 -- engine applies the bands, allowances and NIC (Class 4 on trading profit only).
--- opts: { unreviewed = n }
+-- opts: { unreviewed = n, finance_interest = n (interest already inside `expenses`) }
 function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     opts = opts or {}
     profile = profile or {}
@@ -387,20 +498,48 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
         dividends = tonumber(profile.dividends) or 0,
         gift_aid_net = tonumber(profile.gift_aid_net) or 0,
     }
+    -- Section 24: residential finance costs are NOT a deductible expense; they earn a
+    -- 20% tax reduction (lib/tax-calc compute_full step 8). If the bank-statement
+    -- expenses already deducted interest (classified Loan Interest / interest_finance),
+    -- take the user's stated residential interest back out — up to the amount actually
+    -- classified — so it isn't deducted AND credited. Any classified interest beyond
+    -- the stated residential figure stays deductible (treated as commercial/other).
+    local has_property = false
+    for _, t in ipairs(types) do if t == "uk_property" then has_property = true end end
+    local fin = math.max(0, tonumber(profile.property_finance_costs) or 0)
+    local notes = {}
+    local moved = 0
     if only_property and not has_se then
+        moved = math.min(fin, math.max(0, tonumber(opts.finance_interest) or 0))
         inp.property_rents = income
-        inp.property_expenses = expenses
-        inp.property_finance_costs = tonumber(profile.property_finance_costs) or 0
+        inp.property_expenses = expenses - moved
+        inp.property_finance_costs = fin
+    elseif has_se and has_property and tonumber(profile.property_rents) then
+        -- Mixed self-employment + property: split the bank totals ONLY with the rental
+        -- figures the user stated; the rest is trading. Never guess a split.
+        local rents = math.min(income, math.max(0, tonumber(profile.property_rents)))
+        local pexp = math.min(expenses, math.max(0, tonumber(profile.property_expenses) or 0))
+        inp.property_rents = rents
+        inp.property_expenses = pexp
+        inp.property_finance_costs = fin
+        inp.se_turnover = income - rents
+        inp.se_expenses = expenses - pexp
     else
         inp.se_turnover = income
         inp.se_expenses = expenses
+        if has_property and fin > 0 then
+            notes[#notes + 1] = "Residential finance costs (£" .. string.format("%.2f", fin) .. ") were not "
+                .. "applied: your bank totals mix trading and rental income. Give your total rental income "
+                .. "and rental expenses so the 20% finance-cost credit can be worked out."
+        end
     end
 
     local rates = TaxCalc.load_rates(tax_year)
     local full = TaxCalc.compute_full(inp, rates)
     full.tax_year = tax_year
     full.gross_income = income
-    full.total_expenses = expenses
+    -- Allowable expenses: residential interest moved out under Section 24 is not one.
+    full.total_expenses = expenses - moved
     full.unreviewed_count = tonumber(opts.unreviewed) or 0
     full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
     full.trading_profit = full.profit
@@ -426,6 +565,9 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     full.total_tax_due = full.total_liability
     full.effective_rate = (full.total_income or 0) > 0
         and (math.floor(full.total_liability / full.total_income * 10000) / 100) or 0
+    full.property_finance_costs = inp.property_finance_costs or 0
+    full.finance_costs_moved_from_expenses = moved
+    full.notes = #notes > 0 and notes or nil
     full.is_estimate = true
     return full
 end
@@ -434,7 +576,7 @@ end
 function TaxTools.compute_year(user_id, tax_year, profile)
     local totals = TaxTools.year_totals(user_id, tax_year)
     return TaxTools.estimate(totals.income, totals.expenses, tax_year, profile,
-        { unreviewed = totals.unreviewed })
+        { unreviewed = totals.unreviewed, finance_interest = totals.finance_interest })
 end
 
 -- The deterministic running estimate. The ONLY tax figure the user sees — computed

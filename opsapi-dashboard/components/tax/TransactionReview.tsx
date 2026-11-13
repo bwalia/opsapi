@@ -360,7 +360,7 @@ export default function TransactionReview({ taxYear, total, confirmed, toCheck, 
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           No transactions for {taxYear} yet — upload your bank statements in{' '}
-          <Link href="/dashboard/tax/agent" className="font-medium underline">File with AI</Link>.
+          the <Link href={`/dashboard/tax/agent?tax_year=${encodeURIComponent(taxYear)}`} className="font-medium underline">AI assistant</Link>.
         </span>
       </p>
     );

@@ -1,8 +1,9 @@
 --[[
-    Adds the "File with AI" sidebar item under the Tax group, pointing at the
-    conversational tax agent (/dashboard/tax/agent). Backend-driven menu; new
-    items default to enabled (COALESCE(is_enabled, true)) so no per-namespace
-    config rows are needed. Gated on tax_copilot. Idempotent.
+    Seeds the `tax_agent` menu row (conversational tax agent, /dashboard/tax/agent).
+    It used to be the "File with AI" sidebar item; the assistant is now opened from
+    File My Tax, so the row is seeded INACTIVE (hidden) and existing installs are
+    deactivated by migrations/tax-menu-file-my-tax.lua. Kept so an admin can
+    re-enable it. Gated on tax_copilot. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -22,14 +23,14 @@ return {
         db.insert("menu_items", {
             uuid = MigrationUtils.generateUUID(),
             key = "tax_agent",
-            name = "File with AI",
+            name = "File My Tax — AI assistant",
             icon = "Sparkles",
             path = "/dashboard/tax/agent",
             module = "tax_transactions",
             required_action = "read",
             priority = 30, -- featured: first child under the Tax group
             parent_id = parent_id,
-            is_active = true,
+            is_active = false, -- reached from File My Tax, not the sidebar
             is_admin_only = false,
             always_show = false,
             settings = "{}",

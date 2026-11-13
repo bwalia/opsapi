@@ -1,7 +1,12 @@
 'use client';
 
 /**
- * Guided "File your tax" wizard.
+ * File My Tax — the guided filing wizard.
+ *
+ * At the top the user picks how to do it: "Do it with the AI assistant" docks the tax
+ * chat (components/tax/TaxAgentChat, pinned to this page's tax year) beside the steps
+ * — a side column on wide screens, a full-screen sheet on small ones — or "Do it
+ * myself" (just the steps below). The choice is remembered in localStorage.
  *
  * One linear path so a non-expert can file without hopping between pages:
  *   1. National Insurance number (both paths)
@@ -51,11 +56,15 @@ import {
   UserCheck,
   ClipboardCheck,
   CalendarDays,
+  Sparkles,
+  Maximize2,
+  X,
 } from 'lucide-react';
 import { Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import FileForMe from '@/components/tax/FileForMe';
 import TransactionReview from '@/components/tax/TransactionReview';
+import TaxAgentChat from '@/components/tax/TaxAgentChat';
 import { taxFilingService, type FilingOverview } from '@/services/tax-filing.service';
 import {
   taxService,
@@ -90,6 +99,26 @@ function taxYearOf(dateStr: string): string {
 
 // sessionStorage key holding the tax year while the user is away signing in to HMRC.
 const HMRC_YEAR_KEY = 'tax.file.hmrcTaxYear';
+// How the user chose to file: with the AI assistant or by themselves (remembered).
+const FILE_MODE_KEY = 'tax.file.mode';
+type FileMode = 'ai' | 'self';
+
+function readFileMode(): FileMode | null {
+  try {
+    const v = localStorage.getItem(FILE_MODE_KEY);
+    return v === 'ai' || v === 'self' ? v : null;
+  } catch {
+    return null; // storage blocked (private mode etc.) — just don't remember
+  }
+}
+
+function saveFileMode(mode: FileMode) {
+  try {
+    localStorage.setItem(FILE_MODE_KEY, mode);
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 // The tax year people file now: the last COMPLETED one (years start 6 April).
 // On 22 Oct 2026 that's "2025-26".
@@ -301,7 +330,7 @@ function StepHeader({
 function FileWizardContent() {
   const searchParams = useSearchParams();
 
-  // "Ready to file?" in File with AI passes ?tax_year=; coming back from HMRC sign-in
+  // "Ready to file?" in the AI assistant passes ?tax_year=; coming back from HMRC sign-in
   // restores the year the user picked before leaving; else the year people file now.
   const [taxYear, setTaxYear] = useState(() => {
     const fromUrl = searchParams.get('tax_year');
@@ -324,6 +353,24 @@ function FileWizardContent() {
     searchParams.get('hmrc_connected') || searchParams.get('hmrc_error') ? 'direct' : 'accountant',
   );
   const [confirmRemoveNino, setConfirmRemoveNino] = useState(false);
+
+  // AI assistant vs do-it-myself. Read after mount (no localStorage during SSR).
+  const [fileMode, setFileMode] = useState<FileMode | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  useEffect(() => {
+    const saved = readFileMode();
+    setFileMode(saved);
+    // Re-open the dock for returning AI users on wide screens only — on a phone it
+    // would cover the page, so they get the floating button instead.
+    if (saved === 'ai' && typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1280px)').matches) {
+      setAssistantOpen(true);
+    }
+  }, []);
+  const chooseMode = (mode: FileMode) => {
+    setFileMode(mode);
+    saveFileMode(mode);
+    setAssistantOpen(mode === 'ai');
+  };
 
   // Step 2 — connection
   const [connected, setConnected] = useState(false);
@@ -771,7 +818,7 @@ function FileWizardContent() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-primary-600">Self Assessment</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-secondary-900 sm:text-3xl">File your tax return</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-secondary-900 sm:text-3xl">File My Tax</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-secondary-500">
             Check what we read from your bank statements, confirm it, then choose how to file — our accountant
             files it for you, or you file directly with HMRC.
@@ -793,9 +840,57 @@ function FileWizardContent() {
         </label>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
+      {/* How do you want to do it? AI assistant (docked chat) or the steps yourself. */}
+      <div role="radiogroup" aria-label="How do you want to file?" className="grid gap-3 sm:grid-cols-2">
+        {([
+          {
+            mode: 'ai' as const,
+            icon: <Sparkles className="h-5 w-5" />,
+            title: 'Do it with the AI assistant',
+            body: 'Chat it through — the assistant asks what it needs, reads your statements and works out your '
+              + 'estimate. It opens beside these steps, on the same tax year.',
+          },
+          {
+            mode: 'self' as const,
+            icon: <ListChecks className="h-5 w-5" />,
+            title: 'Do it myself',
+            body: 'Follow the step-by-step guide below at your own pace.',
+          },
+        ]).map((o) => {
+          const on = fileMode === o.mode;
+          return (
+            <button
+              key={o.mode}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              data-testid={`file-mode-${o.mode}`}
+              onClick={() => chooseMode(o.mode)}
+              className={`flex items-start gap-3 rounded-xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                on ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-secondary-200 bg-surface hover:border-primary-300 hover:bg-secondary-50'
+              }`}
+            >
+              <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${on ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>
+                {o.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-semibold text-secondary-900">{o.title}</span>
+                <span className="mt-0.5 block text-sm text-secondary-500">{o.body}</span>
+                {o.mode === 'ai' && on && !assistantOpen && (
+                  <span className="mt-1.5 inline-block text-sm font-medium text-primary-700">Open the assistant →</span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={assistantOpen ? 'xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start xl:gap-6' : ''}>
+      {/* With the assistant docked the steps get one column (summary on top), so the
+          wizard keeps a usable width beside the chat. */}
+      <div className={assistantOpen ? 'grid min-w-0 grid-cols-1 gap-6' : 'grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]'}>
         {/* Summary rail: first on mobile, a sticky right column on wide screens. */}
-        <aside className="space-y-5 xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1 xl:self-start">
+        <aside className={assistantOpen ? 'space-y-5' : 'space-y-5 xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1 xl:self-start'}>
           <Card padding="none" className="overflow-hidden">
             {loadingOverview && !overview ? (
               <p className="flex items-center gap-2 p-5 text-sm text-secondary-500">
@@ -817,6 +912,10 @@ function FileWizardContent() {
                     ['Income', overview.estimate.income],
                     ['Allowable expenses', overview.estimate.expenses],
                     ['Profit', overview.estimate.profit],
+                    // Section 24 credit for residential finance costs — shown only when there is one.
+                    ...((overview.estimate.finance_cost_reduction ?? 0) > 0
+                      ? [['Finance-cost tax reduction (20%)', -(overview.estimate.finance_cost_reduction as number)]]
+                      : []),
                     ['Income Tax', overview.estimate.income_tax],
                     ['Class 4 National Insurance', overview.estimate.class4_nic],
                     ['Due by 31 January*', overview.estimate.total_due_31_jan],
@@ -899,7 +998,7 @@ function FileWizardContent() {
           )}
         </aside>
 
-        <div className="min-w-0 space-y-5 xl:col-start-1 xl:row-start-1">
+        <div className={assistantOpen ? 'min-w-0 space-y-5' : 'min-w-0 space-y-5 xl:col-start-1 xl:row-start-1'}>
       {/* Step 1 — NINO (both paths) */}
       <Card padding="lg" id="step-nino">
         <StepHeader index={1} state={sNino} icon={<Fingerprint className="w-4 h-4" />}
@@ -1567,6 +1666,55 @@ function FileWizardContent() {
         </div>
       </div>
 
+      {/* The AI assistant dock: a side column on wide screens, a full-screen sheet on
+          small ones. Same tax year as the page; refreshes the figures as it works. */}
+      {assistantOpen && (
+        <aside
+          aria-label="AI tax assistant"
+          className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-white shadow-xl xl:sticky xl:inset-auto xl:top-6 xl:z-auto xl:h-[calc(100vh-8rem)] xl:rounded-xl xl:border xl:border-secondary-200 xl:shadow-none"
+        >
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-primary-100 bg-primary-50 px-4 py-2.5">
+            <p className="flex items-center gap-2 text-sm font-semibold text-primary-800">
+              <Sparkles className="h-4 w-4" /> AI assistant
+            </p>
+            <div className="flex items-center gap-1">
+              <Link
+                href={`/dashboard/tax/agent?tax_year=${encodeURIComponent(taxYear)}`}
+                title="Open the assistant full screen"
+                aria-label="Open the assistant full screen"
+                className="rounded-md p-1.5 text-primary-700 hover:bg-primary-100"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => setAssistantOpen(false)}
+                title="Close the assistant"
+                aria-label="Close the assistant"
+                className="rounded-md p-1.5 text-primary-700 hover:bg-primary-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
+            <TaxAgentChat variant="panel" taxYear={taxYear} onFiguresChanged={loadOverview} />
+          </div>
+        </aside>
+      )}
+      </div>
+
+      {/* AI mode with the dock closed: one click brings the assistant back. */}
+      {fileMode === 'ai' && !assistantOpen && (
+        <button
+          type="button"
+          onClick={() => setAssistantOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-primary-600 px-4 py-3 text-sm font-semibold text-white shadow-lg hover:bg-primary-700"
+        >
+          <Sparkles className="h-4 w-4" /> Ask the AI assistant
+        </button>
+      )}
+
       <Modal
         isOpen={confirmRemoveNino}
         onClose={() => setConfirmRemoveNino(false)}
@@ -1603,7 +1751,7 @@ function FileWizardContent() {
 
 export default function FileWizardPage() {
   return (
-    <ProtectedPage module="tax_statements" title="File your tax">
+    <ProtectedPage module="tax_statements" title="File My Tax">
       <Suspense fallback={null}>
         <FileWizardContent />
       </Suspense>

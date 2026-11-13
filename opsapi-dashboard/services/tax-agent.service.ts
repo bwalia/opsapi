@@ -18,6 +18,14 @@ export interface TaxEstimate {
   unreviewed_count?: number;
   nic_applied?: boolean;
   is_estimate?: boolean;
+  /** Section 24: 20% basic-rate credit for residential finance costs (already inside income_tax). */
+  finance_cost_reduction?: number;
+  /** Residential mortgage/loan interest the landlord gave the assistant for the year. */
+  property_finance_costs?: number;
+  /** Classified interest taken back out of allowable expenses (it gets the credit instead). */
+  finance_costs_moved_from_expenses?: number;
+  /** Plain-English caveats about the estimate (e.g. a credit that couldn't be applied). */
+  notes?: string[] | null;
 }
 
 export interface ReviewItem {

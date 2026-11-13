@@ -30,7 +30,7 @@ const PER_PAGE = 25;
 
 // One-click corrections for a credit that was mis-filed as an expense. Income options
 // re-file it under the right HMRC box; "exclude" clears the box so it never reaches the
-// return. Mirrors the guided "File your tax" wizard so both surfaces behave identically.
+// return. Mirrors the guided "File My Tax" wizard so both surfaces behave identically.
 const CREDIT_FIX_OPTIONS = [
   { value: 'turnover', label: 'Business income (sales / turnover)', category: 'sales_income', hmrc_category: 'turnover' },
   { value: 'other_income', label: 'Other business income', category: 'income_other', hmrc_category: 'other_income' },
@@ -444,7 +444,7 @@ function TransactionsContent() {
               Money coming in can&apos;t be a business expense — HMRC rejects the resulting negative value.
               Use the <strong>Fix</strong> action on each flagged row, or the guided{' '}
               <Link href="/dashboard/tax/file" className="underline font-medium">
-                File your tax
+                File My Tax
               </Link>{' '}
               flow.
             </p>

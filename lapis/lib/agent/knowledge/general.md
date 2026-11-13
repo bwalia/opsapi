@@ -26,7 +26,7 @@ Welcome banner, a banner for pending workspace invitations (accept or decline), 
 - Reports (/dashboard/reports): audit log of role, member and security changes.
 - Hospitals (/dashboard/hospitals), Patients (/dashboard/patients), Care Home (/dashboard/care-home): facilities and wards, patient records and care plans, dementia care dashboard.
 - Service Jobs (/dashboard/field-service): field-service jobs, phases, engineer visits, service requests, assets, contracts, parts, Simpro sync.
-- Tax Returns (/dashboard/tax): UK self-assessment — bank statements, transactions, categories, HMRC filing.
+- Tax Dashboard (/dashboard/tax): UK self-assessment — bank statements, transactions, categories, HMRC filing.
 - Shop (/dashboard/shop): AI hardware shop — catalogue, orders, quotes, stock, assistant chats.
 - Products, Orders, Stores (/dashboard/products, /dashboard/orders, /dashboard/stores): e-commerce catalogue, orders, store locations.
 - Services (/dashboard/services): deployment services and GitHub workflows.
