@@ -98,7 +98,7 @@ local ROOT = rawget(_G, "SPEC_ROOT") -- set when the files under test live elsew
 local src = ROOT and read(ROOT .. "routes/tax-process.lua") or read("lapis/routes/tax-process.lua")
 if src == "" then src = read("routes/tax-process.lua") end
 check("extract uses a fresh token", src:find('/api/v2/tax/extract", "statement_id=" .. s.uuid, auth_for(job)', 1, true) ~= nil)
-check("classify uses a fresh token", src:find('/api/v2/tax/classify", "statement_id=" .. s.uuid, auth_for(job)', 1, true) ~= nil)
+check("classify uses a fresh token", src:find('/api/v2/tax/classify", body, auth_for(job)', 1, true) ~= nil)
 check("no call still reuses the job's original header", src:find("s.uuid, job.auth", 1, true) == nil)
 check("verified payload kept on the job", src:find("jwt_payload = jwt_payload", 1, true) ~= nil)
 check("API keys passed through", src:find('raw:match("^opsk_")', 1, true) ~= nil)
