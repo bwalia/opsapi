@@ -77,3 +77,10 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
+
+# Plain, non-secret env for this release (templates/deployment.yaml → extraEnv).
+extraEnv:
+  # OpsAPI's own Ollama copies on the Mac Studio (devops/ollama-host): the gateway's /opsapi rule checks the
+  # same signed key (OLLAMA_API_KEY in Vault) and fails over copy A -> copy B -> the shared Ollama.
+  # Overrides OLLAMA_URL in Vault.
+  OLLAMA_URL: "https://ollama.workstation.co.uk/opsapi"
