@@ -30,7 +30,7 @@ check() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1 (got $2,
 run; check "a healthy server is left alone" "$(kicks)" 0
 echo wedged > "$T/mode"
 run; run; check "two missed answers: no restart yet" "$(kicks)" 0
-run; check "the third missed answer restarts com.ollama.server" "$(grep -c 'kickstart -k gui/.*/com.ollama.server' "$T/kicks")" 1
+run; check "the third missed answer restarts com.opsapi.ollama" "$(grep -c 'kickstart -k gui/.*/com.opsapi.ollama$' "$T/kicks")" 1
 run; run; run; check "...and not again within the cooldown" "$(kicks)" 1
 echo ok > "$T/mode"; run
 check "an answer resets the count" "$(cat "$T/home/Library/Logs/ollama/watchdog.fails")" 0

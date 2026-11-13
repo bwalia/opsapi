@@ -1,14 +1,14 @@
 #!/bin/bash
-# Restarts the platform's Ollama (launchd com.ollama.server, :11434) when it is up but has stopped answering.
+# Restarts OpsAPI's own Ollama (launchd com.opsapi.ollama, :11439) when it is up but has stopped answering.
 # Ollama 0.34's scheduler can wedge: /api/version still answers, but no generation request ever starts, so the
 # OpsAPI assistant times out on every environment until someone restarts it (seen 2026-10-02, -05, -14, -15).
 # Run every 2 minutes by launchd (com.opsapi.ollama-watchdog); install with ./install.sh. A server that isn't
 # running at all is launchd's job (KeepAlive), not this one's.
 set -u
 
-URL="${OLLAMA_WATCHDOG_URL:-http://127.0.0.1:11434}"
+URL="${OLLAMA_WATCHDOG_URL:-http://127.0.0.1:11439}"
 MODEL="${OLLAMA_WATCHDOG_MODEL:-qwen3.8:latest}"
-LABEL="${OLLAMA_WATCHDOG_LABEL:-com.ollama.server}"
+LABEL="${OLLAMA_WATCHDOG_LABEL:-com.opsapi.ollama}"
 FAILS_TO_RESTART="${OLLAMA_WATCHDOG_FAILS:-3}"  # about 6 minutes without one answer
 COOLDOWN="${OLLAMA_WATCHDOG_COOLDOWN:-600}"     # seconds between restarts, so a slow cold start isn't restarted again
 DIR="$HOME/Library/Logs/ollama"
