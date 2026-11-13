@@ -177,6 +177,7 @@ local shop_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "m
 local shop_survey_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-survey") or {}
 local shop_order_auth_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-authorisation") or {}
 local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-bank-transfer") or {}
+local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -2672,6 +2673,12 @@ local _migrations = {
     -- Payment methods ("Getting paid", core) + invoices.po_number / payment_method_uuid (invoicing)
     ['zzpm1_namespace_payment_methods'] = conditional_array(ProjectConfig.FEATURES.CORE, payment_methods_migrations, 1),
     ['zzpm2_invoices_po_payment_method'] = conditional_array(ProjectConfig.FEATURES.INVOICING, payment_methods_migrations, 2),
+    -- Customer PO numbers, quote revisions, supplier PO contacts (migrations/shop-customer-po.lua)
+    ['zzs45_shop_customer_po_number'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 1),
+    ['zzs46_shop_quote_revisions'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 2),
+    ['zzs47_shop_supplier_po_contacts'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 3),
+    ['zzs48_shop_supplier_po_indexes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 4),
+    ['zzs49_shop_purchase_orders_access'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 5),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

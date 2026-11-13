@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Pencil, Plus, RefreshCw, Search, Truck, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -10,7 +11,8 @@ import { ProtectedPage } from '@/components/permissions';
 import { FilterSelect, ShopLoading } from '@/components/shop/shared';
 import { shopService } from '@/services/shop.service';
 import { extractApiError, formatDateTime } from '@/lib/utils';
-import { formatMoney } from '@/lib/shop';
+import { formatMoney, humanize } from '@/lib/shop';
+import type { ShopSupplierPurchaseOrder } from '@/types/shop';
 import {
   SHOP_SUPPLIER_FIELDS,
   type ShopSupplier,
@@ -68,6 +70,11 @@ interface FormState {
   sync_hours: string;
   update_lead_times: boolean;
   is_active: boolean;
+  po_email: string;
+  po_phone: string;
+  po_address: string;
+  account_number: string;
+  po_notes: string;
 }
 
 function toForm(s?: ShopSupplier): FormState {
@@ -90,6 +97,11 @@ function toForm(s?: ShopSupplier): FormState {
     sync_hours: String(s?.sync_hours ?? 24),
     update_lead_times: s?.update_lead_times ?? true,
     is_active: s?.is_active ?? true,
+    po_email: s?.po_email ?? '',
+    po_phone: s?.po_phone ?? '',
+    po_address: s?.po_address ?? '',
+    account_number: s?.account_number ?? '',
+    po_notes: s?.po_notes ?? '',
   };
 }
 
@@ -127,6 +139,11 @@ function SupplierModal({ supplier, open, onClose, onSaved }: { supplier?: ShopSu
       sync_hours: Number(f.sync_hours),
       update_lead_times: f.update_lead_times,
       is_active: f.is_active,
+      po_email: f.po_email.trim() || null,
+      po_phone: f.po_phone.trim() || null,
+      po_address: f.po_address.trim() || null,
+      account_number: f.account_number.trim() || null,
+      po_notes: f.po_notes.trim() || null,
       ...(f.keywords.trim() ? { filter: { keywords: f.keywords.split(',').map((k) => k.trim()).filter(Boolean) } } : {}),
       ...(f.auth_secret ? { auth_secret: f.auth_secret } : {}),
     };
@@ -222,6 +239,17 @@ function SupplierModal({ supplier, open, onClose, onSaved }: { supplier?: ShopSu
             Active (included in the daily sync)
           </label>
         </div>
+        <fieldset className="space-y-4 rounded-lg border border-secondary-200 p-4">
+          <legend className="px-1 text-sm font-semibold text-secondary-800">Purchase orders</legend>
+          <p className="text-xs text-secondary-500">Filled in on every supplier PO raised from a shop order. Leave blank if you don’t raise POs with them.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Send POs to (email)" id="sp-po-email" type="email" value={f.po_email} onChange={(e) => set('po_email', e.target.value)} />
+            <Input label="Phone" id="sp-po-phone" value={f.po_phone} onChange={(e) => set('po_phone', e.target.value)} />
+            <Input label="Our account number with them" id="sp-acc" value={f.account_number} onChange={(e) => set('account_number', e.target.value)} />
+          </div>
+          <Textarea label="Their address (printed on the PO)" id="sp-po-address" rows={3} value={f.po_address} onChange={(e) => set('po_address', e.target.value)} />
+          <Textarea label="Notes printed on every PO to them" id="sp-po-notes" rows={2} value={f.po_notes} placeholder="e.g. Quote our account number on the delivery note" onChange={(e) => set('po_notes', e.target.value)} />
+        </fieldset>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
@@ -456,6 +484,85 @@ function ItemsPanel({ supplier, version }: { supplier: ShopSupplier; version: nu
 
 // ---------------------------------------------------------------------------------------- page
 
+/** POs raised with this supplier (from shop orders, and older ones with its name). */
+function SupplierPurchaseOrders({ supplier, version }: { supplier: ShopSupplier; version: number }) {
+  const [rows, setRows] = useState<ShopSupplierPurchaseOrder[] | null>(null);
+  const [available, setAvailable] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    shopService
+      .getSupplierPurchaseOrders(supplier.uuid, { limit: 50 })
+      .then((res) => {
+        if (!active) return;
+        setRows(res.data);
+        setAvailable((res.meta as { available?: boolean }).available !== false);
+        setError(null);
+      })
+      .catch((err) => active && setError(extractApiError(err, 'Could not load the purchase orders')));
+    return () => {
+      active = false;
+    };
+  }, [supplier.uuid, version, retry]);
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-3 text-sm text-error-700">
+        {error}.
+        <Button size="sm" variant="outline" onClick={() => setRetry((n) => n + 1)}>Retry</Button>
+      </div>
+    );
+  }
+  if (!rows) return <p className="text-sm text-secondary-500">Loading…</p>;
+  if (!available) return <p className="text-sm text-secondary-500">Purchase orders aren’t switched on in this workspace. Ask an administrator to enable the Purchase Orders module.</p>;
+  if (!rows.length) {
+    return (
+      <p className="text-sm text-secondary-500">
+        No purchase orders with {supplier.name} yet. Raise one from a paid order: open it under{' '}
+        <Link href="/dashboard/shop/orders" className="text-primary-600 hover:underline">Shop → Orders</Link> and choose “Raise supplier PO”.
+      </p>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <caption className="sr-only">{supplier.name} purchase orders</caption>
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wider text-secondary-500">
+            <th className="py-2 pr-4">PO</th>
+            <th className="py-2 pr-4">Shop order</th>
+            <th className="py-2 pr-4">End customer PO</th>
+            <th className="py-2 pr-4">Status</th>
+            <th className="py-2 pr-4 text-right">Total</th>
+            <th className="py-2">Raised</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-secondary-100">
+          {rows.map((po) => (
+            <tr key={po.uuid}>
+              <td className="py-2 pr-4">
+                <Link href={`/dashboard/purchase-orders/${po.uuid}`} className="font-mono font-medium text-primary-600 hover:underline">{po.po_number}</Link>
+              </td>
+              <td className="py-2 pr-4">
+                {po.shop_order_uuid ? (
+                  <Link href={`/dashboard/shop/orders/${po.shop_order_uuid}`} className="font-mono text-primary-600 hover:underline">{po.shop_order_number ?? 'Order'}</Link>
+                ) : (
+                  po.reference || '—'
+                )}
+              </td>
+              <td className="py-2 pr-4 font-mono">{po.end_customer_po || '—'}</td>
+              <td className="py-2 pr-4">{humanize(po.status)}</td>
+              <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(Math.round(Number(po.total) * 100), po.currency || 'GBP')}</td>
+              <td className="py-2 text-secondary-600">{formatDateTime(po.created_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SuppliersContent() {
   const [suppliers, setSuppliers] = useState<ShopSupplier[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -594,6 +701,13 @@ function SuppliersContent() {
         </div>
       )}
       <input ref={fileRef} type="file" accept=".csv,.json,.xml,.txt,text/csv,application/json,application/xml,text/xml" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
+
+      {current && (
+        <Card padding="md">
+          <h2 className="mb-3 text-lg font-semibold text-secondary-900">{current.name}: purchase orders</h2>
+          <SupplierPurchaseOrders key={current.uuid} supplier={current} version={version} />
+        </Card>
+      )}
 
       {current && (
         <Card padding="md">

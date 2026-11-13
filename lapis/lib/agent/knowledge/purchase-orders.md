@@ -28,6 +28,11 @@ Orders the business places with suppliers (builders, merchants), e.g. materials 
 - Server-owned metadata (receipts, bills, closed, *_reason) can't be set through create/update.
 - Responses return the uuid as `id`. Find a PO by number with `search`. `project_uuid` must be a project in this workspace (find it with list_projects).
 
+## From shop orders
+- Shop staff raise drop-ship POs from a paid shop order (Shop → Orders → "Raise supplier PO"): metadata holds shop_order_uuid/number, shop_supplier_uuid (the shop supplier), supplier_account_number, end_customer_po (the customer's own PO, printed in the Deliver to block), bill_to, ship_to.
+- A shop supplier's PO details (Shop → Suppliers → Edit → Purchase orders: po_email, po_phone, po_address, account_number, po_notes) fill the PO; costs come from its price file.
+- Shop → Suppliers lists each supplier's POs (by metadata.shop_supplier_uuid, or older ones by supplier name).
+
 ## API
 - `GET /api/v2/purchase-orders?page&perPage&status=draft|sent|acknowledged|partially_received|received|billed|cancelled&supplier&project_uuid&from_date&to_date&search` — list (status may be a comma list; dates YYYY-MM-DD on issue date)
 - `GET /api/v2/purchase-orders/stats` — open/overdue/to-bill/draft counts; values per currency in by_currency[] (open_value, to_bill_value, billed_value, total_value); by_status counts

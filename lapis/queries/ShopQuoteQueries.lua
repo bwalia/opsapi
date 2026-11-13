@@ -1,3 +1,4 @@
+-- luacheck: max line length 180
 --[[
     Shop quotes
     ===========
@@ -17,6 +18,7 @@ local Settings = require("queries.ShopSettingsQueries")
 local Cart = require("queries.ShopCartQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
+local Rules = require("lib.shop-quote-rules")
 
 local ShopQuoteQueries = {}
 
@@ -31,7 +33,18 @@ local QUOTE_COLS = [[
     q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at, q.price_locked,
     q.kind, q.discount_minor, q.discount_label, q.trade_discount_minor, q.delivery_method,
     q.delivery_address::text AS delivery_address, q.sent_at, q.authorised_at, q.authorised_by_name,
+    q.customer_po_number, q.revision_no, q.revision_of_id, q.superseded_by_id,
     (q.valid_until < NOW()) AS is_past_validity
+]]
+
+-- The revision a quote was replaced by, and the original it revises (for the shapes).
+local REVISION_COLS = [[,
+    sb.uuid AS superseded_by_uuid, sb.quote_number AS superseded_by_number, sb.access_token AS superseded_by_token,
+    ro.uuid AS revision_of_uuid, ro.quote_number AS revision_of_number
+]]
+local REVISION_JOINS = [[
+    LEFT JOIN shop_quotes sb ON sb.id = q.superseded_by_id
+    LEFT JOIN shop_quotes ro ON ro.id = q.revision_of_id
 ]]
 
 local function url_path(q)
@@ -53,7 +66,25 @@ local function discount_of(q)
 end
 ShopQuoteQueries.discountOf = discount_of
 
---- Public Quote shape.
+--- How the customer reaches us about changes ("Need changes?" on the quote page): the phone and email
+-- on the shop's "Bill to" settings, else SHOP_CALL_PHONE. Nil when neither is set.
+local function contact_for(ns_id)
+    local b = Settings.billTo(ns_id)
+    b = type(b) == "table" and b or {}
+    local phone = U.nz(b.phone) or U.env("SHOP_CALL_PHONE")
+    local email = U.nz(b.email)
+    if not phone and not email then return nil end
+    return { phone = phone or U.null, email = email or U.null }
+end
+ShopQuoteQueries.contactFor = contact_for
+
+--- The quote fields every order made from this quote carries. Use it wherever an order is created from
+-- a quote (card checkout, bank transfer): { customer_po_number = "…" | nil }.
+function ShopQuoteQueries.orderFieldsFromQuote(q)
+    return Rules.order_fields(q or {})
+end
+
+--- Public Quote shape. opts.admin: the back-office shape; opts.contact: add phone/contact (public page).
 function ShopQuoteQueries.shape(q, opts)
     opts = opts or {}
     local lines = U.dec(q.lines, {})
@@ -90,6 +121,11 @@ function ShopQuoteQueries.shape(q, opts)
         sent_at = q.sent_at or U.null,
         authorised_at = q.authorised_at or U.null,
         authorised_by_name = q.authorised_by_name or U.null,
+        customer_po_number = U.nz(q.customer_po_number) or U.null,
+        revision_no = tonumber(q.revision_no) or 0,
+        -- authorised, turned into an order, converted or replaced: the customer can't change anything
+        locked_for_customer = Rules.locked_for_customer(q),
+        superseded_by = U.null,
     }
     -- Order Authorisations: how to pay by bank transfer ("Getting paid" methods, reference = the OA number),
     -- whether the customer can choose bank transfer now, and the order a bank transfer already created.
@@ -109,6 +145,16 @@ function ShopQuoteQueries.shape(q, opts)
     if U.nz(q.order_uuid) and U.nz(q.order_access_token) then
         out.order_url_path = "/orders/" .. q.order_uuid .. "?t=" .. q.order_access_token
     end
+    if U.nz(q.superseded_by_uuid) then
+        out.superseded_by = { quote_number = q.superseded_by_number,
+            url_path = url_path({ uuid = q.superseded_by_uuid, access_token = q.superseded_by_token }) }
+    end
+    if opts.contact then
+        local c = contact_for(q.namespace_id)
+        out.contact = c or U.null
+        out.phone = c and c.phone or U.null
+        out.contact_phone = out.phone
+    end
     -- Before any discount, for the "Subtotal / Discount / Net" rows on the documents.
     local list = Pricing.totals(lines, q.shipping_minor)
     out.list_subtotal_minor = list.subtotal_minor
@@ -125,6 +171,16 @@ function ShopQuoteQueries.shape(q, opts)
         local base = U.env("SHOP_PUBLIC_URL")
         out.public_url = base and (base:gsub("/+$", "") .. out.url_path) or out.url_path
         out.access_token = q.access_token
+        out.revision_of = U.nz(q.revision_of_uuid) and { uuid = q.revision_of_uuid, quote_number = q.revision_of_number } or U.null
+        if U.nz(q.superseded_by_uuid) then
+            out.superseded_by = { uuid = q.superseded_by_uuid, quote_number = q.superseded_by_number,
+                url_path = out.superseded_by.url_path }
+        end
+        out.has_order = Rules.has_order(q)
+        out.can_revise = (Rules.can_revise(q))
+        out.can_edit = (Rules.can_edit_content(q))
+        out.order_status = q.order_status or U.null
+        out.order_paid_at = q.order_paid_at or U.null
     end
     return out
 end
@@ -213,7 +269,7 @@ function ShopQuoteQueries.insert(ns_id, params)
         VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, ?, 'GBP',
                 COALESCE(?::timestamp, NOW() + interval '30 days'), ?, ?, ?, NOW(), NOW())
         RETURNING id
-    ]], Global.generateUUID(), ns_id, next_number(), U.token(24), params.status or "draft",
+    ]], Global.generateUUID(), ns_id, params.quote_number or next_number(), U.token(24), params.status or "draft",
         params.source or "cart", U.enc(params.customer or {}), U.nz(params.notes) or db.NULL,
         U.nz(params.internal_notes) or db.NULL, U.enc(U.arr(params.lines)), t.subtotal_minor, t.vat_minor,
         t.shipping_minor, t.total_minor, U.nz(params.valid_until) or db.NULL, params.cart_id or db.NULL,
@@ -227,6 +283,10 @@ function ShopQuoteQueries.insert(ns_id, params)
             params.trade_discount_minor or 0, U.nz(params.delivery_method) or db.NULL,
             params.delivery_address and U.enc(params.delivery_address) or db.NULL, row.id)
     end
+    if params.customer_po_number or params.revision_of_id then
+        db.query("UPDATE shop_quotes SET customer_po_number = ?, revision_no = ?, revision_of_id = ? WHERE id = ?",
+            params.customer_po_number or db.NULL, params.revision_no or 0, params.revision_of_id or db.NULL, row.id)
+    end
     if params.chat_session_id then
         db.query("UPDATE shop_chat_sessions SET quote_id = ?, updated_at = NOW() WHERE id = ?", row.id,
             params.chat_session_id)
@@ -239,13 +299,15 @@ function ShopQuoteQueries.getById(id)
 end
 
 function ShopQuoteQueries.getByUuid(ns_id, uuid)
-    return db.query("SELECT " .. QUOTE_COLS .. [[,
+    return db.query("SELECT " .. QUOTE_COLS .. REVISION_COLS .. [[,
                o.uuid AS order_uuid, o.order_number, o.access_token AS order_access_token, o.status AS order_status,
-               o.payment_method AS order_payment_method, cs.uuid AS chat_session_uuid, c.uuid AS cart_uuid
+               o.payment_method AS order_payment_method, o.paid_at AS order_paid_at,
+               cs.uuid AS chat_session_uuid, c.uuid AS cart_uuid
           FROM shop_quotes q
           LEFT JOIN shop_orders o ON o.id = q.order_id
           LEFT JOIN shop_chat_sessions cs ON cs.id = q.chat_session_id
           LEFT JOIN shop_carts c ON c.id = q.cart_id
+         ]] .. REVISION_JOINS .. [[
          WHERE q.namespace_id = ? AND q.uuid = ?]], ns_id, uuid)[1]
 end
 
@@ -274,7 +336,7 @@ function ShopQuoteQueries.publicView(ns_id, uuid, token, opts)
     if not (opts and opts.track == false) and not U.nz(q.viewed_at) then
         db.query("UPDATE shop_quotes SET viewed_at = NOW() WHERE id = ? AND viewed_at IS NULL", q.id)
     end
-    return ShopQuoteQueries.shape(maybe_expire(q))
+    return ShopQuoteQueries.shape(maybe_expire(q), { contact = true })
 end
 
 --- A signed-in customer's own quotes (GET /customer/quotes). `email` is the session's email, which
@@ -283,9 +345,10 @@ function ShopQuoteQueries.forCustomer(ns_id, email, params)
     params = params or {}
     local limit = U.clamp(U.int(params.limit, 50), 1, 100)
     local offset = math.max(0, U.int(params.offset, 0))
-    local rows = db.query("SELECT " .. QUOTE_COLS .. [[, o.uuid AS order_uuid, o.order_number,
+    local rows = db.query("SELECT " .. QUOTE_COLS .. REVISION_COLS .. [[, o.uuid AS order_uuid, o.order_number,
                o.access_token AS order_access_token, COUNT(*) OVER() AS total
           FROM shop_quotes q LEFT JOIN shop_orders o ON o.id = q.order_id
+         ]] .. REVISION_JOINS .. [[
          WHERE q.namespace_id = ? AND lower(q.customer->>'email') = lower(?) AND q.status <> 'cancelled'
          ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?]], ns_id, email, limit, offset)
     local total = rows[1] and tonumber(rows[1].total) or 0
@@ -317,10 +380,13 @@ local function capture_lead(ns_id, q, customer, total, chat_session)
 end
 
 --- Public POST /quotes.
--- body: {from:"cart"|"lines", lines?, customer, notes?, chat_session_uuid?, source}
+-- body: {from:"cart"|"lines", lines?, customer, notes?, chat_session_uuid?, source, delivery_address?}
 function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local customer, cerr = clean_customer(body.customer, true)
     if not customer then return nil, U.err(400, "VALIDATION_ERROR", cerr) end
+    -- "Start a new quote" from an earlier one can bring a delivery address (the supplier PO's "Deliver to").
+    local delivery, derr = ShopQuoteQueries.cleanAddress(body.delivery_address)
+    if derr then return nil, U.err(400, "VALIDATION_ERROR", derr) end
     local from = body.from or (U.nz(cart_token) and "cart" or "lines")
     local lines, cart, err
     if from == "cart" then
@@ -365,6 +431,7 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local q = ShopQuoteQueries.insert(ns_id, {
         lines = lines, customer = customer, notes = U.nz(body.notes) and tostring(body.notes):sub(1, 4000) or nil,
         source = source, cart_id = cart and cart.id or nil, chat_session_id = chat_session_id, status = "draft",
+        delivery_address = delivery,
         valid_until = locked and os.date("!%Y-%m-%d %H:%M:%S", os.time() + member.lock_days * 86400) or nil,
     })
     if locked then
@@ -477,13 +544,10 @@ end
 -- address (default: the customer's address). The source quote is noted and left as it is.
 -- body: { customer?, delivery_address?, delivery_method?, apply_trade_discount?, discount_minor?,
 --         discount_label?, valid_until?, notes? }
-function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
-    body = body or {}
-    local src = ShopQuoteQueries.getByUuid(ns_id, uuid)
-    if not src then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
-    if src.status == "cancelled" then return nil, U.err(409, "QUOTE_CANCELLED", "This quote is cancelled") end
-    -- Lines keep the price on the quote: catalogue lines are re-priced with that price as the override
-    -- (so a catalogue change since doesn't move it); free-text lines are copied.
+--- A quote's lines as priceLines inputs that keep the quoted prices: catalogue lines are re-priced with
+-- that price as the override (so a catalogue change since doesn't move it); free-text lines are copied.
+-- Returns (inputs) or (nil, err).
+local function quote_line_inputs(ns_id, src)
     local inputs = {}
     for _, l in ipairs(U.dec(src.lines, {})) do
         if l.custom then
@@ -504,6 +568,16 @@ function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
                 price_override_minor = l.price_override_minor or l.unit_price_minor }
         end
     end
+    return inputs
+end
+
+function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
+    body = body or {}
+    local src = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not src then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    if src.status == "cancelled" then return nil, U.err(409, "QUOTE_CANCELLED", "This quote is cancelled") end
+    local inputs, ierr = quote_line_inputs(ns_id, src)
+    if not inputs then return nil, ierr end
     local customer = U.dec(src.customer, {})
     if type(body.customer) == "table" then
         for k, v in pairs(body.customer) do customer[k] = v end
@@ -527,6 +601,7 @@ function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
         discount_minor = body.discount_minor, discount_label = body.discount_label,
         delivery_address = delivery, delivery_method = body.delivery_method,
         valid_until = body.valid_until, notes = body.notes,
+        customer_po_number = body.customer_po_number ~= nil and body.customer_po_number or src.customer_po_number,
         internal_notes = table.concat(notes, "\n\n"),
     }, user_id)
     if not res then return nil, err end
@@ -680,6 +755,7 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
         data = {
             app_name = "Workstation", document_title = title, number = q.quote_number, is_order = staff_order(q),
             customer_name = customer.name, total = U.money(tonumber(q.total_minor) or 0),
+            po_number = U.nz(q.customer_po_number), revision_no = tonumber(q.revision_no) or 0,
             discount = discount > 0 and U.money(discount) or nil, delivery_method = q.delivery_method,
             valid_until = q.valid_until and tostring(q.valid_until):sub(1, 10) or nil,
             test = opts.test == true, test_customer = opts.test and customer.email or nil,
@@ -704,6 +780,10 @@ end
 function ShopQuoteQueries.authorise(ns_id, uuid, token, body)
     local q = ShopQuoteQueries.getWithToken(ns_id, uuid, token)
     if not q then return nil, U.err(404, "QUOTE_NOT_FOUND", "Quote not found") end
+    if Rules.is_superseded(q) then
+        return nil, U.err(409, "QUOTE_SUPERSEDED", "This has been replaced by a newer revision: please use the latest one",
+            { superseded_by = q.superseded_by_number })
+    end
     maybe_expire(q)
     if q.status == "expired" or q.is_past_validity then
         return nil, U.err(409, "QUOTE_EXPIRED", "This has expired — please ask us for a new one")
@@ -714,21 +794,76 @@ function ShopQuoteQueries.authorise(ns_id, uuid, token, body)
     if body.accept_terms ~= true then
         return nil, U.err(400, "TERMS_REQUIRED", "Please accept the terms to confirm the order")
     end
+    -- Authorising is the customer's last say: once it is authorised (or has an order) nothing they send
+    -- changes it, so confirming again just returns it.
+    if Rules.locked_for_customer(q) then
+        return ShopQuoteQueries.shape(q, { contact = true })
+    end
+    local po, perr = Rules.clean_po_number(body.customer_po_number)
+    if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
     local name = U.nz(body.name) and tostring(body.name):sub(1, 160) or U.dec(q.customer, {}).name
+    -- status guard: two confirmations at once can't both write.
     db.query([[UPDATE shop_quotes SET status = 'accepted', authorised_at = COALESCE(authorised_at, NOW()),
-               authorised_by_name = COALESCE(authorised_by_name, ?), updated_at = NOW() WHERE id = ?]],
-        name or db.NULL, q.id)
+               authorised_by_name = COALESCE(authorised_by_name, ?),
+               customer_po_number = CASE WHEN ?::text IS NULL THEN customer_po_number ELSE ?::text END,
+               updated_at = NOW() WHERE id = ? AND status IN ('draft', 'sent')]],
+        name or db.NULL, po or db.NULL, po or db.NULL, q.id)
     if q.crm_lead_id then
         pcall(Leads.safeUpsert, ns_id, { email = U.dec(q.customer, {}).email, source = "shop_quote",
             note = (staff_order(q) and "Order " or "Quote ") .. q.quote_number .. " confirmed by the customer"
-                .. (name and (" (" .. name .. ")") or "") })
+                .. (name and (" (" .. name .. ")") or "") .. (po and (", their PO " .. po) or "") })
     end
-    return ShopQuoteQueries.shape(ShopQuoteQueries.getByUuid(ns_id, uuid))
+    return ShopQuoteQueries.shape(ShopQuoteQueries.getByUuid(ns_id, uuid), { contact = true })
 end
 
 -- ---------------------------------------------------------------------------
 -- admin
 -- ---------------------------------------------------------------------------
+
+--- Does this column / table exist? (Columns another feature adds, e.g. shop_orders.payment_method.)
+local exists_cache = {}
+local function column_exists(tbl, col)
+    local key = tbl .. "." .. (col or "")
+    if exists_cache[key] == nil then
+        local r
+        if col then
+            r = db.query([[SELECT 1 AS ok FROM information_schema.columns
+                            WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?]], tbl, col)[1]
+        else
+            r = db.query("SELECT 1 AS ok WHERE to_regclass(?) IS NOT NULL", tbl)[1]
+        end
+        exists_cache[key] = r ~= nil
+    end
+    return exists_cache[key]
+end
+ShopQuoteQueries.columnExists = column_exists
+
+--- SQL (on shop_orders o) for "paid, and no supplier PO raised for it yet".
+function ShopQuoteQueries.needsSupplierPoSql()
+    local sql = "o.status IN ('paid', 'processing')"
+    if column_exists("purchase_orders") then
+        sql = sql .. [[ AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.namespace_id = o.namespace_id
+                         AND po.metadata->>'shop_order_uuid' = o.uuid AND po.deleted_at IS NULL
+                         AND po.status <> 'cancelled')]]
+    end
+    return sql
+end
+
+--- Quick filters for the back office (GET /quotes?filter=…).
+local function quick_filter_sql(name)
+    if name == "awaiting_authorisation" then
+        return "q.status = 'sent' AND q.order_id IS NULL"
+    elseif name == "awaiting_payment" then
+        return "q.status = 'accepted' AND (q.order_id IS NULL OR o.status = 'pending_payment')"
+    elseif name == "needs_supplier_po" then
+        return "q.order_id IS NOT NULL AND " .. ShopQuoteQueries.needsSupplierPoSql()
+    elseif name == "bank_transfer_due" then
+        if not column_exists("shop_orders", "payment_method") then return "false" end
+        return "o.status = 'pending_payment' AND o.payment_method = 'bank_transfer'"
+    end
+    return nil
+end
+ShopQuoteQueries.QUICK_FILTERS = { "awaiting_authorisation", "awaiting_payment", "needs_supplier_po", "bank_transfer_due" }
 
 function ShopQuoteQueries.adminList(ns_id, params)
     params = params or {}
@@ -739,19 +874,31 @@ function ShopQuoteQueries.adminList(ns_id, params)
         where[#where + 1] = "q.status = ?"
         vals[#vals + 1] = params.status
     end
+    if U.nz(params.filter) then
+        local f = quick_filter_sql(params.filter)
+        if not f then return nil, U.err(400, "VALIDATION_ERROR", "filter must be one of "
+            .. table.concat(ShopQuoteQueries.QUICK_FILTERS, ", ")) end
+        where[#where + 1] = "(" .. f .. ")"
+    end
+    if U.nz(params.kind) and KINDS[params.kind] then
+        where[#where + 1] = "q.kind = ?"
+        vals[#vals + 1] = params.kind
+    end
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(q.quote_number ILIKE ? OR q.customer->>'email' ILIKE ? OR q.customer->>'name' ILIKE ? "
-            .. "OR q.customer->>'company' ILIKE ?)"
-        for _ = 1, 4 do vals[#vals + 1] = like end
+            .. "OR q.customer->>'company' ILIKE ? OR q.customer_po_number ILIKE ?)"
+        for _ = 1, 5 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
-    local rows = db.query("SELECT " .. QUOTE_COLS .. [[, o.uuid AS order_uuid, o.order_number,
+    local rows = db.query("SELECT " .. QUOTE_COLS .. REVISION_COLS .. [[, o.uuid AS order_uuid, o.order_number,
+               o.status AS order_status, o.paid_at AS order_paid_at,
                cs.uuid AS chat_session_uuid, c.uuid AS cart_uuid, COUNT(*) OVER() AS total
           FROM shop_quotes q LEFT JOIN shop_orders o ON o.id = q.order_id
           LEFT JOIN shop_chat_sessions cs ON cs.id = q.chat_session_id
           LEFT JOIN shop_carts c ON c.id = q.cart_id
+         ]] .. REVISION_JOINS .. [[
          WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?",
         unpack(vals))
     local total = rows[1] and tonumber(rows[1].total) or 0
@@ -764,10 +911,22 @@ function ShopQuoteQueries.adminList(ns_id, params)
     return U.arr(out), { total = total, limit = limit, offset = offset }
 end
 
+--- Every quote in this quote's revision chain (the original first).
+function ShopQuoteQueries.revisionChain(q)
+    local root = tonumber(q.revision_of_id) or tonumber(q.id)
+    return db.query([[
+        SELECT uuid, quote_number, revision_no, status, superseded_by_id IS NOT NULL AS superseded, created_at
+          FROM shop_quotes WHERE id = ? OR revision_of_id = ? ORDER BY revision_no, id
+    ]], root, root)
+end
+
 function ShopQuoteQueries.adminGet(ns_id, uuid)
     local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
     if not q then return nil end
-    return ShopQuoteQueries.shape(q, { admin = true })
+    local s = ShopQuoteQueries.shape(q, { admin = true })
+    local chain = ShopQuoteQueries.revisionChain(q)
+    s.revisions = U.arr(#chain > 1 and chain or {})
+    return s
 end
 
 --- Admin-created quote (phone/email enquiries).
@@ -781,6 +940,8 @@ function ShopQuoteQueries.adminCreate(ns_id, body, user_id)
     end
     local f, ferr = order_fields(body)
     if not f then return nil, U.err(400, "VALIDATION_ERROR", ferr) end
+    local po, perr = Rules.clean_po_number(body.customer_po_number)
+    if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
     local shipping = U.int(body.shipping_minor, 0)
     local staff = f.discount_minor or 0
     local trade = type(f.trade) == "number" and f.trade or 0
@@ -791,7 +952,7 @@ function ShopQuoteQueries.adminCreate(ns_id, body, user_id)
         shipping_minor = shipping, created_by_user_id = user_id,
         kind = f.kind or "quote", discount_minor = staff, discount_label = f.discount_label or nil,
         trade_discount_minor = trade, delivery_method = f.delivery_method or nil,
-        delivery_address = f.delivery_address or nil,
+        delivery_address = f.delivery_address or nil, customer_po_number = po,
     })
     return ShopQuoteQueries.adminGet(ns_id, q.uuid)
 end
@@ -799,7 +960,23 @@ end
 function ShopQuoteQueries.adminUpdate(ns_id, uuid, body)
     local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
     if not q then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    -- Once it has turned into an order (or been replaced by a revision) what the customer agreed to stays.
+    local content_change = body.lines ~= nil or body.shipping_minor ~= nil or body.customer ~= nil
+        or body.discount_minor ~= nil or body.discount_label ~= nil or body.apply_trade_discount ~= nil
+        or body.trade_discount_minor ~= nil or body.delivery_address ~= nil or body.delivery_method ~= nil
+        or body.kind ~= nil
+    if content_change then
+        local ok, code, msg = Rules.can_edit_content(q)
+        if not ok then return nil, U.err(409, code, msg) end
+    end
     local fields = { updated_at = db.raw("NOW()") }
+    if body.customer_po_number ~= nil then
+        local ok, code, msg = Rules.can_edit_po_number(q)
+        if not ok then return nil, U.err(409, code, msg) end
+        local po, perr = Rules.clean_po_number(body.customer_po_number ~= U.null and body.customer_po_number or nil)
+        if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
+        fields.customer_po_number = po or db.NULL
+    end
     if body.status ~= nil then
         if not STATUSES[body.status] then return nil, U.err(400, "VALIDATION_ERROR", "invalid status") end
         fields.status = body.status
@@ -863,6 +1040,88 @@ function ShopQuoteQueries.adminUpdate(ns_id, uuid, body)
     end
     db.update("shop_quotes", fields, { id = q.id })
     return ShopQuoteQueries.adminGet(ns_id, uuid)
+end
+
+--- POST /quotes/:uuid/revise — a small correction to a quote or Order Authorisation the customer has seen:
+-- a copy (same kind, lines at the same prices, discounts, delivery, PO number, notes) numbered
+-- <original>-R<n>, starting as a draft. The old one is cancelled and points at it. For different products,
+-- quantities or a different customer staff raise a new quote instead.
+-- body: { reason*, customer?, delivery_address?, delivery_method?, customer_po_number?, valid_until? }
+function ShopQuoteQueries.revise(ns_id, uuid, body, user_id)
+    body = type(body) == "table" and body or {}
+    local reason = type(body.reason) == "string" and body.reason:gsub("%c", " "):match("^%s*(.-)%s*$") or ""
+    if #reason < 3 or #reason > 500 then
+        return nil, U.err(400, "VALIDATION_ERROR", "reason is required (3–500 characters)")
+    end
+    local src = ShopQuoteQueries.getByUuid(ns_id, uuid)
+    if not src then return nil, U.err(404, "NOT_FOUND", "Quote not found") end
+    local ok, code, msg = Rules.can_revise(src)
+    if not ok then return nil, U.err(409, code, msg) end
+
+    local customer = U.dec(src.customer, {})
+    if type(body.customer) == "table" then
+        for k, v in pairs(body.customer) do customer[k] = v end
+    end
+    local cerr
+    customer, cerr = clean_customer(customer, false)
+    if not customer then return nil, U.err(400, "VALIDATION_ERROR", cerr) end
+    local f, ferr = order_fields({ delivery_address = body.delivery_address, delivery_method = body.delivery_method })
+    if not f then return nil, U.err(400, "VALIDATION_ERROR", ferr) end
+    local delivery = f.delivery_address
+    if delivery == nil then delivery = U.nz(src.delivery_address) and U.dec(src.delivery_address, nil) or nil end
+    local method = f.delivery_method
+    if method == nil then method = U.nz(src.delivery_method) end
+    local po = src.customer_po_number
+    if body.customer_po_number ~= nil then
+        local perr
+        po, perr = Rules.clean_po_number(body.customer_po_number ~= U.null and body.customer_po_number or nil)
+        if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
+    end
+    local inputs, ierr = quote_line_inputs(ns_id, src)
+    if not inputs then return nil, ierr end
+    local lines, lerr = ShopQuoteQueries.priceLines(ns_id, inputs, { admin = true })
+    if not lines then return nil, lerr end
+    -- Still in date: keep the date; expired: a fresh 30 days (or what staff chose).
+    local valid_until = U.nz(body.valid_until) or (not src.is_past_validity and src.valid_until) or nil
+
+    local new_id, terr = U.tx(function()
+        -- Lock the old quote and the original so two revisions can't take the same number.
+        local root_id = tonumber(src.revision_of_id) or tonumber(src.id)
+        local locked = db.query("SELECT id, status, order_id, superseded_by_id FROM shop_quotes WHERE id IN (?, ?) FOR UPDATE",
+            src.id, root_id)
+        for _, r in ipairs(locked) do
+            if tonumber(r.id) == tonumber(src.id) then
+                local still, c2, m2 = Rules.can_revise(r)
+                if not still then return nil, U.err(409, c2, m2) end
+            end
+        end
+        local root = db.query("SELECT quote_number FROM shop_quotes WHERE id = ?", root_id)[1]
+        local nos = {}
+        for _, r in ipairs(db.query("SELECT revision_no FROM shop_quotes WHERE id = ? OR revision_of_id = ?", root_id, root_id)) do
+            nos[#nos + 1] = r.revision_no
+        end
+        local n = Rules.next_revision_no(nos)
+        local note = "Revision " .. n .. " of " .. root.quote_number .. " (replaces " .. src.quote_number .. "): " .. reason
+        local q = ShopQuoteQueries.insert(ns_id, {
+            quote_number = Rules.revision_number(root.quote_number, n), revision_no = n, revision_of_id = root_id,
+            lines = lines, customer = customer, notes = src.notes,
+            internal_notes = U.nz(src.internal_notes) and (src.internal_notes .. "\n\n" .. note) or note,
+            source = src.source, status = "draft", valid_until = valid_until,
+            shipping_minor = tonumber(src.shipping_minor) or 0, created_by_user_id = user_id,
+            kind = src.kind or "quote", discount_minor = tonumber(src.discount_minor) or 0,
+            discount_label = src.discount_label, trade_discount_minor = tonumber(src.trade_discount_minor) or 0,
+            delivery_method = method or nil, delivery_address = delivery or nil, customer_po_number = po,
+        })
+        db.query([[UPDATE shop_quotes SET price_locked = ?, crm_lead_id = ? WHERE id = ?]],
+            src.price_locked == true, src.crm_lead_id or db.NULL, q.id)
+        db.query([[UPDATE shop_quotes SET status = 'cancelled', superseded_by_id = ?, updated_at = NOW(),
+                   internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],
+            q.id, "Superseded by " .. q.quote_number .. ": " .. reason, src.id)
+        return q.id
+    end)
+    if not new_id then return nil, terr end
+    local new = ShopQuoteQueries.getById(new_id)
+    return ShopQuoteQueries.adminGet(ns_id, new.uuid)
 end
 
 return ShopQuoteQueries

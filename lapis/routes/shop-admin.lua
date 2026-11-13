@@ -12,12 +12,18 @@
       GET               /stock                 GET /stock/movements
       POST              /import                   (existing products keep their prices; body overwrite_prices: true resets them)
       GET               /orders                GET/PUT /orders/:uuid   (?bank_transfer_due=true: awaiting a bank
-                                               transfer, oldest first; ?payment_method=; meta.bank_transfer_due_count)
+                                               transfer, oldest first; ?payment_method=; meta.bank_transfer_due_count;
+                                               ?filter=needs_supplier_po; PUT customer_po_number: editable on the order)
       POST              /orders/:uuid/mark-paid { method?: bank_transfer|cheque|other, reference?, paid_at?, amount_minor? }
       POST              /orders/:uuid/invoice   accounting invoice from the order (idempotent; 501 without invoicing)
+      GET               /orders/:uuid/purchase-order/preview  (?supplier_uuid=) the supplier PO before it is raised
+      POST              /orders/:uuid/purchase-order          { supplier_uuid?, supplier_name?, costs?, … }
       POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
                                                goods via Stripe less the Trade discount clawback
-      GET/POST          /quotes                GET/PUT /quotes/:uuid
+      GET/POST          /quotes                GET/PUT /quotes/:uuid   (?filter=awaiting_authorisation|awaiting_payment|
+                                               needs_supplier_po|bank_transfer_due, ?kind=quote|order)
+      POST              /quotes/:uuid/revise   { reason, customer?, delivery_address?, delivery_method?,
+                                               customer_po_number? } small corrections; 409 once it has an order
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
@@ -34,6 +40,7 @@
       POST              /suppliers/:uuid/sync    fetch the feed URL now
       POST              /suppliers/sync-due      all due suppliers (market-sync CronJob)
       GET               /suppliers/:uuid/items   (?q=&linked=true|false&changed=true&active=all)
+      GET               /suppliers/:uuid/purchase-orders   POs raised with this supplier
       GET               /supplier-items/:uuid/history   daily cost (12 months)
       POST              /supplier-items/:uuid/link      { product_uuid|null, pricing_source, margin_pct? }
       GET               /price-changes          (?status=pending|applied|approved|rejected|superseded)
@@ -234,6 +241,7 @@ return function(app)
     -- orders ----------------------------------------------------------------------
     app:get(BASE .. "/orders", guard("read", function(self, ns_id)
         local data, meta = Orders.adminList(ns_id, self.params)
+        if not data then return U.from_err(meta) end
         return U.ok(data, 200, meta)
     end))
 
@@ -285,6 +293,12 @@ return function(app)
         return U.ok(res, res.existing and 200 or 201)
     end))
 
+    -- What the supplier PO would say (supplier details, costs from the price file, Bill to, Deliver to).
+    app:get(BASE .. "/orders/:uuid/purchase-order/preview", guard("read", function(self, ns_id)
+        return result(Orders.purchaseOrderPreview(ns_id, self.params.uuid, { supplier_uuid = self.params.supplier_uuid,
+            include_custom = self.params.include_custom == "true" }))
+    end))
+
     app:post(BASE .. "/orders/:uuid/refund", guard("update", function(self, ns_id)
         local body, bad = body_or_400()
         if not body then return bad end
@@ -295,6 +309,7 @@ return function(app)
     -- quotes ----------------------------------------------------------------------
     app:get(BASE .. "/quotes", guard("read", function(self, ns_id)
         local data, meta = Quote.adminList(ns_id, self.params)
+        if not data then return U.from_err(meta) end
         return U.ok(data, 200, meta)
     end))
 
@@ -320,6 +335,14 @@ return function(app)
         local q, err = Quote.orderFromQuote(ns_id, self.params.uuid, body, user_id(self))
         if not q then return U.from_err(err) end
         return U.ok(q, 201)
+    end))
+
+    -- A revision for small corrections: a copy numbered <original>-R<n> (draft); the old one is cancelled.
+    -- Body { reason, customer?, delivery_address?, delivery_method?, customer_po_number?, valid_until? }.
+    app:post(BASE .. "/quotes/:uuid/revise", guard("create", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return created(Quote.revise(ns_id, self.params.uuid, body, user_id(self)))
     end))
 
     -- Save the quote's customer to the CRM (company account + contact). Needs CRM permission too.
@@ -576,6 +599,12 @@ return function(app)
 
     app:post(BASE .. "/suppliers/:uuid/sync", guard("update", function(self, ns_id)
         return result(Suppliers.syncNow(ns_id, self.params.uuid))
+    end))
+
+    app:get(BASE .. "/suppliers/:uuid/purchase-orders", guard("read", function(self, ns_id)
+        local data, meta = Suppliers.purchaseOrders(ns_id, self.params.uuid, self.params)
+        if not data then return U.from_err(meta) end
+        return U.ok(data, 200, meta)
     end))
 
     app:get(BASE .. "/suppliers/:uuid/items", guard("read", function(self, ns_id)

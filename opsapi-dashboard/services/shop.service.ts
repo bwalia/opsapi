@@ -52,6 +52,10 @@ import type {
   ShopTradeDiscountPreview,
   ShopQuoteStatus,
   ShopQuoteUpdate,
+  ShopQuoteRevise,
+  ShopQuoteQuickFilter,
+  ShopPurchaseOrderPreview,
+  ShopSupplierPurchaseOrder,
   ShopReconcileResult,
   ShopReindexResult,
   ShopStockAdjust,
@@ -62,7 +66,9 @@ import type {
 const BASE = '/api/v2/shop/admin';
 
 export interface ShopOrderPurchaseOrderInput {
-  supplier_name: string;
+  /** A shop supplier: fills name, email, phone, address and costs from its price file (values here override). */
+  supplier_uuid?: string;
+  supplier_name?: string;
   supplier_email?: string;
   supplier_phone?: string;
   supplier_address?: string;
@@ -140,6 +146,8 @@ export interface ShopOrderListParams {
   q?: string;
   /** Awaiting a bank transfer, oldest first. */
   bank_transfer_due?: boolean;
+  /** Paid with no supplier PO yet. */
+  filter?: 'needs_supplier_po' | '';
   limit?: number;
   offset?: number;
 }
@@ -147,6 +155,8 @@ export interface ShopOrderListParams {
 export interface ShopQuoteListParams {
   status?: ShopQuoteStatus | '';
   q?: string;
+  filter?: ShopQuoteQuickFilter | '';
+  kind?: 'quote' | 'order' | '';
   limit?: number;
   offset?: number;
 }
@@ -284,6 +294,7 @@ export const shopService = {
     const qs = buildQueryString({
       status: params.status,
       q: params.q,
+      filter: params.filter || undefined,
       limit: params.limit,
       offset: params.offset,
       bank_transfer_due: params.bank_transfer_due ? 'true' : undefined,
@@ -310,6 +321,13 @@ export const shopService = {
     return unwrap<ShopOrder>(res);
   },
 
+  /** What the supplier PO would say (supplier details, costs from the price file, Bill to, Deliver to). */
+  async previewOrderPurchaseOrder(uuid: string, supplierUuid?: string): Promise<ShopPurchaseOrderPreview> {
+    const qs = buildQueryString({ supplier_uuid: supplierUuid });
+    const res = await apiClient.get(`${BASE}/orders/${uuid}/purchase-order/preview${qs}`);
+    return unwrap<ShopPurchaseOrderPreview>(res);
+  },
+
   /** Draft a supplier PO for a paid order (Bill to us, deliver directly to the customer). */
   async createOrderPurchaseOrder(uuid: string, body: ShopOrderPurchaseOrderInput): Promise<PurchaseOrder> {
     const res = await apiClient.post(`${BASE}/orders/${uuid}/purchase-order`, body, JSON_BODY);
@@ -323,7 +341,7 @@ export const shopService = {
 
   // ---------------- Quotes ----------------
   async getQuotes(params: ShopQuoteListParams = {}): Promise<ShopList<ShopQuote>> {
-    const qs = buildQueryString({ status: params.status, q: params.q, limit: params.limit, offset: params.offset });
+    const qs = buildQueryString({ status: params.status, q: params.q, filter: params.filter, kind: params.kind, limit: params.limit, offset: params.offset });
     const res = await apiClient.get(`${BASE}/quotes${qs}`);
     return unwrapList<ShopQuote>(res, params.limit, params.offset);
   },
@@ -352,6 +370,12 @@ export const shopService = {
     if (opts.test) body.test = true;
     const res = await apiClient.post(`${BASE}/quotes/${uuid}/send`, body, JSON_BODY);
     return unwrap<ShopQuoteSendResult>(res);
+  },
+
+  /** A revision for small corrections: copy numbered <original>-R<n> (draft); the old one is cancelled. */
+  async reviseQuote(uuid: string, body: ShopQuoteRevise): Promise<ShopQuote> {
+    const res = await apiClient.post(`${BASE}/quotes/${uuid}/revise`, body, JSON_BODY);
+    return unwrap<ShopQuote>(res);
   },
 
   /** New Order Authorisation from a quote: same lines and prices, VIP discount, delivery = customer address. */
@@ -385,6 +409,12 @@ export const shopService = {
 
   async updateSupplier(uuid: string, body: ShopSupplierInput): Promise<ShopSupplier> {
     return unwrap<ShopSupplier>(await apiClient.put(`${BASE}/suppliers/${uuid}`, body, JSON_BODY));
+  },
+
+  /** POs raised with this supplier. meta.available false: purchase orders aren't deployed here. */
+  async getSupplierPurchaseOrders(uuid: string, params: { limit?: number; offset?: number } = {}): Promise<ShopList<ShopSupplierPurchaseOrder>> {
+    const qs = buildQueryString({ limit: params.limit, offset: params.offset });
+    return unwrapList<ShopSupplierPurchaseOrder>(await apiClient.get(`${BASE}/suppliers/${uuid}/purchase-orders${qs}`), params.limit, params.offset);
   },
 
   async deleteSupplier(uuid: string): Promise<void> {

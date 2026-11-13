@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Copy, Download, ExternalLink, FileText, Pencil, Printer, Save, Send, UserPlus, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Copy, Download, ExternalLink, FileText, GitBranch, Lock, Pencil, Printer, Save, Send, UserPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Select, Textarea, confirmDialog } from '@/components/ui';
@@ -25,6 +25,8 @@ import {
 import { QuoteLinesEditor, draftsToPayload, lineToDraft, type LineDraft } from '@/components/shop/QuoteLinesEditor';
 import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type CustomerDraft } from '@/components/shop/CustomerForm';
 import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
+import { NextStepPanel, PoNumberField, StatusTimeline, quoteNextStep, quoteTimeline, type PanelAction } from '@/components/shop/workflow';
+import { ReviseQuoteModal } from '@/components/shop/ReviseQuoteModal';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { humanize, minorToPounds, poundsToMinor, quotePdfUrl } from '@/lib/shop';
 import { SHOP_QUOTE_STATUSES, type ShopQuote, type ShopQuoteStatus } from '@/types/shop';
@@ -68,6 +70,7 @@ function QuoteDetail() {
   const [saving, setSaving] = useState<string | null>(null);
   const [lineErrors, setLineErrors] = useState<string[]>([]);
   const [terms, setTerms] = useState<OrderTermsDraft | null>(null);
+  const [reviseOpen, setReviseOpen] = useState(false);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -99,8 +102,13 @@ function QuoteDetail() {
 
   const cur = quote.currency || 'GBP';
   const pdfUrl = quotePdfUrl(quote.public_url);
-  const locked = quote.status === 'converted';
+  // Turned into an order or replaced by a revision: lines, prices, customer and delivery stay as agreed.
+  const locked = quote.status === 'converted' || quote.can_edit === false;
+  const lockedWhy = quote.superseded_by
+    ? `Replaced by ${quote.superseded_by.quote_number}: make changes there.`
+    : 'This has turned into an order, so what the customer agreed stays as it is. Raise a new quote for changes.';
   const orderUuid = quote.order?.uuid ?? quote.order_uuid;
+  const orderNumber = quote.order_number ?? quote.order?.order_number ?? quote.order?.number ?? '';
 
   const save = async (label: string, body: Parameters<typeof shopService.updateQuote>[1], msg: string): Promise<boolean> => {
     setSaving(label);
@@ -131,7 +139,8 @@ function QuoteDetail() {
         valid_until: details.valid_until || undefined,
         notes: details.notes,
         internal_notes: details.internal_notes,
-        shipping_minor: shipping,
+        // Only when changed: a quote with an order refuses price changes.
+        ...(shipping !== (quote.shipping_minor ?? 0) ? { shipping_minor: shipping } : {}),
       },
       'Quote saved'
     );
@@ -246,6 +255,36 @@ function QuoteDetail() {
     if (await save('lines', { lines }, 'Lines re-priced and saved')) setDrafts(null);
   };
 
+  const savePo = (v: string | null) => save('po', { customer_po_number: v }, v ? 'PO number saved' : 'PO number removed');
+
+  const canRevise = editable && mayCreate && quote.can_revise === true;
+  const step = quoteNextStep(quote);
+  const sendable = editable && !locked && ['draft', 'sent', 'accepted'].includes(quote.status);
+  const reviseAction: PanelAction = { label: 'Revise', icon: <GitBranch className="h-4 w-4" />, onClick: () => setReviseOpen(true) };
+  let primary: PanelAction | null = null;
+  if (step.key === 'superseded' && quote.superseded_by) {
+    primary = { label: `Open ${quote.superseded_by.quote_number}`, icon: <ArrowRight className="h-4 w-4" />, href: `/dashboard/shop/quotes/${quote.superseded_by.uuid}` };
+  } else if (step.key === 'has_order' && orderUuid) {
+    primary = { label: `Open order ${orderNumber}`.trim(), icon: <ArrowRight className="h-4 w-4" />, href: `/dashboard/shop/orders/${orderUuid}` };
+  } else if (step.key === 'send' && sendable) {
+    primary = { label: isOrder ? 'Send for authorisation' : 'Email to customer', icon: <Send className="h-4 w-4" />, loading: saving === 'send', disabled: !!saving, onClick: sendToCustomer };
+  } else if (step.key === 'awaiting_customer' && sendable) {
+    primary = { label: 'Resend', icon: <Send className="h-4 w-4" />, loading: saving === 'send', disabled: !!saving, onClick: sendToCustomer };
+  } else if (step.key === 'expired' && canRevise) {
+    primary = { ...reviseAction, label: 'Revise with a new date' };
+  } else if (step.key === 'create_order' && mayCreate) {
+    primary = { label: 'Create Order Authorisation', icon: <ClipboardCheck className="h-4 w-4" />, loading: saving === 'order', disabled: !!saving, onClick: createOrder };
+  }
+  const more: PanelAction[] = [];
+  if (sendable && step.key !== 'send' && step.key !== 'awaiting_customer') more.push({ label: 'Send again', icon: <Send className="h-4 w-4" />, onClick: sendToCustomer, disabled: !!saving });
+  if (sendable) more.push({ label: 'Send test to me', icon: <Send className="h-4 w-4" />, onClick: sendTest, disabled: !!saving, title: 'Sends this email to you, marked TEST. The link opens a preview with confirm and pay turned off.' });
+  if (canRevise && primary?.label !== 'Revise with a new date') more.push(reviseAction);
+  if (mayCreate && !isOrder && quote.status !== 'cancelled' && step.key !== 'create_order') more.push({ label: 'Create Order Authorisation', icon: <ClipboardCheck className="h-4 w-4" />, onClick: createOrder, disabled: !!saving });
+  if (quote.public_url) more.push({ label: 'Open customer link', icon: <ExternalLink className="h-4 w-4" />, href: quote.public_url });
+  if (pdfUrl) more.push({ label: 'Download PDF', icon: <Download className="h-4 w-4" />, href: pdfUrl });
+  more.push({ label: 'Print', icon: <Printer className="h-4 w-4" />, onClick: () => window.print() });
+  const tone = ['send', 'expired', 'create_order'].includes(step.key) ? 'action' : ['awaiting_customer', 'awaiting_payment'].includes(step.key) ? 'waiting' : 'done';
+
   const copyLink = async () => {
     if (!quote.public_url) return;
     try {
@@ -268,47 +307,33 @@ function QuoteDetail() {
             <Link href="/dashboard/shop/quotes">
               <Button variant="ghost" leftIcon={<ArrowLeft className="h-4 w-4" />}>Quotes</Button>
             </Link>
-            <Button variant="ghost" leftIcon={<Printer className="h-4 w-4" />} onClick={() => window.print()}>
-              Print
-            </Button>
-            {quote.public_url && (
-              <a href={quote.public_url} target="_blank" rel="noopener noreferrer">
-                <Button variant="outline" leftIcon={<ExternalLink className="h-4 w-4" />}>Open customer link</Button>
-              </a>
-            )}
-            {pdfUrl && (
-              <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
-                <Button variant="outline" leftIcon={<Download className="h-4 w-4" />}>Download PDF</Button>
-              </a>
-            )}
-            {mayCreate && !isOrder && quote.status !== 'cancelled' && (
-              <Button variant="outline" leftIcon={<ClipboardCheck className="h-4 w-4" />} isLoading={saving === 'order'} disabled={!!saving} onClick={createOrder}>
-                Create Order Authorisation
-              </Button>
-            )}
-            {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (
-              <Button
-                variant="outline"
-                leftIcon={<Send className="h-4 w-4" />}
-                isLoading={saving === 'test'}
-                disabled={!!saving}
-                onClick={sendTest}
-                title="Sends this email to you, marked TEST. The link opens a preview with confirm and pay turned off."
-              >
-                Send test to me
-              </Button>
-            )}
-            {editable && !locked && quote.status !== 'cancelled' && quote.status !== 'expired' && (
-              <Button leftIcon={<Send className="h-4 w-4" />} isLoading={saving === 'send'} disabled={!!saving} onClick={sendToCustomer}>
-                {quote.sent_at ? 'Send again' : isOrder ? 'Send for authorisation' : 'Email to customer'}
-              </Button>
-            )}
           </div>
         }
       />
 
+      {reviseOpen && <ReviseQuoteModal quote={quote} open={reviseOpen} onClose={() => setReviseOpen(false)} />}
+
+      {quote.superseded_by && (
+        <div className="flex items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800" role="status">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            Replaced by{' '}
+            <Link href={`/dashboard/shop/quotes/${quote.superseded_by.uuid}`} className="font-medium underline">{quote.superseded_by.quote_number}</Link>.
+            The customer’s link now points them to the new revision.
+          </span>
+        </div>
+      )}
+
+      <NextStepPanel step={step} primary={primary} more={more} tone={tone} />
+
       <div className="flex flex-wrap items-center gap-3">
         <QuoteStatusBadge status={quote.status} />
+        {(quote.revision_no ?? 0) > 0 && <span className="rounded bg-secondary-100 px-2 py-0.5 text-xs font-medium text-secondary-700">Revision {quote.revision_no}</span>}
+        {locked && (
+          <span className="inline-flex items-center gap-1 text-xs text-secondary-500" title={lockedWhy}>
+            <Lock className="h-3.5 w-3.5" aria-hidden="true" /> Locked
+          </span>
+        )}
         {quote.sent_at && <span className="text-sm text-secondary-500">Sent {formatDateTime(quote.sent_at)}</span>}
         {quote.viewed_at && <span className="text-sm text-secondary-500">Viewed by customer {formatDateTime(quote.viewed_at)}</span>}
         {quote.authorised_at && (
@@ -319,7 +344,7 @@ function QuoteDetail() {
         )}
         {orderUuid && (
           <Link href={`/dashboard/shop/orders/${orderUuid}`} className="text-sm text-primary-600 hover:underline">
-            Order {quote.order?.order_number ?? quote.order?.number ?? ''} →
+            Order {orderNumber} →
           </Link>
         )}
       </div>
@@ -446,6 +471,7 @@ function QuoteDetail() {
             <SectionTitle
               actions={
                 editable &&
+                !locked &&
                 (editCustomer ? (
                   <>
                     <Button size="sm" variant="ghost" onClick={() => { setEditCustomer(false); setCustomer(customerToDraft(quote.customer)); }}>
@@ -493,9 +519,47 @@ function QuoteDetail() {
           </Card>
 
           <Card>
+            <SectionTitle>Progress</SectionTitle>
+            <StatusTimeline items={quoteTimeline(quote)} />
+          </Card>
+
+          {(quote.revisions?.length ?? 0) > 1 && (
+            <Card className="print:hidden">
+              <SectionTitle>Revisions</SectionTitle>
+              <ul className="divide-y divide-secondary-100">
+                {quote.revisions!.map((r) => (
+                  <li key={r.uuid}>
+                    <Link
+                      href={`/dashboard/shop/quotes/${r.uuid}`}
+                      aria-current={r.uuid === quote.uuid ? 'page' : undefined}
+                      className={`-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm hover:bg-secondary-50 ${r.uuid === quote.uuid ? 'bg-primary-50' : ''}`}
+                    >
+                      <span className="font-mono font-medium text-secondary-900">{r.quote_number}</span>
+                      <span className="text-xs text-secondary-600">{r.superseded ? 'Replaced' : humanize(r.status)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <Card>
             <SectionTitle>Details</SectionTitle>
             <dl className="divide-y divide-secondary-100">
               <KeyValue label={isOrder ? 'Order number' : 'Quote number'}>{quote.quote_number}</KeyValue>
+              <KeyValue label="Customer PO number">
+                <PoNumberField
+                  value={quote.customer_po_number}
+                  editable={editable && !quote.has_order && !['converted', 'cancelled'].includes(quote.status)}
+                  onSave={savePo}
+                  lockedReason={quote.has_order ? 'Change it on the order' : undefined}
+                />
+              </KeyValue>
+              {quote.revision_of && (
+                <KeyValue label="Revises">
+                  <Link href={`/dashboard/shop/quotes/${quote.revision_of.uuid}`} className="text-primary-600 hover:underline">{quote.revision_of.quote_number}</Link>
+                </KeyValue>
+              )}
               <KeyValue label="Valid until">{quote.valid_until ? toDateInput(quote.valid_until) : '—'}</KeyValue>
               {quote.chat_session_uuid && (
                 <KeyValue label="Chat">

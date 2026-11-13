@@ -3,11 +3,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, ExternalLink, Printer, Save, ShoppingCart, Truck, ClipboardList } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, PackageCheck, Printer, Save, ShoppingCart, Truck, ClipboardList, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
+import { MoreMenu, NextStepPanel, PoNumberField, StatusTimeline, activePurchaseOrder, orderNextStep, orderTimeline, type PanelAction } from '@/components/shop/workflow';
+import { purchaseOrdersService } from '@/services/purchase-orders.service';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -118,6 +120,60 @@ function OrderDetail() {
   if (!order) return <ShopLoading label="Loading order…" />;
 
   const next = TRANSITIONS[order.status] ?? [];
+  const step = orderNextStep(order);
+  const po = activePurchaseOrder(order);
+
+  const receiveAll = async () => {
+    if (!po) return;
+    setBusy('receive');
+    try {
+      await purchaseOrdersService.receive(po.uuid, { receive_all: true, note: `Received for shop order ${order.order_number}` });
+      toast.success(`PO ${po.po_number} marked received`);
+      reload();
+    } catch (err) {
+      toast.error(extractApiError(err, 'Could not mark the goods received. Open the PO to record a part delivery.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  let primary: PanelAction | null = null;
+  if (editable) {
+    if (step.key === 'raise_po') primary = { label: 'Raise supplier PO', icon: <ClipboardList className="h-4 w-4" />, onClick: () => setPoOpen(true) };
+    else if (step.key === 'send_po' && po) primary = { label: `Open PO ${po.po_number}`, icon: <ArrowRight className="h-4 w-4" />, href: `/dashboard/purchase-orders/${po.uuid}` };
+    else if (step.key === 'receive') primary = { label: 'Mark received', icon: <PackageCheck className="h-4 w-4" />, loading: busy === 'receive', disabled: !!busy, onClick: receiveAll };
+    else if (step.key === 'ship') primary = { label: 'Mark shipped', icon: <Truck className="h-4 w-4" />, disabled: !!busy, onClick: () => changeStatus('shipped') };
+    else if (step.key === 'deliver') primary = { label: 'Mark delivered', icon: <CheckCircle2 className="h-4 w-4" />, loading: busy === 'delivered', disabled: !!busy, onClick: () => changeStatus('delivered') };
+  }
+  const more: PanelAction[] = [];
+  if (editable) {
+    for (const s of next) {
+      if (primary && ((s === 'shipped' && step.key === 'ship') || (s === 'delivered' && step.key === 'deliver'))) continue;
+      more.push({ label: ACTION_LABEL[s] ?? humanize(s), danger: s === 'cancelled' || s === 'refunded', icon: s === 'cancelled' ? <XCircle className="h-4 w-4" /> : undefined, disabled: !!busy, onClick: () => changeStatus(s) });
+    }
+    if (['paid', 'processing', 'shipped', 'delivered'].includes(order.status) && step.key !== 'raise_po') {
+      more.push({ label: 'Raise another supplier PO', icon: <ClipboardList className="h-4 w-4" />, onClick: () => setPoOpen(true) });
+    }
+  }
+  if (po && step.key !== 'send_po') more.push({ label: `Open PO ${po.po_number}`, href: `/dashboard/purchase-orders/${po.uuid}` });
+  if (order.public_url) more.push({ label: 'Open customer link', icon: <ExternalLink className="h-4 w-4" />, href: order.public_url });
+  more.push({ label: 'Print', icon: <Printer className="h-4 w-4" />, onClick: () => window.print() });
+  const tone = ['awaiting_payment', 'awaiting_bank_transfer'].includes(step.key) ? 'waiting' : ['done', 'closed'].includes(step.key) ? 'done' : 'action';
+  const savePo = async (v: string | null) => {
+    setBusy('po');
+    try {
+      const updated = await shopService.updateOrder(order.uuid, { customer_po_number: v });
+      toast.success(v ? 'PO number saved' : 'PO number removed');
+      if (updated?.uuid) setOrder(updated);
+      else reload();
+      return true;
+    } catch (err) {
+      toast.error(extractApiError(err, 'Could not save the PO number'));
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
   const cur = order.currency || 'GBP';
   const quoteUuid = order.quote?.uuid ?? order.quote_uuid;
   const cleanTracking = (t: ShopTracking): ShopTracking =>
@@ -136,50 +192,19 @@ function OrderDetail() {
             <Link href="/dashboard/shop/orders">
               <Button variant="ghost" leftIcon={<ArrowLeft className="h-4 w-4" />}>Orders</Button>
             </Link>
-            <Button variant="ghost" leftIcon={<Printer className="h-4 w-4" />} onClick={() => window.print()}>
-              Print
-            </Button>
-            {editable && ['paid', 'processing', 'shipped', 'delivered'].includes(order.status) && (
-              <Button leftIcon={<ClipboardList className="h-4 w-4" />} onClick={() => setPoOpen(true)}>
-                Create supplier PO
-              </Button>
-            )}
           </div>
         }
       />
 
-      {/* Status workflow */}
-      <Card padding="md">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-secondary-500">Status</span>
-          <OrderStatusBadge status={order.status} />
-          {order.paid_at && <span className="text-sm text-secondary-500">Paid {formatDateTime(order.paid_at)}</span>}
-          {editable && next.length > 0 && (
-            <div className="ml-auto flex flex-wrap gap-2 print:hidden">
-              {next.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === 'cancelled' || s === 'refunded' ? 'ghost' : 'primary'}
-                  isLoading={busy === s}
-                  disabled={!!busy}
-                  leftIcon={s === 'shipped' ? <Truck className="h-4 w-4" /> : undefined}
-                  onClick={() => changeStatus(s)}
-                >
-                  {ACTION_LABEL[s] ?? humanize(s)}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
-        {order.status === 'pending_payment' && order.payment_method !== 'bank_transfer' && (
-          <p className="mt-3 text-xs text-secondary-500 print:hidden">
-            Awaiting Stripe. Payment status is set by the signed webhook; use “Run reconcile” on the Overview if a webhook was missed.
-          </p>
-        )}
-      </Card>
+      {/* Getting paid comes first: a bank transfer due is the next step (Mark paid); otherwise the
+          fulfilment panel, with Create invoice / the invoice under it once the order is paid. */}
+      {step.key !== 'awaiting_bank_transfer' && <NextStepPanel
+        step={step}
+        primary={primary}
+        more={more}
+        tone={tone}
+      />}
 
-      {/* Next step for getting paid: Mark paid (bank transfer due) / Create invoice (paid, not invoiced). */}
       <OrderPaymentNextStep
         order={order}
         editable={editable}
@@ -190,6 +215,22 @@ function OrderDetail() {
           } else reload();
         }}
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <OrderStatusBadge status={order.status} />
+        {order.paid_at && <span className="text-sm text-secondary-500">Paid {formatDateTime(order.paid_at)}</span>}
+        {order.customer_po_number && <span className="text-sm text-secondary-700">Customer PO <span className="font-mono">{order.customer_po_number}</span></span>}
+        {step.key === 'awaiting_bank_transfer' && (
+          <div className="ml-auto print:hidden">
+            <MoreMenu actions={more} />
+          </div>
+        )}
+      </div>
+      {order.status === 'pending_payment' && order.payment_method !== 'bank_transfer' && (
+        <p className="text-xs text-secondary-500 print:hidden">
+          Payment status is set by Stripe’s signed webhook. If the customer says they paid and nothing changed, use “Run reconcile” on the Overview.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
@@ -225,6 +266,17 @@ function OrderDetail() {
         </div>
 
         <div className="space-y-6">
+          <Card>
+            <SectionTitle>Progress</SectionTitle>
+            <StatusTimeline items={orderTimeline(order)} />
+          </Card>
+
+          <Card>
+            <SectionTitle>Customer PO number</SectionTitle>
+            <PoNumberField value={order.customer_po_number} editable={editable} onSave={savePo} />
+            <p className="mt-1 text-xs text-secondary-500">Printed on the supplier PO as “End customer PO”.</p>
+          </Card>
+
           {(order.purchase_orders?.length ?? 0) > 0 && (
             <Card>
               <SectionTitle>Supplier purchase orders</SectionTitle>
@@ -330,7 +382,7 @@ function OrderDetail() {
               {quoteUuid && (
                 <KeyValue label="From quote">
                   <Link href={`/dashboard/shop/quotes/${quoteUuid}`} className="text-primary-600 hover:underline">
-                    {order.quote?.quote_number ?? order.quote?.number ?? 'View quote'}
+                    {order.quote?.quote_number ?? order.quote_number ?? order.quote?.number ?? 'View quote'}
                   </Link>
                 </KeyValue>
               )}

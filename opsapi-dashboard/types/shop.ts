@@ -390,6 +390,8 @@ export interface ShopQuoteOrderFields {
   trade_discount_minor?: number;
   delivery_method?: string;
   delivery_address?: ShopDeliveryAddress | null;
+  /** The end customer's own purchase order number (≤ 64 characters). null/'' clears it. */
+  customer_po_number?: string | null;
 }
 
 export interface ShopTotals {
@@ -469,7 +471,10 @@ export interface ShopOrder extends ShopTotals {
   delivery_method?: string | null;
   delivery_address?: ShopDeliveryAddress | null;
   /** Supplier POs raised from this order. */
-  purchase_orders?: { uuid: string; po_number: string; status: string; supplier_name: string; total: number | string; created_at: string }[];
+  purchase_orders?: ShopOrderPurchaseOrderRef[];
+  /** The end customer's purchase order number (carried from the quote; editable on the order). */
+  customer_po_number?: string | null;
+  quote_number?: string | null;
   /** card (Stripe Checkout) | bank_transfer | cheque | other */
   payment_method?: ShopPaymentMethodKind;
   /** Bank-transfer orders: where to pay (workspace "Getting paid" methods) and the reference (order number). */
@@ -504,10 +509,63 @@ export interface ShopOrderInvoiceResult {
   order_total_minor?: number;
 }
 
+export interface ShopOrderPurchaseOrderRef {
+  uuid: string;
+  po_number: string;
+  status: string;
+  supplier_name: string;
+  total: number | string;
+  currency?: string;
+  created_at: string;
+  sent_at?: string | null;
+  received_at?: string | null;
+  billed_at?: string | null;
+  shop_supplier_uuid?: string | null;
+}
+
 export interface ShopOrderUpdate {
   status?: ShopOrderStatus;
   tracking?: ShopTracking | null;
   internal_notes?: string;
+  customer_po_number?: string | null;
+}
+
+/** A line of the supplier PO preview (GET /orders/:uuid/purchase-order/preview). Cost: pounds ex VAT. */
+export interface ShopPurchaseOrderPreviewLine {
+  uuid: string;
+  description: string;
+  qty: number;
+  vat_rate: number;
+  custom: boolean;
+  included: boolean;
+  cost: string | null;
+  cost_source: 'entered' | 'supplier_price_file' | null;
+}
+
+export interface ShopPurchaseOrderPreview {
+  order_uuid: string;
+  order_number: string;
+  order_status: string;
+  can_raise: boolean;
+  supplier: {
+    uuid: string | null;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    account_number: string | null;
+    po_notes: string | null;
+  };
+  last_supplier_uuid: string | null;
+  bill_to: Record<string, string> | null;
+  ship_to: ShopDeliveryAddress;
+  ship_to_text: string | null;
+  delivery_method: string | null;
+  customer_po_number: string | null;
+  notes: string;
+  lines: ShopPurchaseOrderPreviewLine[];
+  missing_costs: number;
+  currency: string;
 }
 
 // ============================================================
@@ -549,7 +607,45 @@ export interface ShopQuote extends ShopTotals {
   authorised_at?: string | null;
   authorised_by_name?: string | null;
   payable?: boolean;
+  /** The end customer's purchase order number. */
+  customer_po_number?: string | null;
+  /** 0 = the original; n = <original number>-R<n>. */
+  revision_no?: number;
+  revision_of?: { uuid: string; quote_number: string } | null;
+  superseded_by?: { uuid: string; quote_number: string; url_path?: string } | null;
+  /** The whole chain (original first) when there is more than one. */
+  revisions?: ShopQuoteRevisionRef[];
+  /** Authorised, has an order, converted or superseded: the customer can't change it. */
+  locked_for_customer?: boolean;
+  /** Turned into an order: lines, prices, customer and delivery are locked. */
+  has_order?: boolean;
+  can_revise?: boolean;
+  can_edit?: boolean;
+  order_number?: string | null;
+  order_status?: string | null;
+  order_paid_at?: string | null;
 }
+
+export interface ShopQuoteRevisionRef {
+  uuid: string;
+  quote_number: string;
+  revision_no: number;
+  status: ShopQuoteStatus;
+  superseded: boolean;
+  created_at: string;
+}
+
+export interface ShopQuoteRevise {
+  reason: string;
+  customer?: ShopCustomer;
+  delivery_address?: ShopDeliveryAddress | null;
+  delivery_method?: string;
+  customer_po_number?: string | null;
+  valid_until?: string;
+}
+
+/** Quick filters on the quotes list. */
+export type ShopQuoteQuickFilter = 'awaiting_authorisation' | 'awaiting_payment' | 'needs_supplier_po' | 'bank_transfer_due';
 
 export interface ShopQuoteSendResult {
   to: string;
@@ -723,6 +819,35 @@ export interface ShopSupplier {
   last_error: string | null;
   last_summary: ShopSupplierSummary | null;
   item_counts: { active: number; total: number; linked: number };
+  contact_email?: string | null;
+  /** How we raise purchase orders with them. */
+  po_email?: string | null;
+  po_phone?: string | null;
+  po_address?: string | null;
+  /** Our account number with them (printed on POs). */
+  account_number?: string | null;
+  /** Printed on every PO to them. */
+  po_notes?: string | null;
+}
+
+/** A PO raised with a shop supplier (GET /suppliers/:uuid/purchase-orders). */
+export interface ShopSupplierPurchaseOrder {
+  uuid: string;
+  po_number: string;
+  status: string;
+  supplier_name: string;
+  reference: string | null;
+  issue_date: string | null;
+  expected_date: string | null;
+  currency: string;
+  total: number | string;
+  created_at: string;
+  sent_at: string | null;
+  received_at: string | null;
+  billed_at: string | null;
+  shop_order_uuid: string | null;
+  shop_order_number: string | null;
+  end_customer_po: string | null;
 }
 
 export type ShopSupplierInput = Partial<Omit<ShopSupplier, 'uuid' | 'has_auth_secret' | 'last_synced_at' | 'last_status' | 'last_error' | 'last_summary' | 'item_counts'>> & {

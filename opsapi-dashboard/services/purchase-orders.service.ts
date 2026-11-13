@@ -105,6 +105,12 @@ export interface PurchaseOrderMetadata {
   delivery_method?: string | null;
   bill_to?: PurchaseOrderParty | null;
   ship_to?: PurchaseOrderParty | null;
+  /** The shop supplier it was raised with (Shop → Suppliers). */
+  shop_supplier_uuid?: string | null;
+  /** Our account number with the supplier. */
+  supplier_account_number?: string | null;
+  /** The end customer's own PO number (printed in the Deliver to block). */
+  end_customer_po?: string | null;
   [key: string]: unknown;
 }
 

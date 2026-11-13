@@ -16,6 +16,15 @@ import { useVipStatus } from '@/hooks/useVipStatus';
 import { extractApiError, formatDate, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize } from '@/lib/shop';
 import { SHOP_QUOTE_STATUSES, type ShopQuote, type ShopQuoteStatus, type TableColumn } from '@/types';
+import type { ShopQuoteQuickFilter } from '@/types/shop';
+import { quoteNextStep } from '@/components/shop/workflow';
+
+const QUICK_FILTERS: { key: ShopQuoteQuickFilter; label: string; empty: string }[] = [
+  { key: 'awaiting_authorisation', label: 'Awaiting authorisation', empty: 'Nothing waiting for a customer to authorise. Sent Order Authorisations show here until the customer confirms.' },
+  { key: 'awaiting_payment', label: 'Awaiting payment', empty: 'No authorised orders waiting for payment.' },
+  { key: 'needs_supplier_po', label: 'Needs supplier PO', empty: 'Every paid order has its supplier PO. Nothing to raise.' },
+  { key: 'bank_transfer_due', label: 'Bank transfer due', empty: 'No bank transfers outstanding.' },
+];
 
 const PER_PAGE = 25;
 
@@ -28,6 +37,9 @@ function QuotesContent() {
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<ShopQuoteStatus | ''>('');
+  const [filter, setFilter] = useState<ShopQuoteQuickFilter | ''>('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -41,18 +53,32 @@ function QuotesContent() {
   useEffect(() => {
     let active = true;
     shopService
-      .getQuotes({ status, q: q || undefined, limit: PER_PAGE, offset: (page - 1) * PER_PAGE })
+      .getQuotes({ status, filter, q: q || undefined, limit: PER_PAGE, offset: (page - 1) * PER_PAGE })
       .then((res) => {
         if (!active) return;
         setRows(res.data);
         setTotal(res.meta.total);
+        setLoadError(null);
       })
-      .catch((err) => active && toast.error(extractApiError(err, 'Failed to load quotes')))
+      .catch((err) => {
+        if (!active) return;
+        const msg = extractApiError(err, 'Failed to load quotes');
+        setLoadError(msg);
+        toast.error(msg);
+      })
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [status, q, page]);
+  }, [status, filter, q, page, version]);
+
+  const emptyMessage = loadError
+    ? `${loadError}. Check your connection and press Retry.`
+    : filter
+      ? QUICK_FILTERS.find((f) => f.key === filter)?.empty ?? 'Nothing here.'
+      : q || status
+        ? 'No quotes match. Clear the search or the status filter.'
+        : 'No quotes yet. Use “Create order” for a phone or email enquiry; quotes from the shop appear here automatically.';
 
   const expired = (qt: ShopQuote) => !!qt.valid_until && new Date(qt.valid_until) < new Date() && ['draft', 'sent'].includes(qt.status);
 
@@ -72,6 +98,7 @@ function QuotesContent() {
             {qt.source ? humanize(qt.source) : ''}
             {qt.viewed_at ? ' · viewed' : ''}
             {qt.authorised_at ? ' · confirmed' : ''}
+            {qt.customer_po_number ? ` · PO ${qt.customer_po_number}` : ''}
           </p>
         </div>
       ),
@@ -108,6 +135,11 @@ function QuotesContent() {
           {expired(qt) && <Badge size="sm" variant="error">Past validity</Badge>}
         </div>
       ),
+    },
+    {
+      key: 'next',
+      header: 'Next step',
+      render: (qt) => <span className="text-sm text-secondary-700">{quoteNextStep(qt).title}</span>,
     },
     { key: 'valid_until', header: 'Valid until', render: (qt) => <span className="text-sm text-secondary-600">{qt.valid_until ? formatDate(qt.valid_until) : '—'}</span> },
     { key: 'created_at', header: 'Created', render: (qt) => <span className="text-sm text-secondary-600">{formatDateTime(qt.created_at)}</span> },
@@ -152,6 +184,25 @@ function QuotesContent() {
             ))}
           </FilterSelect>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Quick filters">
+          {QUICK_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
+              onClick={() => {
+                setFilter(filter === f.key ? '' : f.key);
+                setPage(1);
+              }}
+              className={`rounded-full border px-3 py-1 text-sm ${filter === f.key ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-secondary-200 text-secondary-700 hover:bg-secondary-50'}`}
+            >
+              {f.label}
+            </button>
+          ))}
+          {loadError && (
+            <Button size="sm" variant="outline" onClick={() => setVersion((v) => v + 1)}>Retry</Button>
+          )}
+        </div>
       </Card>
 
       <div>
@@ -161,7 +212,7 @@ function QuotesContent() {
           keyExtractor={(qt) => qt.uuid}
           onRowClick={(qt) => router.push(`/dashboard/shop/quotes/${qt.uuid}`)}
           isLoading={loading}
-          emptyMessage="No quotes found"
+          emptyMessage={emptyMessage}
           caption="Shop quotes"
         />
         <Pagination currentPage={page} totalPages={Math.max(1, Math.ceil(total / PER_PAGE))} totalItems={total} perPage={PER_PAGE} onPageChange={setPage} />
