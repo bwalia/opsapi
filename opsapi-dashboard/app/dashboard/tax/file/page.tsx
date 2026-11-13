@@ -66,6 +66,7 @@ import FileForMe from '@/components/tax/FileForMe';
 import TransactionReview from '@/components/tax/TransactionReview';
 import TaxAgentChat from '@/components/tax/TaxAgentChat';
 import { taxFilingService, type FilingOverview } from '@/services/tax-filing.service';
+import { myIncomeService } from '@/services/my-income.service';
 import {
   taxService,
   type HmrcBusiness,
@@ -167,7 +168,18 @@ function StepBlock({ children, last }: { children: React.ReactNode; last?: boole
   );
 }
 
-function CheckItem({ state, label, hint }: { state: 'done' | 'warn' | 'todo'; label: string; hint?: string }) {
+function CheckItem({ state, label, hint, href }: { state: 'done' | 'warn' | 'todo'; label: string; hint?: string; href?: string }) {
+  if (href) {
+    return (
+      <li>
+        <Link href={href} className="-m-1 block rounded-md p-1 hover:bg-secondary-50">
+          <ul>
+            <CheckItem state={state} label={label} hint={hint} />
+          </ul>
+        </Link>
+      </li>
+    );
+  }
   return (
     <li className="flex items-start gap-3">
       <span
@@ -452,6 +464,18 @@ function FileWizardContent() {
   useEffect(() => {
     loadOverview();
   }, [loadOverview]);
+
+  // My Income progress for the year (income types reviewed) — those figures are in the estimate.
+  const [incomeProgress, setIncomeProgress] = useState<{ reviewed: number; total: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!taxYearBounds(taxYear)) return;
+    myIncomeService
+      .overview(taxYear)
+      .then((o) => { if (live) setIncomeProgress(o.progress); })
+      .catch(() => { if (live) setIncomeProgress(null); });
+    return () => { live = false; };
+  }, [taxYear]);
 
   // Direct filing can be switched off (until we're an HMRC-recognised filer).
   useEffect(() => {
@@ -955,6 +979,14 @@ function FileWizardContent() {
                 label="National Insurance number"
                 hint={hasNino ? `Ending ${ninoLast4 ?? '••••'}` : 'Needed whichever way you file'}
               />
+              {incomeProgress && incomeProgress.total > 0 && (
+                <CheckItem
+                  href={`/dashboard/tax/income?tax_year=${taxYear}`}
+                  state={incomeProgress.reviewed === incomeProgress.total ? 'done' : incomeProgress.reviewed > 0 ? 'warn' : 'todo'}
+                  label="Income sources reviewed"
+                  hint={`${incomeProgress.reviewed} of ${incomeProgress.total} in My Income →`}
+                />
+              )}
               <CheckItem
                 state={allConfirmed ? 'done' : txConfirmed > 0 ? 'warn' : 'todo'}
                 label="Transactions checked"

@@ -260,7 +260,9 @@ return function(app)
         -- the filing workbook. Response shape is unchanged for the web/mobile clients.
         local gross_income = total_income + additional_income
         local est = TaxTools.estimate(gross_income, total_expenses, tax_year,
-            TaxTools.profile_for(user_id, tax_year), { finance_interest = finance_interest })
+            TaxTools.profile_for(user_id, tax_year), { finance_interest = finance_interest,
+                -- figures typed under My Income (not in a what-if scenario)
+                my_income = (not is_scenario) and TaxTools.my_income_for(user_id, tax_year) or nil })
 
         local function r2(v) return math.floor((tonumber(v) or 0) * 100 + 0.5) / 100 end
 

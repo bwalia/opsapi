@@ -687,6 +687,9 @@ load_if("tax_copilot", "routes.tax-overseas-properties")
 -- 'employment'; questions come from routes.profile-builder scoped by that
 -- entity, so admins add / edit fields without shipping code.
 load_if("tax_copilot", "routes.tax-employments")
+-- My Income (dashboard): definition-driven income types — the customer's overview +
+-- per-type forms, and the tax_income_types admin (workspace overrides / own types).
+load_if("tax_copilot", "routes.tax-my-income")
 -- Form Sections engine: generic admin-defined sections + sub-form rows
 -- (pension payments and every future screen of that shape). The admin
 -- surface is what lets new screens ship without code changes.

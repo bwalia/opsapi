@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Building2,
   Receipt,
+  Wallet,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -107,6 +108,13 @@ function TaxDashboardContent() {
       icon: <ArrowLeftRight className="w-6 h-6" />,
       path: '/dashboard/tax/transactions',
       color: 'bg-amber-50 text-amber-600',
+    },
+    {
+      title: 'My Income',
+      description: 'Jobs, property, pensions, savings, dividends — every kind of income, step by step',
+      icon: <Wallet className="w-6 h-6" />,
+      path: '/dashboard/tax/income',
+      color: 'bg-teal-50 text-teal-600',
     },
     {
       title: 'Tax Reports',
@@ -255,10 +263,17 @@ function TaxDashboardContent() {
           </li>
           <li className="flex items-start gap-2">
             <span className="font-bold min-w-[20px]">5.</span>
-            <span>View your tax summary and HMRC box mapping under <strong>Reports</strong></span>
+            <span>
+              Add any other income — a job, rental property, pension, savings or dividends — under{' '}
+              <strong>My Income</strong>
+            </span>
           </li>
           <li className="flex items-start gap-2">
             <span className="font-bold min-w-[20px]">6.</span>
+            <span>View your tax summary and HMRC box mapping under <strong>Reports</strong></span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="font-bold min-w-[20px]">7.</span>
             <span>
               Open <strong>File My Tax</strong> — a guided flow that connects HMRC, checks your figures, and
               previews your Self Assessment via Making Tax Digital
