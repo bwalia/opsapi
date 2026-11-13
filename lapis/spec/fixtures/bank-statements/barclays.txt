@@ -1,0 +1,15 @@
+                                                                     Barclays Bank UK PLC
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+Mr A Sample                                                          Your Business Current Account
+1 Example Street                                                     Sort code 20-45-77   Account 43218765
+Testtown TT1 1TT                                                     IBAN GB33 BARC 2045 7743 2187 65
+                                                                     Statement 12 Sep 2026 - 11 Oct 2026
+
+Your balances
+Start balance                 £4,210.55
+End balance                   £5,002.10
+
+Date          Description                                   Money out     Money in      Balance
+12 Sep        Start balance                                                             4,210.55
+14 Sep        CARD PAYMENT TO HSBC CREDIT CARD                  250.00                  3,960.55
+15 Sep        BANK GIRO CREDIT REF CLIENT A                               1,291.55      5,252.10

@@ -1,0 +1,20 @@
+                                      NORTHBRIDGE DEMO BANK
+SYNTHETIC TEST DOCUMENT — NOT A REAL BANK STATEMENT
+
+Account holder: Taylor Example
+Account number: TEST-ACCOUNT-4821
+Sort code: 00-00-00
+Statement period: September 2026
+Test scenario: business/client receipts with no tax withheld.
+
+Opening balance: £17,920.07 Closing balance: £21,062.25
+Client/business receipts this month: £6,000.00
+
+     Date             Description                                          Money out (£)           Money in (£)            Balance (£)
+
+     01/09/2026       CONSULTING INVOICE                                                     —               £6,000.00              £23,920.07
+
+     02/09/2026       COUNCIL TAX                                                      £150.24                       —              £23,769.83
+
+     02/09/2026       INSURANCE PAYMENT                                                  £95.59                      —              £23,674.24
+

@@ -1,0 +1,16 @@
+HSBC UK                                                        Your Statement
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+                                                               Account Name          Sortcode        Account Number
+MR B SAMPLE                                                    MR B SAMPLE           40-11-62        71234590
+                                                               01 September to 30 September 2026
+
+Your HSBC Bank Account details
+Opening Balance          1,000.00
+Payments In              2,500.00
+Payments Out             1,200.00
+Closing Balance          2,300.00
+
+Date      Payment type and details                          Paid out        Paid in      Balance
+01 Sep 26 BALANCE BROUGHT FORWARD                                                        1,000.00
+02 Sep 26 DD BARCLAYCARD                                     300.00                        700.00
+05 Sep 26 CR CLIENT PAYMENT                                                 2,500.00     3,200.00

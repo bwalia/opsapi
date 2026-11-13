@@ -1,0 +1,11 @@
+Personal Account statement
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+D Sample
+Sort code: 04-00-04   Account number: 31415926
+01/05/2026 - 31/05/2026
+
+Date          Description                                     (GBP) Amount      (GBP) Balance
+01/05/2026    Transfer to HALIFAX ISA                          -200.00            1,800.00
+03/05/2026    Card payment LLOYDS PHARMACY                      -12.40            1,787.60
+
+Monzo Bank Limited is a company registered in England No. 09446231. Authorised by the Prudential Regulation Authority.

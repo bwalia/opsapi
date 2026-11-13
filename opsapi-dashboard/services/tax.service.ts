@@ -22,6 +22,32 @@ export interface TaxBankAccount {
   updated_at: string;
 }
 
+// POST /api/v2/tax/extract/bank-details — what was read from a statement.
+export interface DetectedBankDetails {
+  detected: boolean;
+  bank_name?: string | null;
+  sort_code?: string | null;
+  account_number?: string | null;
+  account_number_masked?: string | null;
+  account_type?: string | null;
+  confidence?: number;
+  source?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  opening_balance?: number | null;
+  closing_balance?: number | null;
+  // 'image' (needs a vision model) or 'no_text' (scanned PDF) when nothing could be read.
+  reason?: string | null;
+  matched_account?: {
+    id: string;
+    bank_name?: string | null;
+    account_name?: string | null;
+    sort_code?: string | null;
+    account_number?: string | null;
+  } | null;
+  match_type?: 'exact' | 'account_number' | 'sort_code' | 'bank_name' | null;
+}
+
 export interface TaxStatement {
   id: number;
   uuid: string;
@@ -341,6 +367,36 @@ export const taxService = {
 
   async deleteBankAccount(uuid: string): Promise<void> {
     await apiClient.delete(`${TAX_BASE}/bank-accounts/${uuid}`);
+  },
+
+  // Dedup-aware create: returns the existing account when one with the same sort
+  // code + account number is already there (`matched: true`).
+  async findOrCreateBankAccount(data: {
+    bank_name: string;
+    account_number?: string;
+    sort_code?: string;
+    account_type?: string;
+  }): Promise<{ account: TaxBankAccount; matched: boolean }> {
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') params.append(k, String(v));
+    });
+    const response = await apiClient.post(`${TAX_BASE}/bank-accounts/find-or-create`, params.toString());
+    const d = response.data || {};
+    return { account: d.data || d, matched: !!d.matched };
+  },
+
+  // Read the bank name, sort code and account number from a statement file before
+  // it is uploaded (PDF/CSV; images come back `detected: false, reason: 'image'`).
+  // `matched_account` is the user's existing account it belongs to, if any.
+  async detectBankDetailsFromFile(file: File): Promise<DetectedBankDetails> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post(`${TAX_BASE}/extract/bank-details`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+    return (response.data?.data ?? response.data) as DetectedBankDetails;
   },
 
   // ── Statements ──────────────────────────────────────────────────────────────

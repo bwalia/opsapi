@@ -1,0 +1,22 @@
+                                              NORTHBRIDGE DEMO BANK
+SYNTHETIC TEST DOCUMENT — NOT A REAL BANK STATEMENT
+
+Account holder: Jordan Ashby
+Account number: TEST-ACCOUNT-7310
+Sort code: 00-00-00
+Statement period: April 2025
+Test scenario: UK landlord, 80 let houses via agents and 20 commercial units.
+
+Opening balance: £185,000.00 Closing balance: £260,042.87
+Money in this month: £157,990.51
+
+     Date                Description                                            Money out (£)   Money in (£)   Balance (£)
+
+     06/04/2025          BIRCHWOOD BUILDING SOCIETY BTL MORTGAGE £16,850.00                              —     £168,150.00
+
+     06/04/2025          KINGSMEAD BTL MORTGAGE                                   £13,420.00             —     £154,730.00
+
+     06/04/2025          HARROWGATE LENDING BTL MORTGAGE                          £11,780.00             —     £142,950.00
+
+     06/04/2025          LANDLORD INSURANCE DIRECT DEBIT                            £2,140.00            —     £140,810.00
+

@@ -1,0 +1,11 @@
+Lloyds Bank                                                    Your Account
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT                       Sort Code 30-94-12
+                                                               Account Number 55501234
+Classic Account                                                01 August 2026 to 31 August 2026
+
+Money In   £3,000.00        Balance on 01 August 2026  £800.00
+Money Out  £1,450.00        Balance on 31 August 2026  £2,350.00
+
+Date         Description                     Type      Money In (£)    Money Out (£)    Balance (£)
+03 Aug 26    SANTANDER MORTGAGE              DD                        950.00           -150.00
+10 Aug 26    SALARY ACME LTD                 BGC       3,000.00                         2,850.00

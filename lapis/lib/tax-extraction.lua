@@ -103,7 +103,9 @@ local function detect_columns(header_fields)
         local f = field:lower():gsub("[^%w]", "")
         if f:match("date") or f:match("transactiondate") or f:match("postingdate") or f:match("valuedate") then
             mapping.date = mapping.date or i
-        elseif f:match("description") or f:match("details") or f:match("narrative") or f:match("particulars") or f:match("memo") or f:match("reference") then
+        elseif f:match("description") or f:match("details") or f:match("narrative") or f:match("particulars")
+            or f:match("memo") or f:match("reference") or f == "name" or f:match("counterparty")
+            or f:match("payee") or f:match("merchant") then
             mapping.description = mapping.description or i
         elseif f:match("debit") or f:match("moneyout") or f:match("paidout") or f:match("withdrawal") then
             mapping.debit = mapping.debit or i
@@ -128,16 +130,17 @@ local BANK_LAYOUTS = {
     santander = { date = 1, description = 2, debit = nil, credit = nil, amount = 3, balance = 4 },
 }
 
-local function detect_bank_from_csv(lines)
-    local first_lines = table.concat(lines, "\n", 1, math.min(5, #lines)):lower()
-    if first_lines:match("hsbc") then return "hsbc" end
-    if first_lines:match("barclays") then return "barclays" end
-    if first_lines:match("lloyds") or first_lines:match("halifax") then return "lloyds" end
-    if first_lines:match("santander") then return "santander" end
-    if first_lines:match("monzo") then return "monzo" end
-    if first_lines:match("starling") then return "starling" end
-    if first_lines:match("natwest") then return "natwest" end
-    return nil
+-- Issuing bank of a CSV statement, lowercased ("lloyds", "hsbc", ...), from its
+-- header block / account columns / column signature (lib/bank-detect). Not from
+-- transaction rows: a "SANTANDER MORTGAGE" payment doesn't make it a Santander CSV.
+local CSV_LAYOUT_ALIASES = { halifax = "lloyds", ["bank of scotland"] = "lloyds" }
+local function detect_bank_from_csv(content)
+    local ok, BankDetect = pcall(require, "lib.bank-detect")
+    if not ok then return nil end
+    local name = BankDetect.from_csv(content).bank_name
+    if not name then return nil end
+    name = name:lower()
+    return CSV_LAYOUT_ALIASES[name] or name
 end
 
 --- Extract transactions from CSV content
@@ -154,7 +157,7 @@ function Extraction.extract_from_csv(content, bank_hint)
     if #lines < 2 then return nil, "CSV has fewer than 2 lines" end
 
     local delimiter = detect_delimiter(lines[1])
-    local bank = bank_hint or detect_bank_from_csv(lines)
+    local bank = bank_hint or detect_bank_from_csv(content)
 
     -- Find header row (skip bank metadata rows)
     local header_row = 1
@@ -236,23 +239,16 @@ end
 -- PDF Extraction
 -- ---------------------------------------------------------------------------
 
---- Extract transactions from a native PDF using pdftotext
-function Extraction.extract_from_pdf(file_path)
-    if not file_path then return nil, "file_path required" end
-
-    -- Run pdftotext to a temp FILE and read it back, rather than reading an io.popen
-    -- pipe. In an nginx worker the popen child-reaping races with nginx's own SIGCHLD
-    -- handler and INTERMITTENTLY returns empty output, which wrongly trips the
-    -- "scanned_pdf" vision fallback — and the vision model then misreads the running
-    -- Balance column as the transaction amount. os.execute + file read doesn't depend
-    -- on the child's exit status, so the text is read reliably.
-    -- Run pdftotext via ngx.pipe — OpenResty's native, non-blocking way to spawn a
-    -- subprocess from a worker. io.popen / os.execute race with nginx's SIGCHLD handling
-    -- and intermittently return EMPTY output, which wrongly trips the "scanned_pdf"
-    -- vision fallback — and the vision model then misreads the running Balance column
-    -- as the transaction amount (every amount becomes a ~£14k balance, all DEBIT). This
-    -- was the real cause of the garbage estimates. Falls back to os.execute + file read
-    -- outside the OpenResty runtime (e.g. `lapis exec` / CLI).
+--- Text of a native PDF via `pdftotext -layout` (nil when there is none).
+-- Run pdftotext via ngx.pipe — OpenResty's native, non-blocking way to spawn a
+-- subprocess from a worker. io.popen / os.execute race with nginx's SIGCHLD
+-- handling and intermittently return EMPTY output, which wrongly trips the
+-- "scanned_pdf" vision fallback — and the vision model then misreads the running
+-- Balance column as the transaction amount (every amount becomes a ~£14k balance,
+-- all DEBIT). Falls back to os.execute + file read outside the OpenResty runtime
+-- (e.g. `lapis exec` / CLI).
+function Extraction.pdf_text(file_path)
+    if not file_path then return nil end
     local text
     local ok_pipe, pipe = pcall(require, "ngx.pipe")
     if ok_pipe and pipe then
@@ -270,6 +266,15 @@ function Extraction.extract_from_pdf(file_path)
         if fh then text = fh:read("*a"); fh:close() end
         os.remove(out_path)
     end
+
+    return text
+end
+
+--- Extract transactions from a native PDF using pdftotext
+function Extraction.extract_from_pdf(file_path)
+    if not file_path then return nil, "file_path required" end
+
+    local text = Extraction.pdf_text(file_path)
 
     if not text or #text < 50 then
         -- Genuinely no extractable text (scanned/image PDF) — fall back to vision.
@@ -324,14 +329,12 @@ function Extraction.extract_from_text(text)
     local transactions = {}
     local bank = nil
 
-    -- Detect bank from text
-    local text_lower = text:lower()
-    if text_lower:match("hsbc") then bank = "hsbc"
-    elseif text_lower:match("barclays") then bank = "barclays"
-    elseif text_lower:match("lloyds") or text_lower:match("halifax") then bank = "lloyds"
-    elseif text_lower:match("santander") then bank = "santander"
-    elseif text_lower:match("natwest") then bank = "natwest"
-    elseif text_lower:match("monzo") then bank = "monzo"
+    -- Detect the issuing bank from the statement header (not from transaction
+    -- lines: "LLOYDS BANK BTL MORTGAGE" on another bank's statement is a payee).
+    local ok_bd, BankDetect = pcall(require, "lib.bank-detect")
+    if ok_bd then
+        local det = BankDetect.from_text(text)
+        bank = det.bank_name and det.bank_name:lower() or nil
     end
 
     -- Collect lines (preserve column spacing produced by pdftotext -layout). Normalise
@@ -584,60 +587,29 @@ end
 -- Bank Detail Detection
 -- ---------------------------------------------------------------------------
 
---- Detect bank name, account number, sort code, and period from file content
-function Extraction.detect_bank_details(content, file_type)
-    if not content then return {} end
-
-    local details = {}
-    local text = content
-
-    -- If PDF path, extract text first
+--- Detect bank name, sort code, account number (and period/balances) from a
+-- statement. Deterministic rules first (lib/bank-detect), the platform LLM only
+-- for fields the rules could not read.
+-- @param content string PDF file path (file_type "pdf") or the raw CSV/text content
+-- @param file_type "pdf" | "csv" | "text"
+-- @param opts table|nil { llm = bool, trace_id }
+-- @return table { detected, bank_name, sort_code, account_number, account_number_masked,
+--                 account_type, confidence, source, period_start, period_end,
+--                 opening_balance, closing_balance }
+function Extraction.detect_bank_details(content, file_type, opts)
+    local BankDetect = require("lib.bank-detect")
+    if not content then return BankDetect.detect("", "text", { llm = false }) end
     if file_type == "pdf" then
-        local cmd = string.format("pdftotext -layout %q - 2>/dev/null | head -30", content)
-        local handle = io.popen(cmd)
-        if handle then
-            text = handle:read("*a") or ""
-            handle:close()
+        local text = Extraction.pdf_text(content)
+        if not text or #text < 50 then
+            -- Scanned PDF: no text layer to read the header from.
+            local r = BankDetect.detect("", "text", { llm = false })
+            r.reason = "no_text"
+            return r
         end
+        return BankDetect.detect(text, "text", opts)
     end
-
-    local text_lower = text:lower()
-
-    -- Bank name
-    if text_lower:match("hsbc") then details.bank_name = "HSBC"
-    elseif text_lower:match("barclays") then details.bank_name = "Barclays"
-    elseif text_lower:match("lloyds") then details.bank_name = "Lloyds"
-    elseif text_lower:match("santander") then details.bank_name = "Santander"
-    elseif text_lower:match("natwest") then details.bank_name = "NatWest"
-    elseif text_lower:match("nationwide") then details.bank_name = "Nationwide"
-    elseif text_lower:match("monzo") then details.bank_name = "Monzo"
-    elseif text_lower:match("starling") then details.bank_name = "Starling"
-    elseif text_lower:match("revolut") then details.bank_name = "Revolut"
-    end
-
-    -- Sort code (XX-XX-XX)
-    details.sort_code = text:match("(%d%d%-%d%d%-%d%d)")
-
-    -- Account number (8 digits)
-    details.account_number = text:match("account%s*n[ou]mber[:%s]*(%d%d%d%d%d%d%d%d)")
-        or text:match("a/c[:%s]*(%d%d%d%d%d%d%d%d)")
-        or text:match("(%d%d%d%d%d%d%d%d)")
-
-    -- Statement period
-    local period_start, period_end = text:match("(%d%d[/%-]%d%d[/%-]%d%d%d?%d?)%s*[%-–to]+%s*(%d%d[/%-]%d%d[/%-]%d%d%d?%d?)")
-    if period_start then
-        details.period_start = parse_date_uk(period_start)
-        details.period_end = parse_date_uk(period_end)
-    end
-
-    -- Opening/closing balance
-    local ob = text:match("[Oo]pening%s+[Bb]alance[:%s]*[£]?([%d,]+%.%d%d)")
-    if ob then details.opening_balance = clean_amount(ob) end
-
-    local cb = text:match("[Cc]losing%s+[Bb]alance[:%s]*[£]?([%d,]+%.%d%d)")
-    if cb then details.closing_balance = clean_amount(cb) end
-
-    return details
+    return BankDetect.detect(content, file_type == "csv" and "csv" or "text", opts)
 end
 
 -- ---------------------------------------------------------------------------

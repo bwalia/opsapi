@@ -19,6 +19,7 @@ import { formatCurrency } from '@/lib/utils';
 import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
 import taxFilingService from '@/services/tax-filing.service';
+import StatementUploader, { StatementUploadList, useStatementQueue } from '@/components/tax/StatementUploader';
 
 interface ChatMsg {
   id: string;
@@ -142,6 +143,7 @@ function TaxAgentChat() {
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { items: uploadItems, add: addUploads, update: updateUpload, clear: clearUploads } = useStatementQueue();
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wasProcessing = useRef(false);
@@ -273,8 +275,12 @@ function TaxAgentChat() {
   // Upload one or more statements: each is uploaded, extracted and classified. The
   // bank is auto-detected from the first statement (with a fallback note if it can't
   // be read). One failed file doesn't stop the rest.
-  const handleUpload = useCallback(async (files: File[]) => {
-    if (!sessionId || busy || files.length === 0) return;
+  const handleUpload = useCallback(async (picked: File[]) => {
+    if (!sessionId || busy || picked.length === 0) return;
+    clearUploads();
+    const queued = addUploads(picked);
+    const files = queued.map((q) => q.file);
+    if (files.length === 0) return;
     setBusy(true);
     const names = files.map((f) => f.name).join(', ');
     setMessages((prev) => [...prev, {
@@ -292,12 +298,14 @@ function TaxAgentChat() {
       }
       const ids: string[] = [];
       let detectedBank: string | undefined;
-      for (const file of files) {
+      for (const [i, file] of files.entries()) {
+        updateUpload(queued[i].id, { status: 'uploading' });
         try {
           const stmt = await taxService.uploadStatement(file, acctId as string);
           const s = stmt as { statement_id?: number | string; id?: number | string; uuid?: string };
           const stmtId = s.statement_id ?? s.id ?? s.uuid;
-          if (stmtId === undefined || stmtId === null || stmtId === '') continue;
+          if (stmtId === undefined || stmtId === null || stmtId === '') throw new Error('no statement id');
+          updateUpload(queued[i].id, { status: 'done', message: 'Uploaded — reading transactions' });
           ids.push(String(stmtId));
           if (!detectedBank) {
             const bd = await taxAgentService.detectBankDetails(stmtId);
@@ -305,6 +313,7 @@ function TaxAgentChat() {
           }
         } catch {
           // skip this file, keep going with the others
+          updateUpload(queued[i].id, { status: 'error', message: 'Upload failed' });
         }
       }
       // Name the account from the detected bank if it's still the generic default.
@@ -327,7 +336,7 @@ function TaxAgentChat() {
     } finally {
       setBusy(false);
     }
-  }, [sessionId, busy, startPolling, taxYear]);
+  }, [sessionId, busy, startPolling, taxYear, addUploads, updateUpload, clearUploads]);
 
   const confirmNewChat = useCallback(async () => {
     if (busy || loading || !sessionId) return;
@@ -477,16 +486,14 @@ function TaxAgentChat() {
               ))}
             </div>
           )}
+          <StatementUploadList items={uploadItems} className="mb-2" />
           <form
             onSubmit={(e) => { e.preventDefault(); send(input); }}
             className="flex items-end gap-2"
           >
             {latestUpload && (
-              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
-                title="Upload a bank statement"
-                className="shrink-0 rounded-lg border border-secondary-300 px-3 py-2 text-sm text-secondary-600 hover:bg-secondary-50 disabled:opacity-50">
-                📎
-              </button>
+              <StatementUploader variant="compact" items={uploadItems} onFiles={handleUpload} disabled={busy}
+                inputRef={fileRef} />
             )}
             <textarea
               value={input}
@@ -502,14 +509,6 @@ function TaxAgentChat() {
               Send
             </button>
           </form>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.csv,image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => { const fs = e.target.files ? Array.from(e.target.files) : []; if (fs.length) handleUpload(fs); e.target.value = ''; }}
-          />
         </div>
       </div>
 

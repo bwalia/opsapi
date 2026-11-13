@@ -1,0 +1,13 @@
+NatWest                                                Statement
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+Account name     MS C SAMPLE
+Sort code        60-12-34
+Account no.      87654321
+Period           01/07/2026 to 31/07/2026
+Previous balance 1,234.56
+New balance      2,000.00
+
+Date       Description                                   Paid in      Paid out      Balance
+01 JUL 2026 BROUGHT FORWARD                                                          1,234.56
+04 JUL 2026 TFR TO MONZO                                               100.00       1,134.56
+National Westminster Bank Plc. Registered Office: 250 Bishopsgate, London. Authorised by the PRA.

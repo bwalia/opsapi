@@ -64,111 +64,186 @@ local function txnKey(date, description, amount, ttype, balance)
     }, "|")
 end
 
+local MAX_DETECT_BYTES = 25 * 1024 * 1024
+
+-- pdf | csv | text | image | nil, from the extension (sniffing the bytes when
+-- the name is missing or misleading: "%PDF-" is unambiguous).
+local function detectKind(filename, content)
+    if type(content) == "string" and content:sub(1, 5) == "%PDF-" then return "pdf" end
+    local ext = tostring(filename or ""):match("%.([%w]+)$")
+    ext = ext and ext:lower() or ""
+    if ext == "pdf" then return "pdf" end
+    if ext == "csv" then return "csv" end
+    if ext == "txt" then return "text" end
+    if ext == "jpg" or ext == "jpeg" or ext == "png" or ext == "gif" or ext == "webp" then return "image" end
+    return nil
+end
+
+local function tmpPath(user_id)
+    return string.format("/tmp/opsapi-bankdetect-%s-%s-%d.pdf", tostring(user_id),
+        (tostring(ngx.now()):gsub("%.", "")), math.random(100000, 999999))
+end
+
 return function(app)
 
-    -- POST /api/v2/tax/extract/bank-details — detect bank details from file
+    -- POST /api/v2/tax/extract/bank-details — read bank name, sort code and
+    -- account number from a statement.
+    --   multipart `file`  (PDF / CSV / TXT) — detect BEFORE anything is stored
+    --                     (the "Add from a statement" and upload flows), or
+    --   `statement_id`    — detect from an already uploaded statement.
+    -- Response: { success, data = { detected, bank_name, sort_code, account_number,
+    --   account_number_masked, account_type, confidence, source, period_start,
+    --   period_end, opening_balance, closing_balance, reason?,
+    --   matched_account = { id, bank_name, account_name, sort_code, account_number } | null,
+    --   match_type = "exact" | "account_number" | "sort_code" | "bank_name" | null } }
+    -- Numbers are returned only to the statement's owner and are masked in logs.
     app:post("/api/v2/tax/extract/bank-details",
-        RateLimit.wrap({ rate = 10, window = 60, prefix = "extract:bank" },
+        RateLimit.wrap({ rate = 60, window = 60, prefix = "extract:bank" },
             AuthMiddleware.requireAuth(function(self)
-                local statement_id = self.params.statement_id
-                if not statement_id then
-                    return { status = 400, json = { error = "statement_id is required" } }
-                end
-
                 local user_id = getUserId(self.current_user)
                 if not user_id then
                     return { status = 401, json = { error = "User not found" } }
                 end
 
-                -- Fetch statement
-                local statements = findStatement(statement_id, user_id)
-                if #statements == 0 then
-                    return { status = 404, json = { error = "Statement not found" } }
-                end
-                local stmt = statements[1]
-                -- Normalize to the numeric PK so all subsequent DB reads/writes
-                -- (inserts, updates) use the real id even when the client sent a uuid.
-                statement_id = stmt.id
-
-                -- Download file from MinIO to temp path
-                -- Canonical column is minio_object_key; keep legacy fallbacks.
-                local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
-                if not file_key then
-                    return { status = 400, json = { error = "Statement has no file attached" } }
-                end
-
-                -- For bank detail detection, we need the raw content
-                -- Use pdftotext or read CSV directly
-                local file_type = stmt.file_type or "pdf"
-                local tmp_path = "/tmp/opsapi-extract-" .. ngx.time() .. "-" .. statement_id
-
-                -- Download from MinIO
-                local minio = MinioClient.getDefault()
-                if not minio then
-                    return { status = 503, json = { error = "MinIO not configured" } }
-                end
-
-                local presigned_url = minio:getPresignedUrl(file_key, 300)
-                if not presigned_url then
-                    return { status = 500, json = { error = "Could not get file from storage" } }
-                end
-
-                -- Download file
-                local ok_http, http = pcall(require, "resty.http")
-                if not ok_http then
-                    return { status = 500, json = { error = "HTTP client not available" } }
-                end
-
-                local httpc = http.new()
-                httpc:set_timeout(30000)
-                local res, dl_err = httpc:request_uri(presigned_url, {
-                    method = "GET",
-                    ssl_verify = false,
-                })
-
-                if not res or res.status ~= 200 then
-                    return { status = 500, json = { error = "Failed to download file from storage" } }
-                end
-
-                -- Write to temp file
-                local f = io.open(tmp_path, "wb")
-                if f then
-                    f:write(res.body)
-                    f:close()
-                end
-
-                -- Detect bank details
                 local ok_ext, Extraction = pcall(require, "lib.tax-extraction")
                 if not ok_ext then
-                    os.remove(tmp_path)
                     return { status = 500, json = { error = "Extraction module not available" } }
                 end
+                local BankDetect = require("lib.bank-detect")
 
+                local upload = self.params.file
                 local details
-                if file_type == "csv" then
-                    details = Extraction.detect_bank_details(res.body, "csv")
+                if type(upload) == "table" and upload.content then
+                    -- Detect from an uploaded file (nothing is stored).
+                    if upload.content == "" then
+                        return { status = 400, json = { error = "File content is empty" } }
+                    end
+                    if #upload.content > MAX_DETECT_BYTES then
+                        return { status = 400, json = { error = "File exceeds the 25MB limit" } }
+                    end
+                    local kind = detectKind(upload.filename, upload.content)
+                    if kind == "pdf" then
+                        local tmp_path = tmpPath(user_id)
+                        local f = io.open(tmp_path, "wb")
+                        if not f then
+                            return { status = 500, json = { error = "Could not read the file" } }
+                        end
+                        f:write(upload.content)
+                        f:close()
+                        details = Extraction.detect_bank_details(tmp_path, "pdf")
+                        os.remove(tmp_path)
+                    elseif kind == "csv" or kind == "text" then
+                        details = Extraction.detect_bank_details(upload.content, kind)
+                    elseif kind == "image" then
+                        -- Images need a vision model; the statement is still uploadable,
+                        -- the user just confirms the account by hand.
+                        details = BankDetect.detect("", "text", { llm = false })
+                        details.reason = "image"
+                    else
+                        return { status = 400, json = {
+                            error = "Only PDF, CSV and image statements are supported" } }
+                    end
                 else
-                    details = Extraction.detect_bank_details(tmp_path, "pdf")
-                end
+                    local statement_id = self.params.statement_id
+                    if not statement_id then
+                        return { status = 400, json = { error = "file or statement_id is required" } }
+                    end
+                    local statements = findStatement(statement_id, user_id)
+                    if #statements == 0 then
+                        return { status = 404, json = { error = "Statement not found" } }
+                    end
+                    local stmt = statements[1]
 
-                os.remove(tmp_path)
+                    -- Canonical column is minio_object_key; keep legacy fallbacks.
+                    local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
+                    if not file_key or file_key == db.NULL then
+                        return { status = 400, json = { error = "Statement has no file attached" } }
+                    end
+                    local minio = MinioClient.getDefault()
+                    if not minio then
+                        return { status = 503, json = { error = "MinIO not configured" } }
+                    end
+                    local presigned_url = minio:getPresignedUrl(file_key, 300)
+                    if not presigned_url then
+                        return { status = 500, json = { error = "Could not get file from storage" } }
+                    end
+                    local ok_http, http = pcall(require, "resty.http")
+                    if not ok_http then
+                        return { status = 500, json = { error = "HTTP client not available" } }
+                    end
+                    local httpc = http.new()
+                    httpc:set_timeout(30000)
+                    local res = httpc:request_uri(presigned_url, { method = "GET", ssl_verify = false })
+                    if not res or res.status ~= 200 then
+                        return { status = 500, json = { error = "Failed to download file from storage" } }
+                    end
 
-                -- Update statement with detected details if found
-                if details and details.bank_name then
-                    -- tax_statements has no bank_name column (it lives on
-                    -- tax_bank_accounts), so only persist the balance/period fields.
-                    local updates = {}
-                    if details.opening_balance then updates.opening_balance = details.opening_balance end
-                    if details.closing_balance then updates.closing_balance = details.closing_balance end
-                    if details.period_start then updates.period_start = details.period_start end
-                    if details.period_end then updates.period_end = details.period_end end
-                    if next(updates) then
-                        updates.updated_at = db.raw("NOW()")
-                        db.update("tax_statements", updates, { id = statement_id })
+                    local file_type = stmt.file_type
+                    if not file_type or file_type == db.NULL then
+                        file_type = detectKind(stmt.file_name, res.body)
+                    end
+                    if file_type == "csv" then
+                        details = Extraction.detect_bank_details(res.body, "csv")
+                    elseif file_type == "pdf" then
+                        local tmp_path = tmpPath(user_id)
+                        local f = io.open(tmp_path, "wb")
+                        if f then
+                            f:write(res.body)
+                            f:close()
+                        end
+                        details = Extraction.detect_bank_details(tmp_path, "pdf")
+                        os.remove(tmp_path)
+                    else
+                        details = BankDetect.detect("", "text", { llm = false })
+                        details.reason = "image"
+                    end
+
+                    -- Persist the balance/period fields on the statement (tax_statements
+                    -- has no bank_name column — that lives on tax_bank_accounts).
+                    if details.detected then
+                        local updates = {}
+                        if details.opening_balance then updates.opening_balance = details.opening_balance end
+                        if details.closing_balance then updates.closing_balance = details.closing_balance end
+                        if details.period_start then updates.period_start = details.period_start end
+                        if details.period_end then updates.period_end = details.period_end end
+                        if next(updates) then
+                            updates.updated_at = db.raw("NOW()")
+                            db.update("tax_statements", updates, { id = stmt.id, user_id = user_id })
+                        end
                     end
                 end
 
-                return { status = 200, json = { data = details } }
+                -- Which of the user's accounts (in this workspace) this statement belongs to.
+                details.matched_account = cjson.null
+                details.match_type = cjson.null
+                if details.detected then
+                    local ok_q, Queries = pcall(require, "queries.TaxBankAccountQueries")
+                    if ok_q then
+                        local ok_m, acct, match_type = pcall(Queries.matchDetected, user_id, details)
+                        if ok_m and acct then
+                            local function v(x) if x == db.NULL then return cjson.null end return x end
+                            details.matched_account = {
+                                id = acct.uuid,
+                                bank_name = v(acct.bank_name),
+                                account_name = v(acct.account_name),
+                                sort_code = v(acct.sort_code),
+                                account_number = v(acct.account_number),
+                            }
+                            details.match_type = match_type
+                        elseif not ok_m then
+                            ngx.log(ngx.ERR, "[bank-details] account match failed: ", tostring(acct))
+                        end
+                    end
+                end
+
+                ngx.log(ngx.INFO, "[bank-details] user=", user_id, " ", BankDetect.log_line(details),
+                    " match=", tostring(details.match_type))
+                if details.llm_error then
+                    ngx.log(ngx.WARN, "[bank-details] LLM fallback failed: ", tostring(details.llm_error):sub(1, 200))
+                    details.llm_error = nil
+                end
+
+                return { status = 200, json = { success = true, data = details } }
             end)
         )
     )

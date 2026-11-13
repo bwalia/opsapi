@@ -8,11 +8,14 @@ import {
   Trash2,
   Edit2,
   RefreshCw,
+  FileUp,
+  AlertCircle,
 } from 'lucide-react';
 import { Input, Table, Card, Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { taxService, type TaxBankAccount } from '@/services/tax.service';
+import { taxService, type TaxBankAccount, type DetectedBankDetails } from '@/services/tax.service';
+import StatementUploader, { useStatementQueue } from '@/components/tax/StatementUploader';
 import { formatDate } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
@@ -34,6 +37,13 @@ function BankAccountsContent() {
     currency: 'GBP',
   });
   const [isSaving, setIsSaving] = useState(false);
+
+  // "Add from a statement": read the details from a statement, show them for
+  // confirmation in the normal form, then create. An account the user already has
+  // (same account number) is shown instead of being created twice.
+  const [fromStatement, setFromStatement] = useState(false);
+  const statementQueue = useStatementQueue({ multiple: false });
+  const [detected, setDetected] = useState<DetectedBankDetails | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
@@ -74,12 +84,58 @@ function BankAccountsContent() {
       setShowCreateModal(false);
       resetForm();
       fetchAccounts();
-    } catch {
-      toast.error('Failed to create bank account');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to create bank account');
     } finally {
       setIsSaving(false);
     }
   };
+
+  const openFromStatement = () => {
+    resetForm();
+    setFromStatement(true);
+    setShowCreateModal(true);
+  };
+
+  const handleStatementFile = async (files: File[]) => {
+    const [item] = statementQueue.add(files);
+    setDetected(null);
+    if (!item) return;
+    statementQueue.update(item.id, { status: 'detecting' });
+    try {
+      const d = await taxService.detectBankDetailsFromFile(item.file);
+      setDetected(d);
+      if (d.detected) {
+        setFormData((prev) => ({
+          ...prev,
+          bank_name: d.bank_name || prev.bank_name,
+          sort_code: d.sort_code || prev.sort_code,
+          account_number: d.account_number || prev.account_number,
+          account_type: d.account_type || prev.account_type,
+        }));
+        statementQueue.update(item.id, {
+          status: 'done',
+          message: 'Details read from the statement — check them below',
+        });
+      } else {
+        statementQueue.update(item.id, {
+          status: 'error',
+          message: d.reason === 'image'
+            ? 'Images can\'t be read for bank details — please type them below'
+            : 'We couldn\'t read the bank details from this file — please type them below',
+        });
+      }
+    } catch {
+      statementQueue.update(item.id, { status: 'error', message: 'Could not read the statement' });
+    }
+  };
+
+  // The detected account is already in the list (same account number): don't create it again.
+  const duplicate = fromStatement && detected?.matched_account
+    && (detected.match_type === 'exact' || detected.match_type === 'account_number')
+    ? detected.matched_account
+    : null;
 
   const handleUpdate = async () => {
     if (!editingAccount) return;
@@ -121,6 +177,9 @@ function BankAccountsContent() {
 
   const resetForm = () => {
     setFormData({ bank_name: '', account_number: '', sort_code: '', account_type: 'current', currency: 'GBP' });
+    setFromStatement(false);
+    setDetected(null);
+    statementQueue.clear();
   };
 
   const columns: TableColumn<TaxBankAccount>[] = [
@@ -182,6 +241,34 @@ function BankAccountsContent() {
 
   const renderForm = () => (
     <div className="space-y-4">
+      {fromStatement && !editingAccount && (
+        <div className="space-y-2">
+          <StatementUploader
+            items={statementQueue.items}
+            onFiles={handleStatementFile}
+            multiple={false}
+            allowImages={false}
+            title="Drop a bank statement here or click to choose"
+          />
+          {duplicate && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                You already have this account: <strong>{duplicate.bank_name || 'Bank account'}</strong>
+                {duplicate.sort_code ? ` · ${duplicate.sort_code}` : ''}
+                {duplicate.account_number ? ` · ****${duplicate.account_number.slice(-4)}` : ''}. Upload this
+                statement to it from the Statements page.
+              </span>
+            </div>
+          )}
+          {detected?.detected && !duplicate && detected.matched_account && (
+            <p className="text-xs text-secondary-500">
+              Looks like your existing {detected.matched_account.bank_name || 'account'} account — check before
+              adding another.
+            </p>
+          )}
+        </div>
+      )}
       <div>
         <label className="block text-sm font-medium text-secondary-700 mb-1">Bank Name *</label>
         <input
@@ -251,7 +338,7 @@ function BankAccountsContent() {
         </button>
         <button
           onClick={editingAccount ? handleUpdate : handleCreate}
-          disabled={isSaving}
+          disabled={isSaving || (!editingAccount && !!duplicate)}
           className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
         >
           {isSaving ? 'Saving...' : editingAccount ? 'Update' : 'Create'}
@@ -272,6 +359,13 @@ function BankAccountsContent() {
               className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
             >
               <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={openFromStatement}
+              className="flex items-center gap-2 px-4 py-2 border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50"
+            >
+              <FileUp className="w-4 h-4" />
+              Add from a statement
             </button>
             <button
               onClick={() => { resetForm(); setShowCreateModal(true); }}
@@ -308,7 +402,7 @@ function BankAccountsContent() {
         <Modal
           isOpen={showCreateModal}
           onClose={() => { setShowCreateModal(false); resetForm(); }}
-          title="Add Bank Account"
+          title={fromStatement ? 'Add Bank Account from a Statement' : 'Add Bank Account'}
         >
           {renderForm()}
         </Modal>
