@@ -69,6 +69,35 @@ local function internal(method, path, body, auth, port)
     return res
 end
 
+-- Property income keys (the chat's uk_property and My Income's rental/overseas types).
+local PROPERTY_TYPES = { uk_property = true, rental = true, overseas_property = true, foreign_property = true }
+
+--- The classifier profile to use for this upload, or nil to leave it to the classifier.
+-- The classifier falls back to "sole_trader" when the user has no saved profile, which
+-- files a landlord's rents as other income and their repairs as equipment repairs. When
+-- the File My Tax chat already knows the income is property only, classify as a
+-- landlord. A profile the user saved themselves always wins, so we only fill the gap.
+-- @param session table|nil  tax_agent_sessions row with income_types
+-- @param user_id number
+local function classify_profile(session, user_id)
+    if not session then return nil end
+    local types = session.income_types
+    if type(types) == "string" then
+        local ok, t = pcall(cjson.decode, types)
+        types = ok and t or nil
+    end
+    if type(types) ~= "table" or #types == 0 then return nil end
+    for _, t in ipairs(types) do
+        if not PROPERTY_TYPES[tostring(t)] then return nil end
+    end
+    local ok, rows = pcall(db.select,
+        "default_profile_key FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+    if ok and rows and rows[1] and rows[1].default_profile_key and rows[1].default_profile_key ~= "" then
+        return nil
+    end
+    return "landlord"
+end
+
 -- Background worker: process each statement in turn (extract then classify).
 local function process_all(premature, job)
     if premature then return end
@@ -81,7 +110,9 @@ local function process_all(premature, job)
             if not r1 or r1.status >= 400 then error("extract HTTP " .. tostring(r1 and r1.status)) end
             ngx.log(ngx.INFO, "[tax-process] classifying ", s.uuid, " (extract HTTP ", r1.status, ")")
             set_status(s.id, "CLASSIFYING")
-            local r2 = internal("POST", "/api/v2/tax/classify", "statement_id=" .. s.uuid, auth_for(job), job.port)
+            local body = "statement_id=" .. s.uuid
+            if job.profile_type then body = body .. "&profile_type=" .. job.profile_type end
+            local r2 = internal("POST", "/api/v2/tax/classify", body, auth_for(job), job.port)
             if not r2 or r2.status >= 400 then error("classify HTTP " .. tostring(r2 and r2.status)) end
             ngx.log(ngx.INFO, "[tax-process] completed ", s.uuid, " (classify HTTP ", r2.status, ")")
             set_status(s.id, "COMPLETED")
@@ -104,7 +135,11 @@ local function process_all(premature, job)
     end
 end
 
-return function(app)
+local M = setmetatable({ _classify_profile = classify_profile }, {
+    __call = function(_, app) return M.register(app) end,
+})
+
+function M.register(app)
     local function parse_body()
         local ok, result = pcall(function()
             ngx.req.read_body()
@@ -139,7 +174,7 @@ return function(app)
         local session
         local sid = tostring(data.session_id or self.params.session_id or "")
         if sid ~= "" then
-            session = db.query([[SELECT id, namespace_id, user_id FROM tax_agent_sessions
+            session = db.query([[SELECT id, namespace_id, user_id, income_types FROM tax_agent_sessions
                 WHERE uuid = ? AND user_id = ? LIMIT 1]], sid, user_id)[1]
         end
 
@@ -182,6 +217,7 @@ return function(app)
             session = session,
             auth = auth,
             jwt_payload = jwt_payload,
+            profile_type = classify_profile(session, user_id),
             port = tonumber(ngx.var.server_port) or 80,
         })
         if not ok then
@@ -206,3 +242,5 @@ return function(app)
         return { status = 200, json = { success = true, data = rows or {} } }
     end))
 end
+
+return M
