@@ -18,7 +18,7 @@ load() { # label: write the plist from this folder, then (re)start the job
 }
 
 # A port already taken by something else would leave this job restarting forever.
-owner=$(lsof -nP -iTCP:11439 -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' | head -1)
+owner=$(lsof -nP -iTCP:11439 -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' | head -1 || true) # lsof exits 1 when free
 if [ -n "$owner" ] && [ "$owner" != "$(launchctl list | awk '$3 == "com.opsapi.ollama" {print $1}')" ]; then
   echo "Port 11439 is already in use by process $owner; not installing." >&2
   exit 1
