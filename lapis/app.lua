@@ -516,6 +516,8 @@ safe_load_routes("routes.namespace-webhooks")
 safe_load_routes("routes.namespace-mail")
 -- Workspace AI providers: own model keys (sealed), local LLMs, JobShout link (lib/ai-providers.lua).
 safe_load_routes("routes.namespace-ai-providers")
+-- "Getting paid": bank accounts and other payment methods for OAs and invoices (queries/PaymentMethodQueries.lua).
+safe_load_routes("routes.namespace-payment-methods")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
