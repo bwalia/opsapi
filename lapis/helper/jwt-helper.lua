@@ -398,4 +398,34 @@ function JWTHelper.createServiceToken(identifier, options)
     })
 end
 
+--- Re-sign a verified token's identity with a fresh, short expiry.
+-- For server-side background jobs that act as the user (e.g. the tax statement
+-- worker) and outlive the user's access token. Keeps userinfo and auth_time from
+-- the original so it's the same identity and the same session chain; only iat/exp
+-- move. Callers must pass a payload they already verified.
+-- @param payload table Verified JWT payload (must have userinfo.uuid and iss "opsapi")
+-- @param ttl number Seconds the new token lives (default 900)
+-- @return string|nil token, string|nil err
+function JWTHelper.reissue(payload, ttl)
+    if type(payload) ~= "table" or type(payload.userinfo) ~= "table" or not payload.userinfo.uuid
+        or payload.iss ~= "opsapi" then
+        return nil, "not a verified opsapi user token"
+    end
+    local now = ngx.time()
+    local auth_time = tonumber(payload.auth_time) or tonumber(payload.iat) or now
+    if now - auth_time > MAX_SESSION_SECONDS then
+        return nil, "sign-in is too old to extend"
+    end
+    return jwt:sign(getSecretKey(), {
+        header = { typ = "JWT", alg = "HS256" },
+        payload = {
+            userinfo = payload.userinfo,
+            iat = now,
+            exp = now + (tonumber(ttl) or 900),
+            auth_time = auth_time,
+            iss = "opsapi",
+        },
+    })
+end
+
 return JWTHelper

@@ -95,7 +95,7 @@ Status codes: **401** = missing/invalid credentials; **403** = route exists but 
 `./generate-api.sh` (interactive) and `./quick-api.sh <ModelName>` scaffold a Model+Queries+Routes triple and auto-register the route in `app.lua`. See `API-GENERATOR.md`.
 
 ### HMRC MTD Income Tax filing (UK Self Assessment)
-End-to-end "File your tax" flow against HMRC's Making Tax Digital APIs. Feature-gated under `tax_copilot`. **Read this before touching tax filing — it captures non-obvious HMRC behaviour that is expensive to rediscover.**
+End-to-end "File My Tax" flow (sidebar: Tax → File My Tax; the old "File with AI" item was folded into it — the AI assistant docks beside the wizard) against HMRC's Making Tax Digital APIs. Feature-gated under `tax_copilot`. **Read this before touching tax filing — it captures non-obvious HMRC behaviour that is expensive to rediscover.**
 
 **Layers**
 - `lib/hmrc-mtd-client.lua` — the MTD API client (one function per HMRC endpoint). Env-switched by `HMRC_ENVIRONMENT` (`sandbox`→`test-api.service.hmrc.gov.uk`, `production`→`api.service.hmrc.gov.uk`); `Client.is_sandbox()` gates sandbox-only behaviour. Endpoints + Accept versions: `list_businesses` (Business Details v2), `list_obligations` (Obligations v3), `submit_cumulative` (Self-Employment cumulative v5, `STATEFUL`), `trigger_calculation`/`get_calculation`/`poll_calculation` (Individual Calculations v8), `submit_final_declaration` (Calculations v8 — the BINDING crystallisation), `create_test_business`/`set_itsa_status` (Self Assessment Test Support v1, sandbox only).

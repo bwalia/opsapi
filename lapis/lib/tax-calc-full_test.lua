@@ -85,5 +85,43 @@ check("low taxable_savings", low.taxable_savings, 430)                 -- 10,000
 check("low starting_rate_for_savings_used", low.starting_rate_for_savings_used, 430)
 check("low income_tax_due", low.income_tax_due, 0)                     -- all within the 0% SRS band
 
+-- ===== Section 24: residential finance costs -> 20% basic-rate tax reduction =====
+-- Reduction = 20% x lowest of (finance costs, property profit, adjusted total income
+-- above the PA — non-savings, non-dividend). Costs are NOT deducted from profit.
+-- Large landlord (the case that was ~£100k overstated before the agent could record it):
+local big = TaxCalc.compute_full({ property_rents = 1698949, property_expenses = 250000,
+    property_finance_costs = 512400 }, {})
+check("s24 big property_profit (interest not deducted)", big.schedules.property_profit, 1448949)
+check("s24 big PA fully withdrawn", big.personal_allowance, 0)
+check("s24 big tax before reductions", big.income_tax_before_reductions, 638230.05)
+check("s24 big reduction = 20% of finance costs", big.finance_cost_reduction, 102480)
+check("s24 big income_tax_due", big.income_tax_due, 535750.05)
+check("s24 big no class4 on property", big.class4_nic, 0)
+local big_none = TaxCalc.compute_full({ property_rents = 1698949, property_expenses = 250000 }, {})
+check("s24 big without finance costs", big_none.income_tax_due, 638230.05)
+
+-- Capped by adjusted total income above the PA (small landlord, big mortgage):
+local small = TaxCalc.compute_full({ property_rents = 20000, property_expenses = 5000,
+    property_finance_costs = 30000 }, {})
+check("s24 small reduction capped at ATI above PA", small.finance_cost_reduction, 486)   -- 20% x 2,430
+check("s24 small tax never negative", small.income_tax_due, 0)
+check("s24 small carried forward", small.finance_costs_carried_forward, 27570)
+
+-- Capped by property profit (employee + landlord):
+local mixed = TaxCalc.compute_full({ employment_income = 60000, property_rents = 10000,
+    property_expenses = 2000, property_finance_costs = 12000 }, {})
+check("s24 mixed reduction capped at property profit", mixed.finance_cost_reduction, 1600) -- 20% x 8,000
+
+-- Savings/dividends are excluded from adjusted total income for the cap:
+local sav = TaxCalc.compute_full({ property_profit = 14000, savings_interest = 20000,
+    property_finance_costs = 14000 }, {})
+check("s24 savings excluded from ATI cap", sav.finance_cost_reduction, 286)              -- 20% x 1,430
+
+-- Self-employed landlord with the rental figures split out: credit applies.
+local sel = TaxCalc.compute_full({ se_turnover = 60000, se_expenses = 10000, property_rents = 30000,
+    property_expenses = 5000, property_finance_costs = 9000 }, {})
+check("s24 SE+property reduction", sel.finance_cost_reduction, 1800)
+check("s24 SE+property class4 on trading only", sel.class4_nic, 2245.80)
+
 io.write(string.format("\ntax-calc-full: %d passed, %d failed\n", passed, failed))
 os.exit(failed == 0 and 0 or 1)

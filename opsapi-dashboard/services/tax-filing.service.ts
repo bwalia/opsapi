@@ -38,6 +38,9 @@ export interface FilingEstimate {
   personal_allowance: number;
   taxable_income: number;
   income_tax: number;
+  /** Section 24 20% credit for residential finance costs (already deducted in income_tax). */
+  finance_cost_reduction?: number;
+  property_finance_costs?: number;
   class4_nic: number;
   class2_nic: number;
   total_tax_and_nic: number;

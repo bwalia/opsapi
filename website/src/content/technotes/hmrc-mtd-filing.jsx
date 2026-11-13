@@ -4,7 +4,7 @@ export const meta = {
     slug: 'hmrc-mtd-filing',
     title: 'Filing a UK tax return through HMRC Making Tax Digital',
     summary:
-        'The six-step “File your tax” wizard, the HMRC endpoints and API versions behind it, the sandbox behaviour that is expensive to rediscover, and what production needs.',
+        'The six-step “File My Tax” wizard, the HMRC endpoints and API versions behind it, the sandbox behaviour that is expensive to rediscover, and what production needs.',
     date: '2026-10-28',
     tags: ['hmrc', 'mtd', 'tax', 'integrations'],
     audience: 'developers',
@@ -25,7 +25,7 @@ function WizardDiagram() {
     const xs = [8, 166, 324, 482, 640, 798];
     return (
         <svg viewBox="0 0 960 230" role="img" aria-labelledby="mtd-wiz-t">
-            <title id="mtd-wiz-t">The six steps of the File your tax wizard, five non-binding and one binding</title>
+            <title id="mtd-wiz-t">The six steps of the File My Tax wizard, five non-binding and one binding</title>
             <Markers />
             <rect x="8" y="18" width="770" height="26" rx="4" className="dg-box dg-box--muted" />
             <text x="393" y="36" textAnchor="middle" className="dg-small">non-binding: nothing here files a return</text>
