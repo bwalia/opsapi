@@ -76,8 +76,8 @@ function Agent.status()
         and ngx.time() - (last.checked_at or 0) < (last.status == "down" and 30 or 60) then
         return last
     end
-    -- Long enough for the main probe plus the fallback probe.
-    if locks and not locks:add(STATUS_LOCK, true, 2 * PROBE_TIMEOUT_MS / 1000 + 5) then
+    -- Long enough for the main probe plus a probe of each fallback hop.
+    if locks and not locks:add(STATUS_LOCK, true, (1 + #Llm.chain) * PROBE_TIMEOUT_MS / 1000 + 5) then
         if last then return last end
         base.status = "checking"
         return base
@@ -85,13 +85,18 @@ function Agent.status()
     local ok, result = pcall(probe, Llm.default)
     if not ok then result = { status = "down", reason = "Health check failed: " .. tostring(result) } end
     for k, v in pairs(base) do result[k] = v end
-    local fb = Llm.fallback
-    if result.status == "down" and fb then
-        local fok, fres = pcall(probe, fb)
-        if fok and fres.status ~= "down" then
-            result = { status = "slow", fallback = true, provider = fb.provider, model = fb.model,
-                latency_ms = fres.latency_ms, reason = Llm.model .. " is unavailable (" .. tostring(result.reason)
-                    .. "), so the fallback " .. fb.model .. " is answering" }
+    -- Main model down: the first fallback hop that answers (hops already marked down are skipped).
+    if result.status == "down" then
+        for _, fb in ipairs(Llm.chain) do
+            if fb.legacy or not Llm.is_down(fb) then
+                local fok, fres = pcall(probe, fb)
+                if fok and fres.status ~= "down" then
+                    result = { status = "slow", fallback = true, provider = fb.provider, model = fb.model,
+                        hop = fb.name, latency_ms = fres.latency_ms, reason = Llm.model .. " is unavailable ("
+                            .. tostring(result.reason) .. "), so the fallback " .. fb.model .. " is answering" }
+                    break
+                end
+            end
         end
     end
     if locks then locks:delete(STATUS_LOCK) end
