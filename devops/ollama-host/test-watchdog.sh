@@ -1,15 +1,17 @@
 #!/bin/bash
-# Checks ollama-watchdog.sh against a fake Ollama and a fake launchctl (macOS, python3).
+# Checks ollama-watchdog.sh against two fake Ollama copies and a fake launchctl (macOS, python3).
 #   bash devops/ollama-host/test-watchdog.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-T="$(mktemp -d)"; trap 'kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+T="$(mktemp -d)"; trap '{ kill $A $B; wait; } 2>/dev/null; rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/home"
 printf '#!/bin/sh\necho "$@" >> "%s/kicks"\n' "$T" > "$T/bin/launchctl"; chmod +x "$T/bin/launchctl"
-echo ok > "$T/mode"
-python3 - "$T/mode" > /dev/null 2>&1 <<'EOF' &
+
+fake() { # port, mode file: answers generate with 200 while the file says ok, 500 otherwise
+  echo ok > "$2"
+  python3 - "$1" "$2" > /dev/null 2>&1 <<'EOF' &
 import http.server, sys
-MODE = sys.argv[1]
+PORT, MODE = int(sys.argv[1]), sys.argv[2]
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def reply(self, code):
@@ -18,23 +20,30 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
         self.reply(200 if open(MODE).read().strip() == "ok" else 500)
-http.server.HTTPServer(("127.0.0.1", 18434), H).serve_forever()
+http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
 EOF
-SRV=$!; sleep 1
+}
+fake 18434 "$T/a"; A=$!
+fake 18435 "$T/b"; B=$!
+sleep 1
 
-run() { HOME="$T/home" PATH="$T/bin:$PATH" OLLAMA_WATCHDOG_URL=http://127.0.0.1:18434 bash "$HERE/ollama-watchdog.sh"; }
-kicks() { [ -f "$T/kicks" ] && wc -l < "$T/kicks" | tr -d ' ' || echo 0; }
+run() { HOME="$T/home" PATH="$T/bin:$PATH" \
+  OLLAMA_WATCHDOG_TARGETS="http://127.0.0.1:18434=copy.a http://127.0.0.1:18435=copy.b" bash "$HERE/ollama-watchdog.sh"; }
+kicks() { touch "$T/kicks"; grep -c "$1\$" "$T/kicks"; }
+state() { cat "$T/home/Library/Logs/ollama/watchdog.$1.fails"; }
 fails=0
 check() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1 (got $2, want $3)"; fails=$((fails + 1)); fi; }
 
-run; check "a healthy server is left alone" "$(kicks)" 0
-echo wedged > "$T/mode"
-run; run; check "two missed answers: no restart yet" "$(kicks)" 0
-run; check "the third missed answer restarts com.opsapi.ollama" "$(grep -c 'kickstart -k gui/.*/com.opsapi.ollama$' "$T/kicks")" 1
-run; run; run; check "...and not again within the cooldown" "$(kicks)" 1
-echo ok > "$T/mode"; run
-check "an answer resets the count" "$(cat "$T/home/Library/Logs/ollama/watchdog.fails")" 0
-kill $SRV; wait $SRV 2>/dev/null; rm -f "$T/home/Library/Logs/ollama/watchdog.restarted"
-run; run; run; check "a server that isn't running is launchd's job, not a restart" "$(kicks)" 1
+run; check "healthy copies are left alone" "$(kicks copy.a)$(kicks copy.b)" 00
+echo wedged > "$T/b"
+run; run; check "two missed answers: no restart yet" "$(kicks copy.b)" 0
+run; check "the third missed answer restarts that copy" "$(grep -c 'kickstart -k gui/.*/copy.b$' "$T/kicks")" 1
+check "...and only that copy" "$(kicks copy.a)" 0
+check "the healthy copy's count stays at 0" "$(state copy.a)" 0
+run; run; run; check "...and not again within the cooldown" "$(kicks copy.b)" 1
+echo ok > "$T/b"; run
+check "an answer resets the count" "$(state copy.b)" 0
+{ kill $B; wait $B; } 2>/dev/null; rm -f "$T/home/Library/Logs/ollama/watchdog.copy.b.restarted"
+run; run; run; check "a copy that isn't running is launchd's job, not a restart" "$(kicks copy.b)" 1
 
 [ "$fails" = 0 ] && echo "ALL PASSED" || { echo "FAILED: $fails"; exit 1; }

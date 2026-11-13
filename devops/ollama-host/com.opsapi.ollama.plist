@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- OpsAPI's own Ollama: a separate `ollama serve` on :11439 with its own queue and scheduler, so other
+<!-- One of OpsAPI's own Ollama copies: a separate `ollama serve` with its own queue and scheduler, so other
      products' requests on the shared :11434 can't hold up or wedge OpsAPI's assistant. Same model files
-     (~/.ollama/models), so nothing is downloaded twice. Installed by install.sh. -->
+     (~/.ollama/models), so nothing is downloaded twice. install.sh fills in __LABEL__, __PORT__, __LOG__ and
+     __HOME__ once per copy (com.opsapi.ollama :11439, com.opsapi.ollama-b :11440). -->
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.opsapi.ollama</string>
+  <key>Label</key><string>__LABEL__</string>
   <key>ProgramArguments</key><array><string>/opt/homebrew/opt/ollama/bin/ollama</string><string>serve</string></array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>OLLAMA_HOST</key><string>0.0.0.0:11439</string>
+    <key>OLLAMA_HOST</key><string>0.0.0.0:__PORT__</string>
     <key>OLLAMA_NUM_PARALLEL</key><string>4</string>
     <key>OLLAMA_MAX_LOADED_MODELS</key><string>3</string>
     <key>OLLAMA_MAX_QUEUE</key><string>64</string>
@@ -21,7 +22,7 @@
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>__HOME__/Library/Logs/ollama/opsapi.out.log</string>
-  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/ollama/opsapi.err.log</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/ollama/__LOG__.out.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/ollama/__LOG__.err.log</string>
 </dict>
 </plist>
