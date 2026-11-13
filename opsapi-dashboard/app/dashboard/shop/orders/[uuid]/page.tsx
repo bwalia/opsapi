@@ -7,6 +7,7 @@ import { ArrowLeft, ExternalLink, Printer, Save, ShoppingCart, Truck, ClipboardL
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
+import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -25,7 +26,7 @@ import {
   formatAddress,
 } from '@/components/shop/shared';
 import { extractApiError, formatDateTime } from '@/lib/utils';
-import { humanize, stripePaymentUrl, stripeSessionUrl } from '@/lib/shop';
+import { formatMoney, humanize, stripePaymentUrl, stripeSessionUrl } from '@/lib/shop';
 import type { ShopOrder, ShopOrderStatus, ShopTracking } from '@/types/shop';
 
 /** Allowed manual transitions. Payment states are driven by Stripe webhooks/reconcile. */
@@ -171,12 +172,24 @@ function OrderDetail() {
             </div>
           )}
         </div>
-        {order.status === 'pending_payment' && (
+        {order.status === 'pending_payment' && order.payment_method !== 'bank_transfer' && (
           <p className="mt-3 text-xs text-secondary-500 print:hidden">
             Awaiting Stripe. Payment status is set by the signed webhook; use “Run reconcile” on the Overview if a webhook was missed.
           </p>
         )}
       </Card>
+
+      {/* Next step for getting paid: Mark paid (bank transfer due) / Create invoice (paid, not invoiced). */}
+      <OrderPaymentNextStep
+        order={order}
+        editable={editable}
+        onChanged={(o) => {
+          if (o?.uuid) {
+            setOrder(o);
+            setNotes(o.internal_notes ?? '');
+          } else reload();
+        }}
+      />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
@@ -283,6 +296,18 @@ function OrderDetail() {
           <Card>
             <SectionTitle>Payment</SectionTitle>
             <dl className="divide-y divide-secondary-100">
+              <KeyValue label="Method">{humanize(order.payment_method || 'card')}</KeyValue>
+              {order.paid_reference && <KeyValue label="Reference">{order.paid_reference}</KeyValue>}
+              {typeof order.paid_amount_minor === 'number' && (
+                <KeyValue label="Received">{formatMoney(order.paid_amount_minor, cur)}</KeyValue>
+              )}
+              {order.invoice_uuid && (
+                <KeyValue label="Invoice">
+                  <Link href={`/dashboard/invoices/${order.invoice_uuid}`} className="text-primary-600 hover:underline">
+                    Open invoice
+                  </Link>
+                </KeyValue>
+              )}
               <KeyValue label="Payment intent">
                 {order.stripe_payment_intent_id ? (
                   <a href={stripePaymentUrl(order.stripe_payment_intent_id)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-primary-600 hover:underline">

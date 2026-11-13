@@ -18,6 +18,35 @@ local cjson = require("cjson")
 
 local InvoiceQueries = {}
 
+--- po_number (the customer's purchase order number) and payment_method_uuid (null = the namespace default bank
+-- account) arrive with migrations/payment-methods.lua [2]. Returns (po_number, payment_method_uuid, err); a value
+-- of db.NULL clears the field. A payment_method_uuid must be one of this namespace's payment methods.
+local function doc_fields(namespace_id, params)
+    local po, pm
+    if params.po_number ~= nil then
+        if params.po_number == cjson.null or tostring(params.po_number):match("^%s*$") then
+            po = db.NULL
+        else
+            po = tostring(params.po_number):gsub("%c", " "):match("^%s*(.-)%s*$")
+            if #po > 64 then return nil, nil, "po_number is too long (max 64 characters)" end
+        end
+    end
+    if params.payment_method_uuid ~= nil then
+        if params.payment_method_uuid == cjson.null or tostring(params.payment_method_uuid) == "" then
+            pm = db.NULL
+        else
+            local PaymentMethods = require("queries.PaymentMethodQueries")
+            local ok, row = pcall(PaymentMethods.getRow, namespace_id, tostring(params.payment_method_uuid))
+            if not ok or not row then
+                return nil, nil, "payment_method_uuid is not one of this workspace's payment methods"
+            end
+            pm = row.uuid
+        end
+    end
+    return po, pm
+end
+InvoiceQueries._docFields = doc_fields
+
 -- ============================================================
 -- Invoice Number Generation
 -- ============================================================
@@ -60,6 +89,8 @@ end
 -- @param params table { namespace_id, customer_name, customer_email, customer_address, account_id, issue_date, due_date, currency, notes, payment_terms_days, owner_user_uuid, line_items }
 -- @return table { data = invoice }
 function InvoiceQueries.create(params)
+    local po_number, payment_method_uuid, ferr = doc_fields(params.namespace_id, params)
+    if ferr then return nil, ferr end
     local invoice_number = InvoiceQueries._getNextInvoiceNumber(params.namespace_id)
 
     local invoice = InvoiceModel:create({
@@ -86,6 +117,13 @@ function InvoiceQueries.create(params)
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
+
+    if (po_number and po_number ~= db.NULL) or (payment_method_uuid and payment_method_uuid ~= db.NULL) then
+        db.query("UPDATE invoices SET po_number = ?, payment_method_uuid = ? WHERE id = ?",
+            po_number or db.NULL, payment_method_uuid or db.NULL, invoice.id)
+        invoice.po_number = po_number ~= db.NULL and po_number or nil
+        invoice.payment_method_uuid = payment_method_uuid ~= db.NULL and payment_method_uuid or nil
+    end
 
     -- If line_items provided, create them
     if params.line_items and type(params.line_items) == "table" then
@@ -253,6 +291,12 @@ function InvoiceQueries.get(uuid, namespace_id)
     invoice.line_items = line_items or {}
     invoice.payments = payments or {}
 
+    -- "How to pay" on the invoice: its own payment method, else the workspace default bank account.
+    local okpm, pm = pcall(function()
+        return require("queries.PaymentMethodQueries").resolve(invoice.namespace_id, invoice.payment_method_uuid)
+    end)
+    invoice.payment_method = (okpm and pm) or cjson.null
+
     return invoice
 end
 
@@ -285,6 +329,10 @@ function InvoiceQueries.update(uuid, params, namespace_id)
             update_data[field] = params[field]
         end
     end
+    local po_number, payment_method_uuid, ferr = doc_fields(invoice.namespace_id, params)
+    if ferr then return nil, ferr end
+    if po_number ~= nil then update_data.po_number = po_number end
+    if payment_method_uuid ~= nil then update_data.payment_method_uuid = payment_method_uuid end
 
     update_data.updated_at = db.raw("NOW()")
 

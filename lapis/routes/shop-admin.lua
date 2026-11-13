@@ -11,7 +11,10 @@
       POST              /products/:uuid/stock  POST /options/:uuid/stock
       GET               /stock                 GET /stock/movements
       POST              /import                   (existing products keep their prices; body overwrite_prices: true resets them)
-      GET               /orders                GET/PUT /orders/:uuid
+      GET               /orders                GET/PUT /orders/:uuid   (?bank_transfer_due=true: awaiting a bank
+                                               transfer, oldest first; ?payment_method=; meta.bank_transfer_due_count)
+      POST              /orders/:uuid/mark-paid { method?: bank_transfer|cheque|other, reference?, paid_at?, amount_minor? }
+      POST              /orders/:uuid/invoice   accounting invoice from the order (idempotent; 501 without invoicing)
       POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
                                                goods via Stripe less the Trade discount clawback
       GET/POST          /quotes                GET/PUT /quotes/:uuid
@@ -258,6 +261,28 @@ return function(app)
         local po, err = Orders.createPurchaseOrder(ns_id, self.params.uuid, body, u.uuid)
         if not po then return U.from_err(err) end
         return U.ok(po, 201)
+    end))
+
+    -- Record a payment that arrived outside Stripe (bank transfer, cheque, other): same paid path as a card.
+    -- Body { method?: bank_transfer|cheque|other, reference?, paid_at?: YYYY-MM-DD, amount_minor? }.
+    app:post(BASE .. "/orders/:uuid/mark-paid", guard("update", function(self, ns_id)
+        local body = body_or_400() or {}
+        local u = self.current_user or {}
+        return result(Orders.markPaid(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    -- Accounting invoice (draft) from the order: customer, lines, discount, delivery, VAT, PO number, payment
+    -- method. Idempotent (the order keeps invoice_uuid). Needs invoices.create too. 501 without invoicing.
+    app:post(BASE .. "/orders/:uuid/invoice", guard("update", function(self, ns_id)
+        local NS = require("middleware.namespace")
+        if not NS.hasPermission(self, "invoices", "create") then
+            return U.fail(403, "FORBIDDEN", "You need permission to create invoices")
+        end
+        local body = body_or_400() or {}
+        local u = self.current_user or {}
+        local res, err = Orders.createInvoice(ns_id, self.params.uuid, body, u.uuid)
+        if not res then return U.from_err(err) end
+        return U.ok(res, res.existing and 200 or 201)
     end))
 
     app:post(BASE .. "/orders/:uuid/refund", guard("update", function(self, ns_id)

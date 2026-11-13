@@ -28,6 +28,8 @@ import {
   type InvoicePayload,
 } from '@/services/invoices.service';
 import { generateInvoicePdf, previewInvoicePdfUrl, invoicePdfBase64 } from '@/lib/invoice-pdf';
+import { paymentMethodsService, type PaymentMethod } from '@/services/payment-methods.service';
+import HowToPay from '@/components/payments/HowToPay';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -341,7 +343,15 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
     currency: invoice.currency,
     notes: invoice.notes || '',
     payment_terms_days: invoice.payment_terms_days,
+    po_number: invoice.po_number || '',
+    payment_method_uuid: invoice.payment_method_uuid || '',
   });
+  // The workspace's "Getting paid" methods, for the payment method picker.
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  useEffect(() => {
+    if (!isOpen) return;
+    paymentMethodsService.list().then(setMethods).catch(() => setMethods([]));
+  }, [isOpen]);
 
   useEffect(() => {
     setFormData({
@@ -352,6 +362,8 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
       currency: invoice.currency,
       notes: invoice.notes || '',
       payment_terms_days: invoice.payment_terms_days,
+      po_number: invoice.po_number || '',
+      payment_method_uuid: invoice.payment_method_uuid || '',
     });
   }, [invoice]);
 
@@ -451,6 +463,36 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
               className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               min="0"
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Customer PO number</label>
+            <input
+              type="text"
+              value={formData.po_number || ''}
+              maxLength={64}
+              onChange={(e) => setFormData((prev) => ({ ...prev, po_number: e.target.value }))}
+              placeholder="Their purchase order number"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">How to pay</label>
+            <select
+              value={formData.payment_method_uuid || ''}
+              onChange={(e) => setFormData((prev) => ({ ...prev, payment_method_uuid: e.target.value }))}
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
+            >
+              <option value="">Default bank account</option>
+              {methods.map((m) => (
+                <option key={m.uuid} value={m.uuid}>
+                  {m.label}
+                  {m.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -812,6 +854,12 @@ function InvoiceDetailContent() {
                 <span className="ml-2 text-secondary-900">Net {invoice.payment_terms_days} days</span>
               </div>
             )}
+            {invoice.po_number && (
+              <div>
+                <span className="text-secondary-500">Customer PO:</span>
+                <span className="ml-2 font-mono text-secondary-900">{invoice.po_number}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -972,6 +1020,11 @@ function InvoiceDetailContent() {
           </div>
         )}
       </div>
+
+      {/* How to pay (as printed on the PDF) */}
+      {invoice.payment_method && invoice.status !== 'paid' && invoice.status !== 'void' && (
+        <HowToPay methods={[invoice.payment_method]} reference={invoice.invoice_number} />
+      )}
 
       {/* Notes */}
       {invoice.notes && (

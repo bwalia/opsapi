@@ -38,6 +38,8 @@ import type {
   ShopMarketSourceInput,
   ShopMarketUpsertResult,
   ShopOrder,
+  ShopOrderInvoiceResult,
+  ShopOrderMarkPaid,
   ShopOrderStatus,
   ShopOrderUpdate,
   ShopProduct,
@@ -136,6 +138,8 @@ function normalizeKpis(raw: Record<string, unknown> | undefined): ShopDashboardK
 export interface ShopOrderListParams {
   status?: ShopOrderStatus | '';
   q?: string;
+  /** Awaiting a bank transfer, oldest first. */
+  bank_transfer_due?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -276,10 +280,29 @@ export const shopService = {
   },
 
   // ---------------- Orders ----------------
-  async getOrders(params: ShopOrderListParams = {}): Promise<ShopList<ShopOrder>> {
-    const qs = buildQueryString({ status: params.status, q: params.q, limit: params.limit, offset: params.offset });
+  async getOrders(params: ShopOrderListParams = {}): Promise<ShopList<ShopOrder> & { bankTransferDue: number }> {
+    const qs = buildQueryString({
+      status: params.status,
+      q: params.q,
+      limit: params.limit,
+      offset: params.offset,
+      bank_transfer_due: params.bank_transfer_due ? 'true' : undefined,
+    });
     const res = await apiClient.get(`${BASE}/orders${qs}`);
-    return unwrapList<ShopOrder>(res, params.limit, params.offset);
+    const meta = (res.data as { meta?: { bank_transfer_due_count?: number } } | undefined)?.meta;
+    return { ...unwrapList<ShopOrder>(res, params.limit, params.offset), bankTransferDue: num(meta?.bank_transfer_due_count) };
+  },
+
+  /** Record a payment that arrived outside Stripe (bank transfer, cheque, other); the order becomes paid. */
+  async markOrderPaid(uuid: string, body: ShopOrderMarkPaid): Promise<ShopOrder> {
+    const res = await apiClient.post(`${BASE}/orders/${uuid}/mark-paid`, body, JSON_BODY);
+    return unwrap<ShopOrder>(res);
+  },
+
+  /** Draft accounting invoice from the order (idempotent: returns the existing one). */
+  async createOrderInvoice(uuid: string, body: { payment_method_uuid?: string } = {}): Promise<ShopOrderInvoiceResult> {
+    const res = await apiClient.post(`${BASE}/orders/${uuid}/invoice`, body, JSON_BODY);
+    return unwrap<ShopOrderInvoiceResult>(res);
   },
 
   async getOrder(uuid: string): Promise<ShopOrder> {
