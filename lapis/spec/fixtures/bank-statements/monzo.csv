@@ -1,0 +1,3 @@
+Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In
+tx_0001,01/05/2026,09:00:00,Faster payment,HALIFAX ISA,,Transfers,-200.00,GBP,-200.00,GBP,,,,HALIFAX ISA,,-200.00,
+tx_0002,03/05/2026,12:10:00,Card payment,Lloyds Pharmacy,,Shopping,-12.40,GBP,-12.40,GBP,,,,LLOYDS PHARMACY,,-12.40,

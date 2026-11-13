@@ -1,0 +1,6 @@
+Statement of account
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+Customer reference TEST-REF-1
+
+Date         Description                                     Money out      Money in       Balance
+01/03/2026   LLOYDS BANK BTL MORTGAGE                         900.00                      1,100.00

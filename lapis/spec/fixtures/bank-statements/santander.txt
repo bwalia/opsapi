@@ -1,0 +1,9 @@
+                                     Santander
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+Account Number: 12340987                             Sort Code: 09-01-28
+Statement Period: 01/06/2026 - 30/06/2026
+Everyday Current Account
+
+Date        Description                                     Money in       Money out        Balance
+02/06/2026  DIRECT DEBIT PAYMENT TO BARCLAYS BANK PLC                       45.00           955.00
+15/06/2026  FASTER PAYMENTS RECEIPT                         1,500.00                       2,455.00

@@ -1,0 +1,10 @@
+STATEMENT
+SYNTHETIC FIXTURE - NOT A REAL STATEMENT
+E Sample
+Account number 27182818
+Sort code 60-83-71
+Statement period 01/04/2026 - 30/04/2026
+
+DATE         TYPE        TRANSACTION                          IN         OUT        ACCOUNT BALANCE
+01/04/2026   DIRECT DEBIT NATWEST LOAN                                   120.00     880.00
+Starling Bank Limited is registered in England and Wales (No. 09092149) and authorised by the Prudential Regulation Authority.

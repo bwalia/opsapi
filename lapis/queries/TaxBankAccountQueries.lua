@@ -44,8 +44,100 @@ local function resolveNamespaceId(user_id)
     return 0
 end
 
+local function digits(s)
+    if s == nil or s == db.NULL then return "" end
+    return (tostring(s):gsub("%D", ""))
+end
+
+local function bank_key(name)
+    if name == nil or name == db.NULL then return "" end
+    return (tostring(name):lower():gsub("[%s%-_%.]+", ""):gsub("uk$", ""):gsub("plc$", ""):gsub("bank$", ""))
+end
+
+-- Active accounts of a user in their workspace (same scope as .all, so a
+-- match is always an account the user can see in the list).
+local function scoped_accounts(user_id)
+    local ns_id = resolveNamespaceId(user_id)
+    if ns_id > 0 then
+        return db.query([[
+            SELECT * FROM tax_bank_accounts
+            WHERE user_id = ? AND namespace_id = ? AND is_active = true
+            ORDER BY is_primary DESC, created_at ASC
+        ]], user_id, ns_id) or {}
+    end
+    return db.query([[
+        SELECT * FROM tax_bank_accounts
+        WHERE user_id = ? AND is_active = true
+        ORDER BY is_primary DESC, created_at ASC
+    ]], user_id) or {}
+end
+
+--- Match detected statement details against the user's existing accounts.
+-- Strongest signal first:
+--   exact           sort code AND account number equal
+--   account_number  account number equal, stored sort code empty or equal
+--   sort_code       only a sort code was read; one account with that sort code
+--                   and no stored account number, same bank
+--   bank_name       nothing numeric to compare on either side; same bank name
+-- @return row|nil, match_type|nil
+function TaxBankAccountQueries.matchDetected(user_id, data)
+    local sc, an = digits(data.sort_code), digits(data.account_number)
+    local key = bank_key(data.bank_name)
+    local accounts = scoped_accounts(user_id)
+
+    if an ~= "" then
+        for _, a in ipairs(accounts) do
+            if digits(a.account_number) == an and (sc == "" or digits(a.sort_code) == sc) then
+                return a, "exact"
+            end
+        end
+        local hits = {}
+        for _, a in ipairs(accounts) do
+            local asc = digits(a.sort_code)
+            if digits(a.account_number) == an and (asc == "" or sc == "" or asc == sc) then hits[#hits + 1] = a end
+        end
+        if #hits == 1 then return hits[1], "account_number" end
+        -- A different account number is a different account, whatever the bank.
+        for _, a in ipairs(accounts) do
+            if digits(a.account_number) == "" and key ~= "" and bank_key(a.bank_name) == key
+                and (digits(a.sort_code) == "" or digits(a.sort_code) == sc) then
+                return a, "bank_name"
+            end
+        end
+        return nil
+    end
+
+    if sc ~= "" then
+        local hits = {}
+        for _, a in ipairs(accounts) do
+            if digits(a.sort_code) == sc and digits(a.account_number) == ""
+                and (key == "" or bank_key(a.bank_name) == key) then
+                hits[#hits + 1] = a
+            end
+        end
+        if #hits == 1 then return hits[1], "sort_code" end
+        if #hits > 1 then return nil end
+    end
+
+    if key ~= "" then
+        local hits = {}
+        for _, a in ipairs(accounts) do
+            if bank_key(a.bank_name) == key and digits(a.account_number) == ""
+                and (sc == "" or digits(a.sort_code) == "" or digits(a.sort_code) == sc) then
+                hits[#hits + 1] = a
+            end
+        end
+        if #hits == 1 then return hits[1], "bank_name" end
+    end
+    return nil
+end
+
 -- Find existing bank account by sort_code + account_number or bank_name for a user
+-- (in the user's workspace — the same scope the account list shows).
 function TaxBankAccountQueries.findMatchingAccount(user_id, data)
+    local ns_id = resolveNamespaceId(user_id)
+    local ns_sql = ns_id > 0 and " AND namespace_id = " .. tonumber(ns_id) or ""
+
     -- Exact match: sort_code + account_number (strongest signal)
     if data.sort_code and data.sort_code ~= "" and data.account_number and data.account_number ~= "" then
         -- Normalise sort_code: remove dashes/spaces for comparison
@@ -55,7 +147,7 @@ function TaxBankAccountQueries.findMatchingAccount(user_id, data)
             SELECT * FROM tax_bank_accounts
             WHERE user_id = ? AND is_active = true
               AND REPLACE(REPLACE(sort_code, '-', ''), ' ', '') = ?
-              AND REPLACE(account_number, ' ', '') = ?
+              AND REPLACE(account_number, ' ', '') = ?]] .. ns_sql .. [[
             LIMIT 1
         ]], user_id, normalised_sc, normalised_an)
         if match and #match > 0 then
@@ -64,11 +156,12 @@ function TaxBankAccountQueries.findMatchingAccount(user_id, data)
     end
 
     -- Fuzzy match: normalised bank_name (weaker signal — only if no account details)
-    if data.bank_name and data.bank_name ~= "" and (not data.sort_code or data.sort_code == "") and (not data.account_number or data.account_number == "") then
+    if data.bank_name and data.bank_name ~= "" and (not data.sort_code or data.sort_code == "")
+        and (not data.account_number or data.account_number == "") then
         local normalised_name = data.bank_name:lower():gsub("[%s%-_]+", ""):gsub("uk$", ""):gsub("plc$", "")
         local accounts = db.query([[
             SELECT * FROM tax_bank_accounts
-            WHERE user_id = ? AND is_active = true
+            WHERE user_id = ? AND is_active = true]] .. ns_sql .. [[
             ORDER BY created_at ASC
         ]], user_id)
         if accounts then

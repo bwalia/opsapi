@@ -26,6 +26,8 @@ import {
   type TaxCategory,
 } from '@/services/tax.service';
 import { formatDate, formatCurrency, snakeToTitle } from '@/lib/utils';
+import StatementUploader, { useStatementQueue, type StatementItem } from '@/components/tax/StatementUploader';
+import type { DetectedBankDetails } from '@/services/tax.service';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -63,6 +65,20 @@ function txnStatusBadge(status?: string) {
   return <span className={`text-xs px-2 py-0.5 rounded-full ${cfg.classes}`}>{cfg.label}</span>;
 }
 
+const AUTO_ACCOUNT = '__auto__';
+const NEW_ACCOUNT = '__new__';
+
+function accountLabel(acc: { bank_name?: string | null; account_number?: string | null; sort_code?: string | null }): string {
+  const parts = [acc.bank_name || 'Bank account'];
+  if (acc.sort_code) parts.push(acc.sort_code);
+  if (acc.account_number) parts.push(`****${acc.account_number.slice(-4)}`);
+  return parts.join(' · ');
+}
+
+function describeDetected(d: DetectedBankDetails): string {
+  return accountLabel({ bank_name: d.bank_name, sort_code: d.sort_code, account_number: d.account_number });
+}
+
 function StatementsContent() {
   const [statements, setStatements] = useState<TaxStatement[]>([]);
   const [bankAccounts, setBankAccounts] = useState<TaxBankAccount[]>([]);
@@ -72,10 +88,14 @@ function StatementsContent() {
   const perPage = 20;
 
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   // Holds the bank account UUID (string). The list endpoint returns `uuid as id`,
   // so the account identifier is a string, and the backend /tax/upload keys on it.
-  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
+  // AUTO_ACCOUNT = read the account from each statement (sort code / account number).
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>(AUTO_ACCOUNT);
+  const queue = useStatementQueue();
+  // Per file: what was read from it, and which account it goes to (uuid | NEW_ACCOUNT | '').
+  const [detections, setDetections] = useState<Record<string, DetectedBankDetails | null>>({});
+  const [accountChoice, setAccountChoice] = useState<Record<string, string>>({});
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
@@ -87,7 +107,6 @@ function StatementsContent() {
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [savedProfile, setSavedProfile] = useState<string>('');
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const fetchIdRef = useRef(0);
 
   // Inline transactions view — opens automatically after extract/classify and via the
@@ -190,50 +209,135 @@ function StatementsContent() {
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const maxSize = 25 * 1024 * 1024; // 25MB
-    if (file.size > maxSize) {
-      toast.error('File size exceeds 25MB limit');
-      return;
+  // Read bank name / sort code / account number from one file and pick its account:
+  // the matching existing account, else the detected one (created on upload).
+  const detectItem = async (item: StatementItem) => {
+    queue.update(item.id, { status: 'detecting', message: undefined });
+    let d: DetectedBankDetails | null = null;
+    try {
+      d = await taxService.detectBankDetailsFromFile(item.file);
+    } catch {
+      d = null;
     }
-
-    const allowedTypes = ['application/pdf', 'text/csv', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(file.type) && !file.name.endsWith('.csv')) {
-      toast.error('Unsupported file type. Use PDF, CSV, JPG, PNG, GIF, or WebP.');
-      return;
+    setDetections((prev) => ({ ...prev, [item.id]: d }));
+    let choice = '';
+    let message: string;
+    if (d?.matched_account?.id) {
+      choice = d.matched_account.id;
+      message = `${describeDetected(d)} — your account ${accountLabel(d.matched_account)}`;
+    } else if (d?.detected && d.bank_name) {
+      choice = NEW_ACCOUNT;
+      message = `${describeDetected(d)} — not in your accounts yet`;
+    } else {
+      message = d?.reason === 'image'
+        ? 'Images can\'t be read for bank details — choose the account'
+        : 'Couldn\'t read the bank details — choose the account';
     }
-
-    setSelectedFile(file);
+    setAccountChoice((prev) => ({ ...prev, [item.id]: choice }));
+    queue.update(item.id, { status: 'ready', message });
   };
 
+  const handleFiles = async (files: File[]) => {
+    const accepted = queue.add(files);
+    for (const item of accepted) {
+      if (selectedBankAccountId === AUTO_ACCOUNT) {
+        await detectItem(item);
+      } else {
+        queue.update(item.id, { status: 'ready' });
+      }
+    }
+  };
+
+  // Switching to "read from statement" after picking files: read the ones not read yet.
+  useEffect(() => {
+    if (selectedBankAccountId !== AUTO_ACCOUNT) return;
+    const pending = queue.items.filter((i) => i.status === 'ready' && !(i.id in detections));
+    (async () => {
+      for (const item of pending) await detectItem(item);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBankAccountId]);
+
+  const resetUpload = () => {
+    setShowUploadModal(false);
+    queue.clear();
+    setDetections({});
+    setAccountChoice({});
+    setSelectedBankAccountId(AUTO_ACCOUNT);
+    setStatementDate('');
+  };
+
+  const pendingItems = queue.items.filter((i) => i.status === 'ready' || i.status === 'queued');
+  const unresolved = selectedBankAccountId === AUTO_ACCOUNT
+    ? pendingItems.filter((i) => !accountChoice[i.id]).length
+    : 0;
+
   const handleUpload = async () => {
-    if (!selectedFile) {
-      toast.error('Please select a file');
+    if (pendingItems.length === 0) {
+      toast.error('Please choose at least one statement');
       return;
     }
     if (!selectedBankAccountId) {
       toast.error('Please select a bank account');
       return;
     }
+    if (unresolved > 0) {
+      toast.error('Choose a bank account for every statement');
+      return;
+    }
 
     setIsUploading(true);
-    try {
-      await taxService.uploadStatement(selectedFile, selectedBankAccountId, statementDate || undefined);
-      toast.success('Statement uploaded successfully');
-      setShowUploadModal(false);
-      setSelectedFile(null);
-      setSelectedBankAccountId('');
-      setStatementDate('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    // Accounts created in this batch, by detected details, so two statements of the
+    // same new account create it once (the server's find-or-create dedupes too).
+    const created: Record<string, string> = {};
+    let ok = 0;
+    let failed = 0;
+    for (const item of pendingItems) {
+      queue.update(item.id, { status: 'uploading', message: undefined });
+      try {
+        let accountId = selectedBankAccountId;
+        if (accountId === AUTO_ACCOUNT) {
+          accountId = accountChoice[item.id];
+          const d = detections[item.id];
+          if (accountId === NEW_ACCOUNT && d?.bank_name) {
+            const key = [d.bank_name, d.sort_code || '', d.account_number || ''].join('|').toLowerCase();
+            if (!created[key]) {
+              const res = await taxService.findOrCreateBankAccount({
+                bank_name: d.bank_name,
+                sort_code: d.sort_code || undefined,
+                account_number: d.account_number || undefined,
+                account_type: d.account_type || undefined,
+              });
+              created[key] = res.account.uuid ?? res.account.id;
+            }
+            accountId = created[key];
+          }
+        }
+        if (!accountId || accountId === NEW_ACCOUNT) throw new Error('No bank account chosen');
+        await taxService.uploadStatement(item.file, accountId, statementDate || undefined);
+        const acct = bankAccounts.find((a) => (a.uuid ?? a.id) === accountId);
+        queue.update(item.id, {
+          status: 'done',
+          message: acct ? `Uploaded to ${accountLabel(acct)}` : 'Uploaded',
+        });
+        ok++;
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+          || (err instanceof Error ? err.message : 'Upload failed');
+        queue.update(item.id, { status: 'error', message: msg });
+        failed++;
+      }
+    }
+    setIsUploading(false);
+    if (ok > 0) {
+      toast.success(`${ok} statement${ok === 1 ? '' : 's'} uploaded`);
       fetchStatements();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Upload failed';
-      toast.error(msg);
-    } finally {
-      setIsUploading(false);
+      fetchBankAccounts();
+    }
+    if (failed === 0) {
+      resetUpload();
+    } else {
+      toast.error(`${failed} statement${failed === 1 ? '' : 's'} failed — see the list`);
     }
   };
 
@@ -542,13 +646,9 @@ function StatementsContent() {
       {showUploadModal && (
         <Modal
           isOpen={showUploadModal}
-          onClose={() => {
-            setShowUploadModal(false);
-            setSelectedFile(null);
-            setSelectedBankAccountId('');
-            setStatementDate('');
-          }}
-          title="Upload Bank Statement"
+          onClose={() => { if (!isUploading) resetUpload(); }}
+          title="Upload Bank Statements"
+          size="lg"
         >
           <div className="space-y-4">
             <div>
@@ -556,23 +656,25 @@ function StatementsContent() {
               <select
                 value={selectedBankAccountId}
                 onChange={(e) => setSelectedBankAccountId(e.target.value)}
+                disabled={isUploading}
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
-                <option value="">Select a bank account...</option>
+                <option value={AUTO_ACCOUNT}>Read it from each statement (recommended)</option>
                 {bankAccounts.map((acc) => {
                   // List endpoint returns `uuid as id`, so `id` is the uuid the
                   // backend keys on. Prefer an explicit `uuid` if present.
                   const accountId = acc.uuid ?? acc.id;
                   return (
                     <option key={accountId} value={accountId}>
-                      {acc.bank_name} {acc.account_number ? `(****${acc.account_number.slice(-4)})` : ''}
+                      {accountLabel(acc)}
                     </option>
                   );
                 })}
               </select>
-              {bankAccounts.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  No bank accounts found. <a href="/dashboard/tax/bank-accounts" className="underline">Add one first.</a>
+              {selectedBankAccountId === AUTO_ACCOUNT && (
+                <p className="text-xs text-secondary-500 mt-1">
+                  We read the bank, sort code and account number from each statement and use the matching account
+                  {bankAccounts.length === 0 ? ' — or set it up for you on upload.' : ', or offer to add it.'}
                 </p>
               )}
             </div>
@@ -588,46 +690,52 @@ function StatementsContent() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-1">File *</label>
-              <div className="border-2 border-dashed border-secondary-300 rounded-lg p-6 text-center hover:border-primary-400 transition-colors">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.csv,.jpg,.jpeg,.png,.gif,.webp"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="statement-file"
-                />
-                <label htmlFor="statement-file" className="cursor-pointer">
-                  <Upload className="w-8 h-8 text-secondary-400 mx-auto mb-2" />
-                  {selectedFile ? (
-                    <div>
-                      <p className="font-medium text-secondary-900">{selectedFile.name}</p>
-                      <p className="text-xs text-secondary-500">{(selectedFile.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-secondary-600">Click to select a file</p>
-                      <p className="text-xs text-secondary-400 mt-1">PDF, CSV, JPG, PNG, GIF, WebP (max 25MB)</p>
-                    </div>
-                  )}
-                </label>
-              </div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">Files *</label>
+              <StatementUploader
+                items={queue.items}
+                onFiles={handleFiles}
+                onRemove={isUploading ? undefined : queue.remove}
+                disabled={isUploading}
+                renderExtra={selectedBankAccountId === AUTO_ACCOUNT ? (item) => {
+                  if (item.status !== 'ready') return null;
+                  const d = detections[item.id];
+                  return (
+                    <select
+                      aria-label={`Bank account for ${item.file.name}`}
+                      value={accountChoice[item.id] || ''}
+                      onChange={(e) => setAccountChoice((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                      className="w-full px-2 py-1 text-xs border border-secondary-300 rounded-md focus:ring-1 focus:ring-primary-500"
+                    >
+                      <option value="">Choose an account…</option>
+                      {d?.detected && d.bank_name && !d.matched_account && (
+                        <option value={NEW_ACCOUNT}>Add new account: {describeDetected(d)}</option>
+                      )}
+                      {bankAccounts.map((acc) => {
+                        const id = acc.uuid ?? acc.id;
+                        return <option key={id} value={id}>{accountLabel(acc)}</option>;
+                      })}
+                    </select>
+                  );
+                } : undefined}
+              />
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <button
-                onClick={() => {
-                  setShowUploadModal(false);
-                  setSelectedFile(null);
-                }}
-                className="px-4 py-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+                onClick={resetUpload}
+                disabled={isUploading}
+                className="px-4 py-2 text-secondary-600 hover:bg-secondary-100 rounded-lg disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleUpload}
-                disabled={isUploading || !selectedFile || !selectedBankAccountId}
+                disabled={
+                  isUploading
+                  || pendingItems.length === 0
+                  || unresolved > 0
+                  || queue.items.some((i) => i.status === 'detecting')
+                }
                 className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
               >
                 {isUploading ? (
@@ -638,7 +746,7 @@ function StatementsContent() {
                 ) : (
                   <>
                     <Upload className="w-4 h-4" />
-                    Upload
+                    {pendingItems.length > 1 ? `Upload ${pendingItems.length} statements` : 'Upload'}
                   </>
                 )}
               </button>
