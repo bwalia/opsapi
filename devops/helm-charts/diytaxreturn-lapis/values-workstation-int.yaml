@@ -48,6 +48,19 @@ extraEnv:
   # or in Vault — no code change (lapis/.sample.env).
   AI_REQUEST_TIMEOUT_MS: "300000"
   AI_CLASSIFY_CONCURRENCY: "2"
+  # Optional fallback CHAIN when Ollama is down (lib/agent/llm.lua header). Unset =
+  # today's single AI_FALLBACK_PROVIDER fallback. Hop names are non-secret; their
+  # keys (AWS_*, AZURE_OPENAI_API_KEY, GCP_CREDENTIALS_JSON, AI_HOPS with the vast.ai
+  # keys) belong in Vault or the extraEnvFromSecrets Secret, never here.
+  # AI_FALLBACK_CHAIN: "bedrock,azure,vertex,vast1,vast2"
+  # AI_FALLBACK_CHAIN_BY_FEATURE: "tax_classify=vast1,bedrock"
+  # BEDROCK_REGION: "eu-west-2"
+  # BEDROCK_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  # AZURE_OPENAI_ENDPOINT: "https://<resource>.openai.azure.com"
+  # AZURE_OPENAI_DEPLOYMENT: "<deployment>"
+  # GCP_PROJECT: "<project>"
+  # GCP_LOCATION: "europe-west2"
+  # VERTEX_MODEL: "gemini-2.5-flash"
   # CMS media library (lapis/lib/media-library.lua): images go to the public www S3
   # bucket when CMS_PUBLIC_S3_ACCESS_KEY + CMS_PUBLIC_S3_SECRET_KEY (PutObject +
   # DeleteObject) are in Vault workstation-opsapi/int/config; without them, to

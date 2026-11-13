@@ -14,6 +14,41 @@ When it fails, the call is retried once on `AI_FALLBACK_PROVIDER` /
 `AI_FALLBACK_MODEL` (Ollama by default, `none` turns it off); a provider that
 is down is skipped for 60 s (circuit breaker).
 
+### Fallback chain
+
+`AI_FALLBACK_CHAIN` (comma-separated hop names) replaces that single fallback with
+an ordered chain; each hop has its own 60 s circuit breaker, a hop missing its
+settings is skipped (one INFO log line), and the total time budget is shared
+(main provider 2/3, each hop an equal share of the rest). The answer records who
+replied (`.provider`, `.model`, `.fallback`, `.hop`); `ai_usage` meters each
+attempt. Tool-using calls skip hops marked `tools=false`.
+
+| Hop | Provider | Settings |
+|-----|----------|----------|
+| `bedrock` | AWS Bedrock Runtime, Converse API, SigV4 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (or `AWS_BEARER_TOKEN_BEDROCK`), `BEDROCK_REGION`/`AWS_REGION`, `BEDROCK_MODEL` (model or inference-profile id) |
+| `azure` | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION` (default `2024-10-21`, `v1` supported) |
+| `vertex` | Google Vertex AI (Gemini `generateContent`, or Claude on Vertex) | `GCP_CREDENTIALS_JSON` (or `GOOGLE_APPLICATION_CREDENTIALS`), `GCP_PROJECT`, `GCP_LOCATION`, `VERTEX_MODEL` |
+| `anthropic`, `openai`, `gemini`, `ollama` | as the main provider | their standard env |
+| any other name | from `AI_HOPS` JSON (or `AI_HOP_<NAME>_<FIELD>` env declared in nginx.conf) | `provider`, `model`, `base_url`, `api_key`, … `tools`, `enabled` |
+
+Example — Ollama qwen first, then Bedrock, Azure, Vertex and two vast.ai hosts:
+
+```
+AI_PROVIDER=ollama  OLLAMA_URL=…  OLLAMA_MODEL=qwen3.8:latest
+AI_FALLBACK_CHAIN=bedrock,azure,vertex,vast1,vast2
+AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…  BEDROCK_REGION=eu-west-2
+BEDROCK_MODEL=eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com  AZURE_OPENAI_API_KEY=…  AZURE_OPENAI_DEPLOYMENT=gpt-4o
+GCP_CREDENTIALS_JSON=<service-account JSON>  GCP_LOCATION=europe-west2  VERTEX_MODEL=gemini-2.5-flash
+AI_HOPS={"vast1":{"provider":"openai","base_url":"https://<host1>:<port>/v1","api_key":"…","model":"qwen3-32b"},
+         "vast2":{"provider":"openai","base_url":"https://<host2>/v1","api_key":"…","model":"llama-3.3-70b","tools":false}}
+```
+
+A custom hop never reads another provider's standard key (`vast1` never gets
+`OPENAI_API_KEY`). `GET /api/v2/admin/ai-chain` (platform admins) shows the main
+provider and every hop: configured or why not, tool support, circuit open — no
+secrets.
+
 ## Per-workspace providers
 
 `/api/v2/namespace/ai-providers` (`namespace.read` / `namespace.update`): a
