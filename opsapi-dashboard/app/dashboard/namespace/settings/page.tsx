@@ -11,6 +11,7 @@ import {
   Store as StoreIcon,
   Gauge,
   ChevronRight,
+  Landmark,
 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import NamespaceFormFields, { type NamespaceFieldValues } from '@/components/namespace/NamespaceFormFields';
@@ -171,6 +172,20 @@ export default function NamespaceSettingsPage() {
               ))}
             </dl>
           </Card>
+
+          <Link
+            href="/dashboard/namespace/payment-methods"
+            className="group flex items-center gap-3 rounded-xl border border-secondary-200 bg-surface p-4 transition hover:border-primary-300 hover:bg-primary-50/40"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary-100 group-hover:bg-primary-100">
+              <Landmark className="h-5 w-5 text-secondary-600 group-hover:text-primary-600" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-secondary-900">Getting paid</p>
+              <p className="truncate text-xs text-secondary-500">Bank accounts for Order Authorisations and invoices</p>
+            </div>
+            <ChevronRight className="h-4 w-4 shrink-0 text-secondary-400 group-hover:text-primary-600" />
+          </Link>
 
           <Link
             href="/dashboard/namespace/api-keys"

@@ -6,6 +6,8 @@
  * are ex-VAT; VAT is computed server-side.
  */
 
+import type { PaymentMethodPublic } from '@/lib/payment-methods';
+
 // ============================================================
 // Enums
 // ============================================================
@@ -468,6 +470,38 @@ export interface ShopOrder extends ShopTotals {
   delivery_address?: ShopDeliveryAddress | null;
   /** Supplier POs raised from this order. */
   purchase_orders?: { uuid: string; po_number: string; status: string; supplier_name: string; total: number | string; created_at: string }[];
+  /** card (Stripe Checkout) | bank_transfer | cheque | other */
+  payment_method?: ShopPaymentMethodKind;
+  /** Bank-transfer orders: where to pay (workspace "Getting paid" methods) and the reference (order number). */
+  payment_methods?: PaymentMethodPublic[];
+  payment_reference?: string | null;
+  /** What staff recorded when marking it paid. */
+  paid_reference?: string | null;
+  paid_amount_minor?: number | null;
+  /** Accounting invoice raised from this order. */
+  invoice_uuid?: string | null;
+  /** Awaiting a bank transfer, and for how many days. */
+  bank_transfer_due?: boolean;
+  days_waiting?: number | null;
+}
+
+export type ShopPaymentMethodKind = 'card' | 'bank_transfer' | 'cheque' | 'other';
+
+export interface ShopOrderMarkPaid {
+  method: 'bank_transfer' | 'cheque' | 'other';
+  reference?: string;
+  /** YYYY-MM-DD */
+  paid_at?: string;
+  amount_minor?: number;
+}
+
+export interface ShopOrderInvoiceResult {
+  existing: boolean;
+  invoice_uuid: string;
+  invoice_number: string;
+  status: string;
+  total_amount?: number | null;
+  order_total_minor?: number;
 }
 
 export interface ShopOrderUpdate {

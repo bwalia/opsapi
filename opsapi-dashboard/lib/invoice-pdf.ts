@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Invoice } from '@/services/invoices.service';
+import { kindLabel, paymentMethodRows } from '@/lib/payment-methods';
 
 // The "from" party printed at the top of the invoice. Name is required (the
 // namespace name); the rest are optional and omitted from the header when absent.
@@ -159,6 +160,7 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
     ['Issue Date', invoice.issue_date || '—'],
     ['Due Date', invoice.due_date || '—'],
   ];
+  if (invoice.po_number) metaRows.push(['Your PO number', String(invoice.po_number)]);
   let myy = y;
   for (const [label, value] of metaRows) {
     doc.setFont('helvetica', 'normal');
@@ -260,6 +262,7 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
   doc.text(money(invoice.balance_due, currency), right - 12, ty + 19, { align: 'right' });
 
   // Notes (left, aligned with the totals top).
+  let notesBottom = afterTable;
   if (invoice.notes) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
@@ -270,6 +273,57 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
     doc.setTextColor(...DARK);
     const noteLines = doc.splitTextToSize(invoice.notes, boxX - margin - 24);
     doc.text(noteLines, margin, afterTable + 23);
+    notesBottom = afterTable + 23 + noteLines.length * 12;
+  }
+
+  // ============================================================
+  // How to pay — the invoice's payment method (else the workspace default bank account), reference = number.
+  // ============================================================
+  const pm = invoice.payment_method;
+  if (pm && invoice.status !== 'paid' && invoice.status !== 'void') {
+    const rowsPm = paymentMethodRows(pm);
+    const title = pm.kind === 'bank_transfer' ? `Bank transfer — ${pm.label}` : pm.label || kindLabel(pm.kind);
+    const instr = pm.instructions ? (doc.splitTextToSize(String(pm.instructions), right - margin - 24) as string[]) : [];
+    const ref = invoice.invoice_number || invoice.uuid.slice(0, 8);
+    const boxH = 46 + rowsPm.length * 13 + instr.length * 12 + 16;
+    let py = Math.max(notesBottom, ty + 30) + 22;
+    if (py + boxH > pageH - 70) {
+      doc.addPage();
+      py = margin;
+    }
+    doc.setFillColor(...SOFT);
+    doc.setDrawColor(...LINE);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(margin, py, right - margin, boxH, 5, 5, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...MUTED);
+    doc.text('HOW TO PAY', margin + 12, py + 16);
+    doc.setFontSize(10);
+    doc.setTextColor(...DARK);
+    doc.text(title, margin + 12, py + 31);
+    let ry = py + 46;
+    doc.setFontSize(9.5);
+    for (const [label, value] of rowsPm) {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...MUTED);
+      doc.text(label, margin + 12, ry);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...DARK);
+      doc.text(value, margin + 110, ry);
+      ry += 13;
+    }
+    if (instr.length) {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...MUTED);
+      doc.text(instr, margin + 12, ry);
+      ry += instr.length * 12;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...DARK);
+    doc.text('Reference:', margin + 12, ry + 2);
+    doc.setFont('helvetica', 'bold');
+    doc.text(ref, margin + 110, ry + 2);
   }
 
   // ============================================================

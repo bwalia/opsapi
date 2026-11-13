@@ -1,4 +1,5 @@
 import apiClient, { toFormData } from '@/lib/api-client';
+import type { PaymentMethodPublic } from '@/lib/payment-methods';
 
 // Invoice status type
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' | 'void';
@@ -58,6 +59,12 @@ export interface Invoice {
   balance_due: number;
   notes?: string;
   payment_terms_days?: number;
+  /** The customer's purchase order number ("Your PO number" on the PDF). */
+  po_number?: string | null;
+  /** Which "Getting paid" method the PDF shows; null = the workspace default bank account. */
+  payment_method_uuid?: string | null;
+  /** The resolved method (its own, else the default bank account) for the "How to pay" block. */
+  payment_method?: (PaymentMethodPublic & { uuid?: string }) | null;
   items?: InvoiceLineItem[];
   payments?: InvoicePayment[];
   created_at: string;
@@ -104,6 +111,10 @@ export interface InvoicePayload {
   currency?: string;
   notes?: string;
   payment_terms_days?: number;
+  /** "" clears it. */
+  po_number?: string;
+  /** "" = the workspace default bank account. */
+  payment_method_uuid?: string;
 }
 
 // Line item payload
