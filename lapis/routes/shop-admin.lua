@@ -550,7 +550,10 @@ return function(app)
             return guard("update", function(_, ns_id)
                 local body, bad = json_body()
                 if not body then return bad end
-                return result(Suppliers.create(ns_id, body), nil, 201)
+                -- Keep both returns: a call before other arguments is cut to its first value, which lost the
+                -- validation message ("nil").
+                local sup, err = Suppliers.create(ns_id, body)
+                return result(sup, err, 201)
             end)(self)
         end
         return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
