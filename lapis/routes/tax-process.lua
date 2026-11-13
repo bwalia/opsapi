@@ -18,6 +18,7 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local http = require("resty.http")
 local AuthMiddleware = require("middleware.auth")
+local JWTHelper = require("helper.jwt-helper")
 
 local function getUserId(user)
     local rows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user.uuid or user.id)
@@ -42,6 +43,18 @@ end
 
 local function plural(n) return n == 1 and "" or "s" end
 
+-- The Authorization header for one internal call. A job for a year of statements can
+-- run for hours on a slow model, far past the user's 1-hour access token, so a JWT
+-- caller gets a fresh 15-minute token re-signed from the identity verified when the
+-- job started. API keys (opsk_...) don't expire and are passed through unchanged.
+local function auth_for(job)
+    if job.jwt_payload then
+        local tok = JWTHelper.reissue(job.jwt_payload, 900)
+        if tok then return "Bearer " .. tok end
+    end
+    return job.auth
+end
+
 -- Authenticated internal call to an existing tax endpoint, AS the user.
 local function internal(method, path, body, auth, port)
     local httpc = http.new()
@@ -64,11 +77,11 @@ local function process_all(premature, job)
         local ok, err = pcall(function()
             ngx.log(ngx.INFO, "[tax-process] extracting ", s.uuid)
             set_status(s.id, "EXTRACTING")
-            local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, job.auth, job.port)
+            local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, auth_for(job), job.port)
             if not r1 or r1.status >= 400 then error("extract HTTP " .. tostring(r1 and r1.status)) end
             ngx.log(ngx.INFO, "[tax-process] classifying ", s.uuid, " (extract HTTP ", r1.status, ")")
             set_status(s.id, "CLASSIFYING")
-            local r2 = internal("POST", "/api/v2/tax/classify", "statement_id=" .. s.uuid, job.auth, job.port)
+            local r2 = internal("POST", "/api/v2/tax/classify", "statement_id=" .. s.uuid, auth_for(job), job.port)
             if not r2 or r2.status >= 400 then error("classify HTTP " .. tostring(r2 and r2.status)) end
             ngx.log(ngx.INFO, "[tax-process] completed ", s.uuid, " (classify HTTP ", r2.status, ")")
             set_status(s.id, "COMPLETED")
@@ -156,10 +169,19 @@ return function(app)
                 :format(n, plural(n)))
         end
 
+        -- Keep the verified identity so the worker can mint fresh tokens (see auth_for).
+        local auth = self.req.headers["authorization"]
+        local raw = type(auth) == "string" and auth:match("^[Bb]earer%s+(.+)$")
+        local jwt_payload
+        if raw and not raw:match("^opsk_") then
+            local v = JWTHelper.verifyToken(raw)
+            if v.valid then jwt_payload = v.payload end
+        end
         local ok = ngx.timer.at(0, process_all, {
             statements = statements,
             session = session,
-            auth = self.req.headers["authorization"],
+            auth = auth,
+            jwt_payload = jwt_payload,
             port = tonumber(ngx.var.server_port) or 80,
         })
         if not ok then

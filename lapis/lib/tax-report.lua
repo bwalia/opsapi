@@ -161,7 +161,12 @@ function TaxReport.build(ctx)
             income = r2(est.gross_income), expenses = r2(est.total_expenses), profit = r2(est.profit),
             total_income = r2(est.total_income), personal_allowance = r2(est.personal_allowance),
             taxable_income = r2(est.taxable_income or est.total_taxable),
-            income_tax = r2(est.income_tax_due), class4_nic = r2(est.class4_nic), class2_nic = r2(est.class2_nic),
+            income_tax = r2(est.income_tax_due),
+            -- Section 24 basic-rate credit for residential finance costs (already
+            -- deducted inside income_tax; listed so the screens can show the row).
+            finance_cost_reduction = r2(est.finance_cost_reduction),
+            property_finance_costs = r2(est.property_finance_costs),
+            class4_nic = r2(est.class4_nic), class2_nic = r2(est.class2_nic),
             total_tax_and_nic = r2(est.total_liability), tax_already_paid = r2(est.paye_deducted),
             balancing_payment = r2(est.balancing_payment), payment_on_account = r2(est.payment_on_account_each),
             total_due_31_jan = r2(est.total_due_31_jan),
@@ -244,6 +249,11 @@ function TaxReport.xlsx(report, opts)
         { b("Notes") },
     }
     local function note(text) summary[#summary + 1] = { text } end
+    if num(s.finance_cost_reduction) > 0 then
+        note(("Income Tax due includes a %s finance-cost tax reduction (20%% of residential finance costs of %s, "
+            .. "Section 24); those costs are not deducted as expenses.")
+            :format(("£%.2f"):format(num(s.finance_cost_reduction)), ("£%.2f"):format(num(s.property_finance_costs))))
+    end
     if num(t.unreviewed) > 0 then
         note(("%d transaction(s) are still flagged for review — check them before filing."):format(num(t.unreviewed)))
     end

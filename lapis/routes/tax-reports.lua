@@ -247,10 +247,12 @@ return function(app)
         local additional_income = tonumber(params.additional_income) or 0
         local is_scenario = total_income ~= nil and total_expenses ~= nil
 
+        local finance_interest = 0
         if not is_scenario then
             local totals = TaxTools.year_totals(user_id, tax_year)
             total_income = totals.income
             total_expenses = totals.expenses
+            finance_interest = totals.finance_interest
         end
 
         -- The figures come from the one UK engine (lib/tax-calc compute_full via
@@ -258,7 +260,7 @@ return function(app)
         -- the filing workbook. Response shape is unchanged for the web/mobile clients.
         local gross_income = total_income + additional_income
         local est = TaxTools.estimate(gross_income, total_expenses, tax_year,
-            TaxTools.profile_for(user_id, tax_year))
+            TaxTools.profile_for(user_id, tax_year), { finance_interest = finance_interest })
 
         local function r2(v) return math.floor((tonumber(v) or 0) * 100 + 0.5) / 100 end
 
@@ -274,6 +276,8 @@ return function(app)
                 personal_allowance = est.personal_allowance,
                 taxable_income = r2(est.total_taxable),
                 income_tax = r2(est.income_tax_due),
+                -- Section 24 basic-rate credit for residential finance costs (0 if none).
+                finance_cost_reduction = r2(est.finance_cost_reduction),
                 income_tax_bands = est.income_tax_bands,
                 national_insurance = r2(est.class4_nic),
                 nic_bands = est.class4_bands,

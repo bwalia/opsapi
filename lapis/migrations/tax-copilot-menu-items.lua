@@ -25,7 +25,7 @@ return {
             db.insert("menu_items", {
                 uuid = MigrationUtils.generateUUID(),
                 key = parent_key,
-                name = "Tax Returns",
+                name = "Tax Dashboard",
                 icon = "Calculator",
                 path = "/dashboard/tax",
                 module = "tax_transactions",
@@ -85,7 +85,7 @@ return {
             },
             {
                 key = "tax_file",
-                name = "File your tax",
+                name = "File My Tax",
                 icon = "Building2",
                 path = "/dashboard/tax/file",
                 module = "tax_statements",
@@ -366,7 +366,7 @@ return {
             db.insert("menu_items", {
                 uuid = MigrationUtils.generateUUID(),
                 key = "tax_file",
-                name = "File your tax",
+                name = "File My Tax",
                 icon = "Building2",
                 path = "/dashboard/tax/file",
                 module = "tax_statements",

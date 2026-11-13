@@ -116,7 +116,7 @@ function TaxDashboardContent() {
       color: 'bg-green-50 text-green-600',
     },
     {
-      title: 'File your tax',
+      title: 'File My Tax',
       description: 'Guided: connect HMRC, check figures, and preview your Self Assessment',
       icon: <Building2 className="w-6 h-6" />,
       path: '/dashboard/tax/file',
@@ -142,7 +142,7 @@ function TaxDashboardContent() {
     <div className="space-y-6">
       {/* Header */}
       <PageHeader
-        title="Tax Returns"
+        title="Tax Dashboard"
         description="Manage your UK self-assessment tax return"
         icon={<Receipt className="h-5 w-5" />}
         actions={
@@ -260,7 +260,7 @@ function TaxDashboardContent() {
           <li className="flex items-start gap-2">
             <span className="font-bold min-w-[20px]">6.</span>
             <span>
-              Open <strong>File your tax</strong> — a guided flow that connects HMRC, checks your figures, and
+              Open <strong>File My Tax</strong> — a guided flow that connects HMRC, checks your figures, and
               previews your Self Assessment via Making Tax Digital
             </span>
           </li>
@@ -272,7 +272,7 @@ function TaxDashboardContent() {
 
 export default function TaxDashboardPage() {
   return (
-    <ProtectedPage module="tax_transactions" title="Tax Returns">
+    <ProtectedPage module="tax_transactions" title="Tax Dashboard">
       <TaxDashboardContent />
     </ProtectedPage>
   );
