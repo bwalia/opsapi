@@ -112,6 +112,7 @@ function buildDoc(po: PurchaseOrder, company: InvoiceCompany): jsPDF {
     ['Required By', po.expected_date || '—'],
   ];
   if (po.reference) metaRows.push(['Reference', po.reference]);
+  if (po.metadata?.supplier_account_number) metaRows.push(['Our Account', String(po.metadata.supplier_account_number)]);
   let my = y;
   for (const [label, value] of metaRows) {
     doc.setFont('helvetica', 'normal');
@@ -145,6 +146,13 @@ function buildDoc(po: PurchaseOrder, company: InvoiceCompany): jsPDF {
     const wrapped = doc.splitTextToSize(po.delivery_address, right - metaX);
     doc.text(wrapped, metaX, my + 20);
     my += 20 + 12 * wrapped.length;
+    // The end customer's own PO number, for the supplier's delivery note.
+    if (po.metadata?.end_customer_po) {
+      doc.setFont('helvetica', 'bold');
+      const ref = doc.splitTextToSize(`End customer PO: ${String(po.metadata.end_customer_po)}`, right - metaX);
+      doc.text(ref, metaX, my + 4);
+      my += 4 + 12 * ref.length;
+    }
   }
 
   autoTable(doc, {

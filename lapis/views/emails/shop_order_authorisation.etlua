@@ -3,7 +3,7 @@
   <p style="margin:0;"><strong>TEST SEND, not sent to the customer.</strong> This is the email <%= test_customer or "the customer" %> will get. The link opens a preview: confirm and pay are turned off, and nothing is marked as sent or viewed.</p>
 </div>
 <% end %>
-<h2><%= document_title %> <%= number %></h2>
+<h2><%= document_title %> <%= number %><% if (tonumber(revision_no) or 0) > 0 then %> <small style="font-weight:400;color:#666;">(revision <%= revision_no %>)</small><% end %></h2>
 
 <p>Hello<% if customer_name and customer_name ~= "" then %> <%= customer_name %><% end %>,</p>
 
@@ -14,6 +14,7 @@
 <% end %>
 
 <div class="info-box">
+  <% if po_number and po_number ~= "" then %><p><strong>Your PO:</strong> <%= po_number %></p><% end %>
   <p><strong>Total:</strong> <%= total %> inc VAT</p>
   <% if discount and discount ~= "" then %><p><strong>Discount included:</strong> <%= discount %> ex VAT</p><% end %>
   <% if delivery_method and delivery_method ~= "" then %><p><strong>Delivery:</strong> <%= delivery_method %></p><% end %>

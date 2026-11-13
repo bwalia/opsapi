@@ -22,6 +22,7 @@ local Quote = require("queries.ShopQuoteQueries")
 local Stock = require("queries.ShopStockQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
+local Rules = require("lib.shop-quote-rules")
 
 local ShopOrderQueries = {}
 
@@ -43,7 +44,7 @@ local ORDER_COLS = [[
     o.refunded_minor, o.returned_net_minor, o.refund_clawback_minor,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at,
-    o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid
+    o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid, o.customer_po_number
 ]]
 ShopOrderQueries.ORDER_COLS = ORDER_COLS
 
@@ -82,6 +83,7 @@ function ShopOrderQueries.shape(o, opts)
         -- Bank transfer: where to pay and the reference to use (the order number). [] otherwise.
         payment_methods = U.arr({}),
         payment_reference = U.null,
+        customer_po_number = U.nz(o.customer_po_number) or U.null,
     }
     if o.payment_method == "bank_transfer" then
         out.payment_methods = PaymentMethods.forDocuments(o.namespace_id)
@@ -440,8 +442,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             INSERT INTO shop_orders (uuid, namespace_id, order_number, access_token, status, email, customer, lines,
                                      subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor,
                                      member_discount_minor, member_discount_pct, discount_minor, delivery_method,
-                                     delivery_address, currency, cart_id, quote_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, 'GBP', ?, ?,
+                                     delivery_address, currency, cart_id, quote_id, customer_po_number,
+                                     created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, 'GBP', ?, ?, ?,
                     NOW(), NOW())
             RETURNING id, uuid, order_number, access_token
         ]], Global.generateUUID(), ns_id, next_number(), token, email or db.NULL, U.enc(customer),
@@ -452,7 +455,8 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             quote_discount - quote_trade,
             quote and U.nz(quote.delivery_method) or db.NULL,
             quote and U.nz(quote.delivery_address) or db.NULL,
-            cart and cart.id or db.NULL, quote and quote.id or db.NULL)[1]
+            cart and cart.id or db.NULL, quote and quote.id or db.NULL,
+            quote and Quote.orderFieldsFromQuote(quote).customer_po_number or db.NULL)[1]
         Stock.hold(ns_id, row.id, demand, RESERVATION_MINUTES)
         if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
         return row
@@ -562,6 +566,20 @@ end
 
 local function nz(v) return U.nz(v) end
 
+--- Copy the quote fields an order carries (ShopQuoteQueries.orderFieldsFromQuote: customer PO number) onto
+-- an order made from it. quote: a quote row or its id. opts.only_missing: keep what the order already has.
+-- For every path that creates an order from a quote (card checkout, bank transfer).
+function ShopOrderQueries.applyQuoteFields(order_id, quote, opts)
+    if type(quote) ~= "table" then
+        quote = nz(quote) and db.query("SELECT customer_po_number FROM shop_quotes WHERE id = ?", quote)[1]
+    end
+    if not quote then return end
+    local f = Quote.orderFieldsFromQuote(quote)
+    if not f.customer_po_number then return end
+    db.query("UPDATE shop_orders SET customer_po_number = ? WHERE id = ?" ..
+        ((opts and opts.only_missing) and " AND customer_po_number IS NULL" or ""), f.customer_po_number, order_id)
+end
+
 --- Mark an order paid from a Stripe checkout session object. Idempotent.
 -- Must run inside a transaction.
 function ShopOrderQueries.applyPaid(order, session)
@@ -616,6 +634,8 @@ function ShopOrderQueries.applyPaid(order, session)
         end
         db.query("UPDATE shop_quotes SET status = 'converted', order_id = ?, updated_at = NOW() WHERE id = ?",
             order.id, order.quote_id)
+        -- An order made before the quote fields were carried over (or by another path) gets them now.
+        ShopOrderQueries.applyQuoteFields(order.id, order.quote_id, { only_missing = true })
     end
     db.query([[UPDATE shop_chat_sessions SET order_id = ?, updated_at = NOW()
                 WHERE cart_id = ? AND order_id IS NULL]], order.id, order.cart_id or 0)
@@ -726,13 +746,8 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
             tonumber(quote.shipping_minor) or 0, tonumber(quote.total_minor), quote_trade, quote_discount - quote_trade,
             U.nz(quote.delivery_method) or db.NULL, U.nz(quote.delivery_address) or db.NULL, quote.id,
             "Customer chose bank transfer for " .. tostring(quote.quote_number))[1]
-        -- The customer's PO number travels with the order. Agent B's change adds customer_po_number to
-        -- shop_quotes and shop_orders (and a shared copy helper for checkout); until both columns exist this
-        -- is skipped, so either change can deploy first.
-        if has_column("shop_quotes", "customer_po_number") and has_column("shop_orders", "customer_po_number") then
-            db.query([[UPDATE shop_orders SET customer_po_number = (SELECT customer_po_number FROM shop_quotes WHERE id = ?)
-                        WHERE id = ?]], quote.id, row.id)
-        end
+        -- The quote fields every order made from a quote carries (the customer's PO number).
+        ShopOrderQueries.applyQuoteFields(row.id, quote)
         Stock.hold(ns_id, row.id, demand, BANK_TRANSFER_HOLD_MINUTES)
         db.query("UPDATE shop_quotes SET order_id = ?, updated_at = NOW() WHERE id = ?", row.id, quote.id)
         if quote.crm_lead_id then
@@ -897,6 +912,7 @@ function ShopOrderQueries.adminList(ns_id, params)
     end
     -- "Bank transfer due": awaiting a bank transfer, oldest first.
     local due = params.bank_transfer_due == "true" or params.bank_transfer_due == "1" or params.bank_transfer_due == true
+        or params.filter == "bank_transfer_due"
     if due then
         where[#where + 1] = "o.status = 'pending_payment' AND o.payment_method = 'bank_transfer'"
     end
@@ -904,11 +920,16 @@ function ShopOrderQueries.adminList(ns_id, params)
         where[#where + 1] = "COALESCE(o.payment_method, 'card') = ?"
         vals[#vals + 1] = params.payment_method
     end
+    if params.filter == "needs_supplier_po" then
+        where[#where + 1] = "(" .. Quote.needsSupplierPoSql() .. ")"
+    elseif U.nz(params.filter) and params.filter ~= "bank_transfer_due" then
+        return nil, U.err(400, "VALIDATION_ERROR", "filter must be needs_supplier_po or bank_transfer_due")
+    end
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(o.order_number ILIKE ? OR o.email ILIKE ? OR o.customer->>'name' ILIKE ? "
-            .. "OR o.customer->>'company' ILIKE ?)"
-        for _ = 1, 4 do vals[#vals + 1] = like end
+            .. "OR o.customer->>'company' ILIKE ? OR o.customer_po_number ILIKE ?)"
+        for _ = 1, 5 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
@@ -1063,6 +1084,12 @@ function ShopOrderQueries.adminUpdate(ns_id, uuid, body)
             or db.raw(db.escape_literal(U.enc(body.tracking)) .. "::jsonb")
     end
     if body.internal_notes ~= nil then fields.internal_notes = U.nz(body.internal_notes) or db.NULL end
+    -- The customer's PO number can still be added or corrected on the order (e.g. it arrived after payment).
+    if body.customer_po_number ~= nil then
+        local po, perr = Rules.clean_po_number(body.customer_po_number ~= U.null and body.customer_po_number or nil)
+        if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
+        fields.customer_po_number = po or db.NULL
+    end
     local _, err = U.tx(function()
         db.update("shop_orders", fields, { id = o.id })
         if fields.status and (fields.status == "cancelled" or fields.status == "payment_failed")
@@ -1085,7 +1112,9 @@ local PO_STATUSES = { paid = true, processing = true, shipped = true, delivered 
 -- feature (purchase orders) isn't deployed.
 function ShopOrderQueries.purchaseOrdersFor(ns_id, order_uuid)
     local ok, rows = pcall(db.query, [[
-        SELECT uuid, po_number, status, supplier_name, total, created_at FROM purchase_orders
+        SELECT uuid, po_number, status, supplier_name, total, currency, created_at, sent_at, received_at, billed_at,
+               metadata->>'shop_supplier_uuid' AS shop_supplier_uuid
+          FROM purchase_orders
          WHERE namespace_id = ? AND metadata->>'shop_order_uuid' = ? AND deleted_at IS NULL
          ORDER BY created_at DESC
     ]], ns_id, order_uuid)
@@ -1144,51 +1173,158 @@ local function po_line_description(l)
     return table.concat(parts, "\n")
 end
 
---- POST /orders/:uuid/purchase-order — draft a supplier PO for a paid order: Bill to (shop settings),
--- Deliver directly to (the order's delivery address), delivery method, the order's product lines
--- (free-text lines only with include_custom) at the supplier costs given (pounds ex VAT, by line uuid;
--- 0 when not given, to fill in on the PO).
--- body: { supplier_name, supplier_email?, supplier_phone?, supplier_address?, expected_date?,
---         delivery_method?, notes?, costs? = { [line_uuid] = "123.45" }, include_custom? }
-function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
+--- Cost (pence ex VAT) of each product line from the supplier's price file: the supplier item the product
+-- is linked to (shop_products.supplier_item_id). With a supplier chosen, only that supplier's items count.
+-- Returns { [product_uuid] = cost_minor }.
+local function supplier_costs(ns_id, lines, supplier_id)
+    local uuids = {}
+    for _, l in ipairs(lines) do
+        if not l.custom and U.nz(l.product_uuid) then uuids[#uuids + 1] = l.product_uuid end
+    end
+    if #uuids == 0 then return {} end
+    local ok, rows = pcall(db.query, [[
+        SELECT p.uuid, i.cost_minor FROM shop_products p JOIN shop_supplier_items i ON i.id = p.supplier_item_id
+         WHERE p.namespace_id = ? AND p.uuid IN ? AND (?::int IS NULL OR i.supplier_id = ?::int)
+    ]], ns_id, db.list(uuids), supplier_id or db.NULL, supplier_id or db.NULL)
+    local out = {}
+    for _, r in ipairs(ok and rows or {}) do out[r.uuid] = tonumber(r.cost_minor) end
+    return out
+end
+
+local function pounds(minor) return string.format("%.2f", (tonumber(minor) or 0) / 100) end
+
+--- The shop supplier a PO goes to (body.supplier_uuid), with its PO contact details.
+local function po_supplier(ns_id, supplier_uuid)
+    if not U.nz(supplier_uuid) then return nil end
+    return db.query([[SELECT id, uuid, name, contact_email, po_email, po_phone, po_address, account_number, po_notes
+                        FROM shop_suppliers WHERE namespace_id = ? AND uuid = ?]], ns_id, supplier_uuid)[1]
+end
+
+--- The supplier last used for a shop order's PO in this workspace (the dialog's default).
+local function last_supplier_uuid(ns_id)
+    local ok, rows = pcall(db.query, [[
+        SELECT metadata->>'shop_supplier_uuid' AS u FROM purchase_orders
+         WHERE namespace_id = ? AND metadata->>'shop_supplier_uuid' IS NOT NULL AND deleted_at IS NULL
+         ORDER BY created_at DESC LIMIT 1]], ns_id)
+    return ok and rows[1] and rows[1].u or nil
+end
+
+--- Everything a supplier PO for this order would say, before it is raised. Shared by the preview
+-- (GET /orders/:uuid/purchase-order/preview) and POST /orders/:uuid/purchase-order.
+-- Returns (draft) or (nil, err).
+function ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
+    body = type(body) == "table" and body or {}
     local o = ShopOrderQueries.getByUuid(ns_id, uuid)
     if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
-    if not PO_STATUSES[o.status] then
+    local sup
+    if U.nz(body.supplier_uuid) then
+        sup = po_supplier(ns_id, body.supplier_uuid)
+        if not sup then return nil, U.err(404, "SUPPLIER_NOT_FOUND", "Supplier not found") end
+    end
+    local costs = type(body.costs) == "table" and body.costs or {}
+    local file_costs = supplier_costs(ns_id, U.dec(o.lines, {}), sup and sup.id)
+    local lines, missing = {}, 0
+    for _, l in ipairs(U.dec(o.lines, {})) do
+        local given = costs[l.uuid]
+        if given == U.null or tostring(given or "") == "" then given = nil end
+        local from_file = not l.custom and file_costs[l.product_uuid] or nil
+        local cost = given and tostring(given) or (from_file and pounds(from_file)) or nil
+        local included = not l.custom or body.include_custom == true
+        if included and not cost then missing = missing + 1 end
+        lines[#lines + 1] = {
+            uuid = l.uuid, description = po_line_description(l), qty = tonumber(l.qty) or 1,
+            vat_rate = tonumber(l.vat_rate) or 0.2, custom = l.custom == true, included = included,
+            cost = cost or U.null,
+            cost_source = given and "entered" or (from_file and "supplier_price_file") or U.null,
+        }
+    end
+    local ship_to = ship_to_of(o)
+    local method = U.nz(body.delivery_method) or U.nz(o.delivery_method)
+    local customer_po = U.nz(o.customer_po_number)
+    local supplier = {
+        uuid = sup and sup.uuid or U.null,
+        name = U.nz(body.supplier_name) or (sup and sup.name) or U.null,
+        email = U.nz(body.supplier_email) or (sup and (U.nz(sup.po_email) or U.nz(sup.contact_email))) or U.null,
+        phone = U.nz(body.supplier_phone) or (sup and U.nz(sup.po_phone)) or U.null,
+        address = U.nz(body.supplier_address) or (sup and U.nz(sup.po_address)) or U.null,
+        account_number = sup and U.nz(sup.account_number) or U.null,
+        po_notes = sup and U.nz(sup.po_notes) or U.null,
+    }
+    return {
+        order = o,
+        order_uuid = o.uuid, order_number = o.order_number, order_status = o.status,
+        can_raise = PO_STATUSES[o.status] == true,
+        supplier = supplier,
+        last_supplier_uuid = last_supplier_uuid(ns_id) or U.null,
+        bill_to = require("queries.ShopSettingsQueries").billTo(ns_id) or U.null,
+        ship_to = ship_to, ship_to_text = address_text(ship_to) or U.null,
+        delivery_method = method or U.null,
+        customer_po_number = customer_po or U.null,
+        notes = Rules.supplier_po_notes({
+            customer_po_number = customer_po, account_number = supplier.account_number ~= U.null and supplier.account_number or nil,
+            delivery_method = method, supplier_notes = supplier.po_notes ~= U.null and supplier.po_notes or nil,
+            notes = U.nz(body.notes),
+        }),
+        lines = U.arr(lines),
+        missing_costs = missing,
+        currency = o.currency or "GBP",
+    }
+end
+
+--- GET /orders/:uuid/purchase-order/preview?supplier_uuid= — what the PO would say (no PO is created).
+function ShopOrderQueries.purchaseOrderPreview(ns_id, uuid, params)
+    local d, err = ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, params)
+    if not d then return nil, err end
+    d.order = nil
+    return d
+end
+
+--- POST /orders/:uuid/purchase-order — draft a supplier PO for a paid order: Bill to (shop settings),
+-- Deliver directly to (the order's delivery address), delivery method, the end customer's PO number, the
+-- order's product lines (free-text lines only with include_custom) at the supplier costs given (pounds ex
+-- VAT, by line uuid), else the cost in the chosen supplier's price file, else 0 to fill in on the PO.
+-- body: { supplier_uuid?, supplier_name (unless supplier_uuid), supplier_email?, supplier_phone?,
+--         supplier_address?, expected_date?, delivery_method?, notes?, costs? = { [line_uuid] = "123.45" },
+--         include_custom? }   Values in the body override the supplier's saved details.
+function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
+    body = type(body) == "table" and body or {}
+    local d, derr = ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
+    if not d then return nil, derr end
+    local o = d.order
+    if not d.can_raise then
         return nil, U.err(409, "ORDER_NOT_PAID", "Raise the supplier PO once the order is paid (status " .. o.status .. ")")
     end
     local okPO, POQ = pcall(require, "queries.PurchaseOrderQueries")
     if not okPO then return nil, U.err(501, "PURCHASE_ORDERS_UNAVAILABLE", "Purchase orders are not enabled here") end
-    if not U.nz(body.supplier_name) then return nil, U.err(400, "VALIDATION_ERROR", "supplier_name is required") end
-    local costs = type(body.costs) == "table" and body.costs or {}
+    local sup = d.supplier
+    if sup.name == U.null then return nil, U.err(400, "VALIDATION_ERROR", "Choose a supplier (or give supplier_name)") end
     local items = {}
-    for _, l in ipairs(U.dec(o.lines, {})) do
-        if not l.custom or body.include_custom == true then
-            local cost = costs[l.uuid]
+    for _, l in ipairs(d.lines) do
+        if l.included then
             items[#items + 1] = {
-                description = po_line_description(l),
-                quantity = tonumber(l.qty) or 1,
-                unit_price = (cost ~= nil and cost ~= U.null and tostring(cost) ~= "") and tostring(cost) or "0",
-                tax_rate = tostring(math.floor((tonumber(l.vat_rate) or 0.2) * 10000 + 0.5) / 100),
+                description = l.description,
+                quantity = l.qty,
+                unit_price = l.cost ~= U.null and l.cost or "0",
+                tax_rate = tostring(math.floor(l.vat_rate * 10000 + 0.5) / 100),
             }
         end
     end
     if #items == 0 then return nil, U.err(400, "VALIDATION_ERROR", "This order has no product lines to order") end
-    local bill_to = require("queries.ShopSettingsQueries").billTo(ns_id)
-    local ship_to = ship_to_of(o)
-    local method = U.nz(body.delivery_method) or U.nz(o.delivery_method)
+    local function v(x) return x ~= U.null and x or nil end
     local po, msg, code = POQ.create(ns_id, user_uuid, {
-        supplier_name = tostring(body.supplier_name):sub(1, 255),
-        supplier_email = U.nz(body.supplier_email), supplier_phone = U.nz(body.supplier_phone),
-        supplier_address = U.nz(body.supplier_address),
+        supplier_name = tostring(sup.name):sub(1, 255),
+        supplier_email = v(sup.email), supplier_phone = v(sup.phone), supplier_address = v(sup.address),
         reference = o.order_number,
         expected_date = U.nz(body.expected_date),
-        delivery_address = address_text(ship_to),
-        currency = o.currency or "GBP",
-        notes = join_nonempty({ method and ("Delivery method: " .. method) or nil, U.nz(body.notes) }, "\n\n"),
+        delivery_address = v(d.ship_to_text),
+        currency = d.currency,
+        notes = d.notes ~= "" and d.notes or nil,
         items = items,
         metadata = {
             shop_order_uuid = o.uuid, shop_order_number = o.order_number,
-            bill_to = bill_to or U.null, ship_to = ship_to, delivery_method = method or U.null,
+            shop_supplier_uuid = v(sup.uuid), supplier_account_number = sup.account_number,
+            end_customer_po = d.customer_po_number,
+            bill_to = d.bill_to, ship_to = d.ship_to, delivery_method = d.delivery_method,
             drop_ship = true,
         },
     })
@@ -1197,7 +1333,7 @@ function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
     end
     pcall(db.query, [[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
                       WHERE id = ?]], "Supplier PO " .. tostring(po.po_number or po.uuid) .. " raised ("
-        .. tostring(body.supplier_name) .. ")", o.id)
+        .. tostring(sup.name) .. ")", o.id)
     return po
 end
 

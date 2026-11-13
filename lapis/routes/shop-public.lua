@@ -291,7 +291,8 @@ return function(app)
     end))
 
     -- Order Authorisation: the customer confirms the order. The shop app records their acceptance of the
-    -- terms (legal ledger, checkpoint "checkout") before calling this. Body { t, accept_terms, name? }.
+    -- terms (legal ledger, checkpoint "checkout") before calling this. Body { t, accept_terms, name?,
+    -- customer_po_number? } — the last point the customer can set their PO number; once authorised it is locked.
     app:post(BASE .. "/quotes/:uuid/authorise", public(function(self, ns_id)
         local body, bad = body_or_400()
         if not body then return bad end

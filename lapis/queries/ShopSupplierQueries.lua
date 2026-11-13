@@ -40,7 +40,8 @@ local SUPPLIER_COLS = [[
     auth_header_name, (auth_secret_encrypted IS NOT NULL) AS has_auth_secret, mapping::text AS mapping,
     filter::text AS filter, prices_include_vat, currency, default_margin_pct::float8 AS default_margin_pct,
     change_threshold_pct::float8 AS change_threshold_pct, update_lead_times, sync_hours, is_active, last_synced_at,
-    last_status, last_error, last_summary::text AS last_summary, portal_enabled, contact_email, created_at, updated_at
+    last_status, last_error, last_summary::text AS last_summary, portal_enabled, contact_email, created_at, updated_at,
+    po_email, po_phone, po_address, account_number, po_notes
 ]]
 
 local function supplier_view(r)
@@ -54,7 +55,7 @@ local function supplier_view(r)
     out.last_summary = U.dec(r.last_summary, U.null)
     out.has_auth_secret = r.has_auth_secret == true
     for _, k in ipairs({ "feed_url", "auth_username", "auth_header_name", "last_synced_at", "last_status", "last_error",
-                         "contact_email" }) do
+                         "contact_email", "po_email", "po_phone", "po_address", "account_number", "po_notes" }) do
         if out[k] == nil then out[k] = U.null end
     end
     out.item_counts = db.query([[
@@ -163,6 +164,17 @@ local function supplier_fields(body, partial)
         if body[k] ~= nil then f[k] = body[k] == true end
     end
     if body.contact_email ~= nil then f.contact_email = S.trim(body.contact_email) or db.NULL end
+    -- How we raise purchase orders with them.
+    for k, max in pairs({ po_email = 254, po_phone = 64, po_address = 2000, account_number = 64, po_notes = 4000 }) do
+        if body[k] ~= nil then
+            local v = body[k] ~= U.null and S.trim(body[k]) or nil
+            if v and #v > max then return nil, k .. " must be " .. max .. " characters or fewer" end
+            if k == "po_email" and v and not v:match("^[^@%s]+@[^@%s]+%.[^@%s]+$") then
+                return nil, "po_email must be an email address"
+            end
+            f[k] = v or db.NULL
+        end
+    end
     return f
 end
 
@@ -186,6 +198,31 @@ function Q.update(ns_id, uuid, body)
         db.update("shop_suppliers", f, { id = r.id })
     end
     return Q.get(ns_id, uuid)
+end
+
+--- GET /suppliers/:uuid/purchase-orders — POs raised with this supplier: those raised from a shop order
+-- for it (metadata.shop_supplier_uuid), and older ones with its name. [] without the invoicing feature.
+function Q.purchaseOrders(ns_id, uuid, params)
+    params = params or {}
+    local r = supplier_row(ns_id, uuid)
+    if not r then return nil, U.err(404, "NOT_FOUND", "Supplier not found") end
+    local limit = U.clamp(U.int(params.limit, 50), 1, 200)
+    local offset = math.max(0, U.int(params.offset, 0))
+    local ok, rows = pcall(db.query, [[
+        SELECT po.uuid, po.po_number, po.status, po.supplier_name, po.reference, po.issue_date, po.expected_date,
+               po.currency, po.total, po.created_at, po.sent_at, po.received_at, po.billed_at,
+               po.metadata->>'shop_order_uuid' AS shop_order_uuid, po.metadata->>'shop_order_number' AS shop_order_number,
+               po.metadata->>'end_customer_po' AS end_customer_po, COUNT(*) OVER() AS total_count
+          FROM purchase_orders po
+         WHERE po.namespace_id = ? AND po.deleted_at IS NULL
+           AND (po.metadata->>'shop_supplier_uuid' = ?
+                OR (po.metadata->>'shop_supplier_uuid' IS NULL AND lower(po.supplier_name) = lower(?)))
+         ORDER BY po.created_at DESC LIMIT ? OFFSET ?
+    ]], ns_id, uuid, r.name, limit, offset)
+    if not ok then return U.arr({}), { total = 0, limit = limit, offset = offset, available = false } end
+    local total = rows[1] and tonumber(rows[1].total_count) or 0
+    for _, row in ipairs(rows) do row.total_count = nil end
+    return U.arr(rows), { total = total, limit = limit, offset = offset, available = true }
 end
 
 function Q.delete(ns_id, uuid)

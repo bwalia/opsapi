@@ -16,7 +16,10 @@ Orders come from Stripe Checkout (cart or paid quote) or from an authorised Orde
 - Order detail: **Mark paid** (pending bank-transfer orders: amount prefilled with the total, method Bank transfer, reference = order number, date today), **Create invoice** (paid orders without an invoice; then open the invoice or download its PDF); status buttons "Start processing", "Mark shipped" (asks Carrier, Tracking number, Tracking URL), "Mark delivered", "Cancel order", "Mark refunded"; Lines; Internal notes → "Save notes"; Customer (Ship to / Bill to); Tracking → "Save"; Payment (Stripe links, From quote, Customer link); Print.
 - Quotes: search quote number/email/company, status filter, "Create quote".
 - Create quote: Lines ("Add line" → Product, Qty, "Unit price override (£ ex VAT)", "Configure options"), Notes (shown to customer), Internal notes, Customer (Name *, Email *, Company, Phone, VAT number, address), Terms (Valid until, Shipping (£ ex VAT)). Then "Save draft" or "Create & mark sent".
-- Quote detail: "Edit lines" → "Save & re-price"; "Status, validity & notes" → Save; Customer → Edit → Save; "Customer link" (copy it to send the quote), "Open customer link", "Download PDF".
+- Quote detail: a "Next step" panel with one button for the current state (draft → "Send for authorisation"; sent → "Resend"; expired → "Revise with a new date"; superseded → "Open <revision>"; has an order → "Open order"), everything else under "More" (Send test to me, Revise, Create Order Authorisation, Open customer link, Download PDF, Print). "Progress" timeline (created, sent, viewed, authorised with name and PO number, paid), "Revisions" list, "Edit lines" → "Save & re-price"; "Status, validity & notes" → Save; Customer → Edit → Save; "Customer PO number" (pencil to edit, copy button).
+- Quotes list quick filters: "Awaiting authorisation", "Awaiting payment", "Needs supplier PO", "Bank transfer due"; a "Next step" column.
+- Order detail: "Next step" panel (paid → "Raise supplier PO"; PO drafted → "Open PO"; PO sent → "Mark received"; received → "Mark shipped"; shipped → "Mark delivered"), status changes under "More"; "Progress" timeline; "Customer PO number" (editable on the order).
+- "Raise supplier PO" dialog: Supplier (remembers the last one; "Another supplier" to type one), costs filled from that supplier's price file, lines with no cost highlighted, "Bill to (us)" and "Deliver directly to" (with "End customer PO") shown before drafting; "Draft purchase order" opens the new PO.
 
 ## Rules
 - Order transitions (use only these): pending_payment or payment_failed → cancelled; paid → processing|shipped|cancelled|refunded; processing → shipped|cancelled|refunded; shipped → delivered|refunded; delivered → refunded. Never set paid/payment_failed/pending_payment with PUT — Stripe does, or staff use mark-paid for a payment that arrived outside Stripe (bank transfer, cheque, other).
@@ -29,6 +32,9 @@ Orders come from Stripe Checkout (cart or paid quote) or from an authorised Orde
 - selections: {group_code: "option_code"} or {group_code: ["code", …]} or {group_code: [{option: "code", qty: 2}]}; codes come from GET products/{uuid}.
 - PUT lines replaces ALL lines and re-prices (keep each existing line's uuid); a converted quote's lines cannot change (409). customer replaces the whole customer object.
 - Setting status sent does NOT email anyone — the user shares the customer link.
+- customer_po_number: the end customer's own purchase order number (≤ 64 characters). Staff set it on a quote (not once it has an order, or is converted/cancelled) or on the order; the customer can give it when they authorise, and after that it can't change from their side. It is copied to the order, shown on the documents and printed on the supplier PO as "End customer PO".
+- Once a quote has an order (or is converted) its lines, prices, discounts, shipping, customer and delivery can't change (409 QUOTE_HAS_ORDER): raise a new quote. Status and notes still save.
+- Revisions are for small corrections (delivery address, PO number, contact details, a new validity date). For different products, quantities or a different customer create a new quote. Revise needs a reason; allowed for draft, sent, expired and accepted-without-an-order. The revision is numbered <original>-R<n>, starts as a draft (send it), and the old one is cancelled with a link to it. A revision of an authorised order needs the customer's new authorisation.
 - valid_until is YYYY-MM-DD (default 30 days); draft/sent quotes past it become expired.
 - The UI requires customer name and a valid email.
 
@@ -39,10 +45,14 @@ Orders come from Stripe Checkout (cart or paid quote) or from an authorised Orde
 - `POST /api/v2/shop/admin/orders/{uuid}/mark-paid {method: bank_transfer|cheque|other (default bank_transfer), reference, paid_at: YYYY-MM-DD, amount_minor: int pence (default the order total)}` — record a payment received outside Stripe; the order becomes paid
 - `POST /api/v2/shop/admin/orders/{uuid}/invoice {payment_method_uuid, due_date: YYYY-MM-DD, payment_terms_days: int, notes}` — draft accounting invoice from the order → {invoice_uuid, invoice_number, existing}
 - `GET /api/v2/namespace/payment-methods` — the workspace's bank accounts (How to pay)
-- `PUT /api/v2/shop/admin/orders/{uuid} {status, tracking: {carrier, tracking_number, url, shipped_at}, internal_notes}` — update status / tracking / notes
-- `GET /api/v2/shop/admin/quotes?status&q&limit&offset` — list
+- `PUT /api/v2/shop/admin/orders/{uuid} {status, tracking: {carrier, tracking_number, url, shipped_at}, internal_notes, customer_po_number}` — update status / tracking / notes / the customer's PO number
+- `GET /api/v2/shop/admin/orders?filter=needs_supplier_po` — paid orders with no supplier PO yet
+- `GET /api/v2/shop/admin/quotes?status&q&filter=awaiting_authorisation|awaiting_payment|needs_supplier_po|bank_transfer_due&kind=quote|order&limit&offset` — list (q also matches customer_po_number)
 - `GET /api/v2/shop/admin/quotes/{uuid}` — quote incl. public_url (customer link)
 - `POST /api/v2/shop/admin/quotes {lines*: [{product_slug*, qty: int, selections: {}, price_override_minor: int pence ex VAT per unit}], customer: {name, email, company, phone, vat_number, address: {line1, line2, city, postal_code, country: "GB"}}, notes, internal_notes, status: draft|sent, valid_until: YYYY-MM-DD, shipping_minor: int}` — create
-- `PUT /api/v2/shop/admin/quotes/{uuid} {status, notes, internal_notes, valid_until, customer, lines, shipping_minor}` — update (partial)
+- `PUT /api/v2/shop/admin/quotes/{uuid} {status, notes, internal_notes, valid_until, customer, lines, shipping_minor, customer_po_number}` — update (partial)
+- `POST /api/v2/shop/admin/quotes/{uuid}/revise {reason*, customer, delivery_address, delivery_method, customer_po_number, valid_until}` — revision (201, the new quote: revision_no, revision_of, revisions[])
+- `GET /api/v2/shop/admin/orders/{uuid}/purchase-order/preview?supplier_uuid` — the supplier PO before it is raised (supplier details, bill_to, ship_to, lines with cost from the price file, missing_costs, last_supplier_uuid)
+- `POST /api/v2/shop/admin/orders/{uuid}/purchase-order {supplier_uuid, supplier_name, supplier_email, supplier_phone, supplier_address, expected_date: YYYY-MM-DD, delivery_method, notes, costs: {line_uuid: "123.45" pounds ex VAT}, include_custom}` — draft the supplier PO (paid orders only)
 - `GET /api/v2/shop/admin/products?q&status=active&limit` — find a product's slug/uuid
 - `GET /api/v2/shop/admin/products/{uuid}` — option group and option codes
