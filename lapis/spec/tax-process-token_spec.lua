@@ -8,8 +8,9 @@
     ERROR at once. It now re-signs the verified identity with a fresh 15-minute
     token for each call (JWTHelper.reissue).
 
-    Needs resty.jwt, so run it inside nginx, from the app directory of an opsapi
-    container (JWT_SECRET_KEY is already set there):
+    Runs standalone like every spec (CI: luajit lapis/spec/tax-process-token_spec.lua),
+    with resty.jwt stubbed. For the real signature round-trip run it inside nginx,
+    from the app directory of an opsapi container (JWT_SECRET_KEY is set there):
         lapis exec 'package.path="./?.lua;"..package.path; dofile("spec/tax-process-token_spec.lua")'
     Source paths below are read relative to the repo root or the app directory.
 ]]
@@ -43,6 +44,23 @@ else
         NOTICE = 6, DEBUG = 8, time = function() return NOW end, now = function() return NOW end },
         { __index = function() return function() end end })
 end
+-- Standalone (CI runs every spec with bare LuaJIT) resty.jwt can't load: its HMAC
+-- needs OpenSSL symbols that only nginx provides. Swap in a stub that records what
+-- gets signed, so the identity/expiry logic is still checked; the real signature
+-- round-trip runs when the spec is run inside nginx (see the header).
+local IN_NGINX = pcall(require, "resty.jwt")
+local signed
+if not IN_NGINX then
+    package.loaded["resty.jwt"] = {
+        sign = function(_, secret, obj)
+            signed = { secret = secret, header = obj.header, payload = obj.payload }
+            return "stub-header.stub-payload.stub-signature"
+        end,
+        verify = function() return { verified = false } end,
+    }
+    package.loaded["helper.global"] = package.loaded["helper.global"]
+        or { getEnvVar = function(k) return k == "JWT_SECRET_KEY" and "spec-secret" or os.getenv(k) end }
+end
 local JWTHelper = require("helper.jwt-helper")
 
 print("reissue: same identity, fresh expiry")
@@ -52,9 +70,16 @@ local userinfo = { uuid = "u-123", email = "landlord@example.com", roles = "memb
 local original = { userinfo = userinfo, iat = NOW - 7200, exp = NOW - 3600, auth_time = NOW - 7200, iss = "opsapi" }
 local tok, err = JWTHelper.reissue(original, 900)
 check("returns a token", type(tok) == "string" and #tok > 20, err)
-local v = JWTHelper.verifyToken(tok or "")
-check("new token verifies", v.valid == true, v.reason)
-local p = v.payload or {}
+local p
+if IN_NGINX then
+    local v = JWTHelper.verifyToken(tok or "")
+    check("new token verifies", v.valid == true, v.reason)
+    p = v.payload or {}
+else
+    print("  skip - signature round-trip (needs nginx; payload checked from the signer)")
+    check("signed HS256 with the JWT secret", signed and signed.header.alg == "HS256" and signed.secret == "spec-secret")
+    p = signed and signed.payload or {}
+end
 check("keeps the user", p.userinfo and p.userinfo.uuid == "u-123" and p.userinfo.email == "landlord@example.com")
 check("keeps the namespace", p.userinfo and p.userinfo.namespace and p.userinfo.namespace.slug == "workstation")
 check("fresh iat/exp, 15 minutes", p.iat == NOW and p.exp == NOW + 900, tostring(p.iat) .. "/" .. tostring(p.exp))
