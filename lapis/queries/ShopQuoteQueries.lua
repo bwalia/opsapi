@@ -153,6 +153,7 @@ function ShopQuoteQueries.shape(q, opts)
         local c = contact_for(q.namespace_id)
         out.contact = c or U.null
         out.phone = c and c.phone or U.null
+        out.contact_phone = out.phone
     end
     -- Before any discount, for the "Subtotal / Discount / Net" rows on the documents.
     local list = Pricing.totals(lines, q.shipping_minor)
@@ -379,10 +380,13 @@ local function capture_lead(ns_id, q, customer, total, chat_session)
 end
 
 --- Public POST /quotes.
--- body: {from:"cart"|"lines", lines?, customer, notes?, chat_session_uuid?, source}
+-- body: {from:"cart"|"lines", lines?, customer, notes?, chat_session_uuid?, source, delivery_address?}
 function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local customer, cerr = clean_customer(body.customer, true)
     if not customer then return nil, U.err(400, "VALIDATION_ERROR", cerr) end
+    -- "Start a new quote" from an earlier one can bring a delivery address (the supplier PO's "Deliver to").
+    local delivery, derr = ShopQuoteQueries.cleanAddress(body.delivery_address)
+    if derr then return nil, U.err(400, "VALIDATION_ERROR", derr) end
     local from = body.from or (U.nz(cart_token) and "cart" or "lines")
     local lines, cart, err
     if from == "cart" then
@@ -427,6 +431,7 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
     local q = ShopQuoteQueries.insert(ns_id, {
         lines = lines, customer = customer, notes = U.nz(body.notes) and tostring(body.notes):sub(1, 4000) or nil,
         source = source, cart_id = cart and cart.id or nil, chat_session_id = chat_session_id, status = "draft",
+        delivery_address = delivery,
         valid_until = locked and os.date("!%Y-%m-%d %H:%M:%S", os.time() + member.lock_days * 86400) or nil,
     })
     if locked then

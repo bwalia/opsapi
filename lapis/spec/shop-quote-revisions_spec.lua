@@ -29,7 +29,7 @@ check("nil = none", R.clean_po_number(nil) == nil)
 check("64 characters allowed", R.clean_po_number(string.rep("A", 64)) == string.rep("A", 64))
 local long, lerr = R.clean_po_number(string.rep("A", 65))
 check("65 characters refused", long == nil and lerr ~= nil, lerr)
-check("65 after trimming is fine if ≤ 64", R.clean_po_number("  " .. string.rep("B", 64) .. "  ") == string.rep("B", 64))
+check("trimmed to 64 is fine", R.clean_po_number("  " .. string.rep("B", 64) .. "  ") == string.rep("B", 64))
 local tbl, terr = R.clean_po_number({ "x" })
 check("a table is refused", tbl == nil and terr ~= nil)
 

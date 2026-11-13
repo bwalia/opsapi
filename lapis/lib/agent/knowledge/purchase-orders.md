@@ -31,7 +31,7 @@ Orders the business places with suppliers (builders, merchants), e.g. materials 
 ## From shop orders
 - Shop staff raise drop-ship POs from a paid shop order (Shop → Orders → "Raise supplier PO"): metadata holds shop_order_uuid/number, shop_supplier_uuid (the shop supplier), supplier_account_number, end_customer_po (the customer's own PO, printed in the Deliver to block), bill_to, ship_to.
 - A shop supplier's PO details (Shop → Suppliers → Edit → Purchase orders: po_email, po_phone, po_address, account_number, po_notes) fill the PO; costs come from its price file.
-- `GET /api/v2/shop/admin/suppliers/{uuid}/purchase-orders` — POs raised with a shop supplier (by shop_supplier_uuid, or older ones by name).
+- Shop → Suppliers lists each supplier's POs (by metadata.shop_supplier_uuid, or older ones by supplier name).
 
 ## API
 - `GET /api/v2/purchase-orders?page&perPage&status=draft|sent|acknowledged|partially_received|received|billed|cancelled&supplier&project_uuid&from_date&to_date&search` — list (status may be a comma list; dates YYYY-MM-DD on issue date)
