@@ -128,7 +128,7 @@ local function record_json(r, t)
         sources = obj(r.value_sources),
         status = r.status,
         updated_at = r.updated_at,
-        totals = IncomeTypes.record_totals(t.field_schema, r.values),
+        totals = IncomeTypes.record_totals(t.field_schema, r.values, t.estimator_mapping),
     }
 end
 
@@ -177,7 +177,7 @@ return function(app)
                 local counts = r.status ~= "not_applicable"
                     and (not has_entities(t) or (r.entity_uuid and live[r.entity_uuid]))
                 if counts then
-                    sum_totals(totals, IncomeTypes.record_totals(t.field_schema, r.values))
+                    sum_totals(totals, IncomeTypes.record_totals(t.field_schema, r.values, t.estimator_mapping))
                     if r.status == "done" then done = done + 1 end
                 end
             end

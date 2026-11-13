@@ -724,7 +724,7 @@ register({
                 else
                     e.records = e.records + 1
                     if r.status == "done" then e.done = e.done + 1 end
-                    for k, v in pairs(IncomeTypes.record_totals(t.field_schema, r.values)) do
+                    for k, v in pairs(IncomeTypes.record_totals(t.field_schema, r.values, t.estimator_mapping)) do
                         e.totals[k] = e.totals[k] + v
                     end
                 end

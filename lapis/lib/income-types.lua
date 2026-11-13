@@ -553,20 +553,38 @@ end
 -- Totals + estimator inputs
 -- ---------------------------------------------------------------------------
 
+local function r2(x) return math.floor((tonumber(x) or 0) * 100 + 0.5) / 100 end
+
+-- The share (0..100) a mapped field is scaled by, e.g. 50 for a jointly owned property.
+local function share_of(fm, values, field)
+    local v = to_number(values[field])
+    if v == nil then
+        local sf = fm[field]
+        v = sf and to_number(sf.default) or 100
+    end
+    return math.max(0, math.min(100, v))
+end
+
 --- Per-record totals by role (income / expense / tax_paid / relief), honouring
--- show_if and the ownership share a mapping scales by.
-function IncomeTypes.record_totals(schema, values)
+-- show_if and — when the estimator mapping scales a field by a share — the user's
+-- share, so the cards show the same figures the estimate uses.
+function IncomeTypes.record_totals(schema, values, mapping)
     values = values or {}
+    local fm = field_map(schema)
+    local scale = {}
+    for _, m in ipairs(type(mapping) == "table" and mapping or {}) do
+        if type(m) == "table" and m.field and m.scale_by then scale[m.field] = m.scale_by end
+    end
     local t = { income = 0, expense = 0, tax_paid = 0, relief = 0 }
     for _, f in ipairs(IncomeTypes.fields(schema)) do
         if NUMERIC[f.type] and f.type ~= "percentage" and t[f.role or ""] ~= nil and visible(f, values) then
-            t[f.role] = t[f.role] + (to_number(values[f.key]) or 0)
+            local v = to_number(values[f.key]) or 0
+            if scale[f.key] then v = v * share_of(fm, values, scale[f.key]) / 100 end
+            t[f.role] = r2(t[f.role] + v)
         end
     end
     return t
 end
-
-local function r2(x) return math.floor((tonumber(x) or 0) * 100 + 0.5) / 100 end
 
 --- Turn My Income records into compute_full inputs.
 -- types_by_key: resolved types keyed by income_type_key.
@@ -594,14 +612,7 @@ function IncomeTypes.estimator_inputs(types_by_key, records)
                 local f = fm[m.field]
                 local v = f and visible(f, rec.values) and to_number(rec.values[m.field])
                 if v and v ~= 0 and IncomeTypes.ESTIMATOR_INPUTS[m.input] then
-                    if m.scale_by then
-                        local share = to_number(rec.values[m.scale_by])
-                        if share == nil then
-                            local sf = fm[m.scale_by]
-                            share = sf and to_number(sf.default) or 100
-                        end
-                        v = v * math.max(0, math.min(100, share)) / 100
-                    end
+                    if m.scale_by then v = v * share_of(fm, rec.values, m.scale_by) / 100 end
                     if m.sign == -1 then v = -v end
                     inputs[m.input] = r2((inputs[m.input] or 0) + v)
                     by_type[rec.income_type_key] = by_type[rec.income_type_key] or {}

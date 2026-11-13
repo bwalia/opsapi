@@ -271,6 +271,12 @@ check("agent types derived", at:find("uk_property") and at:find("employment") an
     and not at:find("capital_gains"), at)
 check("has_data", est.has_data)
 check("nothing → no data", not IncomeTypes.estimator_inputs(by_key, {}).has_data)
+local tot = IncomeTypes.record_totals(rental, { ownership_share = 50, rents = 14400, repairs = 500,
+    residential_finance_costs = 4000 }, seeded.rental.estimator_mapping)
+check("card totals use the ownership share, like the estimate", near(tot.income, 7200) and near(tot.expense, 250)
+    and near(tot.relief, 2000), cjson.encode(tot))
+local whole = IncomeTypes.record_totals(rental, { ownership_share = 50, rents = 14400 })
+check("without a mapping, totals are the raw figures", near(whole.income, 14400))
 
 -- ============================================================================
 print("compute_full: pension, other income, tax at source")

@@ -267,7 +267,9 @@ function Q.estimator_inputs(user_id, tax_year, namespace_id)
         namespace_id = r and r[1] and r[1].namespace_id
         if not namespace_id then return IncomeTypes.estimator_inputs({}, {}) end
     end
-    local types = Q.by_key(Q.types_for(namespace_id))
+    -- include hidden types: hiding a type stops new entries, it doesn't drop figures
+    -- the user already gave from their tax
+    local types = Q.by_key(Q.types_for(namespace_id, { include_inactive = true }))
     return IncomeTypes.estimator_inputs(types, Q.records(namespace_id, user_id, tax_year))
 end
 
