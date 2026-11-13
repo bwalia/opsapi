@@ -15,6 +15,8 @@ local Catalog = require("queries.ShopCatalogQueries")
 local Leads = require("queries.ShopLeadQueries")
 local Settings = require("queries.ShopSettingsQueries")
 local Cart = require("queries.ShopCartQueries")
+local PaymentMethods = require("queries.PaymentMethodQueries")
+local PM = require("lib.payment-methods")
 
 local ShopQuoteQueries = {}
 
@@ -89,6 +91,24 @@ function ShopQuoteQueries.shape(q, opts)
         authorised_at = q.authorised_at or U.null,
         authorised_by_name = q.authorised_by_name or U.null,
     }
+    -- Order Authorisations: how to pay by bank transfer ("Getting paid" methods, reference = the OA number),
+    -- whether the customer can choose bank transfer now, and the order a bank transfer already created.
+    out.payment_methods = U.arr({})
+    out.payment_reference = U.null
+    out.bank_transfer_available = false
+    out.order_url_path = U.null
+    if staff_order(q) then
+        local methods = PaymentMethods.forDocuments(q.namespace_id)
+        out.payment_methods = methods
+        out.payment_reference = q.quote_number
+        out.bank_transfer_available = PM.bankTransferAllowed({
+            kind = q.kind, status = q.status, is_past_validity = q.is_past_validity, unpriced = #unpriced,
+            total_minor = q.total_minor,
+        }, methods) == true
+    end
+    if U.nz(q.order_uuid) and U.nz(q.order_access_token) then
+        out.order_url_path = "/orders/" .. q.order_uuid .. "?t=" .. q.order_access_token
+    end
     -- Before any discount, for the "Subtotal / Discount / Net" rows on the documents.
     local list = Pricing.totals(lines, q.shipping_minor)
     out.list_subtotal_minor = list.subtotal_minor
@@ -220,7 +240,8 @@ end
 
 function ShopQuoteQueries.getByUuid(ns_id, uuid)
     return db.query("SELECT " .. QUOTE_COLS .. [[,
-               o.uuid AS order_uuid, o.order_number, cs.uuid AS chat_session_uuid, c.uuid AS cart_uuid
+               o.uuid AS order_uuid, o.order_number, o.access_token AS order_access_token, o.status AS order_status,
+               o.payment_method AS order_payment_method, cs.uuid AS chat_session_uuid, c.uuid AS cart_uuid
           FROM shop_quotes q
           LEFT JOIN shop_orders o ON o.id = q.order_id
           LEFT JOIN shop_chat_sessions cs ON cs.id = q.chat_session_id
@@ -262,7 +283,8 @@ function ShopQuoteQueries.forCustomer(ns_id, email, params)
     params = params or {}
     local limit = U.clamp(U.int(params.limit, 50), 1, 100)
     local offset = math.max(0, U.int(params.offset, 0))
-    local rows = db.query("SELECT " .. QUOTE_COLS .. [[, o.uuid AS order_uuid, o.order_number, COUNT(*) OVER() AS total
+    local rows = db.query("SELECT " .. QUOTE_COLS .. [[, o.uuid AS order_uuid, o.order_number,
+               o.access_token AS order_access_token, COUNT(*) OVER() AS total
           FROM shop_quotes q LEFT JOIN shop_orders o ON o.id = q.order_id
          WHERE q.namespace_id = ? AND lower(q.customer->>'email') = lower(?) AND q.status <> 'cancelled'
          ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?]], ns_id, email, limit, offset)

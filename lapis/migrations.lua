@@ -176,6 +176,7 @@ local shop_analytics_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "
 local shop_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-settings") or {}
 local shop_survey_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-survey") or {}
 local shop_order_auth_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-authorisation") or {}
+local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-bank-transfer") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -391,6 +392,8 @@ local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOI
 local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-menu-items") or {}
 -- Purchase Orders (raise/send/receive/bill supplier POs) ride on the invoicing feature
 local purchase_order_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.purchase-orders") or {}
+-- Payment methods ("Getting paid") are core; the invoices columns ride on invoicing (see the file).
+local payment_methods_migrations = load_if_enabled({ ProjectConfig.FEATURES.CORE, ProjectConfig.FEATURES.INVOICING }, "migrations.payment-methods") or {}
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
@@ -2664,6 +2667,11 @@ local _migrations = {
     -- Order Authorisation: staff-built orders, discounts, delivery (migrations/shop-order-authorisation.lua)
     ['zzs39_shop_order_authorisation'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_auth_migrations, 1),
     ['zzs40_shop_po_bill_to'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_auth_migrations, 2),
+    -- Bank transfer for Order Authorisations, manual mark-paid, invoice link (shop_orders columns)
+    ['zzs41_shop_bank_transfer'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_bank_transfer_migrations, 1),
+    -- Payment methods ("Getting paid", core) + invoices.po_number / payment_method_uuid (invoicing)
+    ['zzpm1_namespace_payment_methods'] = conditional_array(ProjectConfig.FEATURES.CORE, payment_methods_migrations, 1),
+    ['zzpm2_invoices_po_payment_method'] = conditional_array(ProjectConfig.FEATURES.INVOICING, payment_methods_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

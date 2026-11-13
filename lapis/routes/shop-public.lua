@@ -23,11 +23,14 @@
       GET    /search
       GET    /market?product_slug=|q=&limit=3   (market-price reference, MARKET.prompt.md §A)
       POST   /quotes
-      GET    /quotes/:uuid?t=
+      GET    /quotes/:uuid?t=                    OAs: payment_methods, payment_reference, bank_transfer_available,
+                                                 order_url_path
+      POST   /quotes/:uuid/authorise             { t, accept_terms, name? }
+      POST   /quotes/:uuid/bank-transfer         { t } authorised OA → order awaiting bank transfer (idempotent)
       POST   /checkout                           { …, membership?: { interval, accept_terms, terms_version } } joins Trade in the same payment
                                                  409 CHECKOUT_DISABLED while settings.checkout_enabled is false
       GET    /settings                           { checkout_enabled } — false: enquiries (quotes) only, no online payment
-      GET    /orders/:uuid?t=
+      GET    /orders/:uuid?t=                    payment_method; bank transfer: payment_methods, payment_reference
       POST   /chat-sessions                      { cart_token?, email?, name?, phone? } (+ BFF X-Visitor-Country)
       POST   /chat-sessions/:uuid/messages
       POST   /chat-sessions/:uuid/requirements   { requirements: {goal, models, budget_gbp, …} } (AI advisor)
@@ -295,6 +298,17 @@ return function(app)
         local quote, err = Quote.authorise(ns_id, self.params.uuid, body.t or self.params.t, body)
         if not quote then return U.from_err(err) end
         return U.ok(quote)
+    end))
+
+    -- Order Authorisation: pay by bank transfer instead of card. Body { t } (or ?t=). Only for an authorised
+    -- OA with something to pay and a bank account on the workspace's documents; creates the order awaiting
+    -- payment (idempotent) and answers the public order shape with payment_methods + payment_reference.
+    app:post(BASE .. "/quotes/:uuid/bank-transfer", public(function(self, ns_id)
+        local body = U.read_json()
+        body = type(body) == "table" and body or {}
+        local order, err = Orders.bankTransfer(ns_id, self.params.uuid, body.t or self.params.t)
+        if not order then return U.from_err(err) end
+        return U.ok(order, 201)
     end))
 
     -- checkout + orders -----------------------------------------------------------

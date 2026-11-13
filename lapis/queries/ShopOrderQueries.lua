@@ -20,6 +20,8 @@ local Catalog = require("queries.ShopCatalogQueries")
 local Cart = require("queries.ShopCartQueries")
 local Quote = require("queries.ShopQuoteQueries")
 local Stock = require("queries.ShopStockQueries")
+local PaymentMethods = require("queries.PaymentMethodQueries")
+local PM = require("lib.payment-methods")
 
 local ShopOrderQueries = {}
 
@@ -40,7 +42,8 @@ local ORDER_COLS = [[
     o.discount_minor, o.delivery_method, o.delivery_address::text AS delivery_address,
     o.refunded_minor, o.returned_net_minor, o.refund_clawback_minor,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
-    o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at
+    o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at,
+    o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid
 ]]
 ShopOrderQueries.ORDER_COLS = ORDER_COLS
 
@@ -74,7 +77,16 @@ function ShopOrderQueries.shape(o, opts)
         created_at = o.created_at,
         tracking = U.dec(o.tracking, U.null),
         url_path = url_path(o),
+        -- card (Stripe Checkout; older orders have no value) | bank_transfer | cheque | other
+        payment_method = U.nz(o.payment_method) or "card",
+        -- Bank transfer: where to pay and the reference to use (the order number). [] otherwise.
+        payment_methods = U.arr({}),
+        payment_reference = U.null,
     }
+    if o.payment_method == "bank_transfer" then
+        out.payment_methods = PaymentMethods.forDocuments(o.namespace_id)
+        out.payment_reference = o.order_number
+    end
     if opts.admin then
         out.refunded_minor = tonumber(o.refunded_minor) or 0
         out.returned_net_minor = tonumber(o.returned_net_minor) or 0
@@ -91,6 +103,12 @@ function ShopOrderQueries.shape(o, opts)
         out.public_url = base and (base:gsub("/+$", "") .. out.url_path) or out.url_path
         out.access_token = o.access_token
         out.stripe_mode = (U.env("STRIPE_SECRET_KEY") or ""):find("_live_", 1, true) and "live" or "test"
+        out.paid_reference = o.paid_reference or U.null
+        out.paid_amount_minor = tonumber(o.paid_amount_minor) or U.null
+        out.invoice_uuid = o.invoice_uuid or U.null
+        -- "Bank transfer due": awaiting a bank transfer, and for how long (whole days).
+        out.bank_transfer_due = o.status == "pending_payment" and o.payment_method == "bank_transfer"
+        out.days_waiting = tonumber(o.days_waiting) or U.null
     end
     return out
 end
@@ -101,6 +119,7 @@ end
 
 function ShopOrderQueries.getByUuid(ns_id, uuid)
     return db.query("SELECT " .. ORDER_COLS .. [[, q.uuid AS quote_uuid, q.quote_number, c.uuid AS cart_uuid,
+               EXTRACT(DAY FROM NOW() - o.created_at)::int AS days_waiting,
                (SELECT cs.uuid FROM shop_chat_sessions cs WHERE cs.order_id = o.id OR (o.cart_id IS NOT NULL
                    AND cs.cart_id = o.cart_id) ORDER BY cs.id DESC LIMIT 1) AS chat_session_uuid
           FROM shop_orders o
@@ -584,6 +603,17 @@ function ShopOrderQueries.applyPaid(order, session)
     Stock.commit(order.namespace_id, order.id, order.order_number)
     Cart.markConverted(order.cart_id)
     if nz(order.quote_id) then
+        -- An earlier bank-transfer order for the same Order Authorisation that the customer then paid another
+        -- way (card): cancel it and give its stock back, so only the paid order goes ahead.
+        local stale = db.query([[SELECT id FROM shop_orders WHERE quote_id = ? AND id <> ? AND status = 'pending_payment'
+                                  AND payment_method = 'bank_transfer']], order.quote_id, order.id)
+        for _, st in ipairs(stale) do
+            db.query([[UPDATE shop_orders SET status = 'cancelled', updated_at = NOW(),
+                       internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],
+                "Cancelled: the customer paid " .. tostring(order.order_number) .. " instead of paying by bank transfer",
+                st.id)
+            Stock.release(st.id)
+        end
         db.query("UPDATE shop_quotes SET status = 'converted', order_id = ?, updated_at = NOW() WHERE id = ?",
             order.id, order.quote_id)
     end
@@ -612,6 +642,247 @@ function ShopOrderQueries.applyUnpaid(order, status, note)
 end
 
 -- ---------------------------------------------------------------------------
+-- bank transfer (Order Authorisations) + payments recorded by staff
+-- ---------------------------------------------------------------------------
+
+-- A bank transfer takes days, so its stock is held for two weeks (a card checkout holds 35 minutes).
+local BANK_TRANSFER_HOLD_MINUTES = 14 * 24 * 60
+ShopOrderQueries.BANK_TRANSFER_HOLD_MINUTES = BANK_TRANSFER_HOLD_MINUTES
+
+local column_cache = {}
+--- Does this column exist? (cached per worker once true). Used for columns another change adds.
+local function has_column(tbl, col)
+    local key = tbl .. "." .. col
+    if column_cache[key] then return true end
+    local ok, rows = pcall(db.query, [[SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?
+                                       LIMIT 1]], tbl, col)
+    local yes = ok and rows and #rows > 0 or false
+    if yes then column_cache[key] = true end
+    return yes
+end
+ShopOrderQueries.hasColumn = has_column
+
+--- POST /quotes/:uuid/bank-transfer (public) — the customer of an authorised Order Authorisation chooses to
+-- pay by bank transfer: creates the order (pending_payment, payment_method bank_transfer, no Stripe session),
+-- holds its stock, links the quote (quote.order_id; the quote stays 'accepted' until the money arrives and
+-- counts as turned into an order, so it can no longer be revised). Idempotent: a second call returns the
+-- same order. Returns the public order shape (payment_methods + payment_reference = order number).
+function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
+    local quote = Quote.getWithToken(ns_id, uuid, token)
+    if not quote then return nil, U.err(404, "QUOTE_NOT_FOUND", "Quote not found") end
+    Quote.maybeExpire(quote)
+    return U.tx(function()
+        -- Lock the quote so two clicks can't create two orders.
+        local q = db.query("SELECT id, order_id, status FROM shop_quotes WHERE id = ? FOR UPDATE", quote.id)[1]
+        if q and nz(q.order_id) then
+            local existing = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.id = ?", q.order_id)[1]
+            if existing and existing.payment_method == "bank_transfer" and existing.status ~= "cancelled"
+                and existing.status ~= "payment_failed" then
+                return ShopOrderQueries.shape(existing)
+            end
+        end
+        quote.status = q and q.status or quote.status
+        local lines = U.dec(quote.lines, {})
+        local methods = PaymentMethods.forDocuments(ns_id)
+        local allowed, why = PM.bankTransferAllowed({
+            kind = quote.kind, status = quote.status, is_past_validity = quote.is_past_validity,
+            unpriced = #Pricing.unpriced_lines(lines), total_minor = quote.total_minor,
+        }, methods)
+        if not allowed then
+            local messages = {
+                NOT_AN_ORDER_AUTHORISATION = "Bank transfer is available for confirmed orders only",
+                NOT_AUTHORISED = quote.status == "converted" and "This order has already been paid"
+                    or "Please confirm the order first",
+                QUOTE_EXPIRED = "This has expired — please ask us for a new one",
+                QUOTE_PRICING_PENDING = "We still need to price some items before you can pay",
+                NOTHING_TO_PAY = "There is nothing to pay on this order",
+                NO_BANK_ACCOUNT = "Bank transfer isn't available — please pay by card or call us",
+            }
+            return nil, U.err(409, why == "NOT_AUTHORISED" and quote.status == "converted" and "QUOTE_NOT_PAYABLE"
+                or why, messages[why] or "Bank transfer isn't available for this order")
+        end
+        if #lines == 0 then return nil, U.err(400, "EMPTY_QUOTE", "The quote has no lines") end
+
+        db.query("SELECT pg_advisory_xact_lock(hashtext('shop_stock_' || ?))", tostring(ns_id))
+        local demand = demand_for_lines(ns_id, lines)
+        local blocking = shortages_for(demand)
+        if #blocking > 0 then
+            return nil, U.err(409, "OUT_OF_STOCK", "Some items are out of stock", { shortages = U.arr(blocking) })
+        end
+        local customer = U.dec(quote.customer, {})
+        local email = U.nz(customer.email)
+        local quote_discount = Quote.discountOf(quote)
+        local quote_trade = tonumber(quote.trade_discount_minor) or 0
+        local row = db.query([[
+            INSERT INTO shop_orders (uuid, namespace_id, order_number, access_token, status, email, customer, lines,
+                                     subtotal_minor, vat_minor, shipping_minor, total_minor, credit_minor,
+                                     member_discount_minor, discount_minor, delivery_method, delivery_address,
+                                     currency, quote_id, payment_method, internal_notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending_payment', ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, 0, ?, ?, ?, ?::jsonb, 'GBP', ?,
+                    'bank_transfer', ?, NOW(), NOW())
+            RETURNING id
+        ]], Global.generateUUID(), ns_id, next_number(), U.token(24), email or db.NULL, U.enc(customer),
+            U.enc(U.arr(lines)), tonumber(quote.subtotal_minor), tonumber(quote.vat_minor),
+            tonumber(quote.shipping_minor) or 0, tonumber(quote.total_minor), quote_trade, quote_discount - quote_trade,
+            U.nz(quote.delivery_method) or db.NULL, U.nz(quote.delivery_address) or db.NULL, quote.id,
+            "Customer chose bank transfer for " .. tostring(quote.quote_number))[1]
+        -- The customer's PO number travels with the order. Agent B's change adds customer_po_number to
+        -- shop_quotes and shop_orders (and a shared copy helper for checkout); until both columns exist this
+        -- is skipped, so either change can deploy first.
+        if has_column("shop_quotes", "customer_po_number") and has_column("shop_orders", "customer_po_number") then
+            db.query([[UPDATE shop_orders SET customer_po_number = (SELECT customer_po_number FROM shop_quotes WHERE id = ?)
+                        WHERE id = ?]], quote.id, row.id)
+        end
+        Stock.hold(ns_id, row.id, demand, BANK_TRANSFER_HOLD_MINUTES)
+        db.query("UPDATE shop_quotes SET order_id = ?, updated_at = NOW() WHERE id = ?", row.id, quote.id)
+        if quote.crm_lead_id then
+            pcall(require("queries.ShopLeadQueries").safeUpsert, ns_id, { email = email, source = "shop_quote",
+                note = "Order " .. quote.quote_number .. ": customer chose to pay by bank transfer" })
+        end
+        return ShopOrderQueries.shape(ShopOrderQueries.getById(row.id))
+    end)
+end
+
+local function valid_date(v)
+    v = U.nz(v)
+    if type(v) ~= "string" then return nil end
+    local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
+    if not y then return nil end
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if m < 1 or m > 12 or d < 1 or d > 31 or y < 2000 or y > 2100 then return nil end
+    return v:sub(1, 10)
+end
+
+--- POST /orders/:uuid/mark-paid — staff record a payment that arrived outside Stripe (bank transfer, cheque,
+-- other) and the order goes through the same paid path as a card payment (status paid, stock committed,
+-- quote converted, credits used). Only for orders awaiting payment that Stripe isn't collecting.
+-- body: { method = bank_transfer|cheque|other (default bank_transfer), reference?, paid_at? (YYYY-MM-DD),
+--         amount_minor? (what arrived; defaults to the order total) }
+function ShopOrderQueries.markPaid(ns_id, uuid, body, actor)
+    body = type(body) == "table" and body or {}
+    local method = U.nz(body.method) or "bank_transfer"
+    if not PM.MANUAL_PAID_METHODS[method] then
+        return nil, U.err(400, "VALIDATION_ERROR", "method must be bank_transfer, cheque or other")
+    end
+    local reference = U.nz(body.reference) and tostring(body.reference):gsub("%c", " "):sub(1, 120) or nil
+    local paid_at = U.nz(body.paid_at) and valid_date(body.paid_at) or nil
+    if U.nz(body.paid_at) and not paid_at then
+        return nil, U.err(400, "VALIDATION_ERROR", "paid_at must be a date (YYYY-MM-DD)")
+    end
+    local amount
+    if body.amount_minor ~= nil and body.amount_minor ~= U.null then
+        amount = math.floor(tonumber(body.amount_minor) or -1)
+        if amount < 0 then return nil, U.err(400, "VALIDATION_ERROR", "amount_minor must be 0 or more (pence)") end
+    end
+    local _, err = U.tx(function()
+        local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
+            ns_id, uuid)[1]
+        if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+        if o.status ~= "pending_payment" then
+            return nil, U.err(409, "NOT_AWAITING_PAYMENT", "This order isn't awaiting payment (status " .. o.status .. ")")
+        end
+        if o.payment_method ~= "bank_transfer" and nz(o.stripe_session_id) then
+            return nil, U.err(409, "CARD_PAYMENT_IN_PROGRESS",
+                "This order is being paid by card through Stripe — wait for it, or cancel it first")
+        end
+        amount = amount or tonumber(o.total_minor) or 0
+        local note = string.format("[%s] Marked paid by %s: %s received%s%s%s",
+            os.date("!%Y-%m-%d %H:%M UTC"), actor or "staff", U.money(amount),
+            " (" .. method:gsub("_", " ") .. ")",
+            reference and (", reference " .. reference) or "",
+            amount ~= tonumber(o.total_minor) and (" — order total " .. U.money(o.total_minor)) or "")
+        db.query([[UPDATE shop_orders SET payment_method = ?, paid_reference = ?, paid_amount_minor = ?,
+                   paid_at = COALESCE(?::timestamp, NOW()),
+                   internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW() WHERE id = ?]],
+            method, reference or db.NULL, amount, paid_at or db.NULL, note, o.id)
+        o.payment_method = method
+        ShopOrderQueries.applyPaid(o, {})
+        return true
+    end)
+    if err then return nil, err end
+    return ShopOrderQueries.adminGet(ns_id, uuid)
+end
+
+local INVOICEABLE = { pending_payment = true, paid = true, processing = true, shipped = true, delivered = true }
+
+--- POST /orders/:uuid/invoice — an accounting invoice (draft) from a shop order: the customer, one line per
+-- order line, a discount line, delivery, VAT, the customer's PO number and the payment method. Idempotent:
+-- the invoice uuid is kept on the order and a second call returns that invoice ({ existing = true }).
+-- body: { payment_method_uuid?, due_date?, payment_terms_days?, notes? }
+function ShopOrderQueries.createInvoice(ns_id, uuid, body, user_uuid)
+    body = type(body) == "table" and body or {}
+    local okIQ, IQ = pcall(require, "queries.InvoiceQueries")
+    if not okIQ or not has_column("invoices", "po_number") then
+        return nil, U.err(501, "INVOICING_UNAVAILABLE", "Invoicing is not available here")
+    end
+    if U.nz(body.payment_method_uuid) and not PaymentMethods.getRow(ns_id, body.payment_method_uuid) then
+        return nil, U.err(400, "VALIDATION_ERROR", "payment_method_uuid is not one of this workspace's payment methods")
+    end
+    return U.tx(function()
+        local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
+            ns_id, uuid)[1]
+        if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+        if nz(o.invoice_uuid) then
+            local inv = db.query([[SELECT uuid, invoice_number, status FROM invoices
+                                    WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL]], ns_id, o.invoice_uuid)[1]
+            if inv then
+                return { existing = true, invoice_uuid = inv.uuid, invoice_number = inv.invoice_number, status = inv.status }
+            end
+        end
+        if not INVOICEABLE[o.status] then
+            return nil, U.err(409, "NOT_INVOICEABLE", "This order can't be invoiced (status " .. o.status .. ")")
+        end
+        local customer = U.dec(o.customer, {})
+        local billing = U.nz(o.billing_address) and U.dec(o.billing_address, nil) or nil
+        local delivery = U.nz(o.delivery_address) and U.dec(o.delivery_address, nil) or nil
+        local address
+        if type(billing) == "table" and type(billing.address) == "table" then
+            local a = billing.address
+            address = { line1 = a.line1, line2 = a.line2, city = a.city, state = a.state,
+                        postal_code = a.postal_code, country = a.country }
+        elseif type(delivery) == "table" then
+            address = { line1 = delivery.line1, line2 = delivery.line2, city = delivery.city,
+                        postal_code = delivery.postcode, country = delivery.country }
+        end
+        local name = U.nz(customer.company) or U.nz(customer.name) or (type(billing) == "table" and U.nz(billing.name))
+            or U.nz(o.email) or "Customer"
+        local po_number
+        if has_column("shop_orders", "customer_po_number") then
+            local r = db.query("SELECT customer_po_number FROM shop_orders WHERE id = ?", o.id)[1]
+            po_number = r and U.nz(r.customer_po_number) or nil
+        end
+        local items = PM.invoiceLinesFromOrder({
+            lines = U.dec(o.lines, {}), subtotal_minor = o.subtotal_minor, vat_minor = o.vat_minor,
+            shipping_minor = o.shipping_minor,
+        })
+        local note_parts = { "Shop order " .. o.order_number }
+        if U.nz(customer.name) and U.nz(customer.company) then note_parts[#note_parts + 1] = "Attn: " .. customer.name end
+        if U.nz(customer.vat_number) then note_parts[#note_parts + 1] = "Customer VAT number: " .. customer.vat_number end
+        if U.nz(body.notes) then note_parts[#note_parts + 1] = tostring(body.notes):sub(1, 2000) end
+        local notes = table.concat(note_parts, "\n")
+        local res = IQ.create({
+            namespace_id = ns_id, owner_user_uuid = user_uuid,
+            customer_name = tostring(name):sub(1, 255), customer_email = U.nz(customer.email) or U.nz(o.email),
+            customer_address = address and U.enc(address) or nil,
+            currency = o.currency or "GBP", notes = notes,
+            due_date = valid_date(body.due_date), payment_terms_days = tonumber(body.payment_terms_days),
+            po_number = po_number, payment_method_uuid = U.nz(body.payment_method_uuid),
+            line_items = items,
+        })
+        local inv = res and res.data
+        if not inv then return nil, U.err(500, "INVOICE_FAILED", "Could not create the invoice") end
+        db.query([[UPDATE invoices SET metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb WHERE uuid = ?]],
+            U.enc({ shop_order_uuid = o.uuid, shop_order_number = o.order_number }), inv.uuid)
+        db.query([[UPDATE shop_orders SET invoice_uuid = ?, internal_notes = COALESCE(internal_notes || E'\n', '') || ?,
+                   updated_at = NOW() WHERE id = ?]], inv.uuid, "Invoice " .. tostring(inv.invoice_number) .. " created",
+            o.id)
+        local total = db.query("SELECT total_amount FROM invoices WHERE uuid = ?", inv.uuid)[1]
+        return { existing = false, invoice_uuid = inv.uuid, invoice_number = inv.invoice_number, status = "draft",
+                 total_amount = total and tonumber(total.total_amount) or U.null, order_total_minor = o.total_minor }
+    end)
+end
+
+-- ---------------------------------------------------------------------------
 -- admin
 -- ---------------------------------------------------------------------------
 
@@ -624,6 +895,15 @@ function ShopOrderQueries.adminList(ns_id, params)
         where[#where + 1] = "o.status = ?"
         vals[#vals + 1] = params.status
     end
+    -- "Bank transfer due": awaiting a bank transfer, oldest first.
+    local due = params.bank_transfer_due == "true" or params.bank_transfer_due == "1" or params.bank_transfer_due == true
+    if due then
+        where[#where + 1] = "o.status = 'pending_payment' AND o.payment_method = 'bank_transfer'"
+    end
+    if U.nz(params.payment_method) then
+        where[#where + 1] = "COALESCE(o.payment_method, 'card') = ?"
+        vals[#vals + 1] = params.payment_method
+    end
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(o.order_number ILIKE ? OR o.email ILIKE ? OR o.customer->>'name' ILIKE ? "
@@ -633,12 +913,14 @@ function ShopOrderQueries.adminList(ns_id, params)
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
     local rows = db.query("SELECT " .. ORDER_COLS .. [[, q.uuid AS quote_uuid, q.quote_number, c.uuid AS cart_uuid,
+               EXTRACT(DAY FROM NOW() - o.created_at)::int AS days_waiting,
                (SELECT cs.uuid FROM shop_chat_sessions cs WHERE cs.order_id = o.id OR (o.cart_id IS NOT NULL
                    AND cs.cart_id = o.cart_id) ORDER BY cs.id DESC LIMIT 1) AS chat_session_uuid,
                COUNT(*) OVER() AS total
           FROM shop_orders o LEFT JOIN shop_quotes q ON q.id = o.quote_id
           LEFT JOIN shop_carts c ON c.id = o.cart_id
-         WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY o.created_at DESC, o.id DESC LIMIT ? OFFSET ?",
+         WHERE ]] .. table.concat(where, " AND ")
+        .. (due and " ORDER BY o.created_at ASC, o.id ASC" or " ORDER BY o.created_at DESC, o.id DESC") .. " LIMIT ? OFFSET ?",
         unpack(vals))
     local total = rows[1] and tonumber(rows[1].total) or 0
     local out = {}
@@ -647,7 +929,11 @@ function ShopOrderQueries.adminList(ns_id, params)
         s.line_count = #s.lines
         out[#out + 1] = s
     end
-    return U.arr(out), { total = total, limit = limit, offset = offset }
+    -- For the "Bank transfer due" filter badge.
+    local due_row = db.query([[SELECT COUNT(*)::int AS n FROM shop_orders WHERE namespace_id = ?
+                                AND status = 'pending_payment' AND payment_method = 'bank_transfer']], ns_id)[1]
+    return U.arr(out), { total = total, limit = limit, offset = offset,
+                         bank_transfer_due_count = due_row and tonumber(due_row.n) or 0 }
 end
 
 function ShopOrderQueries.adminGet(ns_id, uuid)

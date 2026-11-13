@@ -348,7 +348,10 @@ return function(app)
 
             -- Wrap create: malformed date/number fields hit Postgres casts and would
             -- otherwise surface as a raw 500 instead of a clean validation error.
-            local ok, result = pcall(InvoiceQueries.create, body)
+            local ok, result, verr = pcall(InvoiceQueries.create, body)
+            if ok and not result and verr then
+                return api_response(400, nil, verr)
+            end
             if not ok or not result then
                 ngx.log(ngx.ERR, "[Invoices] create failed: ", tostring(result))
                 return api_response(400, nil, "Could not create invoice — check the submitted fields (dates, amounts, line items)")

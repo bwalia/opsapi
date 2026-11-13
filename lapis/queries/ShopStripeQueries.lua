@@ -14,6 +14,7 @@
           paid → mark paid; otherwise cancel + release
       (b) pending_payment orders Stripe reports as paid (missed webhook) → paid
       (c) release stale held reservations of non-pending orders
+    Bank-transfer orders (payment_method = 'bank_transfer') are left alone: staff mark them paid.
 ]]
 
 local db = require("lapis.db")
@@ -194,7 +195,10 @@ function ShopStripeQueries.reconcile(ns_id, opts)
     local stripe
     if U.env("STRIPE_SECRET_KEY") then stripe = PaymentProvider.get_stripe() end
 
+    -- Bank-transfer orders (Order Authorisations) wait days for the money and Stripe knows nothing about them:
+    -- staff mark them paid (POST /orders/:uuid/mark-paid) or cancel them.
     local where = "o.status = 'pending_payment' AND o.created_at > NOW() - interval '7 days'"
+        .. " AND COALESCE(o.payment_method, 'card') <> 'bank_transfer'"
     local vals = {}
     if ns_id then
         where = where .. " AND o.namespace_id = ?"

@@ -1,24 +1,28 @@
 ---
 title: Shop orders & quotes
 pages: /dashboard/shop/orders, /dashboard/shop/quotes
-api: /api/v2/shop/admin/orders, /api/v2/shop/admin/quotes, /api/v2/shop/admin/products
+api: /api/v2/shop/admin/orders, /api/v2/shop/admin/quotes, /api/v2/shop/admin/products, /api/v2/namespace/payment-methods
 modules: shop
 tools:
-suggestions: Show paid orders awaiting fulfilment | Mark this order as shipped | Draft a quote for 2 GPUs for jane@acme.com
+suggestions: Show paid orders awaiting fulfilment | Which bank transfers are we waiting for? | Mark this order as shipped | Create an invoice for this order
 readonly: false
 ---
 # Shop orders & quotes
-Orders come from Stripe Checkout (cart or paid quote); this page fulfils them. Order status: pending_payment, paid, processing, shipped, delivered, cancelled, refunded, payment_failed. Quotes are priced snapshots the customer opens via a link; status: draft, sent, accepted, expired, converted (paid → became an order), cancelled. Numbers look like WSO-2026-00012 / WSQ-2026-00034. Money is integer pence; line prices ex VAT, VAT added per line.
+Orders come from Stripe Checkout (cart or paid quote) or from an authorised Order Authorisation the customer chose to pay by bank transfer (payment_method bank_transfer: the order waits in pending_payment until staff mark it paid); this page fulfils them. Order status: pending_payment, paid, processing, shipped, delivered, cancelled, refunded, payment_failed. Quotes are priced snapshots the customer opens via a link; status: draft, sent, accepted, expired, converted (paid → became an order), cancelled. Numbers look like WSO-2026-00012 / WSQ-2026-00034. Money is integer pence; line prices ex VAT, VAT added per line.
 
 ## Using the page
 - Orders: search order number/email/company, status filter; click a row.
-- Order detail: status buttons "Start processing", "Mark shipped" (asks Carrier, Tracking number, Tracking URL), "Mark delivered", "Cancel order", "Mark refunded"; Lines; Internal notes → "Save notes"; Customer (Ship to / Bill to); Tracking → "Save"; Payment (Stripe links, From quote, Customer link); Print.
+- Orders: **Bank transfer due** filter (awaiting a bank transfer, oldest first, with days waiting).
+- Order detail: **Mark paid** (pending bank-transfer orders: amount prefilled with the total, method Bank transfer, reference = order number, date today), **Create invoice** (paid orders without an invoice; then open the invoice or download its PDF); status buttons "Start processing", "Mark shipped" (asks Carrier, Tracking number, Tracking URL), "Mark delivered", "Cancel order", "Mark refunded"; Lines; Internal notes → "Save notes"; Customer (Ship to / Bill to); Tracking → "Save"; Payment (Stripe links, From quote, Customer link); Print.
 - Quotes: search quote number/email/company, status filter, "Create quote".
 - Create quote: Lines ("Add line" → Product, Qty, "Unit price override (£ ex VAT)", "Configure options"), Notes (shown to customer), Internal notes, Customer (Name *, Email *, Company, Phone, VAT number, address), Terms (Valid until, Shipping (£ ex VAT)). Then "Save draft" or "Create & mark sent".
 - Quote detail: "Edit lines" → "Save & re-price"; "Status, validity & notes" → Save; Customer → Edit → Save; "Customer link" (copy it to send the quote), "Open customer link", "Download PDF".
 
 ## Rules
-- Order transitions (use only these): pending_payment or payment_failed → cancelled; paid → processing|shipped|cancelled|refunded; processing → shipped|cancelled|refunded; shipped → delivered|refunded; delivered → refunded. Never set paid/payment_failed/pending_payment — Stripe does.
+- Order transitions (use only these): pending_payment or payment_failed → cancelled; paid → processing|shipped|cancelled|refunded; processing → shipped|cancelled|refunded; shipped → delivered|refunded; delivered → refunded. Never set paid/payment_failed/pending_payment with PUT — Stripe does, or staff use mark-paid for a payment that arrived outside Stripe (bank transfer, cheque, other).
+- Mark paid only after the user confirms the money arrived (amount and date). It runs the same paid path as a card payment (stock committed, quote converted). Card orders still in Stripe Checkout can't be marked paid.
+- Bank-transfer orders are not cancelled automatically; their stock is held for 14 days. If the customer then pays by card instead, the bank-transfer order is cancelled for them.
+- Create invoice makes a draft accounting invoice (lines, discount line, delivery, VAT, the customer's PO number, the default bank account) and is idempotent: a second call returns the same invoice. Needs invoices create permission; 501 when invoicing isn't enabled.
 - Cancelling a pending_payment order releases its held stock. Cancelled/refunded only record the status — the refund itself is done in Stripe.
 - Marking shipped: send status shipped plus tracking with shipped_at (ISO time). tracking replaces the whole object.
 - Quotes: 1–100 lines, qty 1–1000, each line needs product_slug (find it via products?q=). Admin quotes may use draft products and invalid configurations. Omitted option groups use their defaults.
@@ -31,6 +35,10 @@ Orders come from Stripe Checkout (cart or paid quote); this page fulfils them. O
 ## API
 - `GET /api/v2/shop/admin/orders?status&q&limit&offset` — list (q = number, email, name, company; limit ≤200)
 - `GET /api/v2/shop/admin/orders/{uuid}` — order with lines, reservations, links
+- `GET /api/v2/shop/admin/orders?bank_transfer_due=true` — orders awaiting a bank transfer, oldest first (each has days_waiting; meta.bank_transfer_due_count)
+- `POST /api/v2/shop/admin/orders/{uuid}/mark-paid {method: bank_transfer|cheque|other (default bank_transfer), reference, paid_at: YYYY-MM-DD, amount_minor: int pence (default the order total)}` — record a payment received outside Stripe; the order becomes paid
+- `POST /api/v2/shop/admin/orders/{uuid}/invoice {payment_method_uuid, due_date: YYYY-MM-DD, payment_terms_days: int, notes}` — draft accounting invoice from the order → {invoice_uuid, invoice_number, existing}
+- `GET /api/v2/namespace/payment-methods` — the workspace's bank accounts (How to pay)
 - `PUT /api/v2/shop/admin/orders/{uuid} {status, tracking: {carrier, tracking_number, url, shipped_at}, internal_notes}` — update status / tracking / notes
 - `GET /api/v2/shop/admin/quotes?status&q&limit&offset` — list
 - `GET /api/v2/shop/admin/quotes/{uuid}` — quote incl. public_url (customer link)
