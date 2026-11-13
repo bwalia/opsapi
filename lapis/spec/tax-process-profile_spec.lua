@@ -57,6 +57,17 @@ if type(profile) == "function" then
     saved_profile = nil
 end
 
+print("mounting (as app.lua's safe_load_routes does: pcall(module, app))")
+local registered = {}
+local fake_app = setmetatable({}, { __index = function(_, method)
+    return function(_, path) registered[#registered + 1] = method .. " " .. tostring(path) end
+end })
+local ok_mount, mount_err = pcall(route, fake_app)
+check("module mounts without error", ok_mount, mount_err)
+local joined = table.concat(registered, "\n")
+check("registers POST /statements/process", joined:find("post /api/v2/tax/statements/process", 1, true) ~= nil, joined)
+check("registers GET /statements/process-status", joined:find("get /api/v2/tax/statements/process-status", 1, true) ~= nil)
+
 print("wiring (source)")
 local h = io.open("lapis/routes/tax-process.lua"); local src = h:read("*a"); h:close()
 check("classify call sends profile_type when set", src:find('body .. "&profile_type=" .. job.profile_type', 1, true) ~= nil)

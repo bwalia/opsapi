@@ -135,9 +135,10 @@ local function process_all(premature, job)
     end
 end
 
-local M = setmetatable({ _classify_profile = classify_profile }, {
-    __call = function(_, app) return M.register(app) end,
-})
+-- Declare M before the metatable: inside `local M = setmetatable(..., { __call = ...M... })`
+-- the closure would see the (nil) global M, and the routes would never mount.
+local M = { _classify_profile = classify_profile }
+setmetatable(M, { __call = function(_, app) return M.register(app) end })
 
 function M.register(app)
     local function parse_body()
