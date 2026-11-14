@@ -16,9 +16,13 @@ local Delta = {}
 -- A difference smaller than this is rounding.
 Delta.TOLERANCE = 1.0
 
+-- HMRC's test service fills some fields with -99999999999.99: a placeholder, not a
+-- figure. Treat it as missing so it's shown as "—", never compared.
+Delta.PLACEHOLDER = -99999999999
+
 local function num(x)
     local n = tonumber(x)
-    if n == nil or n ~= n then return nil end
+    if n == nil or n ~= n or n <= Delta.PLACEHOLDER then return nil end
     return n
 end
 

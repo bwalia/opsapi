@@ -16,6 +16,17 @@
     POST   /api/v2/vat/transactions/apply-rules code un-coded lines by the rules { tax_year?, statement_id?,
                                                   refresh? }
 
+    VAT returns (phase 2):
+    POST   /api/v2/vat/returns/preview          build the 9 boxes for a period (not saved)
+                                                 { period_start, period_end, relevant_goods_gross? }
+    POST   /api/v2/vat/returns                  save/refresh the draft for a period
+    GET    /api/v2/vat/returns                  this business's returns
+    GET    /api/v2/vat/returns/:uuid            one return; ?lines=1 adds the lines behind each box
+    GET    /api/v2/vat/adjustments              ?period_start&period_end
+    POST   /api/v2/vat/adjustments              { period_start, period_end, type = fuel_scale | bad_debt_relief
+                                                  | correction, vat, net, box1, box4, due_date, written_off }
+    DELETE /api/v2/vat/adjustments/:uuid
+
     Whose business: `?scope=user` (default) is the signed-in person's own VAT
     registration (many sole traders share a namespace); `?scope=namespace` is the
     namespace's (accounting), and needs the "vat" module permission.
@@ -27,6 +38,7 @@ local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local VAT = require("lib.vat")
 local VatQueries = require("queries.VatQueries")
+local VatReturnQueries = require("queries.VatReturnQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -167,5 +179,58 @@ return function(app)
         local row, msg, status = VatQueries.set_transaction_vat(reg, actor, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
         return { status = 200, json = { success = true, data = row } }
+    end))
+    -- ---------------------------------------------------------------- returns
+    app:post("/api/v2/vat/returns/preview", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local b = read_body(self)
+        local res, msg = VatReturnQueries.preview(reg, b.period_start, b.period_end,
+            { relevant_goods_gross = b.relevant_goods_gross })
+        if not res then return err(400, msg) end
+        return { status = 200, json = { success = true, data = res } }
+    end))
+
+    app:post("/api/v2/vat/returns", authed(function(self)
+        local reg, actor, e = with_registration(self, "update"); if e then return e end
+        local b = read_body(self)
+        local row, msg, status = VatReturnQueries.save_draft(reg, b.period_start, b.period_end, actor,
+            { relevant_goods_gross = b.relevant_goods_gross })
+        if not row then return err(status or 400, msg) end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:get("/api/v2/vat/returns", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        return { status = 200, json = { success = true, data = VatReturnQueries.list(reg) } }
+    end))
+
+    app:get("/api/v2/vat/returns/:uuid", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local want = self.params.lines == "1" or self.params.lines == "true"
+        local row, msg, status = VatReturnQueries.get(reg, self.params.uuid, { lines = want })
+        if not row then return err(status or 404, msg) end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:get("/api/v2/vat/adjustments", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local ok, perr = VatReturnQueries.check_period(self.params.period_start, self.params.period_end)
+        if not ok then return err(400, perr) end
+        return { status = 200, json = { success = true,
+            data = VatReturnQueries.list_adjustments(reg, self.params.period_start, self.params.period_end) } }
+    end))
+
+    app:post("/api/v2/vat/adjustments", authed(function(self)
+        local reg, actor, e = with_registration(self, "create"); if e then return e end
+        local row, msg, status = VatReturnQueries.create_adjustment(reg, read_body(self), actor)
+        if not row then return err(status or 400, msg) end
+        return { status = 201, json = { success = true, data = row } }
+    end))
+
+    app:delete("/api/v2/vat/adjustments/:uuid", authed(function(self)
+        local reg, _, e = with_registration(self, "delete"); if e then return e end
+        local ok, msg, status = VatReturnQueries.delete_adjustment(reg, self.params.uuid)
+        if not ok then return err(status or 400, msg) end
+        return { status = 200, json = { success = true } }
     end))
 end

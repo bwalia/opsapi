@@ -108,6 +108,7 @@ local tax_menu_file_my_tax = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT,
 local tax_statement_processing_job = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-processing-job") or {}
 local tax_landlord_filing = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-landlord-filing") or {}
 local vat_records = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-records") or {}
+local vat_returns = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-returns") or {}
 -- My Income: definition-driven income types (schema + estimator mapping on income_types),
 -- per-namespace overrides, the user's per-year figures, RBAC module + menu items.
 local tax_my_income_dynamic = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-dynamic") or {}
@@ -2129,6 +2130,8 @@ local _migrations = {
     ['zz_vat_records_2_rules'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 2),
     ['zz_vat_records_3_tax_transactions'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 3),
     ['zz_vat_records_4_accounting'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 4),
+    ['zz_vat_returns_1_returns'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_returns, 1),
+    ['zz_vat_returns_2_adjustments'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_returns, 2),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

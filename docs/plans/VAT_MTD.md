@@ -283,6 +283,53 @@ English.
   behind every box, for an inspection.
 - **Reports:** VAT by code, by supplier and by period, plus reclaimable versus blocked VAT.
 
+## Phase 7: production go-live
+
+Real VAT returns can only be filed once HMRC approves the software.
+
+- Run HMRC's production checks:
+  - fraud-prevention headers pass the Test Fraud Prevention Headers API for every connection method used;
+  - the evidence pack HMRC asks for: screenshots and test logs of each endpoint, and the error handling.
+- Production credentials stay in the Vault ExternalSecret, never in values files or code.
+- `HMRC_ENVIRONMENT=production` must switch the VAT client, as Income Tax does. Add a per-release kill switch (`VAT_FILING_ENABLED`) so filing can be turned off without a deploy.
+- Monitoring and alerts on submission failures. A runbook for HMRC outages and rejected returns.
+- Get the product listed as recognised MTD VAT software.
+
+Steps that need the user (HMRC application and forms) are reported, not done.
+
+## Phase 8: accountants (agents)
+
+- Accountants sign in with their HMRC Agent Services account.
+- Each client authorises them through HMRC's Agent Authorisation API, MTD VAT service: create an invitation, see its status, cancel it.
+- An accountant view lists their clients' VAT registrations, deadlines and draft returns, and files on their behalf. Each client's data stays in their own namespace; access is granted per client, with RBAC.
+- Audit: every return records whether the business or its agent filed it.
+
+## Phase 9: VAT on sales from our own modules
+
+- Invoices from Invoicing and the Shop carry valid VAT invoice details:
+  - supplier VRN, tax point and invoice number;
+  - VAT rate and amount per line, with VAT-exclusive and VAT-inclusive totals;
+  - the reverse-charge wording when it applies.
+- Issued invoices (sales) and supplier bills (purchases) feed the return directly as coded lines. Match them to bank lines so nothing is counted twice.
+- Cash accounting uses payment dates; standard accounting uses the tax point.
+
+## Phase 10: less common schemes
+
+- Full partial exemption: the standard method, the de minimis tests and the annual adjustment.
+- Capital Goods Scheme adjustments.
+- Margin schemes for second-hand goods.
+- VAT groups (one VRN, several members).
+- Northern Ireland EU sales lists where required.
+
+## Phase 11: e-invoicing readiness
+
+The UK is moving to mandatory e-invoicing for VAT-registered businesses from April 2029.
+
+- Export and import invoices as structured data (UBL / Peppol BIS Billing 3.0).
+- Validate them against the schema.
+- Keep the data model ready to exchange through an access point when the UK model is final.
+- Track the HMRC guidance, and record what changes when it is published.
+
 ## Testing and definition of done
 
 For each phase:
@@ -309,14 +356,9 @@ Also:
 - Update `CLAUDE.md` with a "HMRC MTD VAT" section (layers, sandbox gotchas, production
   readiness), as for Income Tax.
 
-## Not in scope for v1 (note them as follow-ups)
+## Follow-ups beyond Phase 11
 
-- Full partial-exemption calculations (standard method and annual adjustment): v1 uses a
-  manual %.
-- The Capital Goods Scheme.
-- Margin schemes (second-hand goods) and the Tour Operators' Margin Scheme.
-- VAT groups.
-- EC Sales Lists.
+- The Tour Operators' Margin Scheme.
 - Making Tax Digital for corporation tax.
 
 ## Report back

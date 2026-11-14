@@ -101,5 +101,15 @@ check("sandbox", sb.sandbox == true)
 check("total row still shown with no HMRC figure", sb.rows[#sb.rows].key == "total" and sb.rows[#sb.rows].hmrc == nil)
 check("missing HMRC figure counts as a difference", sb.differs == true)
 
+print("== HMRC test-service placeholders are not figures")
+local ph = Delta.compare(ours, hmrc(function(c)
+    c.calculation.taxCalculation.incomeTax.incomeTaxDueAfterReliefs = -99999999999.99
+    c.calculation.taxCalculation.totalTaxDeducted = -99999999999.99
+end), { sandbox = true })
+local rk = {}
+for _, r in ipairs(ph.rows) do rk[r.key] = r end
+check("placeholder shown as missing", rk.income_tax_due.hmrc == nil)
+check("placeholder extra is left out", #ph.extras == 0, #ph.extras)
+
 print(failures == 0 and "\nALL PASSED" or ("\n" .. failures .. " FAILED"))
 os.exit(failures == 0 and 0 or 1)
