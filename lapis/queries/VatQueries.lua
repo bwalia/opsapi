@@ -249,6 +249,8 @@ function VatQueries.set_transaction_vat(registration, user_id, uuid, fields, act
     if not vf then return nil, err, 400 end
     vf.vat_source = "user"
     vf.vat_confidence = 1
+    vf.vat_review = false -- a person decided: nothing left to check
+    vf.vat_review_reasons = db.NULL
     vf.vat_reason = fields.reason and tostring(fields.reason):sub(1, 1000) or db.NULL
     vf.vat_rule_id = db.NULL
     vf.vat_registration_id = registration.id

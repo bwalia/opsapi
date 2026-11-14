@@ -27,6 +27,17 @@
                                                   | correction, vat, net, box1, box4, due_date, written_off }
     DELETE /api/v2/vat/adjustments/:uuid
 
+    AI VAT coding (phase 3):
+    POST   /api/v2/vat/transactions/classify    code un-coded lines in the background (rules, memory, model)
+                                                 { tax_year?, period_start?, period_end?, recode? }
+    GET    /api/v2/vat/transactions/classify-status ?tax_year   counts by source, to check, running
+    GET    /api/v2/vat/review                   lines a person should check, with the reasons
+    POST   /api/v2/vat/transactions/:uuid/receipt read a VAT receipt { mime, data (base64) }
+    GET    /api/v2/vat/admin/rule-candidates    platform admin: rules several businesses taught us
+    POST   /api/v2/vat/admin/rule-candidates/:uuid/(promote|dismiss)
+    POST   /api/v2/vat/admin/eval               platform admin: measure the live model on the labelled set
+    GET    /api/v2/vat/admin/eval               the last runs
+
     Whose business: `?scope=user` (default) is the signed-in person's own VAT
     registration (many sole traders share a namespace); `?scope=namespace` is the
     namespace's (accounting), and needs the "vat" module permission.
@@ -39,6 +50,7 @@ local NamespaceMiddleware = require("middleware.namespace")
 local VAT = require("lib.vat")
 local VatQueries = require("queries.VatQueries")
 local VatReturnQueries = require("queries.VatReturnQueries")
+local VatAiQueries = require("queries.VatAiQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -178,6 +190,9 @@ return function(app)
         if not reg then return err(409, "Add your VAT registration first") end
         local row, msg, status = VatQueries.set_transaction_vat(reg, actor, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
+        -- Two agreeing decisions for a supplier teach the business a rule.
+        local ok_l, learned = pcall(VatAiQueries.learn, reg, self.params.uuid, actor)
+        row.learned_rule = ok_l and learned or nil
         return { status = 200, json = { success = true, data = row } }
     end))
     -- ---------------------------------------------------------------- returns
@@ -232,5 +247,69 @@ return function(app)
         local ok, msg, status = VatReturnQueries.delete_adjustment(reg, self.params.uuid)
         if not ok then return err(status or 400, msg) end
         return { status = 200, json = { success = true } }
+    end))
+    -- ---------------------------------------------------------------- AI coding
+    local function own_registration(self)
+        local actor = user_pk(self); if not actor then return nil, nil, err(401, "User not found") end
+        local reg = VatQueries.get_registration(self.namespace.id, actor)
+        if not reg then return nil, nil, err(409, "Add your VAT registration first") end
+        return reg, actor
+    end
+
+    app:post("/api/v2/vat/transactions/classify", authed(function(self)
+        local reg, actor, e = own_registration(self); if e then return e end
+        local b = read_body(self)
+        local res, msg = VatAiQueries.start(reg, actor, { tax_year = b.tax_year, period_start = b.period_start,
+            period_end = b.period_end, recode = b.recode == true or b.recode == "true" })
+        if not res then return err(500, msg) end
+        return { status = 202, json = { success = true, data = res } }
+    end))
+
+    app:get("/api/v2/vat/transactions/classify-status", authed(function(self)
+        local reg, actor, e = own_registration(self); if e then return e end
+        return { status = 200, json = { success = true,
+            data = VatAiQueries.status(reg, actor, { tax_year = self.params.tax_year }) } }
+    end))
+
+    app:get("/api/v2/vat/review", authed(function(self)
+        local reg, actor, e = own_registration(self); if e then return e end
+        return { status = 200, json = { success = true, data = VatAiQueries.review_queue(reg, actor) } }
+    end))
+
+    app:post("/api/v2/vat/transactions/:uuid/receipt", authed(function(self)
+        local reg, actor, e = own_registration(self); if e then return e end
+        local row, msg, status = VatAiQueries.read_receipt(reg, actor, self.params.uuid, read_body(self), actor)
+        if not row then return err(status or 400, msg) end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    local function platform_admin(self)
+        if not self.is_platform_admin then return err(403, "Platform admins only") end
+    end
+
+    app:get("/api/v2/vat/admin/rule-candidates", authed(function(self)
+        local e = platform_admin(self); if e then return e end
+        return { status = 200, json = { success = true, data = VatAiQueries.candidates(self.params.status) } }
+    end))
+
+    app:post("/api/v2/vat/admin/rule-candidates/:uuid/:decision", authed(function(self)
+        local e = platform_admin(self); if e then return e end
+        local d = self.params.decision
+        if d ~= "promote" and d ~= "dismiss" then return err(400, "promote or dismiss") end
+        local row, msg, status = VatAiQueries.decide_candidate(self.params.uuid, d == "promote", user_pk(self))
+        if not row then return err(status or 400, msg) end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:post("/api/v2/vat/admin/eval", authed(function(self)
+        local e = platform_admin(self); if e then return e end
+        local res, msg = VatAiQueries.start_eval(user_pk(self))
+        if not res then return err(500, msg) end
+        return { status = 202, json = { success = true, data = res } }
+    end))
+
+    app:get("/api/v2/vat/admin/eval", authed(function(self)
+        local e = platform_admin(self); if e then return e end
+        return { status = 200, json = { success = true, data = VatAiQueries.eval_runs() } }
     end))
 end
