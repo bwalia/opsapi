@@ -153,6 +153,7 @@ function Agent.run(opts)
 
     local actions = {}
     local nudged = false
+    local empty_nudged = false
     local failures = {} -- "name args" -> times it failed this turn
     ngx.update_time()
     local deadline = ngx.now() + Agent.RUN_SECONDS
@@ -183,6 +184,26 @@ function Agent.run(opts)
         local tool_calls = msg.tool_calls
         if not tool_calls or #tool_calls == 0 then
             local reply = msg.content or ""
+            -- An empty answer must never reach the user (seen live on int: the landlord gave
+            -- their mortgage interest, the turn ended with "" and nothing was saved). Ask the
+            -- model once to act on the last message; then answer honestly.
+            if not tostring(reply):find("%S") then
+                ngx.log(ngx.WARN, "[agent] empty model reply (actions so far: ", #actions, ")")
+                if not empty_nudged then
+                    empty_nudged = true
+                    messages[#messages + 1] = {
+                        role = "system",
+                        content = "Your last reply was empty. Respond to the user's last message now: if they "
+                            .. "gave you figures or details, call the tool that saves them; otherwise write a "
+                            .. "short answer or call ask_user.",
+                    }
+                    goto continue
+                end
+                local saved = false
+                for _, a in ipairs(actions) do if not a.error then saved = true end end
+                reply = saved and "I've saved that. What would you like to do next?"
+                    or "Sorry, I didn't manage to answer that. Could you say it again in one message?"
+            end
             -- Hallucination guard: the model sometimes answers "Done — created X"
             -- without calling any tool (seen live: fake customer + fake INV-0004).
             -- Push back once so it actually calls the tool; if it still claims
@@ -219,11 +240,25 @@ function Agent.run(opts)
             -- The model asks for missing info by calling an ask-style tool
             -- (qwen sometimes invents "ask_followup"). Treat any of these as the
             -- agent asking the user: return the question and end the turn.
-            if name == "ask_user" or name == "ask_followup"
-                or name == "ask_clarification" or name == "ask_question" then
-                local question = args.question or args.message or args.text or msg.content or ""
+            local is_ask = name == "ask_user" or name == "ask_followup"
+                or name == "ask_clarification" or name == "ask_question"
+            local question = is_ask and (args.question or args.message or args.text or args.prompt
+                or msg.content or "") or ""
+            if is_ask and tostring(question):find("%S") then
                 -- Surface any suggested answers so the UI can show them as chips.
                 return { reply = question, quick_replies = args.quick_replies, actions = actions }
+            end
+            if is_ask then
+                -- An ask with no question would end the turn with an empty message: tell
+                -- the model instead, and let it try again.
+                ngx.log(ngx.WARN, "[agent] ", name, " called without a question")
+                messages[#messages + 1] = {
+                    role = "tool", tool_call_id = tc.id, tool_name = name,
+                    content = cjson.encode({ ok = false, error = "ask_user needs the question text in "
+                        .. "'question'. If the user already gave what you need, call the tool that saves "
+                        .. "it instead." }) or "{}",
+                }
+                goto next_call
             end
 
             -- A model that keeps re-sending a call that already failed is stuck:
@@ -271,6 +306,7 @@ function Agent.run(opts)
                 tool_name = name,
                 content = cjson.encode(payload) or "{}",
             }
+            ::next_call::
         end
         ::continue::
     end
