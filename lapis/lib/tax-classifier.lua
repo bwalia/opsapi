@@ -478,7 +478,16 @@ function Classifier.classify_transaction(transaction, opts)
     -- picked a valid category but a wrong/invalid box key from being needlessly flagged.
     local meta = classification.category and cat_meta[classification.category]
     if meta then
-        if meta.hmrc_key then classification.hmrc_category = meta.hmrc_key end
+        if meta.hmrc_key then
+            classification.hmrc_category = meta.hmrc_key
+        else
+            -- A non-business category (transfer, loan_repayments, tax_payments, personal…)
+            -- has no HMRC box: keeping the model's box would put it in the return and let
+            -- that box's deductibility override the category's (a mortgage payment or an
+            -- HMRC tax payment ended up claimed as an expense).
+            classification.hmrc_category = nil
+            classification.no_box = true
+        end
         classification.is_tax_deductible = meta.deductible
     end
 
@@ -513,7 +522,9 @@ function Classifier.classify_transaction(transaction, opts)
         local hk = classification.hmrc_category
         local box = hk and box_by_key[hk]
 
-        if not box then
+        if classification.no_box then -- luacheck: ignore 542
+            -- Nothing to file and nothing claimed: no box to check.
+        elseif not box then
             -- Unknown/legacy-camelCase/hallucinated key: never persist as fileable.
             table.insert(review_reasons,
                 "hmrc_category '" .. tostring(hk) .. "' not in HMRC catalogue")
@@ -557,6 +568,8 @@ function Classifier.classify_transaction(transaction, opts)
         drawings = true,
         uncategorised_expense = true,
         transfer = true,
+        tax_payments = true,
+        loan_repayments = true,
     }
     if classification.category and NON_DEDUCTIBLE_CATEGORIES[classification.category] then
         classification.is_tax_deductible = false
@@ -570,9 +583,15 @@ function Classifier.classify_transaction(transaction, opts)
         classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
     end
 
-    -- Large/anomalous amounts get verified by a human.
+    -- Large amounts get verified by a human where a mistake could under-report: a
+    -- large cost being CLAIMED (capital or private?), or large money IN put somewhere
+    -- other than income (a transfer could hide income). Large rents/sales booked as
+    -- income, and large payments not claimed (mortgage, tax, transfers out), are not.
     local amount = math.abs(tonumber(transaction.amount) or 0)
-    if amount > 10000 then
+    local cat_income = meta and meta.income
+    local risky_large = is_credit and not cat_income
+        or (not is_credit and classification.is_tax_deductible ~= false)
+    if amount > 10000 and risky_large then
         table.insert(review_reasons, string.format("large amount (£%.2f) — verify", amount))
     end
 

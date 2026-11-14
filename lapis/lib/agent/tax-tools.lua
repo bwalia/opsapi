@@ -86,7 +86,8 @@ end
 TaxTools.income_catalogue = income_catalogue
 
 -- Profile keys that hold figures for ONE tax year (cleared when the year changes).
-local YEAR_FIGURES = { "property_finance_costs", "property_rents", "property_expenses" }
+local YEAR_FIGURES = { "property_finance_costs", "commercial_finance_costs", "property_rents",
+    "property_expenses" }
 
 local save_profile_patch -- defined below (needs TaxTools.merge_profile)
 
@@ -262,6 +263,11 @@ register({
                 description = "Residential mortgage/loan INTEREST + finance fees for the tax year in £ "
                     .. "(not capital repayments). 0 if none.",
             },
+            commercial_finance_costs = {
+                type = "number",
+                description = "Mortgage/loan INTEREST on COMMERCIAL (non-residential) property for the tax "
+                    .. "year in £ (not capital repayments). It is an ordinary expense. 0 if none.",
+            },
             property_income = {
                 type = "number",
                 description = "Optional, only for users who are ALSO self-employed: total rents "
@@ -282,6 +288,13 @@ register({
             return nil, "residential_finance_costs must be a number of pounds, 0 or more."
         end
         local patch = { property_finance_costs = math.floor(fc * 100 + 0.5) / 100 }
+        if args.commercial_finance_costs ~= nil then
+            local cfc = tonumber(args.commercial_finance_costs)
+            if not cfc or cfc ~= cfc or cfc < 0 or cfc == math.huge then
+                return nil, "commercial_finance_costs must be a number of pounds, 0 or more."
+            end
+            patch.commercial_finance_costs = math.floor(cfc * 100 + 0.5) / 100
+        end
         local rents, pexp = tonumber(args.property_income), tonumber(args.property_expenses)
         if args.property_income ~= nil then
             if not rents or rents < 0 then return nil, "property_income must be 0 or more." end
@@ -295,11 +308,13 @@ register({
         return {
             saved = true,
             property_finance_costs = patch.property_finance_costs,
+            commercial_finance_costs = patch.commercial_finance_costs,
             property_rents = patch.property_rents,
             property_expenses = patch.property_expenses,
             tax_credit_rate = 0.20,
             note = "Saved. Residential finance costs are not deducted from rental profit; they give a "
-                .. "20% tax reduction instead. Call compute_estimate to show the updated estimate.",
+                .. "20% tax reduction instead. Commercial interest is deducted as an expense. Call "
+                .. "compute_estimate to show the updated estimate.",
         }
     end,
 })
@@ -439,6 +454,17 @@ register({
         return { updated = true, category = c.key, label = c.label, hmrc_box = c.hmrc_box }
     end,
 })
+
+-- Commercial property interest the landlord stated, as an expense. Interest already
+-- classified from the statements beyond the residential figure (the old way, kept for
+-- years classified before mortgage payments stopped being claimed) already counts as
+-- an expense, so only the part of the stated figure not already in `expenses` is added.
+local function commercial_interest(profile, opts, fin)
+    local stated = math.max(0, tonumber(profile.commercial_finance_costs) or 0)
+    local already = math.max(0, (tonumber(opts.finance_interest) or 0) - fin)
+    return math.max(0, stated - already)
+end
+TaxTools._commercial_interest = commercial_interest
 
 -- ======================= shared year estimate =======================
 -- The chat estimate, the Calculate screens (routes/tax-calculate), the reports
@@ -580,11 +606,12 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     for _, t in ipairs(types) do if t == "uk_property" then has_property = true end end
     local fin = math.max(0, tonumber(profile.property_finance_costs) or 0)
     local notes = {}
-    local moved = 0
+    local moved, added = 0, 0
     if only_property and not has_se then
         moved = math.min(fin, math.max(0, tonumber(opts.finance_interest) or 0))
         inp.property_rents = income
-        inp.property_expenses = expenses - moved
+        added = commercial_interest(profile, opts, fin)
+        inp.property_expenses = expenses - moved + added
         inp.property_finance_costs = fin
     elseif has_se and has_property and tonumber(profile.property_rents) then
         -- Mixed self-employment + property: split the bank totals ONLY with the rental
@@ -627,7 +654,7 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
     full.tax_year = tax_year
     full.gross_income = income
     -- Allowable expenses: residential interest moved out under Section 24 is not one.
-    full.total_expenses = expenses - moved
+    full.total_expenses = expenses - moved + added
     full.unreviewed_count = tonumber(opts.unreviewed) or 0
     full.profit = (full.schedules.trading_profit or 0) + (full.schedules.property_profit or 0)
     full.trading_profit = full.profit

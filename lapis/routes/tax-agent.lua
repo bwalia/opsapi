@@ -259,9 +259,12 @@ return function(app)
                     .. "apply_classification_fix with that uuid and a valid category key from the queue. The user "
                     .. "confirms before it saves.",
                 "- LANDLORDS (uk_property): bank statements can't separate mortgage interest from capital, so "
-                    .. "before the first estimate ask_user ONCE for this year's residential mortgage/loan INTEREST "
-                    .. "(not capital repayments; not commercial-property interest, which stays a normal expense), "
-                    .. "then call set_property_finance_costs (0 if none). If they are ALSO self-employed, ask for "
+                    .. "before the first estimate ask_user ONCE for this year's mortgage/loan INTEREST (not "
+                    .. "capital repayments): residential lets and, if they have any, commercial property "
+                    .. "separately (commercial interest is a normal expense, residential earns a 20% credit). "
+                    .. "Then call set_property_finance_costs with residential_finance_costs and "
+                    .. "commercial_finance_costs (0 if none); mortgage payments in the bank statement are never "
+                    .. "deducted. If they are ALSO self-employed, ask for "
                     .. "their total rental income and rental expenses too and pass them as property_income / "
                     .. "property_expenses. Skip this if the context shows finance costs already on file.",
                 "- After classification, call compute_estimate and tell the user their estimated tax in one sentence.",
@@ -297,6 +300,8 @@ return function(app)
                 "- Income type(s) on file: " .. types_str,
                 "- Residential finance costs on file: " .. (tonumber(profile.property_finance_costs)
                     and string.format("£%.2f", tonumber(profile.property_finance_costs)) or "not given yet"),
+                "- Commercial property interest on file: " .. (tonumber(profile.commercial_finance_costs)
+                    and string.format("£%.2f", tonumber(profile.commercial_finance_costs)) or "not given"),
                 data_state(session),
                 "- Today (UTC): " .. os.date("!%Y-%m-%d"),
             }, "\n"),

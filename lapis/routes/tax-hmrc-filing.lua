@@ -10,8 +10,13 @@
          calculation and return HMRC's calculated figures. Does NOT file the return.
 
     POST /api/v2/tax/hmrc/sandbox/provision { tax_year, nino?, business_id? }
-         Sandbox only: create a stateful test self-employment business + set MTD ITSA
-         status so cumulative submissions/calculations work for the tax year.
+         Sandbox only: create a stateful test business (self-employment, or UK property
+         for a landlord) + set MTD ITSA status so cumulative submissions/calculations
+         work for the tax year.
+
+    Which business is filed comes from the File My Tax profile (filingKind): a landlord
+    with only UK property files the UK property cumulative summary
+    (lib/hmrc-property-aggregator.lua); everyone else files self-employment.
 ]]
 
 local db = require("lapis.db")
@@ -32,19 +37,53 @@ end
 
 -- Load the tax profile row (NINO + default business) for a user_id.
 local function getProfile(user_id)
-    local rows = db.select(
-        "nino_encrypted, nino_last4, default_business_id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
-        user_id)
+    local ok, rows = pcall(db.select,
+        "nino_encrypted, nino_last4, default_business_id, default_property_business_id "
+        .. "FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+    if not ok then
+        rows = db.select(
+            "nino_encrypted, nino_last4, default_business_id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
+            user_id)
+    end
     return rows and rows[1]
+end
+
+local PROPERTY = "uk-property"
+local SELF_EMPLOYMENT = "self-employment"
+
+-- What File My Tax files for this user and year, from the income types they gave the
+-- assistant: "uk-property" (landlord only), "self-employment", or "mixed" (both, which
+-- one HMRC submission from one set of bank totals can't split).
+local function filingKind(user_id, tax_year)
+    local ok, TaxTools = pcall(require, "lib.agent.tax-tools")
+    if not ok then return SELF_EMPLOYMENT, {} end
+    local profile = TaxTools.profile_for(user_id, tax_year) or {}
+    local se, prop = false, false
+    for _, t in ipairs(profile.income_types or {}) do
+        if t == "self_employment" then se = true end
+        if t == "uk_property" then prop = true end
+    end
+    if prop and se then return "mixed", profile end
+    if prop then return PROPERTY, profile end
+    return SELF_EMPLOYMENT, profile
+end
+
+-- The stored filing business for a kind.
+local function storedBusiness(profile, kind)
+    if not profile then return nil end
+    local id = (kind == PROPERTY) and profile.default_property_business_id or profile.default_business_id
+    if id == nil or id == "" or id == ngx.null then return nil end
+    return id
 end
 
 -- Remember the filing business on the user's profile, creating the profile if this is
 -- the first thing ever stored for them (user_uuid and namespace_id are NOT NULL).
-local function saveDefaultBusiness(user_id, business_id)
+local function saveDefaultBusiness(user_id, business_id, kind)
+    local col = (kind == PROPERTY) and "default_property_business_id" or "default_business_id"
     local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
     if existing and #existing > 0 then
         db.update("tax_user_profiles",
-            { default_business_id = business_id, updated_at = db.raw("NOW()") },
+            { [col] = business_id, updated_at = db.raw("NOW()") },
             { user_id = user_id })
         return
     end
@@ -55,7 +94,7 @@ local function saveDefaultBusiness(user_id, business_id)
         user_id = user_id,
         user_uuid = user_uuid,
         namespace_id = NamespaceResolver.getByUuid(user_uuid) or 0,
-        default_business_id = business_id,
+        [col] = business_id,
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()"),
     })
@@ -80,30 +119,42 @@ end
 -- endpoint only accepts a business created this way; the ones from the Business Details
 -- list / obligations (e.g. XBIS12345678901) are not fileable. Used by the
 -- calculate-preview self-heal (mirrors the explicit /sandbox/provision route).
-local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id)
+local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id, kind)
     local start_date, end_date = Aggregator.tax_year_bounds(tax_year)
     if not start_date then return nil, "Invalid tax year" end
 
-    local biz, berr, bbody = Client.create_test_business(token, nino, {
-        typeOfBusiness = "self-employment",
-        tradingName = "OpsAPI Test SE",
-        -- HMRC Test Support now rejects a self-employment business without it
-        -- (RULE_MISSING_TRADING_TYPE).
-        tradingType = "Plastering",
-        firstAccountingPeriodStartDate = start_date,
-        firstAccountingPeriodEndDate = end_date,
-        accountingType = "ACCRUALS",
-        commencementDate = start_date,
-        businessAddressLineOne = "1 Test Street",
-        businessAddressTownOrCity = "London",
-        businessAddressPostcode = "SW1A 1AA",
-        businessAddressCountryCode = "GB",
-    })
+    local params
+    if kind == PROPERTY then
+        params = {
+            typeOfBusiness = PROPERTY,
+            firstAccountingPeriodStartDate = start_date,
+            firstAccountingPeriodEndDate = end_date,
+            accountingType = "CASH",
+            commencementDate = start_date,
+        }
+    else
+        params = {
+            typeOfBusiness = SELF_EMPLOYMENT,
+            tradingName = "OpsAPI Test SE",
+            -- HMRC Test Support now rejects a self-employment business without it
+            -- (RULE_MISSING_TRADING_TYPE).
+            tradingType = "Plastering",
+            firstAccountingPeriodStartDate = start_date,
+            firstAccountingPeriodEndDate = end_date,
+            accountingType = "ACCRUALS",
+            commencementDate = start_date,
+            businessAddressLineOne = "1 Test Street",
+            businessAddressTownOrCity = "London",
+            businessAddressPostcode = "SW1A 1AA",
+            businessAddressCountryCode = "GB",
+        }
+    end
+    local biz, berr, bbody = Client.create_test_business(token, nino, params)
     if not biz then return nil, berr or "Failed to create sandbox business", bbody end
 
     -- Set MTD ITSA status for the year so calculations are allowed.
     local submitted_on = os.date("!%Y-%m-%dT%H:%M:%S") .. ".000Z"
-    Client.set_itsa_status(token, nino, tax_year, {
+    local itsa_ok, itsa_err = Client.set_itsa_status(token, nino, tax_year, {
         {
             submittedOn = submitted_on,
             status = "MTD Mandated",
@@ -112,10 +163,10 @@ local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_yea
         },
     })
 
-    -- Remember it as the default filing business.
-    pcall(saveDefaultBusiness, user_id, biz)
+    -- Remember it as the default filing business for this kind.
+    pcall(saveDefaultBusiness, user_id, biz, kind)
 
-    return biz
+    return biz, nil, nil, itsa_ok, itsa_err
 end
 
 -- Shared prep for the calculate-preview and final-declaration routes: resolve the HMRC
@@ -151,10 +202,30 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
             error = "No NINO available — create/connect a sandbox test user first" } }
     end
 
+    local kind, fprofile = filingKind(user_id, tax_year)
+    if kind == "mixed" then
+        return nil, { status = 422, json = { code = "MIXED_INCOME_NOT_SUPPORTED",
+            error = "You have both self-employment and rental income. Filing both from one set of bank "
+                .. "statements isn't supported here yet, so choose \"Our accountant files it\"." } }
+    end
+    local is_property = (kind == PROPERTY)
+
     -- Aggregate classified transactions into the MTD body.
-    local agg, aerr = Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year })
+    local agg, aerr
+    if is_property then
+        agg, aerr = require("lib.hmrc-property-aggregator").build_cumulative_body({
+            user_id = user_id, tax_year = tax_year, profile = fprofile })
+    else
+        agg, aerr = Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year })
+    end
     if not agg then return nil, { status = 400, json = { error = aerr } } end
     if #agg.negative_fields > 0 then
+        if is_property then
+            return nil, { status = 422, json = {
+                error = "Your rental income comes out negative, which HMRC rejects. Check refunds or money "
+                    .. "paid back to tenants are categorised correctly.",
+                negative_fields = agg.negative_fields } }
+        end
         local neg_fields = {}
         for _, nf in ipairs(agg.negative_fields) do
             table.insert(neg_fields, (nf.field:gsub("Disallowable$", "")))
@@ -178,37 +249,43 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
                 .. "left out of the figures, so filing now would under-report them — review them first." } }
     end
 
-    -- Resolve the business id: param → stored default → first self-employment from HMRC.
+    -- Resolve the business id: param → stored default → the right business from HMRC.
     local business_id = self.params.business_id
-    if (not business_id or business_id == "") and profile then
-        business_id = profile.default_business_id
-    end
+    if not business_id or business_id == "" then business_id = storedBusiness(profile, kind) end
     if not business_id or business_id == "" then
         local list = Client.list_businesses(token, nino)
-        if list then business_id = Client.first_self_employment(list) end
+        if list then
+            business_id = is_property and Client.first_uk_property(list) or Client.first_self_employment(list)
+        end
+    end
+    if (not business_id or business_id == "") and Client.is_sandbox() then
+        business_id = provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id, kind)
     end
     if not business_id or business_id == "" then
         return nil, { status = 422, json = {
-            error = "No HMRC self-employment business found for this NINO. In sandbox, run "
-                .. "'Set up sandbox business' first." } }
+            error = "No HMRC " .. (is_property and "UK property" or "self-employment")
+                .. " business found for this National Insurance number." } }
     end
 
-    -- Build the cumulative body (aggregator output + the period dates).
+    -- Build the body (self-employment needs the period dates added; property has them).
     local body = agg.body
-    body.periodDates = { periodStartDate = agg.tax_year_start, periodEndDate = agg.tax_year_end }
+    if not is_property then
+        body.periodDates = { periodStartDate = agg.tax_year_start, periodEndDate = agg.tax_year_end }
+    end
+    local submit = is_property and Client.submit_property_cumulative or Client.submit_cumulative
 
     -- Submit the cumulative period. In the sandbox the only fileable business is one
     -- created via the test-support API; the businesses from the Business Details list /
     -- obligations (e.g. XBIS12345678901) are NOT stateful, so submitting against them
     -- returns MATCHING_RESOURCE_NOT_FOUND. Self-heal: provision a stateful business for
     -- this NINO + tax year and retry once, so the user never has to know about provisioning.
-    local sres, serr, sbody = Client.submit_cumulative(token, nino, business_id, tax_year, body)
+    local sres, serr, sbody = submit(token, nino, business_id, tax_year, body)
     if not sres and Client.is_sandbox()
         and sbody and sbody.code == "MATCHING_RESOURCE_NOT_FOUND" then
-        local new_biz, perr = provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id)
+        local new_biz, perr = provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id, kind)
         if new_biz then
             business_id = new_biz
-            sres, serr, sbody = Client.submit_cumulative(token, nino, business_id, tax_year, body)
+            sres, serr, sbody = submit(token, nino, business_id, tax_year, body)
         else
             serr = perr or serr
         end
@@ -216,10 +293,10 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     if not sres then
         local hint = ""
         if sbody and sbody.code == "MATCHING_RESOURCE_NOT_FOUND" then
-            hint = " HMRC has no self-employment record for this combination of NINO, "
-                .. "business (" .. tostring(business_id) .. ") and tax year (" .. tax_year
-                .. "). File for a tax year HMRC shows as open for this business — use the "
-                .. "open obligation rather than a typed year."
+            hint = " HMRC has no " .. (is_property and "UK property" or "self-employment")
+                .. " record for this combination of NINO, business (" .. tostring(business_id)
+                .. ") and tax year (" .. tax_year .. "). File for a tax year HMRC shows as open for "
+                .. "this business — use the open obligation rather than a typed year."
         end
         return nil, { status = 502, json = {
             error = "HMRC rejected the period submission." .. hint,
@@ -228,7 +305,7 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     end
 
     return {
-        tax_year = tax_year, user_id = user_id, user_uuid = user_uuid,
+        tax_year = tax_year, user_id = user_id, user_uuid = user_uuid, kind = kind,
         token = token, nino = nino, business_id = business_id, agg = agg, body = body,
     }, nil
 end
@@ -253,10 +330,17 @@ return function(app)
                 return { status = 500, json = { error = "Aggregator not available" } }
             end
 
-            local result, err = Aggregator.build_cumulative_body({
-                user_id = user_id,
-                tax_year = tax_year,
-            })
+            local kind, fprofile = filingKind(user_id, tax_year)
+            local result, err
+            if kind == PROPERTY then
+                result, err = require("lib.hmrc-property-aggregator").build_cumulative_body({
+                    user_id = user_id, tax_year = tax_year, profile = fprofile })
+            else
+                result, err = Aggregator.build_cumulative_body({
+                    user_id = user_id,
+                    tax_year = tax_year,
+                })
+            end
             if not result then
                 return { status = 400, json = { error = err or "Aggregation failed" } }
             end
@@ -266,7 +350,16 @@ return function(app)
             local warnings = {}
             local blocking = false
             local offending_transactions = {}
-            if #result.negative_fields > 0 then
+            if kind == "mixed" then
+                blocking = true
+                table.insert(warnings, "You have both self-employment and rental income. Filing both from "
+                    .. "one set of bank statements isn't supported here yet, so choose \"Our accountant files it\".")
+            end
+            if kind == PROPERTY and #result.negative_fields > 0 then
+                blocking = true
+                table.insert(warnings, "Your rental income comes out negative, which HMRC rejects. Check "
+                    .. "refunds or money paid back to tenants are categorised correctly.")
+            elseif #result.negative_fields > 0 then
                 blocking = true
                 local fields = {}
                 for _, nf in ipairs(result.negative_fields) do
@@ -299,6 +392,7 @@ return function(app)
                     success = true,
                     data = {
                         tax_year = tax_year,
+                        filing_kind = kind,
                         period = { from = result.tax_year_start, to = result.tax_year_end },
                         body = result.body,
                         stats = result.stats,
@@ -375,6 +469,7 @@ return function(app)
 
             return { status = 200, json = { success = true, data = {
                 tax_year = ctx.tax_year,
+                filing_kind = ctx.kind,
                 business_id = ctx.business_id,
                 calculation_id = calc_id,
                 figures = figures,
@@ -564,9 +659,15 @@ return function(app)
         AuthMiddleware.requireAuth(function(self)
             local user_id = getUserId(self.current_user)
             if not user_id then return { status = 200, json = { business_id = nil } } end
+            local kind = SELF_EMPLOYMENT
+            if self.params.tax_year and self.params.tax_year ~= "" then
+                kind = filingKind(user_id, self.params.tax_year)
+            end
             local profile = getProfile(user_id)
             return { status = 200, json = {
-                business_id = (profile and profile.default_business_id ~= "" and profile.default_business_id) or nil } }
+                business_id = storedBusiness(profile, kind == PROPERTY and PROPERTY or SELF_EMPLOYMENT),
+                -- "uk-property" | "self-employment" | "mixed": which HMRC business File My Tax files.
+                filing_kind = kind } }
         end)
     )
 
@@ -581,8 +682,13 @@ return function(app)
             local user_id = getUserId(self.current_user)
             if not user_id then return { status = 401, json = { error = "User not found" } } end
 
-            saveDefaultBusiness(user_id, business_id)
-            return { status = 200, json = { success = true, data = { business_id = business_id } } }
+            local kind = self.params.kind
+            if kind ~= PROPERTY and self.params.tax_year and self.params.tax_year ~= "" then
+                kind = filingKind(user_id, self.params.tax_year)
+            end
+            kind = (kind == PROPERTY) and PROPERTY or SELF_EMPLOYMENT
+            saveDefaultBusiness(user_id, business_id, kind)
+            return { status = 200, json = { success = true, data = { business_id = business_id, kind = kind } } }
         end)
     )
 
@@ -605,7 +711,7 @@ return function(app)
             if not tax_year then
                 return { status = 400, json = { error = "tax_year is required (e.g. 2025-26)" } }
             end
-            local start_date, end_date, yerr = Aggregator.tax_year_bounds(tax_year)
+            local start_date, _, yerr = Aggregator.tax_year_bounds(tax_year)
             if not start_date then return { status = 400, json = { error = yerr } } end
 
             local user_id = getUserId(self.current_user)
@@ -622,43 +728,17 @@ return function(app)
                 return { status = 400, json = { error = "No NINO available — connect a sandbox test user first" } }
             end
 
-            -- Create the test business.
-            local biz, berr, bbody = Client.create_test_business(token, nino, {
-                typeOfBusiness = "self-employment",
-                tradingName = "OpsAPI Test SE",
-                -- HMRC Test Support now rejects a self-employment business without it
-                -- (RULE_MISSING_TRADING_TYPE).
-                tradingType = "Plastering",
-                firstAccountingPeriodStartDate = start_date,
-                firstAccountingPeriodEndDate = end_date,
-                accountingType = "ACCRUALS",
-                commencementDate = start_date,
-                businessAddressLineOne = "1 Test Street",
-                businessAddressTownOrCity = "London",
-                businessAddressPostcode = "SW1A 1AA",
-                businessAddressCountryCode = "GB",
-            })
+            local kind = filingKind(user_id, tax_year)
+            local biz, berr, bbody, itsa_ok, iterr =
+                provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id, kind)
             if not biz then
                 return { status = 502, json = {
                     error = "Failed to create sandbox business", detail = berr, hmrc = bbody } }
             end
 
-            -- Set MTD ITSA status for the year (so calculations are allowed).
-            local submitted_on = os.date("!%Y-%m-%dT%H:%M:%S") .. ".000Z"
-            local itsa_ok, iterr = Client.set_itsa_status(token, nino, tax_year, {
-                {
-                    submittedOn = submitted_on,
-                    status = "MTD Mandated",
-                    statusReason = "Sign up - return available",
-                    businessIncome2YearsPrior = 35000.00,
-                },
-            })
-
-            -- Remember the business id on the profile for future calculate-preview calls.
-            pcall(saveDefaultBusiness, user_id, biz)
-
             return { status = 200, json = { success = true, data = {
                 business_id = biz,
+                kind = (kind == PROPERTY) and PROPERTY or SELF_EMPLOYMENT,
                 itsa_status = itsa_ok and "MTD Mandated" or nil,
                 itsa_error = (not itsa_ok) and iterr or nil,
             } } }

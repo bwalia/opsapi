@@ -264,10 +264,16 @@ export interface HmrcOffendingTransaction {
   field: string; // the MTD field it was wrongly placed under (e.g. wagesAndStaffCosts)
 }
 
+/** Which HMRC business File My Tax files: a landlord files UK property. */
+export type HmrcFilingKind = 'self-employment' | 'uk-property' | 'mixed';
+
 export interface HmrcAggregatePreview {
   tax_year: string;
+  filing_kind?: HmrcFilingKind;
   period: { from: string; to: string };
-  body: Record<string, Record<string, number>>;
+  // Self-employment: { periodIncome, periodExpenses, ... }. UK property:
+  // { fromDate, toDate, ukProperty: { income, expenses } }.
+  body: Record<string, unknown>;
   stats: {
     rows?: number;
     applied?: number;
@@ -634,22 +640,38 @@ export const taxService = {
 
   // The business id we'll file against (stored default). In sandbox this is the
   // test-support stateful business, which the Business Details list doesn't return.
-  async getDefaultHmrcBusiness(): Promise<string | null> {
-    const response = await apiClient.get(`${TAX_BASE}/hmrc/business/default`);
-    return (response.data?.business_id as string) || null;
+  // With a tax year it also says which kind of business is filed (a landlord files
+  // UK property) and returns that kind's stored business.
+  async getDefaultHmrcBusiness(taxYear?: string): Promise<string | null> {
+    return (await this.getHmrcFilingBusiness(taxYear)).businessId;
   },
 
-  // Persist the chosen default self-employment business for filing.
-  async selectHmrcBusiness(businessId: string): Promise<void> {
+  async getHmrcFilingBusiness(taxYear?: string): Promise<{ businessId: string | null; filingKind: HmrcFilingKind }> {
+    const response = await apiClient.get(`${TAX_BASE}/hmrc/business/default`, {
+      params: taxYear ? { tax_year: taxYear } : undefined,
+    });
+    const kind = response.data?.filing_kind as HmrcFilingKind | undefined;
+    return {
+      businessId: (response.data?.business_id as string) || null,
+      filingKind: kind === 'uk-property' || kind === 'mixed' ? kind : 'self-employment',
+    };
+  },
+
+  // Persist the chosen default business for filing (of the kind filed for that tax year).
+  async selectHmrcBusiness(businessId: string, taxYear?: string): Promise<void> {
     const params = new URLSearchParams();
     params.append('business_id', businessId);
+    if (taxYear) params.append('tax_year', taxYear);
     await apiClient.post(`${TAX_BASE}/hmrc/business/select`, params.toString());
   },
 
   // Pull obligations (periods due to file) live from HMRC for a business + window.
-  async fetchHmrcObligations(businessId: string, from: string, to: string): Promise<HmrcObligation[]> {
+  async fetchHmrcObligations(
+    businessId: string, from: string, to: string, typeOfBusiness?: HmrcFilingKind,
+  ): Promise<HmrcObligation[]> {
     const params = new URLSearchParams();
     params.append('business_id', businessId);
+    if (typeOfBusiness === 'uk-property') params.append('type_of_business', 'uk-property');
     params.append('from_date', from);
     params.append('to_date', to);
     const response = await apiClient.post('/api/v2/hmrc/obligations/fetch', params.toString());

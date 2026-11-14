@@ -145,6 +145,39 @@ function Client.submit_cumulative(token, nino, business_id, tax_year, body)
 end
 
 -- ---------------------------------------------------------------------------
+-- Property Business (v6): UK property cumulative period summary (tax years from 2025-26)
+-- ---------------------------------------------------------------------------
+-- @param body table { fromDate, toDate, ukProperty = { income, expenses } }
+function Client.submit_property_cumulative(token, nino, business_id, tax_year, body)
+    local httpc, err = http_client()
+    if not httpc then return nil, err end
+    local url = string.format(
+        "%s/individuals/business/property/uk/%s/%s/cumulative/%s",
+        base_url(), nino, business_id, tax_year)
+    local res, rerr = httpc:request_uri(url, {
+        method = "PUT",
+        body = cjson.encode(body),
+        headers = headers(token, "6.0", { json_body = true, test_scenario = "STATEFUL" }),
+        ssl_verify = true,
+    })
+    if not res then return nil, "submit_property_cumulative request failed: " .. tostring(rerr) end
+    if res.status >= 400 then
+        return nil, "HTTP " .. res.status, decode(res.body)
+    end
+    return { status = res.status }, nil  -- 204 No Content on success
+end
+
+-- Find the UK property business id from a Business Details list response.
+function Client.first_uk_property(list_data)
+    local list = list_data and (list_data.listOfBusinesses or list_data.businesses)
+    if type(list) ~= "table" then return nil end
+    for _, b in ipairs(list) do
+        if b.typeOfBusiness == "uk-property" and b.businessId then return b.businessId end
+    end
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Individual Calculations (v8): trigger + retrieve
 -- ---------------------------------------------------------------------------
 -- calc_type ∈ {"in-year", "intent-to-finalise", "intent-to-amend"}. Preview uses in-year.
