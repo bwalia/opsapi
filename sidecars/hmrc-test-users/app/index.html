@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HMRC test users</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --brand:#0f766e; --brand-ink:#fff; --warn:#92400e; --warn-bg:#fef3c7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1220; --card:#111a2e; --ink:#e2e8f0; --muted:#94a3b8; --line:#1e293b; --brand:#14b8a6; --brand-ink:#04201d; --warn:#fcd34d; --warn-bg:#3a2a06; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  p.lead { color:var(--muted); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+  .note { background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:10px 12px; font-size:13px; margin-bottom:16px; }
+  label.svc { display:flex; gap:10px; align-items:center; padding:6px 0; }
+  button { font:inherit; border:0; border-radius:8px; padding:10px 16px; cursor:pointer; }
+  button.primary { background:var(--brand); color:var(--brand-ink); font-weight:600; }
+  button.primary:disabled { opacity:.6; cursor:wait; }
+  button.copy { background:transparent; color:var(--brand); border:1px solid var(--line); padding:4px 10px; font-size:13px; }
+  .row { display:grid; grid-template-columns:150px 1fr auto; gap:10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); }
+  .row:first-of-type { border-top:0; }
+  .k { color:var(--muted); font-size:13px; }
+  .v { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
+  .err { color:#dc2626; margin-top:12px; }
+  ol { padding-left:20px; color:var(--muted); }
+  a { color:var(--brand); }
+  @media (max-width:560px) { .row { grid-template-columns:1fr auto; } .k { grid-column:1 / -1; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>HMRC sandbox test users</h1>
+  <p class="lead">Make a fresh HMRC test taxpayer to try File My Tax end to end. Each one is a new person in HMRC's sandbox, not a real taxpayer.</p>
+
+  <div class="card">
+    <div class="note">Sandbox only. Copy the password now: it is shown once and is not stored here.</div>
+    <div id="services"></div>
+    <div style="margin-top:12px"><button class="primary" id="go">Create test user</button></div>
+    <div class="err" id="err" role="alert"></div>
+  </div>
+
+  <div id="results"></div>
+
+  <div class="card">
+    <strong>Using it in OpsAPI</strong>
+    <ol>
+      <li>In File My Tax, add the <b>National Insurance number</b> shown.</li>
+      <li>Choose <b>File directly with HMRC</b> and connect. On HMRC's page sign in with the <b>User ID</b> and <b>Password</b>, then grant access.</li>
+      <li>OpsAPI finds (or, in the sandbox, sets up) the self-employment or UK property business and files against it.</li>
+    </ol>
+    <p id="ui-link" style="display:none">Open <a id="ui-href" target="_blank" rel="noopener">OpsAPI</a></p>
+  </div>
+</main>
+<script>
+  const PREFIX = "__PREFIX__";
+  const UI = "__OPSAPI_UI__";
+  const $ = (id) => document.getElementById(id);
+  if (UI) { $("ui-link").style.display = "block"; $("ui-href").href = UI + "/dashboard/tax/file"; }
+
+  async function loadServices() {
+    const r = await fetch(PREFIX + "/api/services");
+    const d = await r.json();
+    $("services").innerHTML = d.services.map((s) =>
+      `<label class="svc"><input type="checkbox" value="${s.key}" ${s.default ? "checked" : ""}> ${s.label}</label>`).join("");
+  }
+
+  function row(label, value) {
+    if (value === undefined || value === null || value === "") return "";
+    const v = typeof value === "object" ? Object.values(value).filter(Boolean).join(", ") : String(value);
+    const safe = v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    return `<div class="row"><span class="k">${label}</span><span class="v">${safe}</span>`
+      + `<button class="copy" data-v="${safe}">Copy</button></div>`;
+  }
+
+  $("go").addEventListener("click", async () => {
+    $("err").textContent = "";
+    const names = [...document.querySelectorAll("#services input:checked")].map((i) => i.value);
+    $("go").disabled = true; $("go").textContent = "Creating…";
+    try {
+      const r = await fetch(PREFIX + "/api/test-users", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_names: names }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<strong>${d.name || "Test user"}</strong>`
+        + row("User ID", d.user_id) + row("Password", d.password) + row("NINO", d.nino)
+        + row("SA UTR", d.sa_utr) + row("MTD IT ID", d.mtd_it_id) + row("Date of birth", d.date_of_birth)
+        + row("Email", d.email) + row("Address", d.address)
+        + `<div style="margin-top:10px"><button class="copy" data-json='${JSON.stringify(d).replace(/'/g, "&#39;")}'>Copy all as JSON</button></div>`;
+      $("results").prepend(card);
+    } catch (e) {
+      $("err").textContent = e.message;
+    } finally {
+      $("go").disabled = false; $("go").textContent = "Create test user";
+    }
+  });
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button.copy");
+    if (!b) return;
+    const text = b.dataset.json || b.dataset.v;
+    try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(() => (b.textContent = b.dataset.json ? "Copy all as JSON" : "Copy"), 1200); }
+    catch { b.textContent = "Select and copy"; }
+  });
+
+  loadServices().catch((e) => { $("err").textContent = "Could not load: " + e.message; });
+</script>
+</body>
+</html>

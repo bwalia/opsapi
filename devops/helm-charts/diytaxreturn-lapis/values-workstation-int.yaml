@@ -271,3 +271,17 @@ pluginOverlays:
     pullPolicy: Always
 imagePullSecrets:
   - name: nebulacr-login
+
+# HMRC sandbox test-user generator (templates/hmrc-test-users.yaml): its own pod
+# and Service, served at https://int-opsapi.workstation.co.uk/hmrc-test-users.
+# Uses hmrcCredentialsSecret (the int HMRC *sandbox* app). The page asks for the
+# ACCESS_PASSWORD in Secret workstation-opsapi-hmrc-test-users (HTTP Basic).
+hmrcTestUsers:
+  enabled: true
+  path: /hmrc-test-users
+  image:
+    repository: bwalia/opsapi-hmrc-test-users
+    tag: latest
+    pullPolicy: Always
+  accessSecret: workstation-opsapi-hmrc-test-users
+  rateLimitPerHour: 20
