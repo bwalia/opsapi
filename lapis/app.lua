@@ -779,6 +779,7 @@ load_if("field_service", "routes.field-service-simpro")
 -- ACCOUNTING / BOOKKEEPING (AI-powered)
 -- ============================================
 load_if("accounting", "routes.accounting")
+load_if("vat", "routes.vat")
 
 -- ============================================
 -- ACADEMY (LMS: courses, lessons, rich content)

@@ -46,6 +46,7 @@ ProjectConfig.FEATURES = {
     BILLING = "billing",               -- Billing & Entitlements: apps, flat-tier plans, entitlements, licences (docs/BILLING_ENTITLEMENTS.md)
     FORMS = "forms",                   -- Form builder: public forms, responses, records from them (docs/FORMS.md)
     ATS = "ats",                       -- Hiring: jobs, candidates, AI first-round interviews (docs/plans/PROMPT_ATS_INTERVIEWS.md)
+    VAT = "vat",                       -- VAT records, AI VAT coding, 9-box returns, HMRC MTD VAT (docs/plans/VAT_MTD.md)
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -72,6 +73,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.VAT,
         ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.CMS,
         ProjectConfig.FEATURES.FIELD_SERVICE,
@@ -116,6 +118,7 @@ ProjectConfig.PROJECT_FEATURES = {
     tax_copilot = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
+        ProjectConfig.FEATURES.VAT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
@@ -202,6 +205,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.VAT,
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
@@ -593,6 +597,12 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
         { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
         { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
+    },
+
+    -- VAT (docs/plans/VAT_MTD.md). A person's own VAT records need no module
+    -- permission; a namespace-wide (accounting) registration and its rules need "vat".
+    vat = {
+        { machine_name = "vat", name = "VAT", description = "VAT registration, VAT coding rules and VAT records", category = "Accounting" },
     },
 
     -- Academy (LMS) modules — RBAC module that routes/academy.lua gates on ("courses")
