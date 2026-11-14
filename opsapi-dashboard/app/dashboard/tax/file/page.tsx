@@ -664,7 +664,16 @@ function FileWizardContent() {
       const ofKind = (b: HmrcBusiness) => (kind === 'uk-property'
         ? /uk-property/i.test(bizType(b)) : /self-employment/i.test(bizType(b)));
       // Only the kind we file; anything unlabelled is kept so nothing real is hidden.
-      const list = all.filter((b) => !bizType(b) || ofKind(b));
+      let list = all.filter((b) => !bizType(b) || ofKind(b));
+      // HMRC sandbox: a landlord's test NINO has no UK property business until one is
+      // set up through HMRC test support. The server refuses this outside the sandbox.
+      if (kind === 'uk-property' && !list.some(ofKind) && !stored) {
+        const made = await taxService.provisionHmrcSandbox(taxYear).catch(() => null);
+        if (made?.business_id) {
+          list = [{ businessId: made.business_id, typeOfBusiness: 'uk-property',
+            tradingName: 'Your rental property business' }, ...list];
+        }
+      }
       // The fileable sandbox (test-support) business isn't returned by the Business
       // Details list, so merge in our stored default if it's missing.
       if (stored && !list.some((b) => bizId(b) === stored)) {

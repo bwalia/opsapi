@@ -148,6 +148,20 @@ return function(app)
                 end
                 return { status = 502, json = { error = msg, code = code, hmrc = hmrc_body } }
             end
+            -- Sandbox: the default list is a fixed sample; the businesses created through
+            -- test support (the only fileable ones, e.g. a landlord's UK property business)
+            -- come from STATEFUL. Add those that aren't already listed.
+            if Client.is_sandbox() then
+                local stateful = Client.list_businesses(access_token, nino, { test_scenario = "STATEFUL" })
+                local listed = data.listOfBusinesses or data.businesses
+                if stateful and type(stateful.listOfBusinesses) == "table" and type(listed) == "table" then
+                    local seen = {}
+                    for _, b in ipairs(listed) do seen[b.businessId or ""] = true end
+                    for _, b in ipairs(stateful.listOfBusinesses) do
+                        if b.businessId and not seen[b.businessId] then table.insert(listed, b) end
+                    end
+                end
+            end
 
             -- The MTD list response nests under listOfBusinesses; older shapes vary.
             local businesses = data.listOfBusinesses or data.businesses
