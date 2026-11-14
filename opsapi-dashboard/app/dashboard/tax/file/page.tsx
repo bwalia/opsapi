@@ -64,6 +64,7 @@ import {
 import { Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import FileForMe from '@/components/tax/FileForMe';
+import EstimateVsHmrc from '@/components/tax/EstimateVsHmrc';
 import TransactionReview from '@/components/tax/TransactionReview';
 import TaxAgentChat from '@/components/tax/TaxAgentChat';
 import { taxFilingService, type FilingOverview } from '@/services/tax-filing.service';
@@ -1668,7 +1669,11 @@ function FileWizardContent() {
               </p>
             )}
 
-            {calc && (
+            {calc && calc.comparison && Array.isArray(calc.comparison.rows) && (
+              <EstimateVsHmrc comparison={calc.comparison} />
+            )}
+
+            {calc && !(calc.comparison && Array.isArray(calc.comparison.rows)) && (
               <div className="space-y-3">
                 {calc.sandbox_placeholder && (
                   <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800">

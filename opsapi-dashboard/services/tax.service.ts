@@ -267,6 +267,29 @@ export interface HmrcOffendingTransaction {
 /** Which HMRC business File My Tax files: a landlord files UK property. */
 export type HmrcFilingKind = 'self-employment' | 'uk-property' | 'mixed';
 
+/** Our estimate vs HMRC's calculation, line by line (lapis/lib/tax-delta.lua). */
+export interface HmrcComparisonRow {
+  key: string;
+  label: string;
+  ours?: number | null;
+  hmrc?: number | null;
+  delta?: number | null;
+  differs: boolean;
+  is_total?: boolean;
+  why?: string | null;
+}
+export interface HmrcComparison {
+  rows: HmrcComparisonRow[];
+  differs: boolean;
+  total_delta?: number | null;
+  sandbox: boolean;
+  income_sources: Array<{ type?: string; name?: string; id?: string; income?: number | null;
+    expenses?: number | null; taxable_profit?: number | null }>;
+  extras: Array<{ label: string; amount: number }>;
+  messages: { info: Array<{ id?: string; text: string }>; warnings: Array<{ id?: string; text: string }>;
+    errors: Array<{ id?: string; text: string }> };
+}
+
 export interface HmrcAggregatePreview {
   tax_year: string;
   filing_kind?: HmrcFilingKind;
@@ -722,6 +745,9 @@ export const taxService = {
     business_id: string;
     calculation_id: string;
     sandbox_placeholder: boolean;
+    filing_kind?: HmrcFilingKind;
+    // Our estimate next to HMRC's figures; absent if it couldn't be worked out.
+    comparison?: HmrcComparison | null;
     figures: {
       total_income_tax_and_nics_due?: number;
       total_taxable_income?: number;
