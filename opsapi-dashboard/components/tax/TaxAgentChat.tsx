@@ -24,6 +24,7 @@ import { formatCurrency } from '@/lib/utils';
 import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
 import taxFilingService from '@/services/tax-filing.service';
+import MarkdownMessage from '@/components/chat/MarkdownMessage';
 import StatementUploader, { StatementUploadList, useStatementQueue } from '@/components/tax/StatementUploader';
 
 interface ChatMsg {
@@ -195,6 +196,8 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
       } else if (wasProcessing.current) {
         wasProcessing.current = false;
         stopPolling();
+        // The per-file upload rows are finished with; drop them so the replies have the pane.
+        clearUploads();
         // The worker records how it went in the session ("✅ processed" or "⚠️ couldn't be
         // read") — show that, not an assumed success.
         const s = await taxAgentService.createSession(yearOpts()).catch(() => null);
@@ -212,7 +215,7 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
     } catch {
       /* transient poll error — keep trying */
     }
-  }, [stopPolling, sessionId, yearOpts]);
+  }, [stopPolling, sessionId, yearOpts, clearUploads]);
 
   const startPolling = useCallback(() => {
     stopPolling();
@@ -442,7 +445,11 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
                       : 'max-w-[85%] rounded-2xl rounded-bl-sm bg-secondary-100 px-4 py-2.5 text-sm text-secondary-900'
                   }
                 >
-                  <p className="whitespace-pre-wrap">{m.text}</p>
+                  {m.role === 'user' ? (
+                    <p className="whitespace-pre-wrap">{m.text}</p>
+                  ) : (
+                    <MarkdownMessage text={m.text} />
+                  )}
                   {m.uploadPrompt && (
                     <button
                       type="button"
@@ -533,7 +540,7 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
               ))}
             </div>
           )}
-          <StatementUploadList items={uploadItems} className="mb-2" />
+          <StatementUploadList items={uploadItems} className="mb-2 max-h-36 overflow-y-auto" />
           <form
             onSubmit={(e) => { e.preventDefault(); send(input); }}
             className="flex items-end gap-2"
