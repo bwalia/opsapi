@@ -680,6 +680,8 @@ return function(app)
     -- POST /api/v2/tax/transactions/confirm-year  { tax_year, consent: true }
     -- The customer confirms, after checking them, every AI-classified transaction
     -- for a tax year. Flagged rows (PENDING / NEEDS_REVIEW) are NOT bulk-confirmed:
+    -- Confirming is not editing: is_manually_reviewed stays as it was, so each row
+    -- still shows who sorted it (AI / known merchant) and the AI's reason.
     -- each needs its own look. Filing requires every row confirmed (routes/tax-filing).
     -- =========================================================================
     app:post("/api/v2/tax/transactions/confirm-year", AuthMiddleware.requireAuth(function(self)
@@ -702,7 +704,6 @@ return function(app)
             SET classification_status = 'CONFIRMED',
                 classification_confirmed_at = NOW(),
                 classification_confirmed_by = ?,
-                is_manually_reviewed = TRUE,
                 updated_at = NOW()
             FROM tax_statements s
             WHERE s.id = t.statement_id AND t.user_id = ? AND s.tax_year = ?

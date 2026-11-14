@@ -3279,4 +3279,22 @@ return {
         print(string.format("[Tax Copilot] Secrets re-encrypted as v2: %d rows, %d undecryptable left as-is, %d failed",
             done, skipped, failed))
     end,
+
+    -- 93. "Confirm the rest" (POST /transactions/confirm-year) used to set
+    -- is_manually_reviewed on every row it confirmed, so the review list showed
+    -- "You" and hid how the AI sorted each line and why. Confirming is not
+    -- editing: undo it for rows nobody edited. A real edit sets reviewed_by
+    -- (TaxTransactionQueries.update) or classified_by = 'user' (agent tool);
+    -- confirm-year set neither.
+    [93] = function()
+        local res = db.query([[
+            UPDATE tax_transactions
+            SET is_manually_reviewed = false
+            WHERE is_manually_reviewed = true
+              AND reviewed_by IS NULL
+              AND COALESCE(classified_by, '') <> 'user'
+        ]])
+        print("[Tax Copilot] Confirmed-only rows show their AI source again: "
+            .. tostring(res and res.affected_rows or 0) .. " rows")
+    end,
 }
