@@ -281,7 +281,10 @@ export default function TransactionReview({ taxYear, total, confirmed, toCheck, 
               {tr.text}
             </p>
             <p className="text-[11px] text-secondary-400">
-              <span className="font-medium text-secondary-500">{sourceLabel(t)}</span>
+              <span className="font-medium text-secondary-500">
+                {sourceLabel(t)}
+                {isConfirmed(t) && !t.is_manually_reviewed && ' · confirmed by you'}
+              </span>
               {t.reasoning && !t.is_manually_reviewed && (
                 <span className="line-clamp-2" title={t.reasoning}> — {t.reasoning}</span>
               )}
