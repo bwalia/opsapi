@@ -38,6 +38,9 @@ const STAT_ICONS = {
 } as Record<string, React.ReactNode>;
 
 // One fetch per data source, only for the sources the visible widgets need.
+/** Menu keys shown first in "Jump to your work" when the person can open them. */
+const PINNED_SHORTCUTS = ['tax_file'];
+
 const fetchDashboardData = async (needs: { core: boolean; property: boolean; health: boolean }) => {
   const [stats, health, property] = await Promise.all([
     needs.core ? dashboardService.getDashboardStats() : Promise.resolve(null),
@@ -53,10 +56,19 @@ export default function DashboardPage() {
   const { currentNamespace } = useNamespace();
   const { isHydrated: menuHydrated, isLoading: menuLoading, mainMenu } = useMenu();
   // The pages this person can open (their menu), for when the dashboard has no panels for their role.
-  const shortcuts = useMemo(
-    () => mainMenu.filter((item) => item.path && item.key !== 'dashboard' && item.path !== '/dashboard').slice(0, 8),
-    [mainMenu]
-  );
+  // Pinned pages (e.g. File My Tax) come first so a long menu can't push them past the cut.
+  const shortcuts = useMemo(() => {
+    const pages = mainMenu.filter((item) => item.path && item.key !== 'dashboard' && item.path !== '/dashboard');
+    const rank = (key: string) => {
+      const i = PINNED_SHORTCUTS.indexOf(key);
+      return i === -1 ? PINNED_SHORTCUTS.length : i;
+    };
+    return pages
+      .map((item, i) => ({ item, i }))
+      .sort((a, b) => rank(a.item.key) - rank(b.item.key) || a.i - b.i)
+      .map(({ item }) => item)
+      .slice(0, 8);
+  }, [mainMenu]);
 
   // Post-login landing is DATA-DRIVEN: each namespace role carries a
   // `landing_path` (configured per tenant when the role is created/edited), so a
