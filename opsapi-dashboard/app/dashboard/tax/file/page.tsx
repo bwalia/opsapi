@@ -746,10 +746,17 @@ function FileWizardContent() {
       const list = await taxService.fetchHmrcObligations(selectedBusiness, b.from, b.to, filingKind);
       setObligations(list);
       // Drive the filing tax year from the open obligation HMRC actually has — never a
-      // hardcoded year. Auto-select the first open period; the user can pick another.
+      // hardcoded year. Prefer an open period in the year being filed; the user can pick
+      // another. A tax year that has already ended (filing last year's return before
+      // 31 January) has no open quarterly periods left, and HMRC lists the current
+      // year's instead: keep the year the person chose rather than jumping to one with
+      // no figures.
       const open = list.filter(isOpen);
-      if (open.length > 0) {
-        const o = open[0];
+      const inYear = open.filter((o) => taxYearOf(o.period_start) === taxYear);
+      const yearEnded = !!b && b.to < new Date().toISOString().slice(0, 10);
+      const pick = inYear[0] || (yearEnded ? null : open[0]);
+      if (pick) {
+        const o = pick;
         setSelectedObligation(`${o.period_start}|${o.period_end}`);
         const derived = taxYearOf(o.period_start);
         // Only reset on a real year change: the auto-check re-runs per year, so clearing
