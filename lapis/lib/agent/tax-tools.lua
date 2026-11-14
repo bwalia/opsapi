@@ -322,6 +322,23 @@ register({
 -- Prompt the user to upload a bank statement. The actual upload + extract +
 -- classify runs through the existing tax endpoints (frontend); this just returns
 -- the button the chat attaches to its message.
+-- A reply that asks the user to upload their statements but came without the upload
+-- button (the model wrote "upload your bank statement using the button above" and never
+-- called request_bank_statement, seen on int) gets the button attached, so the user is
+-- never asked for something they can't do. Returns the upload_prompt, or nil.
+function TaxTools.upload_prompt_for_reply(reply)
+    local t = tostring(reply or ""):lower()
+    if not t:find("upload", 1, true) or not t:find("statement", 1, true) then return nil end
+    -- "you've uploaded", "no need to upload" are not asks.
+    if t:find("uploaded", 1, true) and not t:find("upload your", 1, true) then return nil end
+    if t:find("no need to upload", 1, true) or t:find("don't need to upload", 1, true) then return nil end
+    return {
+        kind = "bank_statement",
+        button_label = "Upload bank statement",
+        caption = "Upload a PDF or CSV bank statement.",
+    }
+end
+
 register({
     name = "request_bank_statement",
     description = "Ask the user to upload a bank statement for the current entity. "

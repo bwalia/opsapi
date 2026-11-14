@@ -519,6 +519,10 @@ return function(app)
 
         local reply = clean_reply(result.reply)
         local harvested = harvest(result.actions)
+        -- Asked to upload in words only: show the button anyway.
+        if not harvested.upload_prompt then
+            harvested.upload_prompt = TaxTools.upload_prompt_for_reply(reply)
+        end
         local pending = result.pending
         local quick_replies = result.quick_replies
         if pending then set_pending(session, pending) end
