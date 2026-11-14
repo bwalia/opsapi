@@ -150,6 +150,12 @@ local function provisionSandboxBusiness(Client, Aggregator, token, nino, tax_yea
         }
     end
     local biz, berr, bbody = Client.create_test_business(token, nino, params)
+    if not biz and kind == PROPERTY and bbody and bbody.code == "RULE_PROPERTY_BUSINESS_ADDED" then
+        -- HMRC allows one UK property business per NINO: it was created before (e.g. by
+        -- another user of the same sandbox test NINO). Use that one.
+        local list = Client.list_businesses(token, nino, { test_scenario = "STATEFUL" })
+        biz = list and Client.first_uk_property(list)
+    end
     if not biz then return nil, berr or "Failed to create sandbox business", bbody end
 
     -- Set MTD ITSA status for the year so calculations are allowed.
@@ -253,7 +259,9 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     local business_id = self.params.business_id
     if not business_id or business_id == "" then business_id = storedBusiness(profile, kind) end
     if not business_id or business_id == "" then
-        local list = Client.list_businesses(token, nino)
+        -- Sandbox: STATEFUL lists the test-support businesses, the only fileable ones.
+        local list = Client.list_businesses(token, nino,
+            { test_scenario = Client.is_sandbox() and "STATEFUL" or nil })
         if list then
             business_id = is_property and Client.first_uk_property(list) or Client.first_self_employment(list)
         end

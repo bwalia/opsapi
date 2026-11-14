@@ -66,12 +66,16 @@ end
 -- ---------------------------------------------------------------------------
 -- Business details (v2): list the taxpayer's businesses
 -- ---------------------------------------------------------------------------
-function Client.list_businesses(token, nino)
+-- opts.test_scenario = "STATEFUL" (sandbox) lists the test-support businesses — the
+-- only ones the sandbox can file against; the default sandbox list is a fixed sample.
+function Client.list_businesses(token, nino, opts)
+    opts = opts or {}
     local httpc, err = http_client()
     if not httpc then return nil, err end
     local res, rerr = httpc:request_uri(
         base_url() .. "/individuals/business/details/" .. nino .. "/list",
-        { method = "GET", headers = headers(token, "2.0"), ssl_verify = true })
+        { method = "GET", headers = headers(token, "2.0", { test_scenario = opts.test_scenario }),
+          ssl_verify = true })
     if not res then return nil, "list_businesses request failed: " .. tostring(rerr) end
     if res.status >= 400 then
         return nil, "HTTP " .. res.status, decode(res.body)
