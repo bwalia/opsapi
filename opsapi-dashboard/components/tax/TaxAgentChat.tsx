@@ -24,6 +24,7 @@ import { formatCurrency } from '@/lib/utils';
 import taxAgentService, { type TaxEstimate, type UploadPrompt, type StatementStatus } from '@/services/tax-agent.service';
 import taxService from '@/services/tax.service';
 import taxFilingService from '@/services/tax-filing.service';
+import MarkdownMessage from '@/components/chat/MarkdownMessage';
 import StatementUploader, { StatementUploadList, useStatementQueue } from '@/components/tax/StatementUploader';
 
 interface ChatMsg {
@@ -442,7 +443,11 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
                       : 'max-w-[85%] rounded-2xl rounded-bl-sm bg-secondary-100 px-4 py-2.5 text-sm text-secondary-900'
                   }
                 >
-                  <p className="whitespace-pre-wrap">{m.text}</p>
+                  {m.role === 'user' ? (
+                    <p className="whitespace-pre-wrap">{m.text}</p>
+                  ) : (
+                    <MarkdownMessage text={m.text} />
+                  )}
                   {m.uploadPrompt && (
                     <button
                       type="button"
