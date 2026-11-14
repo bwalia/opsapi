@@ -105,6 +105,7 @@ local tax_agent_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COP
 local tax_filing_requests_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-filing-requests") or {}
 local tax_statement_year_backfill = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-year-backfill") or {}
 local tax_menu_file_my_tax = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-menu-file-my-tax") or {}
+local tax_statement_processing_job = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-processing-job") or {}
 -- My Income: definition-driven income types (schema + estimator mapping on income_types),
 -- per-namespace overrides, the user's per-year figures, RBAC module + menu items.
 local tax_my_income_dynamic = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-dynamic") or {}
@@ -2118,6 +2119,8 @@ local _migrations = {
     -- Tax menu rename: "Tax Dashboard", "File My Tax", hide "File with AI". Sorts after
     -- 'zz_tax_agent_zz_menu' (and every numbered tax menu seed), so all rows exist.
     ['zz_tax_menu_file_my_tax'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_menu_file_my_tax, 1),
+    -- What the statement worker needs to resume a job after a restart (see routes/tax-process.lua).
+    ['zz_tax_statement_processing_job'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_statement_processing_job, 1),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

@@ -10,8 +10,15 @@
     authenticated internal calls, rather than re-implementing the pipeline.
 
     processing_status lifecycle: QUEUED -> EXTRACTING -> CLASSIFYING -> COMPLETED | ERROR.
-    ponytail: ngx.timer is fine for a handful of statements per user; move to a job
-    queue if this ever needs to survive nginx reloads or run at scale.
+
+    Surviving a restart: the worker lives in one nginx worker's memory, so a deploy or
+    pod restart kills it and its statements would sit at QUEUED/CLASSIFYING forever.
+    While a job runs it touches updated_at every minute (heartbeat). A statement still
+    in a working state whose updated_at is older than STALE_SECS has no live worker,
+    so the next status poll claims it (one atomic UPDATE, so only one pod wins) and
+    starts it again as the polling user. Extract skips rows it already stored and
+    classify only reads PENDING rows, so a resume carries on where it stopped.
+    ponytail: move to a real job queue if this ever needs to run at scale.
 ]]
 
 local db = require("lapis.db")
@@ -28,6 +35,11 @@ end
 local function set_status(id, status)
     db.update("tax_statements", { processing_status = status, updated_at = db.raw("NOW()") }, { id = id })
 end
+
+-- A job touches its statements this often; one untouched for STALE_SECS is orphaned.
+local HEARTBEAT_SECS = 60
+local STALE_SECS = 300
+local WORKING = "('QUEUED','EXTRACTING','CLASSIFYING')"
 
 -- Add a line to the tax-agent chat this upload came from, so it survives a reload
 -- (and the model sees that statements were uploaded / processed). Best-effort.
@@ -98,9 +110,23 @@ local function classify_profile(session, user_id)
     return "landlord"
 end
 
+-- Keeps the job's unfinished statements fresh so a status poll doesn't take them
+-- for orphans. Stops when the job is done or nginx is shutting down.
+local function heartbeat(premature, job)
+    if premature or job.done then return end
+    local ids = {}
+    for _, s in ipairs(job.statements) do ids[#ids + 1] = tonumber(s.id) end
+    if #ids > 0 then
+        pcall(db.query, "UPDATE tax_statements SET updated_at = NOW() WHERE id IN ("
+            .. table.concat(ids, ",") .. ") AND processing_status IN " .. WORKING)
+    end
+    ngx.timer.at(HEARTBEAT_SECS, heartbeat, job)
+end
+
 -- Background worker: process each statement in turn (extract then classify).
 local function process_all(premature, job)
     if premature then return end
+    ngx.timer.at(HEARTBEAT_SECS, heartbeat, job)
     local failed = 0
     for _, s in ipairs(job.statements) do
         local ok, err = pcall(function()
@@ -123,6 +149,7 @@ local function process_all(premature, job)
             failed = failed + 1
         end
     end
+    job.done = true
     local n = #job.statements
     if failed == 0 then
         session_note(job.session, "assistant",
@@ -135,9 +162,86 @@ local function process_all(premature, job)
     end
 end
 
+-- The caller's Authorization header plus, for a JWT, its verified payload so the
+-- worker can mint fresh tokens (see auth_for).
+local function caller_identity(self)
+    local auth = self.req.headers["authorization"]
+    local raw = type(auth) == "string" and auth:match("^[Bb]earer%s+(.+)$")
+    local jwt_payload
+    if raw and not raw:match("^opsk_") then
+        local v = JWTHelper.verifyToken(raw)
+        if v.valid then jwt_payload = v.payload end
+    end
+    return auth, jwt_payload
+end
+
+local function start_job(self, statements, session, profile_type)
+    local auth, jwt_payload = caller_identity(self)
+    return ngx.timer.at(0, process_all, {
+        statements = statements,
+        session = session,
+        auth = auth,
+        jwt_payload = jwt_payload,
+        profile_type = profile_type,
+        port = tonumber(ngx.var.server_port) or 80,
+    })
+end
+
+local function decode(v)
+    if type(v) == "table" then return v end
+    if type(v) ~= "string" then return nil end
+    local ok, t = pcall(cjson.decode, v)
+    return ok and type(t) == "table" and t or nil
+end
+
+--- Restart this user's statements that a dead worker left half done.
+-- Claims them in one UPDATE (a second pod polling at the same moment gets nothing),
+-- then restarts them grouped by the chat + profile they were uploaded with.
+-- @return number of statements resumed
+local function resume_orphans(self, user_id)
+    local sql = [[UPDATE tax_statements SET processing_status = 'QUEUED', updated_at = NOW()
+        WHERE user_id = ? AND processing_status IN ]] .. WORKING .. [[
+          AND updated_at < NOW() - (? * INTERVAL '1 second')
+        RETURNING id, uuid, file_name, processing_job]]
+    local ok, rows = pcall(db.query, sql, user_id, STALE_SECS)
+    if not ok then -- processing_job not migrated yet: resume without the chat/profile
+        ok, rows = pcall(db.query, (sql:gsub(", processing_job$", "")), user_id, STALE_SECS)
+    end
+    if not ok or type(rows) ~= "table" or #rows == 0 then return 0 end
+    table.sort(rows, function(a, b) return tonumber(a.id) < tonumber(b.id) end)
+
+    local groups, order = {}, {}
+    for _, r in ipairs(rows) do
+        local pj = decode(r.processing_job) or {}
+        local key = tostring(pj.session_id) .. "|" .. tostring(pj.profile_type)
+        if not groups[key] then
+            groups[key] = { session_id = pj.session_id, profile_type = pj.profile_type, statements = {} }
+            order[#order + 1] = key
+        end
+        local g = groups[key].statements
+        g[#g + 1] = { id = r.id, uuid = r.uuid, file_name = r.file_name }
+    end
+    for _, key in ipairs(order) do
+        local g = groups[key]
+        local session
+        if tonumber(g.session_id) then
+            session = db.query([[SELECT id, namespace_id, user_id FROM tax_agent_sessions
+                WHERE id = ? AND user_id = ? LIMIT 1]], tonumber(g.session_id), user_id)[1]
+        end
+        local n = #g.statements
+        ngx.log(ngx.WARN, "[tax-process] resuming ", n, " orphaned statement(s) for user ", user_id)
+        session_note(session, "assistant", ("I was interrupted by a server update, so I've picked "
+            .. "up the remaining %d statement%s where I left off."):format(n, plural(n)))
+        if not start_job(self, g.statements, session, g.profile_type) then
+            for _, s in ipairs(g.statements) do set_status(s.id, "ERROR") end
+        end
+    end
+    return #rows
+end
+
 -- Declare M before the metatable: inside `local M = setmetatable(..., { __call = ...M... })`
 -- the closure would see the (nil) global M, and the routes would never mount.
-local M = { _classify_profile = classify_profile }
+local M = { _classify_profile = classify_profile, _resume_orphans = resume_orphans }
 setmetatable(M, { __call = function(_, app) return M.register(app) end })
 
 function M.register(app)
@@ -179,6 +283,7 @@ function M.register(app)
                 WHERE uuid = ? AND user_id = ? LIMIT 1]], sid, user_id)[1]
         end
 
+        local profile_type = classify_profile(session, user_id)
         local statements = {}
         for _, ident in ipairs(ids) do
             local rows = db.query(
@@ -187,6 +292,10 @@ function M.register(app)
             if rows and rows[1] then
                 statements[#statements + 1] = rows[1]
                 set_status(rows[1].id, "QUEUED")
+                -- What a resume needs after a restart (no credentials). Best-effort.
+                pcall(db.query, "UPDATE tax_statements SET processing_job = ?::jsonb WHERE id = ?",
+                    cjson.encode({ session_id = session and session.id or nil, profile_type = profile_type }),
+                    rows[1].id)
                 if tax_year then
                     db.query([[UPDATE tax_statements SET tax_year = ?
                         WHERE id = ? AND (tax_year IS NULL OR tax_year = '')]], tax_year, rows[1].id)
@@ -205,22 +314,7 @@ function M.register(app)
                 :format(n, plural(n)))
         end
 
-        -- Keep the verified identity so the worker can mint fresh tokens (see auth_for).
-        local auth = self.req.headers["authorization"]
-        local raw = type(auth) == "string" and auth:match("^[Bb]earer%s+(.+)$")
-        local jwt_payload
-        if raw and not raw:match("^opsk_") then
-            local v = JWTHelper.verifyToken(raw)
-            if v.valid then jwt_payload = v.payload end
-        end
-        local ok = ngx.timer.at(0, process_all, {
-            statements = statements,
-            session = session,
-            auth = auth,
-            jwt_payload = jwt_payload,
-            profile_type = classify_profile(session, user_id),
-            port = tonumber(ngx.var.server_port) or 80,
-        })
+        local ok = start_job(self, statements, session, profile_type)
         if not ok then
             for _, s in ipairs(statements) do set_status(s.id, "ERROR") end
             return { status = 503, json = { error = "Could not start processing. Please try again." } }
@@ -232,6 +326,7 @@ function M.register(app)
     app:get("/api/v2/tax/statements/process-status", AuthMiddleware.requireAuth(function(self)
         local user_id = getUserId(self.current_user)
         if not user_id then return { status = 401, json = { error = "User not found" } } end
+        resume_orphans(self, user_id)
         local rows = db.query([[
             SELECT s.uuid, s.file_name, s.processing_status,
                    (SELECT count(*) FROM tax_transactions t WHERE t.statement_id = s.id) AS transaction_count,
