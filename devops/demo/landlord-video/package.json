@@ -1,0 +1,7 @@
+{
+  "name": "landlord-demo-video",
+  "private": true,
+  "type": "module",
+  "description": "Records the 100-property landlord File My Tax demo on int",
+  "dependencies": { "playwright": "^1.48.0" }
+}
