@@ -1,0 +1,129 @@
+{{- /*
+  HMRC sandbox test-user generator: a small side app (sidecars/hmrc-test-users)
+  in its own pod + Service, next to this release's API. Testers make a fresh HMRC
+  sandbox taxpayer (Government Gateway user ID + password, NINO, SA UTR, MTD IT
+  ID) to test File My Tax. It uses this release's HMRC sandbox application
+  (hmrcCredentialsSecret) and refuses to run against production HMRC.
+  Off unless hmrcTestUsers.enabled. Served at hmrcTestUsers.path on this
+  release's ingress hosts, so it needs no DNS of its own.
+*/ -}}
+{{- $htu := .Values.hmrcTestUsers | default dict }}
+{{- if $htu.enabled }}
+{{- $name := printf "%s-hmrc-test-users" .Release.Name }}
+{{- $img := $htu.image | default dict }}
+{{- $path := $htu.path | default "/hmrc-test-users" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+    part-of: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        part-of: {{ .Release.Name }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: hmrc-test-users
+          image: "{{ $img.repository | default "bwalia/opsapi-hmrc-test-users" }}:{{ $img.tag | default "latest" }}"
+          imagePullPolicy: {{ $img.pullPolicy | default "Always" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: HMRC_ENVIRONMENT
+              value: sandbox
+            - name: ROOT_PATH
+              value: {{ $path | quote }}
+            - name: RATE_LIMIT_PER_HOUR
+              value: {{ $htu.rateLimitPerHour | default 20 | quote }}
+            {{- if .Values.frontendUrl }}
+            - name: OPSAPI_UI_URL
+              value: {{ .Values.frontendUrl | quote }}
+            {{- end }}
+            - name: HMRC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $htu.credentialsSecret | default .Values.hmrcCredentialsSecret | quote }}
+                  key: HMRC_CLIENT_ID
+            - name: HMRC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $htu.credentialsSecret | default .Values.hmrcCredentialsSecret | quote }}
+                  key: HMRC_CLIENT_SECRET
+            {{- if $htu.accessSecret }}
+            # HTTP Basic sign-in for the page (any user name, this password).
+            - name: ACCESS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $htu.accessSecret | quote }}
+                  key: ACCESS_PASSWORD
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 160Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+spec:
+  selector:
+    app: {{ $name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if and .Values.ingress.enabled (ne $htu.ingress false) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: 80
+    {{- end }}
+{{- end }}
+{{- end }}

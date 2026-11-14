@@ -1,0 +1,68 @@
+name: HMRC test-user generator
+
+# sidecars/hmrc-test-users: tests on every PR; on main, build + push the image
+# (bwalia/opsapi-hmrc-test-users:latest and :<sha>) and restart the int pod so it
+# pulls it. The pod itself is created by the opsapi chart
+# (devops/helm-charts/diytaxreturn-lapis/templates/hmrc-test-users.yaml).
+on:
+  pull_request:
+    paths: ["sidecars/hmrc-test-users/**", ".github/workflows/hmrc-test-users.yml"]
+  push:
+    branches: [main]
+    paths: ["sidecars/hmrc-test-users/**", ".github/workflows/hmrc-test-users.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hmrc-test-users-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecars/hmrc-test-users
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements-dev.txt
+      - run: python -m pytest -q tests
+
+  image:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: sidecars/hmrc-test-users
+          push: true
+          tags: |
+            bwalia/opsapi-hmrc-test-users:latest
+            bwalia/opsapi-hmrc-test-users:${{ github.sha }}
+
+      - name: Restart the int pod onto the new image
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::warning::no KUBE_CONFIG_DATA_K3S; image pushed, pod not restarted"; exit 0; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
+          # The Deployment exists once the chart is deployed with hmrcTestUsers.enabled.
+          if kubectl -n int get deploy/workstation-opsapi-hmrc-test-users >/dev/null 2>&1; then
+            kubectl -n int rollout restart deploy/workstation-opsapi-hmrc-test-users
+            kubectl -n int rollout status deploy/workstation-opsapi-hmrc-test-users --timeout=180s
+          else
+            echo "Deployment not there yet: it starts with the next opsapi deploy."
+          fi
+          rm -f kubeconfig
