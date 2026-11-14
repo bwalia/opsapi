@@ -106,6 +106,7 @@ local tax_filing_requests_migrations = load_if_enabled(ProjectConfig.FEATURES.TA
 local tax_statement_year_backfill = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-year-backfill") or {}
 local tax_menu_file_my_tax = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-menu-file-my-tax") or {}
 local tax_statement_processing_job = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-statement-processing-job") or {}
+local tax_landlord_filing = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-landlord-filing") or {}
 -- My Income: definition-driven income types (schema + estimator mapping on income_types),
 -- per-namespace overrides, the user's per-year figures, RBAC module + menu items.
 local tax_my_income_dynamic = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-dynamic") or {}
@@ -2121,6 +2122,8 @@ local _migrations = {
     ['zz_tax_menu_file_my_tax'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_menu_file_my_tax, 1),
     -- What the statement worker needs to resume a job after a restart (see routes/tax-process.lua).
     ['zz_tax_statement_processing_job'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_statement_processing_job, 1),
+    ['zz_tax_landlord_filing_1_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_landlord_filing, 1),
+    ['zz_tax_landlord_filing_2_property_business'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_landlord_filing, 2),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

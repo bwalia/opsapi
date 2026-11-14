@@ -240,12 +240,14 @@ return function(app)
             -- filing business id so the rows map to the business they actually selected.
             -- Production returns the real business's obligations and is filtered by id.
             local is_sandbox = Client.is_sandbox()
+            -- Which business type the user files ("self-employment", or "uk-property" for a landlord).
+            local want_type = (self.params.type_of_business == "uk-property") and "uk-property" or "self-employment"
             local obligations = data.obligations or {}
             local returned = {}
             for _, ob in ipairs(obligations) do
                 local include
                 if is_sandbox then
-                    include = (ob.typeOfBusiness == "self-employment")
+                    include = (ob.typeOfBusiness == want_type)
                 else
                     include = (not business_id) or (ob.businessId == business_id)
                 end

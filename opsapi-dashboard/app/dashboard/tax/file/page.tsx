@@ -14,7 +14,8 @@
  *                                 each — nothing is filed until all are confirmed)
  *   then either "our accountant files it" (FileForMe) or, filing directly:
  *   3. Connect to HMRC          (OAuth)
- *   4. Select your business     (pull from HMRC, pick the self-employment)
+ *   4. Select your business     (pull from HMRC, pick the self-employment — or the UK
+ *                                property business for a landlord)
  *   5. Fetch obligations        (which period HMRC says is open to file)
  *   6. Check your figures       (aggregate classified tx; fix mis-filed credits inline)
  *   7. Preview calculation      (submit cumulative + in-year calc — non-binding)
@@ -72,6 +73,7 @@ import {
   type HmrcBusiness,
   type HmrcObligation,
   type HmrcAggregatePreview,
+  type HmrcFilingKind,
   type HmrcOffendingTransaction,
 } from '@/services/tax.service';
 import { formatCurrency, extractApiError } from '@/lib/utils';
@@ -252,11 +254,53 @@ const HMRC_FIELD_LABELS: Record<string, string> = {
   otherExpenses: 'Other business expenses',
 };
 
+// The HMRC UK property fields (a landlord's return).
+const PROPERTY_SECTION_LABELS: Record<string, string> = {
+  income: 'Rental income',
+  expenses: 'Property expenses',
+  finance: 'Residential finance costs (20% tax credit, not an expense)',
+};
+const PROPERTY_FIELD_LABELS: Record<string, string> = {
+  periodAmount: 'Rents received',
+  otherIncome: 'Other property income',
+  premiumsOfLeaseGrant: 'Lease premiums',
+  reversePremiums: 'Reverse premiums',
+  taxDeducted: 'Tax already deducted',
+  premisesRunningCosts: 'Rent, rates, insurance & running costs',
+  repairsAndMaintenance: 'Repairs & maintenance',
+  financialCosts: 'Loan interest (commercial property) & finance costs',
+  professionalFees: 'Legal, management & professional fees',
+  costOfServices: 'Cost of services provided',
+  travelCosts: 'Car, van & travel',
+  other: 'Other allowable property expenses',
+  residentialFinancialCost: 'Residential mortgage interest',
+};
+
+type Sections = Record<string, Record<string, number>>;
+
+// A UK property body as display sections: the residential finance cost is shown on its
+// own (it is a tax credit, not an expense, so it isn't in the expenses total).
+function propertySections(body: Record<string, unknown>): Sections {
+  const uk = (body.ukProperty || {}) as Record<string, Record<string, number> | undefined>;
+  const expenses = { ...(uk.expenses || {}) };
+  const finance: Record<string, number> = {};
+  if (expenses.residentialFinancialCost !== undefined) {
+    finance.residentialFinancialCost = expenses.residentialFinancialCost;
+    delete expenses.residentialFinancialCost;
+  }
+  return { income: { ...(uk.income || {}) }, expenses, finance };
+}
+
 // Render the exact MTD body (income / expense lines) we'll submit to HMRC, with friendly
 // labels and per-section totals. Only non-zero lines are shown to keep it readable.
-function FiguresBreakdown({ body, taxYear }: { body?: Record<string, Record<string, number>>; taxYear: string }) {
+function FiguresBreakdown({ body: raw, taxYear }: { body?: Record<string, unknown>; taxYear: string }) {
   const fmt = (n: number) => formatCurrency(n, 'GBP', 'en-GB');
-  const sections = ['periodIncome', 'periodExpenses', 'periodDisallowableExpenses'].filter(
+  const property = !!raw && 'ukProperty' in raw;
+  const body: Sections | undefined = raw && (property ? propertySections(raw) : (raw as Sections));
+  const sectionLabels = property ? PROPERTY_SECTION_LABELS : HMRC_SECTION_LABELS;
+  const fieldLabels = property ? PROPERTY_FIELD_LABELS : HMRC_FIELD_LABELS;
+  const order = property ? ['income', 'expenses', 'finance'] : ['periodIncome', 'periodExpenses', 'periodDisallowableExpenses'];
+  const sections = order.filter(
     (s) => body?.[s] && Object.values(body[s]).some((v) => Number(v) !== 0),
   );
   if (sections.length === 0) return null;
@@ -269,18 +313,18 @@ function FiguresBreakdown({ body, taxYear }: { body?: Record<string, Record<stri
         return (
           <div key={s} className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">
-              {HMRC_SECTION_LABELS[s] || s}
+              {sectionLabels[s] || s}
             </p>
             <div className="divide-y divide-secondary-100">
               {entries.map(([k, v]) => (
                 <div key={k} className="flex items-center justify-between py-1 text-sm">
-                  <span className="text-secondary-700">{HMRC_FIELD_LABELS[k] || k}</span>
+                  <span className="text-secondary-700">{fieldLabels[k] || k}</span>
                   <span className="font-medium text-secondary-900 tabular-nums">{fmt(Number(v))}</span>
                 </div>
               ))}
             </div>
             <div className="flex items-center justify-between pt-1 text-sm font-semibold border-t border-secondary-200">
-              <span className="text-secondary-600">Total {(HMRC_SECTION_LABELS[s] || s).toLowerCase()}</span>
+              <span className="text-secondary-600">Total {(sectionLabels[s] || s).toLowerCase()}</span>
               <span className="tabular-nums text-secondary-900">{fmt(total)}</span>
             </div>
           </div>
@@ -421,6 +465,9 @@ function FileWizardContent() {
 
   // Step 4 — figures
   const [preview, setPreview] = useState<HmrcAggregatePreview | null>(null);
+  // Which HMRC business this year's return is for (a landlord files UK property).
+  const [filingKind, setFilingKind] = useState<HmrcFilingKind>('self-employment');
+  const isProperty = filingKind === 'uk-property';
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [fixing, setFixing] = useState<string | null>(null);
   const [fixChoice, setFixChoice] = useState<Record<string, string>>({});
@@ -607,24 +654,36 @@ function FileWizardContent() {
     setBizError(null);
     setBizErrorCode(null);
     try {
-      const list = await taxService.fetchHmrcBusinesses();
+      const all = await taxService.fetchHmrcBusinesses();
+      // A landlord files their UK property business; everyone else self-employment.
+      const filing = await taxService.getHmrcFilingBusiness(taxYear)
+        .catch(() => ({ businessId: null, filingKind: 'self-employment' as HmrcFilingKind }));
+      const kind: HmrcFilingKind = filing.filingKind === 'uk-property' ? 'uk-property' : 'self-employment';
+      setFilingKind(filing.filingKind);
+      const stored = filing.businessId;
+      const ofKind = (b: HmrcBusiness) => (kind === 'uk-property'
+        ? /uk-property/i.test(bizType(b)) : /self-employment/i.test(bizType(b)));
+      // Only the kind we file; anything unlabelled is kept so nothing real is hidden.
+      const list = all.filter((b) => !bizType(b) || ofKind(b));
       // The fileable sandbox (test-support) business isn't returned by the Business
       // Details list, so merge in our stored default if it's missing.
-      const stored = await taxService.getDefaultHmrcBusiness().catch(() => null);
       if (stored && !list.some((b) => bizId(b) === stored)) {
-        list.unshift({ businessId: stored, typeOfBusiness: 'self-employment', tradingName: 'Your filing business' });
+        list.unshift({ businessId: stored, typeOfBusiness: kind,
+          tradingName: kind === 'uk-property' ? 'Your rental property business' : 'Your filing business' });
       }
       setBusinesses(list);
       if (list.length === 0) {
-        setBizError('HMRC has no self-employed business for this National Insurance number. Check the number in step 1 is right, or choose “Our accountant files it”.');
+        setBizError(kind === 'uk-property'
+          ? 'HMRC has no UK property business for this National Insurance number. Check the number in step 1 is right, or choose “Our accountant files it”.'
+          : 'HMRC has no self-employed business for this National Insurance number. Check the number in step 1 is right, or choose “Our accountant files it”.');
       }
-      // Prefer the stored/provisioned business; else the sole self-employment / only one.
-      const se = list.filter((b) => /self-employment/i.test(bizType(b)));
+      // Prefer the stored/provisioned business; else the only one of the right kind.
+      const matching = list.filter(ofKind);
       const auto = (stored && list.find((b) => bizId(b) === stored))
-        || (se.length === 1 ? se[0] : list.length === 1 ? list[0] : null);
+        || (matching.length === 1 ? matching[0] : list.length === 1 ? list[0] : null);
       if (auto) {
         setSelectedBusiness(bizId(auto));
-        await taxService.selectHmrcBusiness(bizId(auto));
+        await taxService.selectHmrcBusiness(bizId(auto), taxYear);
       }
     } catch (err: unknown) {
       // If a NINO is missing, reflect that so the inline NINO form shows.
@@ -643,12 +702,12 @@ function FileWizardContent() {
     } finally {
       setLoadingBiz(false);
     }
-  }, []);
+  }, [taxYear]);
 
   const chooseBusiness = async (id: string) => {
     setSelectedBusiness(id);
     try {
-      await taxService.selectHmrcBusiness(id);
+      await taxService.selectHmrcBusiness(id, taxYear);
     } catch {
       toast.error('Failed to save business selection');
     }
@@ -675,7 +734,7 @@ function FileWizardContent() {
     }
     setLoadingObl(true);
     try {
-      const list = await taxService.fetchHmrcObligations(selectedBusiness, b.from, b.to);
+      const list = await taxService.fetchHmrcObligations(selectedBusiness, b.from, b.to, filingKind);
       setObligations(list);
       // Drive the filing tax year from the open obligation HMRC actually has — never a
       // hardcoded year. Auto-select the first open period; the user can pick another.
@@ -700,7 +759,7 @@ function FileWizardContent() {
     } finally {
       setLoadingObl(false);
     }
-  }, [selectedBusiness, taxYear]);
+  }, [selectedBusiness, taxYear, filingKind]);
 
   // Auto-fetch obligations once a business is chosen (the obvious next step), once per
   // business. The user can still re-pull with "Refresh" if HMRC's answer changes.
@@ -1284,8 +1343,10 @@ function FileWizardContent() {
           title="Your business"
           subtitle={
             s2 === 'done'
-              ? `Filing for ${bizName(businesses.find((b) => bizId(b) === selectedBusiness) || {}) || 'your self-employed business'}.`
-              : 'We ask HMRC for the self-employed business it holds for you.'
+              ? `Filing for ${bizName(businesses.find((b) => bizId(b) === selectedBusiness) || {})
+                || (isProperty ? 'your UK property business' : 'your self-employed business')}.`
+              : (isProperty ? 'We ask HMRC for the UK property business it holds for you.'
+                : 'We ask HMRC for the self-employed business it holds for you.')
           }
         />
         {s2 === 'active' && (
@@ -1320,7 +1381,8 @@ function FileWizardContent() {
                   >
                     <p className="font-medium text-secondary-900">{bizName(b) || 'Your business'}</p>
                     <p className="text-xs text-secondary-500">
-                      {/self-employment/i.test(bizType(b)) ? 'Self-employed' : bizType(b).replace(/-/g, ' ')}
+                      {/self-employment/i.test(bizType(b)) ? 'Self-employed'
+                        : /uk-property/i.test(bizType(b)) ? 'UK property (landlord)' : bizType(b).replace(/-/g, ' ')}
                       {selectedBusiness === bizId(b) ? ' · ✓ Chosen' : ' · Press to choose'}
                     </p>
                   </button>
