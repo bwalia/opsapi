@@ -48,6 +48,26 @@ local function getProfile(user_id)
     return rows and rows[1]
 end
 
+-- Our estimate for the year next to HMRC's calculation (lib/tax-delta), so the person
+-- or their accountant can see where the two differ and why. Never fails the call.
+local function compareWithEstimate(user_id, tax_year, calc_data, sandbox)
+    local ok, result = pcall(function()
+        local TaxTools = require("lib.agent.tax-tools")
+        local est = TaxTools.compute_year(user_id, tax_year, TaxTools.profile_for(user_id, tax_year))
+        return require("lib.tax-delta").compare(est, calc_data, { sandbox = sandbox })
+    end)
+    if not ok then
+        ngx.log(ngx.WARN, "[hmrc] estimate comparison failed: ", tostring(result))
+        return nil
+    end
+    -- Live differences point at missing income or a bug in our calculator: log them.
+    if result.differs and not sandbox then
+        ngx.log(ngx.WARN, "[hmrc] estimate differs from HMRC for user ", tostring(user_id), " ", tax_year,
+            ": total delta ", tostring(result.total_delta))
+    end
+    return result
+end
+
 local PROPERTY = "uk-property"
 local SELF_EMPLOYMENT = "self-employment"
 
@@ -481,6 +501,7 @@ return function(app)
                 business_id = ctx.business_id,
                 calculation_id = calc_id,
                 figures = figures,
+                comparison = compareWithEstimate(ctx.user_id, ctx.tax_year, cres.data, Client.is_sandbox()),
                 sandbox_placeholder = figures.is_sandbox_placeholder or false,
                 body = ctx.body,
                 stats = ctx.agg.stats,
@@ -655,6 +676,7 @@ return function(app)
                 business_id = ctx.business_id,
                 calculation_id = calc_id,
                 figures = figures,
+                comparison = compareWithEstimate(ctx.user_id, ctx.tax_year, cres.data, Client.is_sandbox()),
                 sandbox = Client.is_sandbox(),
             } } }
         end)
