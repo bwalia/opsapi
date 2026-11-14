@@ -196,6 +196,8 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
       } else if (wasProcessing.current) {
         wasProcessing.current = false;
         stopPolling();
+        // The per-file upload rows are finished with; drop them so the replies have the pane.
+        clearUploads();
         // The worker records how it went in the session ("✅ processed" or "⚠️ couldn't be
         // read") — show that, not an assumed success.
         const s = await taxAgentService.createSession(yearOpts()).catch(() => null);
@@ -213,7 +215,7 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
     } catch {
       /* transient poll error — keep trying */
     }
-  }, [stopPolling, sessionId, yearOpts]);
+  }, [stopPolling, sessionId, yearOpts, clearUploads]);
 
   const startPolling = useCallback(() => {
     stopPolling();
@@ -538,7 +540,7 @@ export default function TaxAgentChat({ variant = 'page', taxYear: pinnedYear, on
               ))}
             </div>
           )}
-          <StatementUploadList items={uploadItems} className="mb-2" />
+          <StatementUploadList items={uploadItems} className="mb-2 max-h-36 overflow-y-auto" />
           <form
             onSubmit={(e) => { e.preventDefault(); send(input); }}
             className="flex items-end gap-2"
