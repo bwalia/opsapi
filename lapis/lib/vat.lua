@@ -24,7 +24,11 @@ VAT.CODES = {
     { code = "RC_CIS", label = "Reverse charge: construction (CIS)", rate = 20, reclaimable = 100,
       reverse = true },
     { code = "PVA", label = "Postponed import VAT", rate = 20, reclaimable = 100, reverse = true },
-    { code = "NI_EU_GOODS", label = "Northern Ireland: goods to/from the EU", rate = 20, reclaimable = 100 },
+    -- Goods moving between Northern Ireland and the EU: a sale (dispatch) is
+    -- zero-rated; a purchase (acquisition) carries no supplier VAT and the buyer
+    -- accounts for it (Boxes 2 and 4) — so it splits like a reverse charge.
+    { code = "NI_EU_GOODS", label = "Northern Ireland: goods to/from the EU", rate = 20, reclaimable = 100,
+      reverse = true },
 }
 
 local BY_CODE = {}
