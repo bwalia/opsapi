@@ -1,0 +1,50 @@
+-- The global starting VAT rules: the obvious UK cases. A business's own rule
+-- always wins. Used by the vat-records migration and by the VAT classifier
+-- evaluation (spec/vat-classifier_spec.lua), so both see the same list.
+-- { match_type, match_value, vat_code, reclaimable_pct (nil = the code's default), reason }
+local SEED_RULES = {
+    { "contains", "HMRC", "OUTSIDE", nil, "Payments to HMRC are tax, not a purchase." },
+    { "contains", "COUNCIL TAX", "OUTSIDE", nil, "Council tax is not a supply, so no VAT." },
+    { "contains", "CTAX", "OUTSIDE", nil, "Council tax is not a supply, so no VAT." },
+    { "contains", "BUSINESS RATES", "OUTSIDE", nil, "Business rates are not a supply, so no VAT." },
+    { "contains", "SALARY", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
+    { "contains", "PAYROLL", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
+    { "contains", "TRANSFER TO", "OUTSIDE", nil, "Moving your own money is not a supply." },
+    { "contains", "TRANSFER FROM", "OUTSIDE", nil, "Moving your own money is not a supply." },
+    { "contains", "INSURANCE", "EXEMPT", nil, "Insurance is exempt from VAT (Insurance Premium Tax instead)." },
+    { "contains", "BANK CHARGE", "EXEMPT", nil, "Bank charges for financial services are exempt." },
+    { "contains", "ACCOUNT FEE", "EXEMPT", nil, "Bank account fees are exempt financial services." },
+    { "contains", "INTEREST", "EXEMPT", nil, "Interest is exempt from VAT." },
+    { "contains", "ROYAL MAIL", "EXEMPT", nil, "Royal Mail stamps are exempt postal services." },
+    { "contains", "TRAINLINE", "ZERO", nil, "Passenger rail travel is zero-rated." },
+    { "contains", "TFL", "ZERO", nil, "Passenger transport is zero-rated." },
+    { "contains", "CONGESTION CHARGE", "OUTSIDE", nil, "The congestion charge is not a supply, so no VAT." },
+    { "contains", "MOT TEST", "OUTSIDE", nil, "The MOT certificate fee is outside the scope of VAT." },
+    { "contains", "DVLA", "OUTSIDE", nil, "Vehicle tax is not a supply, so no VAT." },
+    { "contains", "COMPANIES HOUSE", "OUTSIDE", nil, "Statutory filing fees are outside the scope of VAT." },
+    { "contains", "TV LICENCE", "OUTSIDE", nil, "The TV licence fee is outside the scope of VAT." },
+    { "contains", "CASH WITHDRAWAL", "OUTSIDE", nil, "Cash taken out is not a purchase." },
+    { "contains", "DONATION", "OUTSIDE", nil, "A donation is not a supply." },
+    { "contains", "LOAN REPAYMENT", "OUTSIDE", nil, "Loan repayments are not a supply." },
+    { "contains", "DIVIDEND", "OUTSIDE", nil, "Dividends are not a supply." },
+    { "contains", "OPTED TO TAX", "STD20", nil, "Rent on a building you opted to tax is standard-rated." },
+    { "contains", "DEPOSIT FROM TENANT", "OUTSIDE", nil, "A tenant's security deposit is not a supply." },
+    { "contains", "SECURITY DEPOSIT", "OUTSIDE", nil, "A security deposit is not a supply." },
+    { "category", "loan_repayments", "OUTSIDE", nil, "Loan repayments are not a supply." },
+    { "category", "tax_payments", "OUTSIDE", nil, "Tax payments are not a supply." },
+    { "category", "transfer", "OUTSIDE", nil, "Moving your own money is not a supply." },
+    { "category", "personal_expense", "OUTSIDE", nil, "Personal spending is not a business purchase." },
+    { "category", "drawings", "OUTSIDE", nil, "Drawings are not a business purchase." },
+    { "category", "salaries_wages", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
+    { "category", "business_rates", "OUTSIDE", nil, "Business rates are not a supply, so no VAT." },
+    { "category", "premises_insurance", "EXEMPT", nil, "Insurance is exempt from VAT." },
+    { "category", "business_insurance", "EXEMPT", nil, "Insurance is exempt from VAT." },
+    { "category", "bank_charges", "EXEMPT", nil, "Bank charges are exempt financial services." },
+    { "category", "rental_income", "EXEMPT", nil,
+      "Residential rent is exempt. Commercial rent is exempt unless you opted to tax the building — "
+          .. "add your own rule if you did." },
+    { "category", "client_entertainment", "STD20", 0,
+      "VAT on business entertainment can't be reclaimed." },
+}
+
+return SEED_RULES

@@ -1,0 +1,820 @@
+{
+ "about": "Labelled UK bank lines for measuring VAT coding (docs/plans/VAT_MTD.md phase 3). expected = right VAT code; expected_pct = reclaimable %.",
+ "lines": [
+  {
+   "description": "HMRC SELF ASSESSMENT",
+   "direction": "purchase",
+   "amount": 1234.56,
+   "category": "tax_payments",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "HMRC VAT PAYMENT",
+   "direction": "purchase",
+   "amount": 1234.56,
+   "category": "tax_payments",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "HMRC PAYE NIC",
+   "direction": "purchase",
+   "amount": 1234.56,
+   "category": "tax_payments",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "SALARY J SMITH",
+   "direction": "purchase",
+   "amount": 2100,
+   "category": "salaries_wages",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "PAYROLL OCT",
+   "direction": "purchase",
+   "amount": 2100,
+   "category": "salaries_wages",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "STAFF WAGES NOV",
+   "direction": "purchase",
+   "amount": 2100,
+   "category": "salaries_wages",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "TRANSFER TO SAVINGS",
+   "direction": "purchase",
+   "amount": 5000,
+   "category": "transfer",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "TRANSFER FROM SAVINGS",
+   "direction": "sale",
+   "amount": 5000,
+   "category": "transfer",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "LEEDS CITY COUNCIL CTAX",
+   "direction": "purchase",
+   "amount": 180,
+   "category": "business_rates",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "BRISTOL CC BUSINESS RATES",
+   "direction": "purchase",
+   "amount": 410,
+   "category": "business_rates",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "BARCLAYS LOAN REPAYMENT",
+   "direction": "purchase",
+   "amount": 850,
+   "category": "loan_repayments",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "DIVIDEND TO DIRECTOR",
+   "direction": "purchase",
+   "amount": 3000,
+   "category": "drawings",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "COMPANIES HOUSE CONFIRMATION",
+   "direction": "purchase",
+   "amount": 34,
+   "category": "professional_fees",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Statutory fee: outside the scope"
+  },
+  {
+   "description": "DVLA VEHICLE TAX",
+   "direction": "purchase",
+   "amount": 190,
+   "category": "vehicle_insurance",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Vehicle excise duty: outside the scope"
+  },
+  {
+   "description": "TV LICENCE",
+   "direction": "purchase",
+   "amount": 169.5,
+   "category": "general_admin_expenses",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "STRIPE PAYOUT",
+   "direction": "sale",
+   "amount": 1840,
+   "category": "sales_income",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Transfer of collected sales; the sales are coded on the invoices"
+  },
+  {
+   "description": "AVIVA INSURANCE DD",
+   "direction": "purchase",
+   "amount": 89,
+   "category": "business_insurance",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "HISCOX BUSINESS INSURANCE",
+   "direction": "purchase",
+   "amount": 89,
+   "category": "business_insurance",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "DIRECT LINE LANDLORD INSURANCE",
+   "direction": "purchase",
+   "amount": 89,
+   "category": "premises_insurance",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "BANK CHARGES",
+   "direction": "purchase",
+   "amount": 12.5,
+   "category": "bank_charges",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "MONTHLY ACCOUNT FEE",
+   "direction": "purchase",
+   "amount": 12.5,
+   "category": "bank_charges",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "OVERDRAFT INTEREST",
+   "direction": "purchase",
+   "amount": 12.5,
+   "category": "bank_charges",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "ROYAL MAIL STAMPS",
+   "direction": "purchase",
+   "amount": 26.4,
+   "category": "postage_delivery",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "RENT RECEIVED FLAT 2 HIGH ST",
+   "direction": "sale",
+   "amount": 950,
+   "category": "rental_income",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "INTEREST PAID",
+   "direction": "sale",
+   "amount": 3.21,
+   "category": "interest_income",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "BUPA HEALTH CARE",
+   "direction": "purchase",
+   "amount": 120,
+   "category": "staff_welfare",
+   "expected": "EXEMPT",
+   "expected_pct": 0,
+   "note": "Health insurance is exempt"
+  },
+  {
+   "description": "NHS DENTAL",
+   "direction": "purchase",
+   "amount": 65,
+   "category": "personal_expense",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Personal spending is left off a business VAT return"
+  },
+  {
+   "description": "STUDENTS UNION COURSE FEE",
+   "direction": "purchase",
+   "amount": 300,
+   "category": "training_courses",
+   "expected": "EXEMPT",
+   "expected_pct": 0,
+   "note": "Education by eligible body"
+  },
+  {
+   "description": "TRAINLINE TICKET",
+   "direction": "purchase",
+   "amount": 58.2,
+   "category": "travel_transport",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "TFL TRAVEL CHARGE",
+   "direction": "purchase",
+   "amount": 58.2,
+   "category": "travel_transport",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "NATIONAL RAIL",
+   "direction": "purchase",
+   "amount": 58.2,
+   "category": "travel_transport",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "STAGECOACH BUS",
+   "direction": "purchase",
+   "amount": 58.2,
+   "category": "travel_transport",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "EASYJET FLIGHT LGW",
+   "direction": "purchase",
+   "amount": 58.2,
+   "category": "travel_transport",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "WATERSTONES BOOKS",
+   "direction": "purchase",
+   "amount": 24.99,
+   "category": "office_supplies",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "TESCO GROCERIES",
+   "direction": "purchase",
+   "amount": 42.1,
+   "category": "personal_expense",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Personal spending is left off a business VAT return"
+  },
+  {
+   "description": "NEWSAGENT NEWSPAPERS",
+   "direction": "purchase",
+   "amount": 6,
+   "category": "general_admin_expenses",
+   "expected": "ZERO",
+   "expected_pct": 100
+  },
+  {
+   "description": "SALE TO EXPORT CUSTOMER USA",
+   "direction": "sale",
+   "amount": 4000,
+   "category": "sales_income",
+   "expected": "ZERO",
+   "expected_pct": 100,
+   "note": "Export of goods"
+  },
+  {
+   "description": "BRITISH GAS DOMESTIC",
+   "direction": "purchase",
+   "amount": 105,
+   "category": "utilities",
+   "expected": "RED5",
+   "expected_pct": 100,
+   "note": "Domestic fuel"
+  },
+  {
+   "description": "OCTOPUS ENERGY HOME",
+   "direction": "purchase",
+   "amount": 98,
+   "category": "utilities",
+   "expected": "RED5",
+   "expected_pct": 100
+  },
+  {
+   "description": "MOTHERCARE CAR SEAT",
+   "direction": "purchase",
+   "amount": 120,
+   "category": "personal_expense",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Personal spending is left off a business VAT return"
+  },
+  {
+   "description": "ECO INSULATION INSTALL",
+   "direction": "purchase",
+   "amount": 2100,
+   "category": "repairs_property",
+   "expected": "ZERO",
+   "expected_pct": 100,
+   "note": "Energy-saving materials zero-rated to 2027"
+  },
+  {
+   "description": "ADOBE CREATIVE CLOUD",
+   "direction": "purchase",
+   "amount": 54.6,
+   "category": "software_subscriptions",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "MICROSOFT 365",
+   "direction": "purchase",
+   "amount": 11.4,
+   "category": "software_subscriptions",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SCREWFIX DIRECT",
+   "direction": "purchase",
+   "amount": 86.4,
+   "category": "materials_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "B&Q TRADE",
+   "direction": "purchase",
+   "amount": 230,
+   "category": "materials_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "STAPLES OFFICE",
+   "direction": "purchase",
+   "amount": 45,
+   "category": "office_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "AMAZON BUSINESS",
+   "direction": "purchase",
+   "amount": 120,
+   "category": "office_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "BT BROADBAND",
+   "direction": "purchase",
+   "amount": 42,
+   "category": "internet",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "VODAFONE MOBILE",
+   "direction": "purchase",
+   "amount": 30,
+   "category": "telephone",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SHELL FUEL",
+   "direction": "purchase",
+   "amount": 65,
+   "category": "vehicle_fuel",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "KWIK FIT TYRES",
+   "direction": "purchase",
+   "amount": 180,
+   "category": "vehicle_maintenance",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "ACCOUNTANCY FEES SMITH & CO",
+   "direction": "purchase",
+   "amount": 600,
+   "category": "accountancy_fees",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SOLICITORS LEGAL FEES",
+   "direction": "purchase",
+   "amount": 900,
+   "category": "legal_fees",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "GOOGLE ADS",
+   "direction": "purchase",
+   "amount": 250,
+   "category": "marketing_advertising",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "XERO SUBSCRIPTION",
+   "direction": "purchase",
+   "amount": 36,
+   "category": "software_subscriptions",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "CURRYS LAPTOP",
+   "direction": "purchase",
+   "amount": 1199,
+   "category": "equipment_purchase",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "PREMIER INN",
+   "direction": "purchase",
+   "amount": 89,
+   "category": "travel_transport",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "WILKO CLEANING",
+   "direction": "purchase",
+   "amount": 19.99,
+   "category": "materials_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "TRAVIS PERKINS",
+   "direction": "purchase",
+   "amount": 640,
+   "category": "materials_supplies",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SIGNS EXPRESS",
+   "direction": "purchase",
+   "amount": 350,
+   "category": "marketing_advertising",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "LANDLORD LETTING AGENT FEE",
+   "direction": "purchase",
+   "amount": 120,
+   "category": "professional_fees",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "PLUMBER REPAIR INVOICE",
+   "direction": "purchase",
+   "amount": 480,
+   "category": "repairs_property",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "ELECTRICIAN CERT",
+   "direction": "purchase",
+   "amount": 150,
+   "category": "repairs_property",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "WEB HOSTING 123REG",
+   "direction": "purchase",
+   "amount": 9.99,
+   "category": "website_costs",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "FIVERR FREELANCER UK",
+   "direction": "purchase",
+   "amount": 200,
+   "category": "subcontractors",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "CLIENT DINNER THE IVY",
+   "direction": "purchase",
+   "amount": 240,
+   "category": "client_entertainment",
+   "expected": "STD20",
+   "expected_pct": 0,
+   "note": "Business entertainment: no reclaim"
+  },
+  {
+   "description": "STAFF CHRISTMAS PARTY",
+   "direction": "purchase",
+   "amount": 600,
+   "category": "staff_welfare",
+   "expected": "STD20",
+   "expected_pct": 100,
+   "note": "Staff entertainment is reclaimable"
+  },
+  {
+   "description": "CAR LEASE PCP",
+   "direction": "purchase",
+   "amount": 350,
+   "category": "vehicle_maintenance",
+   "expected": "STD20",
+   "expected_pct": 50,
+   "note": "Car lease with private use: 50%"
+  },
+  {
+   "description": "CORPORATE HOSPITALITY TICKETS",
+   "direction": "purchase",
+   "amount": 480,
+   "category": "client_entertainment",
+   "expected": "STD20",
+   "expected_pct": 0
+  },
+  {
+   "description": "FACEBOOK ADS IRELAND",
+   "direction": "purchase",
+   "amount": 60,
+   "category": "software_subscriptions",
+   "expected": "RC_SERVICES",
+   "expected_pct": 100
+  },
+  {
+   "description": "GOOGLE CLOUD IRELAND LTD",
+   "direction": "purchase",
+   "amount": 60,
+   "category": "software_subscriptions",
+   "expected": "RC_SERVICES",
+   "expected_pct": 100
+  },
+  {
+   "description": "SLACK TECHNOLOGIES LLC",
+   "direction": "purchase",
+   "amount": 60,
+   "category": "software_subscriptions",
+   "expected": "RC_SERVICES",
+   "expected_pct": 100
+  },
+  {
+   "description": "ZOOM VIDEO COMMUNICATIONS",
+   "direction": "purchase",
+   "amount": 60,
+   "category": "software_subscriptions",
+   "expected": "RC_SERVICES",
+   "expected_pct": 100
+  },
+  {
+   "description": "UPWORK FREELANCER (US)",
+   "direction": "purchase",
+   "amount": 400,
+   "category": "subcontractors",
+   "expected": "RC_SERVICES",
+   "expected_pct": 100
+  },
+  {
+   "description": "BUILDER LTD CIS REVERSE CHARGE",
+   "direction": "purchase",
+   "amount": 5000,
+   "category": "subcontractors",
+   "expected": "RC_CIS",
+   "expected_pct": 100
+  },
+  {
+   "description": "POSTPONED IMPORT VAT C79 GOODS",
+   "direction": "purchase",
+   "amount": 2500,
+   "category": "cost_of_sales",
+   "expected": "PVA",
+   "expected_pct": 100
+  },
+  {
+   "description": "INVOICE 1001 ACME LTD",
+   "direction": "sale",
+   "amount": 1200,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "INVOICE 1002 BETA LTD",
+   "direction": "sale",
+   "amount": 3600,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SQUARE SALES",
+   "direction": "sale",
+   "amount": 480,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SUMUP CARD SALES",
+   "direction": "sale",
+   "amount": 215.5,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "CONSULTING FEE GLOBEX",
+   "direction": "sale",
+   "amount": 2400,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "WEB DESIGN PROJECT",
+   "direction": "sale",
+   "amount": 1800,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "SALE OF OLD VAN",
+   "direction": "sale",
+   "amount": 4800,
+   "category": "sales_income",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "COMMERCIAL RENT UNIT 4 (OPTED TO TAX)",
+   "direction": "sale",
+   "amount": 2400,
+   "category": "rental_income",
+   "expected": "STD20",
+   "expected_pct": 100,
+   "note": "Opted to tax"
+  },
+  {
+   "description": "PAYPAL PAYMENT",
+   "direction": "purchase",
+   "amount": 35,
+   "category": "general_admin_expenses",
+   "expected": "STD20",
+   "expected_pct": 100,
+   "note": "Unknown PayPal merchant: review"
+  },
+  {
+   "description": "CASH WITHDRAWAL",
+   "direction": "purchase",
+   "amount": 100,
+   "category": "drawings",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "REFUND SCREWFIX",
+   "direction": "sale",
+   "amount": 23.4,
+   "category": "materials_supplies",
+   "expected": "STD20",
+   "expected_pct": 100,
+   "note": "Refund of a standard-rated purchase"
+  },
+  {
+   "description": "CHARITY DONATION",
+   "direction": "purchase",
+   "amount": 50,
+   "category": "general_admin_expenses",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  },
+  {
+   "description": "PARKING NCP",
+   "direction": "purchase",
+   "amount": 12,
+   "category": "travel_transport",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "CONGESTION CHARGE TFL",
+   "direction": "purchase",
+   "amount": 15,
+   "category": "travel_transport",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Congestion charge: outside the scope"
+  },
+  {
+   "description": "MOT TEST",
+   "direction": "purchase",
+   "amount": 54.85,
+   "category": "vehicle_maintenance",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "MOT certificate fee: outside the scope"
+  },
+  {
+   "description": "POST OFFICE PARCEL FORCE",
+   "direction": "purchase",
+   "amount": 18,
+   "category": "postage_delivery",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "ROYAL MAIL SPECIAL DELIVERY",
+   "direction": "purchase",
+   "amount": 8.5,
+   "category": "postage_delivery",
+   "expected": "EXEMPT",
+   "expected_pct": 0
+  },
+  {
+   "description": "GYM MEMBERSHIP PURE",
+   "direction": "purchase",
+   "amount": 30,
+   "category": "personal_expense",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Personal spending is left off a business VAT return"
+  },
+  {
+   "description": "ZERO RATED CHILDRENS CLOTHES NEXT",
+   "direction": "purchase",
+   "amount": 40,
+   "category": "personal_expense",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Personal spending is left off a business VAT return"
+  },
+  {
+   "description": "CAFFE NERO",
+   "direction": "purchase",
+   "amount": 4.2,
+   "category": "travel_transport",
+   "expected": "STD20",
+   "expected_pct": 100,
+   "note": "Hot drinks/catering standard-rated"
+  },
+  {
+   "description": "UBER TRIP",
+   "direction": "purchase",
+   "amount": 18,
+   "category": "travel_transport",
+   "expected": "STD20",
+   "expected_pct": 100
+  },
+  {
+   "description": "DEPOSIT FROM TENANT",
+   "direction": "sale",
+   "amount": 1200,
+   "category": "rental_income",
+   "expected": "OUTSIDE",
+   "expected_pct": 0,
+   "note": "Security deposit is not a supply"
+  },
+  {
+   "description": "HMRC VAT REPAYMENT",
+   "direction": "sale",
+   "amount": 640,
+   "category": "tax_payments",
+   "expected": "OUTSIDE",
+   "expected_pct": 0
+  }
+ ]
+}

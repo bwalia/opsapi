@@ -53,39 +53,7 @@ local function add_vat_columns(tbl)
         .. " (vat_registration_id, vat_period_key)")
 end
 
--- Global starting rules: the obvious UK cases. A business's own rule always wins.
-local SEED_RULES = {
-    { "contains", "HMRC", "OUTSIDE", nil, "Payments to HMRC are tax, not a purchase." },
-    { "contains", "COUNCIL TAX", "OUTSIDE", nil, "Council tax is not a supply, so no VAT." },
-    { "contains", "CTAX", "OUTSIDE", nil, "Council tax is not a supply, so no VAT." },
-    { "contains", "BUSINESS RATES", "OUTSIDE", nil, "Business rates are not a supply, so no VAT." },
-    { "contains", "SALARY", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
-    { "contains", "PAYROLL", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
-    { "contains", "TRANSFER TO", "OUTSIDE", nil, "Moving your own money is not a supply." },
-    { "contains", "TRANSFER FROM", "OUTSIDE", nil, "Moving your own money is not a supply." },
-    { "contains", "INSURANCE", "EXEMPT", nil, "Insurance is exempt from VAT (Insurance Premium Tax instead)." },
-    { "contains", "BANK CHARGE", "EXEMPT", nil, "Bank charges for financial services are exempt." },
-    { "contains", "ACCOUNT FEE", "EXEMPT", nil, "Bank account fees are exempt financial services." },
-    { "contains", "INTEREST", "EXEMPT", nil, "Interest is exempt from VAT." },
-    { "contains", "ROYAL MAIL", "EXEMPT", nil, "Royal Mail stamps are exempt postal services." },
-    { "contains", "TRAINLINE", "ZERO", nil, "Passenger rail travel is zero-rated." },
-    { "contains", "TFL", "ZERO", nil, "Passenger transport is zero-rated." },
-    { "category", "loan_repayments", "OUTSIDE", nil, "Loan repayments are not a supply." },
-    { "category", "tax_payments", "OUTSIDE", nil, "Tax payments are not a supply." },
-    { "category", "transfer", "OUTSIDE", nil, "Moving your own money is not a supply." },
-    { "category", "personal_expense", "OUTSIDE", nil, "Personal spending is not a business purchase." },
-    { "category", "drawings", "OUTSIDE", nil, "Drawings are not a business purchase." },
-    { "category", "salaries_wages", "OUTSIDE", nil, "Wages are not a supply, so no VAT." },
-    { "category", "business_rates", "OUTSIDE", nil, "Business rates are not a supply, so no VAT." },
-    { "category", "premises_insurance", "EXEMPT", nil, "Insurance is exempt from VAT." },
-    { "category", "business_insurance", "EXEMPT", nil, "Insurance is exempt from VAT." },
-    { "category", "bank_charges", "EXEMPT", nil, "Bank charges are exempt financial services." },
-    { "category", "rental_income", "EXEMPT", nil,
-      "Residential rent is exempt. Commercial rent is exempt unless you opted to tax the building — "
-          .. "add your own rule if you did." },
-    { "category", "client_entertainment", "STD20", 0,
-      "VAT on business entertainment can't be reclaimed." },
-}
+local SEED_RULES = require("lib.vat-seed-rules")
 
 return {
     [1] = function()
