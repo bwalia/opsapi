@@ -44,7 +44,8 @@ local ORDER_COLS = [[
     o.refunded_minor, o.returned_net_minor, o.refund_clawback_minor,
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at,
-    o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid, o.customer_po_number
+    o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid, o.customer_po_number,
+    o.delivery_date::text AS delivery_date, o.delivery_window
 ]]
 ShopOrderQueries.ORDER_COLS = ORDER_COLS
 
@@ -73,6 +74,9 @@ function ShopOrderQueries.shape(o, opts)
         discount_minor = tonumber(o.discount_minor) or 0,
         delivery_method = o.delivery_method or U.null,
         delivery_address = U.nz(o.delivery_address) and U.dec(o.delivery_address, U.null) or U.null,
+        -- Agreed delivery day (YYYY-MM-DD) and window (all_day | am | pm), set by an approved delivery change.
+        delivery_date = U.nz(o.delivery_date) or U.null,
+        delivery_window = U.nz(o.delivery_window) or U.null,
         currency = o.currency,
         paid_at = o.paid_at or U.null,
         created_at = o.created_at,
@@ -111,6 +115,8 @@ function ShopOrderQueries.shape(o, opts)
         -- "Bank transfer due": awaiting a bank transfer, and for how long (whole days).
         out.bank_transfer_due = o.status == "pending_payment" and o.payment_method == "bank_transfer"
         out.days_waiting = tonumber(o.days_waiting) or U.null
+        -- A customer's delivery change request is waiting for staff (adminList / adminGet).
+        out.delivery_change_pending = o.delivery_change_pending == true
     end
     return out
 end
@@ -130,11 +136,19 @@ function ShopOrderQueries.getByUuid(ns_id, uuid)
          WHERE o.namespace_id = ? AND o.uuid = ?]], ns_id, uuid)[1]
 end
 
-function ShopOrderQueries.publicView(ns_id, uuid, token)
+--- member_email: the signed-in customer (X-Member-Token), if any. When it is the order's email the view
+-- adds viewer_owns_order = true and pending_delivery_change (their request awaiting confirmation, or null).
+function ShopOrderQueries.publicView(ns_id, uuid, token, member_email)
     if not U.nz(uuid) or not U.nz(token) then return nil end
     local o = ShopOrderQueries.getByUuid(ns_id, uuid)
     if not o or not U.secure_equals(o.access_token, token) then return nil end
-    return ShopOrderQueries.shape(o)
+    local out = ShopOrderQueries.shape(o)
+    if U.nz(member_email) then
+        local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
+        out.viewer_owns_order = DeliveryChange.ownsOrder(o, member_email)
+        if out.viewer_owns_order then out.pending_delivery_change = DeliveryChange.pendingFor(o.id) end
+    end
+    return out
 end
 
 local function next_number()
@@ -904,6 +918,10 @@ end
 -- admin
 -- ---------------------------------------------------------------------------
 
+--- SQL (on alias o): a customer's delivery change request is waiting for staff.
+local PENDING_CHANGE_SQL = [[EXISTS (SELECT 1 FROM shop_delivery_change_requests dcr
+                                      WHERE dcr.order_id = o.id AND dcr.status = 'pending')]]
+
 function ShopOrderQueries.adminList(ns_id, params)
     params = params or {}
     local limit = U.clamp(U.int(params.limit, 25), 1, 200)
@@ -925,8 +943,11 @@ function ShopOrderQueries.adminList(ns_id, params)
     end
     if params.filter == "needs_supplier_po" then
         where[#where + 1] = "(" .. Quote.needsSupplierPoSql() .. ")"
+    elseif params.filter == "delivery_change_pending" then
+        where[#where + 1] = "(" .. PENDING_CHANGE_SQL .. ")"
     elseif U.nz(params.filter) and params.filter ~= "bank_transfer_due" then
-        return nil, U.err(400, "VALIDATION_ERROR", "filter must be needs_supplier_po or bank_transfer_due")
+        return nil, U.err(400, "VALIDATION_ERROR",
+            "filter must be needs_supplier_po, bank_transfer_due or delivery_change_pending")
     end
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
@@ -940,6 +961,7 @@ function ShopOrderQueries.adminList(ns_id, params)
                EXTRACT(DAY FROM NOW() - o.created_at)::int AS days_waiting,
                (SELECT cs.uuid FROM shop_chat_sessions cs WHERE cs.order_id = o.id OR (o.cart_id IS NOT NULL
                    AND cs.cart_id = o.cart_id) ORDER BY cs.id DESC LIMIT 1) AS chat_session_uuid,
+               ]] .. PENDING_CHANGE_SQL .. [[ AS delivery_change_pending,
                COUNT(*) OVER() AS total
           FROM shop_orders o LEFT JOIN shop_quotes q ON q.id = o.quote_id
           LEFT JOIN shop_carts c ON c.id = o.cart_id
@@ -956,8 +978,12 @@ function ShopOrderQueries.adminList(ns_id, params)
     -- For the "Bank transfer due" filter badge.
     local due_row = db.query([[SELECT COUNT(*)::int AS n FROM shop_orders WHERE namespace_id = ?
                                 AND status = 'pending_payment' AND payment_method = 'bank_transfer']], ns_id)[1]
+    -- For the "Delivery change requested" filter badge.
+    local change_row = db.query([[SELECT COUNT(DISTINCT order_id)::int AS n FROM shop_delivery_change_requests
+                                   WHERE namespace_id = ? AND status = 'pending']], ns_id)[1]
     return U.arr(out), { total = total, limit = limit, offset = offset,
-                         bank_transfer_due_count = due_row and tonumber(due_row.n) or 0 }
+                         bank_transfer_due_count = due_row and tonumber(due_row.n) or 0,
+                         delivery_change_pending_count = change_row and tonumber(change_row.n) or 0 }
 end
 
 function ShopOrderQueries.adminGet(ns_id, uuid)
@@ -973,6 +999,11 @@ function ShopOrderQueries.adminGet(ns_id, uuid)
          WHERE r.order_id = ? ORDER BY r.id
     ]], o.id))
     s.purchase_orders = ShopOrderQueries.purchaseOrdersFor(ns_id, o.uuid)
+    s.delivery_change_requests = require("queries.ShopDeliveryChangeQueries").forOrder(o.id, { admin = true })
+    s.delivery_change_pending = false
+    for _, r in ipairs(s.delivery_change_requests) do
+        if r.status == "pending" then s.delivery_change_pending = true end
+    end
     return s
 end
 
@@ -1124,9 +1155,16 @@ function ShopOrderQueries.purchaseOrdersFor(ns_id, order_uuid)
     return U.arr(ok and rows or {})
 end
 
+--- Non-blank strings of parts joined by sep. parts may have holes (a missing line2), so no ipairs:
+-- ipairs stopped at the first nil and dropped the town, postcode and country.
 local function join_nonempty(parts, sep)
     local out = {}
-    for _, p in ipairs(parts) do
+    local n = 0
+    for k in pairs(parts) do
+        if type(k) == "number" and k > n then n = k end
+    end
+    for i = 1, n do
+        local p = parts[i]
         if type(p) == "string" and p:match("%S") then out[#out + 1] = p end
     end
     return table.concat(out, sep)
@@ -1166,6 +1204,7 @@ local function address_text(a)
     return s ~= "" and s or nil
 end
 ShopOrderQueries.addressText = address_text
+ShopOrderQueries.shipTo = ship_to_of
 
 local function po_line_description(l)
     local parts = { tostring(l.product_name or l.label or "Item") }

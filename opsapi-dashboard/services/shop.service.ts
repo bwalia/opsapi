@@ -37,6 +37,8 @@ import type {
   ShopMarketSource,
   ShopMarketSourceInput,
   ShopMarketUpsertResult,
+  ShopDeliveryChangeDecision,
+  ShopDeliveryChangeRequest,
   ShopOrder,
   ShopOrderInvoiceResult,
   ShopOrderMarkPaid,
@@ -146,8 +148,8 @@ export interface ShopOrderListParams {
   q?: string;
   /** Awaiting a bank transfer, oldest first. */
   bank_transfer_due?: boolean;
-  /** Paid with no supplier PO yet. */
-  filter?: 'needs_supplier_po' | '';
+  /** Paid with no supplier PO yet | a customer's delivery change request is waiting. */
+  filter?: 'needs_supplier_po' | 'delivery_change_pending' | '';
   limit?: number;
   offset?: number;
 }
@@ -173,6 +175,8 @@ export interface ShopSettings {
   po_bill_to?: PurchaseOrderParty | null;
   /** Where the staff "new order" alert goes (unset: the Leads → Notifications admin email). */
   order_alert_email?: string | null;
+  /** Email customers when a delivery change request is approved or declined. Off by default. */
+  customer_delivery_notifications?: boolean;
   updated_at: string | null;
 }
 
@@ -183,7 +187,9 @@ export const shopService = {
     return unwrap<ShopSettings>(res);
   },
 
-  async updateSettings(body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email'>>): Promise<ShopSettings> {
+  async updateSettings(
+    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications'>>,
+  ): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);
   },
@@ -292,7 +298,7 @@ export const shopService = {
   },
 
   // ---------------- Orders ----------------
-  async getOrders(params: ShopOrderListParams = {}): Promise<ShopList<ShopOrder> & { bankTransferDue: number }> {
+  async getOrders(params: ShopOrderListParams = {}): Promise<ShopList<ShopOrder> & { bankTransferDue: number; deliveryChangePending: number }> {
     const qs = buildQueryString({
       status: params.status,
       q: params.q,
@@ -302,8 +308,30 @@ export const shopService = {
       bank_transfer_due: params.bank_transfer_due ? 'true' : undefined,
     });
     const res = await apiClient.get(`${BASE}/orders${qs}`);
-    const meta = (res.data as { meta?: { bank_transfer_due_count?: number } } | undefined)?.meta;
-    return { ...unwrapList<ShopOrder>(res, params.limit, params.offset), bankTransferDue: num(meta?.bank_transfer_due_count) };
+    const meta = (res.data as { meta?: { bank_transfer_due_count?: number; delivery_change_pending_count?: number } } | undefined)?.meta;
+    return {
+      ...unwrapList<ShopOrder>(res, params.limit, params.offset),
+      bankTransferDue: num(meta?.bank_transfer_due_count),
+      deliveryChangePending: num(meta?.delivery_change_pending_count),
+    };
+  },
+
+  /** The customer's delivery change requests on an order, newest first. */
+  async getDeliveryChanges(orderUuid: string): Promise<ShopDeliveryChangeRequest[]> {
+    const res = await apiClient.get(`${BASE}/orders/${orderUuid}/delivery-changes`);
+    return unwrap<ShopDeliveryChangeRequest[]>(res) ?? [];
+  },
+
+  /** Apply the requested address / date / window to the order. Idempotent; 409 once the order has shipped. */
+  async approveDeliveryChange(orderUuid: string, requestUuid: string, staffNote?: string): Promise<ShopDeliveryChangeDecision> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/delivery-changes/${requestUuid}/approve`, { staff_note: staffNote || undefined }, JSON_BODY);
+    return unwrap<ShopDeliveryChangeDecision>(res);
+  },
+
+  /** Decline with a reason (shown to the customer on their order page). Idempotent. */
+  async declineDeliveryChange(orderUuid: string, requestUuid: string, staffNote: string): Promise<ShopDeliveryChangeDecision> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/delivery-changes/${requestUuid}/decline`, { staff_note: staffNote }, JSON_BODY);
+    return unwrap<ShopDeliveryChangeDecision>(res);
   },
 
   /** Record a payment that arrived outside Stripe (bank transfer, cheque, other); the order becomes paid. */

@@ -11,6 +11,10 @@
     order_alert_email the staff "new order" alert (an order paid online, or a customer choosing bank
                       transfer) goes here; unset = the Leads → Notifications admin email, else the
                       workspace owner. Customers are never emailed by this alert.
+    customer_delivery_notifications
+                      false (default) → nothing is sent to customers when staff approve or decline a
+                      delivery change request (they see the outcome on their order page). Leave it off
+                      until the shop's sending address is changed.
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")
@@ -22,7 +26,12 @@ local BILL_TO_KEYS = { "company", "line1", "line2", "city", "county", "postcode"
 
 function Q.get(ns_id)
     local ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
-                                              updated_at FROM shop_settings WHERE namespace_id = ?]], ns_id)
+                                              customer_delivery_notifications, updated_at
+                                         FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    if not ok then -- before migration zzs52
+        ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
+                                            updated_at FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    end
     if not ok then -- before migration zzs50
         rows = db.query([[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, updated_at
                             FROM shop_settings WHERE namespace_id = ?]], ns_id)
@@ -32,6 +41,7 @@ function Q.get(ns_id)
         checkout_enabled = row ~= nil and row.checkout_enabled == true,
         po_bill_to = row and U.nz(row.po_bill_to) and U.dec(row.po_bill_to, U.null) or U.null,
         order_alert_email = row and U.nz(row.order_alert_email) or U.null,
+        customer_delivery_notifications = row ~= nil and row.customer_delivery_notifications == true,
         updated_at = row and row.updated_at or U.null,
     }
 end
@@ -63,12 +73,22 @@ function Q.orderAlertEmail(ns_id)
     return e ~= U.null and e or nil
 end
 
---- body: { checkout_enabled?, po_bill_to?, order_alert_email? } (at least one).
+--- May we email the customer when staff decide on their delivery change request? Off by default.
+function Q.customerDeliveryNotifications(ns_id)
+    return Q.get(ns_id).customer_delivery_notifications == true
+end
+
+--- body: { checkout_enabled?, po_bill_to?, order_alert_email?, customer_delivery_notifications? } (at least one).
 function Q.update(ns_id, body)
     local has_checkout, has_bill = body.checkout_enabled ~= nil, body.po_bill_to ~= nil
     local has_alert = body.order_alert_email ~= nil
-    if not has_checkout and not has_bill and not has_alert then
-        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to or order_alert_email)")
+    local has_notify = body.customer_delivery_notifications ~= nil
+    if not has_checkout and not has_bill and not has_alert and not has_notify then
+        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to, order_alert_email "
+            .. "or customer_delivery_notifications)")
+    end
+    if has_notify and type(body.customer_delivery_notifications) ~= "boolean" then
+        return nil, U.err(400, "VALIDATION_ERROR", "customer_delivery_notifications must be true or false")
     end
     local alert
     if has_alert then
@@ -93,6 +113,10 @@ function Q.update(ns_id, body)
     if has_checkout then
         db.query("UPDATE shop_settings SET checkout_enabled = ?, updated_at = NOW() WHERE namespace_id = ?",
             body.checkout_enabled, ns_id)
+    end
+    if has_notify then
+        db.query([[UPDATE shop_settings SET customer_delivery_notifications = ?, updated_at = NOW()
+                    WHERE namespace_id = ?]], body.customer_delivery_notifications, ns_id)
     end
     if has_alert then
         db.query("UPDATE shop_settings SET order_alert_email = ?, updated_at = NOW() WHERE namespace_id = ?",
