@@ -84,6 +84,13 @@ function VatQueries.validate_registration(f)
         out.effective_date = f.effective_date
     end
     if f.business_name then out.business_name = tostring(f.business_name):sub(1, 255) end
+    if f.business_address then out.business_address = tostring(f.business_address):sub(1, 500) end
+    if f.sales_from ~= nil then
+        if not ({ auto = 1, invoices = 1, bank = 1 })[f.sales_from] then
+            return nil, "sales_from must be auto, invoices or bank"
+        end
+        out.sales_from = f.sales_from
+    end
     return out
 end
 

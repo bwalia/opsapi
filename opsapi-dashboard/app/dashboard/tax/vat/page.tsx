@@ -22,6 +22,7 @@ import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
   BOX_LABELS,
   setVatClient,
+  setVatScope,
   type Boxes,
   type VatCode,
   type VatObligation,
@@ -124,6 +125,17 @@ function Registration({ reg, schemes, onSaved }: {
         </label>
         <label className="text-sm">Business name
           <input className={input} value={form.business_name || ''} onChange={(e) => set('business_name', e.target.value)} />
+        </label>
+        <label className="text-sm sm:col-span-2">Business address (shown on VAT invoices)
+          <input className={input} value={form.business_address || ''}
+            onChange={(e) => set('business_address', e.target.value)} />
+        </label>
+        <label className="text-sm">Sales on the VAT return come from
+          <select className={input} value={form.sales_from || 'auto'} onChange={(e) => set('sales_from', e.target.value)}>
+            <option value="auto">Invoices if you issue them here, otherwise the bank</option>
+            <option value="invoices">The invoices you issue here</option>
+            <option value="bank">Money received in the bank</option>
+          </select>
         </label>
         <label className="text-sm">VAT scheme
           <select className={input} value={form.scheme} onChange={(e) => set('scheme', e.target.value)}>
@@ -376,6 +388,9 @@ function VatPage() {
   // An accountant opening a client's VAT (from Tax → VAT clients): every call carries it.
   const client = params.get('client');
   setVatClient(client);
+  // ?scope=namespace: the workspace's own VAT (its invoices, accounting bank lines).
+  const workspace = !client && params.get('scope') === 'namespace';
+  setVatScope(workspace ? 'namespace' : null);
   const [loading, setLoading] = useState(true);
   const [reg, setReg] = useState<VatRegistration | null>(null);
   const [codes, setCodes] = useState<VatCode[]>([]);
@@ -519,6 +534,11 @@ function VatPage() {
     <div className="space-y-4">
       <PageHeader title="VAT" icon={<Receipt className="h-5 w-5" />}
         description="Code your VAT with AI, check the few lines it's unsure about, and file your VAT return with HMRC." />
+      {workspace && (
+        <div className="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900">
+          You&apos;re working on this workspace&apos;s VAT (its invoices and accounts), not your own.
+        </div>
+      )}
       {client && (
         <div className="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900">
           You&apos;re working on a client&apos;s VAT{reg ? ` — ${reg.business_name || 'VAT number ' + reg.vrn}` : ''}.

@@ -53,6 +53,10 @@
     DELETE /api/v2/vat/agent/clients/:uuid      stop / cancel
     Then any VAT route with ?client=<uuid> acts on that client's VAT.
 
+    VAT on our own invoices (phase 9):
+    GET    /api/v2/vat/invoices/:uuid/check     what a valid VAT invoice must show and this one is
+                                                 missing; VAT by rate; reverse-charge wording
+
     VAT management (phase 6):
     GET    /api/v2/vat/threshold                rolling 12-month taxable turnover vs the registration threshold
     GET    /api/v2/vat/reports                  ?from&to  VAT by code and supplier; reclaimable vs blocked
@@ -151,6 +155,7 @@ local function registration_json(r)
         flat_rate_pct = r.flat_rate_pct, flat_rate_first_year = r.flat_rate_first_year,
         limited_cost_trader = r.limited_cost_trader, partially_exempt = r.partially_exempt,
         recovery_pct = r.recovery_pct, status = r.status, scope = r.user_id and "user" or "namespace",
+        sales_from = r.sales_from, business_address = r.business_address,
     }
 end
 
@@ -462,5 +467,30 @@ return function(app)
         local ok, resp = VatAgentQueries.cancel(self.namespace.id, actor, uuid_of(self), self.params.uuid)
         if not ok then return resp end
         return { status = 200, json = { success = true } }
+    end))
+    -- ---------------------------------------------------------------- invoices
+    app:get("/api/v2/vat/invoices/:uuid/check", authed(function(self)
+        if not NamespaceMiddleware.hasPermission(self, "invoices", "read") then
+            return err(403, "You don't have permission to see invoices")
+        end
+        local inv = db.query([[SELECT * FROM invoices WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL
+            LIMIT 1]], self.params.uuid, self.namespace.id)[1]
+        if not inv then return err(404, "Invoice not found") end
+        local lines = db.query("SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id",
+            inv.id) or {}
+        local reg = VatQueries.get_registration(self.namespace.id, nil)
+        local addr = inv.customer_address
+        if type(addr) == "table" then addr = next(addr) and cjson.encode(addr) or "" end
+        local result = require("lib.vat-invoice").check({
+            invoice_number = inv.invoice_number, issue_date = inv.issue_date, tax_point = inv.tax_point,
+            customer_name = inv.customer_name, customer_address = addr, currency = inv.currency,
+        }, lines, { name = reg and reg.business_name, address = reg and reg.business_address,
+            vrn = reg and reg.vrn })
+        if not reg then
+            table.insert(result.missing, 1, "Add the workspace's VAT registration (Tax -> VAT, workspace) first")
+            result.ok = false
+        end
+        result.supplier_vrn = reg and reg.vrn or nil
+        return { status = 200, json = { success = true, data = result } }
     end))
 end
