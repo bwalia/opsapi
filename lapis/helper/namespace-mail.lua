@@ -114,6 +114,23 @@ NamespaceMail.TEMPLATES = {
         sample = { app_name = "Acme Ltd", form_title = "Contact us", reply_subject = "Thanks, Ann",
             reply_body = "Thanks for getting in touch.\nWe'll reply within one working day." },
     },
+    -- Sent by staff from the order page ("Email the customer"); a transactional message, not marketing.
+    -- `message` is plain text: the built-in body shows its line breaks; in a custom body {{message}} is
+    -- one escaped paragraph.
+    ["shop.order_update"] = {
+        name = "Shop: order update to the customer",
+        feature = "shop",
+        file = "shop_order_update",
+        subject = "{{headline}}: order {{order_number}}",
+        variables = { "customer_name", "first_name", "order_number", "headline", "message", "order_link",
+            "delivery_summary", "signature", "app_name", "call_phone" },
+        sample = { app_name = "Workstation", customer_name = "Ann Lee", first_name = "Ann", order_number = "WS-10042",
+            headline = "Order received",
+            message = "Thank you, we've received your order WS-10042. We've placed the order with our supplier and "
+                .. "your item is reserved for you.\n\nWe'll be in touch to agree a delivery time that suits you.",
+            order_link = "https://shop.example.com/orders/sample?t=sample", delivery_summary = "",
+            signature = "Sam Taylor", signature_is_person = true, call_phone = "+44 20 7946 0000" },
+    },
 }
 
 -- ---------------------------------------------------------------------------
@@ -316,9 +333,23 @@ function NamespaceMail.preview(namespace_id, key, draft)
     return { subject = m.subject, html = Mail.previewHtml(m.html, m.data) }
 end
 
+--- Render a template with real data, without sending: the workspace's version if it has one, else the
+-- built-in. @return { subject, html, customised } | nil, err
+function NamespaceMail.render(namespace_id, key, data, brand)
+    if not template(key) then return nil, "Template not found" end
+    local m = message(namespace_id, key, data, brand)
+    if m.template then
+        local html, err = Mail.preview(m.template, m.data)
+        if not html then return nil, err end
+        return { subject = m.subject, html = html, customised = false }
+    end
+    return { subject = m.subject, html = Mail.previewHtml(m.html, m.data), customised = true }
+end
+
 --- Send a template now (call from a background job: the outbox retries on failure).
 -- @return true | nil, err
--- `extra`: { attachments = { { filename, content_type, content_b64 } } } (e.g. a calendar invite).
+-- `extra`: { attachments = { { filename, content_type, content_b64 } } } (e.g. a calendar invite),
+--          subject_prefix (e.g. "[TEST] " for a test send to staff).
 function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
     if not NamespaceMail.TEMPLATES[key] then return nil, "unknown template " .. tostring(key) end
     local smtp = NamespaceMail.smtp(namespace_id)
@@ -327,6 +358,10 @@ function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
         if not ok then return nil, "workspace SMTP: " .. herr end
     end
     local m = message(namespace_id, key, data, brand)
+    if type(extra) == "table" and type(extra.subject_prefix) == "string" then
+        m.subject = extra.subject_prefix .. m.subject
+        if m.data then m.data.subject = m.subject end
+    end
     m.to, m.sync, m.smtp = to, true, smtp
     if type(extra) == "table" and type(extra.attachments) == "table" then m.attachments = extra.attachments end
     if smtp then

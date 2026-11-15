@@ -70,7 +70,7 @@ function Change({ label, from, to }: { label: string; from: string; to: string |
 /**
  * "Delivery change requests" on the order page: what the customer asked for (old → new) and Approve /
  * Decline. Approving applies the address, date and time window to the order; the customer is only
- * emailed while Shop settings → "Email customers about delivery changes" is on.
+ * emailed while Shop settings → "Customer emails from the shop" is on.
  */
 export function DeliveryChangeRequests({ order, editable, onChanged }: { order: ShopOrder; editable: boolean; onChanged: (o: ShopOrder) => void }) {
   const requests = order.delivery_change_requests ?? [];
