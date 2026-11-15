@@ -257,6 +257,9 @@ return function(app)
 
         -- Build redirect base depending on where the user started
         local function error_redirect(err_code)
+            if source == "vat" then
+                return { redirect_to = frontend_url .. "/vat?hmrc_error=" .. ngx.escape_uri(err_code) }
+            end
             if source == "settings" then
                 return { redirect_to = frontend_url .. "/settings?hmrc_error=" .. ngx.escape_uri(err_code) }
             end
@@ -335,6 +338,9 @@ return function(app)
                              " statement=", statement_id, " source=", source, " expires_in=", expires_in)
 
         -- ── Redirect to frontend — no token in URL ──
+        if source == "vat" then
+            return { redirect_to = frontend_url .. "/vat?hmrc_connected=true" }
+        end
         if source == "settings" then
             return {
                 redirect_to = frontend_url .. "/settings?hmrc_connected=true"
