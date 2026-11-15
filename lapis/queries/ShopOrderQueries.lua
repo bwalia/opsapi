@@ -582,7 +582,8 @@ end
 
 --- Mark an order paid from a Stripe checkout session object. Idempotent.
 -- Must run inside a transaction.
-function ShopOrderQueries.applyPaid(order, session)
+--- opts.staff = true: staff recorded the payment themselves (no "new order" alert).
+function ShopOrderQueries.applyPaid(order, session, opts)
     if order.status == "paid" or order.status == "processing" or order.status == "shipped"
         or order.status == "delivered" or order.status == "refunded" then
         return false
@@ -643,6 +644,7 @@ function ShopOrderQueries.applyPaid(order, session)
     Membership.useCredits(order.id)
     order.email = nz(cd.email) or order.email
     Membership.maybeIssueRefundCredit(order)
+    if not (opts and opts.staff) then ShopOrderQueries.staffAlert(order.id, "paid") end
     return true
 end
 
@@ -754,6 +756,7 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
             pcall(require("queries.ShopLeadQueries").safeUpsert, ns_id, { email = email, source = "shop_quote",
                 note = "Order " .. quote.quote_number .. ": customer chose to pay by bank transfer" })
         end
+        ShopOrderQueries.staffAlert(row.id, "bank_transfer")
         return ShopOrderQueries.shape(ShopOrderQueries.getById(row.id))
     end)
 end
@@ -811,7 +814,7 @@ function ShopOrderQueries.markPaid(ns_id, uuid, body, actor)
                    internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW() WHERE id = ?]],
             method, reference or db.NULL, amount, paid_at or db.NULL, note, o.id)
         o.payment_method = method
-        ShopOrderQueries.applyPaid(o, {})
+        ShopOrderQueries.applyPaid(o, {}, { staff = true })
         return true
     end)
     if err then return nil, err end
@@ -1335,6 +1338,68 @@ function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
                       WHERE id = ?]], "Supplier PO " .. tostring(po.po_number or po.uuid) .. " raised ("
         .. tostring(sup.name) .. ")", o.id)
     return po
+end
+
+-- ---------------------------------------------------------------------------
+-- staff "new order" alert
+-- ---------------------------------------------------------------------------
+
+local ALERT_KIND = {
+    paid = { subject = "New order paid", headline = "New order paid online", emoji = "🛒" },
+    bank_transfer = { subject = "New order (bank transfer)", headline = "New order: paying by bank transfer",
+                      emoji = "🏦" },
+}
+
+--- Tell staff about an order placed online: email to Shop settings → order alert email (else the Leads →
+-- Notifications admin email, else the workspace owner) plus the Telegram alert when that is on. Staff only:
+-- the customer gets nothing. Best effort, never fails the caller; the sends run after the response.
+-- kind: "paid" (paid by card online) | "bank_transfer" (customer chose bank transfer, awaiting payment).
+function ShopOrderQueries.staffAlert(order_id, kind)
+    local ok, err = pcall(function()
+        local k = ALERT_KIND[kind] or ALERT_KIND.paid
+        local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.id = ?", order_id)[1]
+        if not o then return end
+        local ns = db.query("SELECT id, name FROM namespaces WHERE id = ?", o.namespace_id)[1]
+        if not ns then return end
+        local customer = U.dec(o.customer, {})
+        local ship = ship_to_of(o)
+        local name = U.nz(customer.name) or U.nz(ship.name) or U.nz(o.email) or "Customer"
+        local first, last = tostring(name):match("^(%S+)%s*(.*)$")
+        local lines = {}
+        for _, l in ipairs(U.dec(o.lines, {})) do
+            local qty = tonumber(l.quantity or l.qty) or 1
+            lines[#lines + 1] = qty .. " × " .. (po_line_description(l):gsub("\n", ", "))
+        end
+        local base = (U.env("FRONTEND_URL") or ""):gsub("/+$", "")
+        local notes = table.concat({
+            "Order " .. o.order_number .. ": " .. U.money(tonumber(o.total_minor) or 0) .. " inc VAT",
+            kind == "bank_transfer" and "Payment: bank transfer, awaiting payment (reference " .. o.order_number .. ")"
+                or "Payment: paid online",
+            U.nz(o.customer_po_number) and ("Customer PO: " .. o.customer_po_number) or nil,
+            "",
+            table.concat(lines, "\n"),
+            "",
+            "Delivery: " .. (U.nz(o.delivery_method) or "not set"),
+            address_text(ship) and ("Deliver to:\n" .. address_text(ship)) or nil,
+            base ~= "" and ("\nOpen the order: " .. base .. "/dashboard/shop/orders/" .. o.uuid) or nil,
+        }, "\n")
+        require("queries.CrmLeadNotificationQueries").notify(ns, {
+            first_name = first or name, last_name = last ~= "" and last or nil,
+            email = U.nz(customer.email) or o.email, phone = U.nz(customer.phone) or U.nz(ship.phone),
+            company_name = U.nz(customer.company) or U.nz(ship.company), source = "shop_order", notes = notes,
+        }, {
+            to = require("queries.ShopSettingsQueries").orderAlertEmail(o.namespace_id),
+            staff = {
+                subject = k.subject .. ": " .. o.order_number .. " " .. U.money(tonumber(o.total_minor) or 0)
+                    .. " (" .. tostring(name) .. ")",
+                headline = k.headline,
+                intro = "Order " .. o.order_number .. " has just come in through the shop. The details are below; "
+                    .. "open Shop → Orders in your dashboard to process it. The customer has not been emailed.",
+                telegram_title = k.emoji .. " <b>" .. k.headline .. "</b> " .. o.order_number,
+            },
+        })
+    end)
+    if not ok then ngx.log(ngx.WARN, "[shop-orders] staff alert for order ", tostring(order_id), " failed: ", tostring(err)) end
 end
 
 return ShopOrderQueries

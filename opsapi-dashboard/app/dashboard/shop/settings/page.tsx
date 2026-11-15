@@ -30,6 +30,8 @@ function SettingsContent() {
   const [saving, setSaving] = useState(false);
   const [billTo, setBillTo] = useState<PurchaseOrderParty>({});
   const [savingBill, setSavingBill] = useState(false);
+  const [alertEmail, setAlertEmail] = useState('');
+  const [savingAlert, setSavingAlert] = useState(false);
 
   useEffect(() => {
     shopService
@@ -37,6 +39,7 @@ function SettingsContent() {
       .then((s) => {
         setSettings(s);
         setBillTo(s.po_bill_to ?? {});
+        setAlertEmail(s.order_alert_email ?? '');
       })
       .catch((e) => toast.error(extractApiError(e, 'Could not load shop settings')));
   }, []);
@@ -77,6 +80,20 @@ function SettingsContent() {
     }
   };
 
+  const saveAlertEmail = async () => {
+    setSavingAlert(true);
+    try {
+      const s = await shopService.updateSettings({ order_alert_email: alertEmail.trim() || null });
+      setSettings(s);
+      setAlertEmail(s.order_alert_email ?? '');
+      toast.success(s.order_alert_email ? `New-order alerts go to ${s.order_alert_email}` : 'New-order alerts go to the Leads notification email');
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingAlert(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -105,6 +122,27 @@ function SettingsContent() {
             onChange={setCheckout}
           />
         </div>
+      </Card>
+      <Card className="p-6">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">New-order alerts</h2>
+            <p className="text-sm text-secondary-600">
+              We email this address when an order is paid online or a customer chooses to pay by bank transfer (and send the Telegram alert if it is on under Leads → Notifications). Customers are not emailed.
+              Leave it empty to use the Leads notification email.
+            </p>
+          </div>
+          <Button size="sm" isLoading={savingAlert} disabled={!settings || !canUpdate('shop')} onClick={saveAlertEmail}>Save</Button>
+        </div>
+        <Input
+          label="Alert email"
+          id="order-alert-email"
+          type="email"
+          placeholder="sales@example.com"
+          value={alertEmail}
+          disabled={!canUpdate('shop')}
+          onChange={(e) => setAlertEmail(e.target.value)}
+        />
       </Card>
       <Card className="p-6">
         <div className="mb-4 flex items-start justify-between gap-4">

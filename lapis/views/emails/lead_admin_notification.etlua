@@ -21,9 +21,7 @@
 
 <% if notes and notes ~= "" then %>
   <p><strong>Message:</strong></p>
-  <div class="info-box">
-    <%= notes %>
-  </div>
+  <div class="info-box" style="white-space:pre-line"><%= notes %></div>
 <% end %>
 
 <p>This is an automated notification from <%= app_name %>. You can turn these off or add a Telegram alert under Leads → Notifications.</p>
