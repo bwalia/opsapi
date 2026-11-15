@@ -77,6 +77,14 @@
     PUT    /api/v2/vat/invoices/:uuid/vat-details { customer_vat_number?, tax_point? }
     Margin scheme: code second-hand stock MARGIN (global accounting, Notice 718).
 
+    E-invoicing readiness (phase 11; UBL 2.1, Peppol BIS Billing 3.0 / EN 16931):
+    GET    /api/v2/vat/invoices/:uuid/einvoice  our invoice as an e-invoice (XML download); ?check=1 -> JSON
+    POST   /api/v2/vat/einvoice/check           { xml } check any UBL invoice against the business rules
+    POST   /api/v2/vat/einvoice/import          { xml, record? } a supplier's e-invoice; record = add as purchases
+                                                 (workspace VAT, waiting for approval)
+    GET    /api/v2/vat/einvoice/documents       ?direction=in|out  e-invoices sent and received
+    GET    /api/v2/vat/einvoice/documents/:uuid one, with its XML and check result
+
     VAT management (phase 6):
     GET    /api/v2/vat/threshold                rolling 12-month taxable turnover vs the registration threshold
     GET    /api/v2/vat/reports                  ?from&to  VAT by code and supplier; reclaimable vs blocked
@@ -99,6 +107,7 @@ local VatFilingQueries = require("queries.VatFilingQueries")
 local VatManagementQueries = require("queries.VatManagementQueries")
 local VatAgentQueries = require("queries.VatAgentQueries")
 local VatSchemeQueries = require("queries.VatSchemeQueries")
+local VatEinvoiceQueries = require("queries.VatEinvoiceQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -645,6 +654,58 @@ return function(app)
         upd.updated_at = db.raw("NOW()")
         db.update("invoices", upd, { id = inv.id })
         return ok_json(db.query("SELECT uuid, customer_vat_number, tax_point FROM invoices WHERE id = ?", inv.id)[1])
+    end))
+
+
+    -- ---------------------------------------------------------------- e-invoicing (phase 11)
+    local MAX_XML = 512 * 1024
+
+    app:get("/api/v2/vat/invoices/:uuid/einvoice", authed(function(self)
+        if not NamespaceMiddleware.hasPermission(self, "invoices", "read") then
+            return err(403, "You don't have permission to see invoices")
+        end
+        local reg = VatQueries.get_registration(self.namespace.id, nil)
+        local res, msg, status = VatEinvoiceQueries.export(self.namespace.id, self.params.uuid, reg, user_pk(self))
+        if not res then return err(status or 400, msg) end
+        if self.params.check == "1" or self.params.check == "true" then
+            return { status = 200, json = { success = true, data = { check = res.check, document = res.document,
+                filename = res.filename } } }
+        end
+        ngx.header["Content-Disposition"] = 'attachment; filename="' .. res.filename .. '"'
+        return { status = 200, content_type = "application/xml; charset=utf-8", layout = false, res.xml }
+    end))
+
+    app:post("/api/v2/vat/einvoice/check", authed(function(self)
+        local xml = read_body(self).xml
+        if type(xml) ~= "string" or xml == "" then return err(400, "Send the e-invoice XML (xml)") end
+        if #xml > MAX_XML then return err(413, "That e-invoice is too large") end
+        local res = require("lib.vat-einvoice").check(xml)
+        return { status = 200, json = { success = true, data = res } }
+    end))
+
+    app:post("/api/v2/vat/einvoice/import", authed(function(self)
+        local b = read_body(self)
+        local record = b.record == true or b.record == "true"
+        local reg, _, e = with_registration(self, record and "create" or "read"); if e then return e end
+        if type(b.xml) == "string" and #b.xml > MAX_XML then return err(413, "That e-invoice is too large") end
+        local u = self.current_user or {}
+        local res, msg, status = VatEinvoiceQueries.import(reg, { id = user_pk(self), uuid = u.uuid or u.sub },
+            b.xml, record)
+        if not res then return err(status or 400, msg) end
+        return { status = record and 201 or 200, json = { success = true, data = res } }
+    end))
+
+    app:get("/api/v2/vat/einvoice/documents", authed(function(self)
+        local _, _, e = with_registration(self, "read"); if e then return e end
+        return { status = 200, json = { success = true,
+            data = VatEinvoiceQueries.list(self.namespace.id, self.params.direction) } }
+    end))
+
+    app:get("/api/v2/vat/einvoice/documents/:uuid", authed(function(self)
+        local _, _, e = with_registration(self, "read"); if e then return e end
+        local row, msg, status = VatEinvoiceQueries.get(self.namespace.id, self.params.uuid)
+        if not row then return err(status or 404, msg) end
+        return { status = 200, json = { success = true, data = row } }
     end))
 
 end

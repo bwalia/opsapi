@@ -115,6 +115,7 @@ local vat_management = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.v
 local vat_agents = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-agents") or {}
 local vat_invoices = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-invoices") or {}
 local vat_schemes = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-schemes") or {}
+local vat_einvoice = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-einvoice") or {}
 -- My Income: definition-driven income types (schema + estimator mapping on income_types),
 -- per-namespace overrides, the user's per-year figures, RBAC module + menu items.
 local tax_my_income_dynamic = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-dynamic") or {}
@@ -2159,6 +2160,7 @@ local _migrations = {
     ['zz_vat_schemes_3_capital_items'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_schemes, 3),
     ['zz_vat_schemes_4_group_members'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_schemes, 4),
     ['zz_vat_schemes_5_customer_vat_number'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_schemes, 5),
+    ['zz_vat_schemes_6_einvoice_documents'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_einvoice, 1),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

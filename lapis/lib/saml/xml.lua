@@ -118,7 +118,9 @@ local Doc = {}
 Doc.__index = Doc
 
 --- Parse an XML string. Returns a Doc, or nil and a reason.
-function M.parse(xml)
+-- extra_ns: optional { prefix = uri } registered for XPath on top of M.NS
+-- (e.g. UBL for e-invoices, lib/vat-einvoice.lua).
+function M.parse(xml, extra_ns)
     if type(xml) ~= "string" or xml == "" then return nil, "empty document" end
     if #xml > MAX_XML_BYTES then return nil, "document too large" end
     local raw = lib.xmlReadMemory(xml, #xml, nil, nil, PARSE_OPTIONS)
@@ -129,6 +131,7 @@ function M.parse(xml)
     if ctx == nil then return nil, "XPath context unavailable" end
     ctx = ffi.gc(ctx, lib.xmlXPathFreeContext)
     for prefix, uri in pairs(M.NS) do lib.xmlXPathRegisterNs(ctx, prefix, uri) end
+    for prefix, uri in pairs(extra_ns or {}) do lib.xmlXPathRegisterNs(ctx, prefix, uri) end
     return setmetatable({ doc = doc, ctx = ctx }, Doc)
 end
 
@@ -167,6 +170,12 @@ end
 function M.attr(node, name)
     if not node then return nil end
     return take_string(lib.xmlGetNoNsProp(node, name))
+end
+
+--- Is node the element {uri}name? (by namespace URI rather than a SAML prefix)
+function M.is_ns(node, uri, name)
+    return node ~= nil and node.type == XML_ELEMENT_NODE and node.ns ~= nil
+        and ffi.string(node.ns.href) == uri and ffi.string(node.name) == name
 end
 
 function M.is(node, ns, name)

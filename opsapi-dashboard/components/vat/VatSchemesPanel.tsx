@@ -6,6 +6,7 @@
  *   - Capital goods scheme items and their interval adjustments (Notice 706/2)
  *   - VAT group: invite member workspaces, or join a group (workspace VAT only)
  *   - EC Sales List for Northern Ireland goods sold to EU customers (workspace VAT only)
+ *   - E-invoices: read a supplier's Peppol UBL invoice and record it (phase 11)
  * Figures come from the VAT engine (lapis/lib/vat-schemes.lua), never the AI.
  */
 
@@ -15,6 +16,7 @@ import toast from 'react-hot-toast';
 import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
   type CapitalKind,
+  type EinvoiceImport,
   type VatAnnualAdjustment,
   type VatCapitalItem,
   type VatEcSalesList,
@@ -246,6 +248,55 @@ function EcSales({ period }: { period: { start: string; end: string } | null }) 
   );
 }
 
+function Einvoices({ workspace }: { workspace: boolean }) {
+  const [xml, setXml] = useState('');
+  const [res, setRes] = useState<EinvoiceImport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (record: boolean) => {
+    setBusy(true);
+    try {
+      const r = await vatService.importEinvoice(xml, record);
+      setRes(r);
+      if (record) toast.success(r.note || 'Recorded');
+    } catch (e) { toast.error(extractApiError(e, 'Could not read the e-invoice')); }
+    finally { setBusy(false); }
+  };
+  const errors = res && Array.isArray(res.check.errors) ? res.check.errors : [];
+  const warnings = res && Array.isArray(res.check.warnings) ? res.check.warnings : [];
+  return (
+    <div className="space-y-3 text-sm">
+      <input type="file" accept=".xml,application/xml,text/xml" onChange={(e) => {
+        const f = e.target.files?.[0];
+        if (f) f.text().then((t) => { setXml(t); setRes(null); });
+      }} />
+      {xml && (
+        <button type="button" className={ghost} disabled={busy} onClick={() => run(false)}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />} Check it</button>
+      )}
+      {res && (
+        <div className="rounded-lg border border-secondary-200 bg-surface p-3" data-testid="vat-einvoice-import">
+          <p className="font-medium">{res.data.supplier?.name || 'Supplier'} · invoice {res.data.invoice_number}
+            {' '}· {res.data.issue_date}</p>
+          <p className="text-xs text-secondary-600">Net {gbp(res.data.totals?.tax_exclusive)} · VAT {gbp(res.data.totals?.tax)}
+            {' '}· supplier VAT {res.data.supplier?.vat_id || '—'}</p>
+          <p className={`mt-1 text-xs ${res.check.valid ? 'text-green-700' : 'text-amber-800'}`}>
+            {res.check.valid ? 'Passes the Peppol BIS 3.0 checks.' : 'Doesn\'t pass the checks:'}</p>
+          {errors.map((e) => <p key={e.rule + e.message} className="text-xs text-amber-800">• {e.message} ({e.rule})</p>)}
+          {warnings.map((w) => <p key={w} className="text-xs text-amber-700">{w}</p>)}
+          {(res.purchases || []).map((p) => (
+            <p key={p.vat_code} className="text-xs">{p.vat_code}: net {gbp(p.net)} · VAT {gbp(p.vat)}</p>
+          ))}
+          {res.recorded ? <p className="mt-1 text-xs text-green-700">{res.note}</p>
+            : workspace && res.check.valid && (
+              <button type="button" className={`${primary} mt-2`} disabled={busy} onClick={() => run(true)}>
+                {res.duplicate ? 'Record it (seen before)' : 'Record as purchases'}</button>
+            )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function VatSchemesPanel({ reg, workspace, period, onChanged }: {
   reg: VatRegistration; workspace: boolean; period: { start: string; end: string } | null; onChanged: () => void;
 }) {
@@ -270,6 +321,10 @@ export default function VatSchemesPanel({ reg, workspace, period, onChanged }: {
             <VatGroup />
           </Section>
         )}
+        <Section testId="vat-einvoice" title="E-invoices (Peppol)"
+          hint="Read a supplier's e-invoice (UBL XML): check it and record it with its VAT. Mandatory UK e-invoicing is due from April 2029.">
+          <Einvoices workspace={workspace} />
+        </Section>
         {workspace && (
           <Section testId="vat-esl" title="EC Sales List (Northern Ireland)"
             hint="Goods sold from Northern Ireland to VAT-registered customers in the EU.">
