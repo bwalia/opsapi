@@ -170,3 +170,28 @@ groups:
         annotations:
           summary: "High number of waiting connections"
           description: "{{ $value }} connections waiting"
+
+  - name: vat_mtd_alerts
+    rules:
+      # A VAT return HMRC rejected, or we couldn't reach HMRC. Someone may be waiting
+      # on a deadline: see docs/runbooks/vat-mtd.md.
+      - alert: VatReturnNotFiled
+        expr: increase(vat_submissions_total{result=~"rejected|unreachable"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A VAT return wasn't filed with HMRC ({{ $labels.result }}, {{ $labels.environment }})"
+          description: "Check the failed VAT return and HMRC's status; runbook docs/runbooks/vat-mtd.md."
+      # Most attempts failing for an hour: HMRC outage or a broken release.
+      - alert: VatFilingMostlyFailing
+        expr: >
+          sum(increase(vat_submissions_total{result=~"rejected|unreachable"}[1h]))
+          / clamp_min(sum(increase(vat_submissions_total{result!="refused_locally"}[1h])), 1) > 0.5
+          and sum(increase(vat_submissions_total{result!="refused_locally"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Most VAT returns are failing to reach or pass HMRC"
+          description: "Check HMRC's service status and the last release; consider VAT_FILING_ENABLED=false. Runbook docs/runbooks/vat-mtd.md."
