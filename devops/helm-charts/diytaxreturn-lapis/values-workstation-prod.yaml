@@ -146,6 +146,10 @@ extraEnv:
   CMS_PUBLIC_S3_BUCKET: "workstation-website"
   CMS_PUBLIC_S3_REGION: "eu-west-2"
   CMS_PUBLIC_BASE_URL: "https://www.workstation.co.uk"
+  # VAT (MTD) filing stays off in production until HMRC has approved the software for
+  # VAT and production VAT credentials are in Vault (docs/plans/VAT_PRODUCTION_CHECKLIST.md).
+  # Flip to "true" to switch it on; back to "false" switches it off without a code change.
+  VAT_FILING_ENABLED: "false"
 
 autoscaling:
   enabled: false

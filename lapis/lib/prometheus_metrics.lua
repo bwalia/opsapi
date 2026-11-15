@@ -56,6 +56,9 @@ function _M.init()
     package.loaded._metric_api_calls = prometheus:counter("api_calls_total", "API endpoint calls", {"endpoint", "method", "status"})
     package.loaded._metric_auth_attempts = prometheus:counter("api_auth_attempts_total", "Authentication attempts", {"result", "type"})
     package.loaded._metric_auth_failures = prometheus:counter("api_auth_failures_total", "Authentication failures", {"reason"})
+    -- VAT returns sent to HMRC, by outcome (filed / rejected / unreachable / refused_locally).
+    package.loaded._metric_vat_submissions = prometheus:counter("vat_submissions_total",
+        "VAT returns sent to HMRC (MTD)", {"result", "environment"})
     package.loaded._metric_database_queries = prometheus:counter("api_database_queries_total", "Database query count", {"operation"})
     package.loaded._metric_database_latency = prometheus:histogram("api_database_query_duration_seconds", "Database query latency", {"operation"})
     
@@ -148,6 +151,10 @@ end
 -- Business / API metrics
 function _M.get_metric_api_calls()
     return package.loaded._metric_api_calls
+end
+
+function _M.get_metric_vat_submissions()
+    return package.loaded._metric_vat_submissions
 end
 
 function _M.get_metric_auth_attempts()

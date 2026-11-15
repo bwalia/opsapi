@@ -22,6 +22,22 @@ local VatReturnQueries = require("queries.VatReturnQueries")
 
 local Q = {}
 
+-- Count every attempt to file (Prometheus: vat_submissions_total{result, environment}).
+local function count(result)
+    pcall(function()
+        local m = require("lib.prometheus_metrics").get_metric_vat_submissions()
+        if m then m:inc(1, { result, Client.is_sandbox() and "sandbox" or "production" }) end
+    end)
+end
+
+--- Is filing VAT switched on here? In production it must be turned on explicitly
+-- (VAT_FILING_ENABLED=true), so it can be switched off without a deploy; the
+-- sandbox is always on.
+function Q.filing_enabled()
+    if Client.is_sandbox() then return true end
+    return os.getenv("VAT_FILING_ENABLED") == "true"
+end
+
 local function decode(v)
     if type(v) == "table" then return v end
     if type(v) ~= "string" or v == "" then return nil end
@@ -77,6 +93,11 @@ end
 -- @return filed row or nil, response
 function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
     body = body or {}
+    if not Q.filing_enabled() then
+        count("refused_locally")
+        return nil, { status = 503, json = { success = false, code = "VAT_FILING_OFF",
+            error = "Filing VAT returns with HMRC isn't switched on here yet. Your return is saved as a draft." } }
+    end
     local declared = body.declaration_accepted == true or body.declaration_accepted == "true"
     if not declared then
         return nil, { status = 400, json = { success = false, code = "DECLARATION_REQUIRED",
@@ -142,10 +163,12 @@ function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
     end
 
     if receipt then
+        count("filed")
         db.query([[UPDATE vat_returns SET status = 'submitted', hmrc_receipt = ?, submitted_at = NOW(),
             updated_at = NOW() WHERE id = ?]], cjson.encode(receipt), fresh.id)
     else
         local msg, code = Client.explain(hbody)
+        count(status and "rejected" or "unreachable")
         db.query([[UPDATE vat_returns SET status = 'failed', hmrc_receipt = ?, updated_at = NOW() WHERE id = ?]],
             cjson.encode({ error = msg, code = code, detail = err, hmrc = hbody, http_status = status }), fresh.id)
         local resp = hmrc_error(err, hbody, status)
