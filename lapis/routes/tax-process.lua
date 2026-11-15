@@ -67,17 +67,40 @@ local function auth_for(job)
     return job.auth
 end
 
+-- How long to wait before retrying a rate-limited internal call: the endpoint's
+-- Retry-After (seconds), kept between 1 and 60.
+local function retry_wait(res)
+    local h = res.headers and (res.headers["Retry-After"] or res.headers["retry-after"])
+    local secs = tonumber(type(h) == "table" and h[1] or h) or 15
+    return math.min(math.max(secs, 1), 60)
+end
+
+-- How many times one call waits out a 429 before giving up (about 30 minutes at most).
+local MAX_RATE_LIMIT_RETRIES = 30
+
 -- Authenticated internal call to an existing tax endpoint, AS the user.
-local function internal(method, path, body, auth, port)
-    local httpc = http.new()
-    -- classify runs the model per transaction; nobody waits on this background job, so the
-    -- budget follows the model speed (TAX_PROCESS_TIMEOUT_MS, default 30 min per statement step).
-    httpc:set_timeout(tonumber(os.getenv("TAX_PROCESS_TIMEOUT_MS") or "") or 1800000)
-    local res = httpc:request_uri("http://127.0.0.1:" .. (port or 80) .. path, {
-        method = method,
-        headers = { ["Content-Type"] = "application/x-www-form-urlencoded", ["Authorization"] = auth },
-        body = body,
-    })
+-- /tax/classify and /tax/extract are rate limited per client IP, and every internal call
+-- comes from 127.0.0.1. When classification is quick (payees learned from earlier years
+-- need no model call) a year of statements goes over the limit, so on a 429 we wait for
+-- Retry-After and try again instead of failing the statement.
+-- @param job table the running job; a fresh token is minted for every attempt
+local function internal(method, path, body, job)
+    local res
+    for _ = 0, MAX_RATE_LIMIT_RETRIES do
+        local httpc = http.new()
+        -- classify runs the model per transaction; nobody waits on this background job, so the
+        -- budget follows the model speed (TAX_PROCESS_TIMEOUT_MS, default 30 min per statement step).
+        httpc:set_timeout(tonumber(os.getenv("TAX_PROCESS_TIMEOUT_MS") or "") or 1800000)
+        res = httpc:request_uri("http://127.0.0.1:" .. (job.port or 80) .. path, {
+            method = method,
+            headers = { ["Content-Type"] = "application/x-www-form-urlencoded", ["Authorization"] = auth_for(job) },
+            body = body,
+        })
+        if not res or res.status ~= 429 then return res end
+        local wait = retry_wait(res)
+        ngx.log(ngx.INFO, "[tax-process] ", path, " rate limited, retrying in ", wait, "s")
+        ngx.sleep(wait)
+    end
     return res
 end
 
@@ -132,13 +155,13 @@ local function process_all(premature, job)
         local ok, err = pcall(function()
             ngx.log(ngx.INFO, "[tax-process] extracting ", s.uuid)
             set_status(s.id, "EXTRACTING")
-            local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, auth_for(job), job.port)
+            local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, job)
             if not r1 or r1.status >= 400 then error("extract HTTP " .. tostring(r1 and r1.status)) end
             ngx.log(ngx.INFO, "[tax-process] classifying ", s.uuid, " (extract HTTP ", r1.status, ")")
             set_status(s.id, "CLASSIFYING")
             local body = "statement_id=" .. s.uuid
             if job.profile_type then body = body .. "&profile_type=" .. job.profile_type end
-            local r2 = internal("POST", "/api/v2/tax/classify", body, auth_for(job), job.port)
+            local r2 = internal("POST", "/api/v2/tax/classify", body, job)
             if not r2 or r2.status >= 400 then error("classify HTTP " .. tostring(r2 and r2.status)) end
             ngx.log(ngx.INFO, "[tax-process] completed ", s.uuid, " (classify HTTP ", r2.status, ")")
             set_status(s.id, "COMPLETED")
@@ -241,7 +264,7 @@ end
 
 -- Declare M before the metatable: inside `local M = setmetatable(..., { __call = ...M... })`
 -- the closure would see the (nil) global M, and the routes would never mount.
-local M = { _classify_profile = classify_profile, _resume_orphans = resume_orphans }
+local M = { _classify_profile = classify_profile, _resume_orphans = resume_orphans, _internal = internal }
 setmetatable(M, { __call = function(_, app) return M.register(app) end })
 
 function M.register(app)
