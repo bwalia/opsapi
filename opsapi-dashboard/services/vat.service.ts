@@ -25,6 +25,8 @@ export interface VatRegistration {
   partially_exempt?: boolean;
   recovery_pct?: number | null;
   status: string;
+  sales_from?: 'auto' | 'invoices' | 'bank';
+  business_address?: string | null;
 }
 
 export interface VatStatus {
@@ -91,6 +93,12 @@ export interface VatReport {
   top_suppliers: Array<{ supplier: string; spend: number; vat: number; lines: number }>;
 }
 
+export interface VatInvoiceCheckResult {
+  ok: boolean; missing: string[]; simplified_allowed: boolean; reverse_charge_text?: string | null;
+  breakdown: Array<{ vat_code: string; label: string; net: number; vat: number }>;
+  net: number; vat: number; gross: number; supplier_vrn?: string | null;
+}
+
 export interface VatAgentClient {
   uuid: string; client_vrn: string; status: 'pending' | 'accepted' | 'active' | 'rejected' | 'expired' | 'cancelled' | 'revoked';
   client_action_url?: string | null; expires_on?: string | null; last_checked_at?: string | null;
@@ -106,7 +114,15 @@ const data = <T,>(r: { data?: { data?: T } }) => r.data?.data as T;
 // (lapis/routes/vat.lua resolve()). null = your own VAT.
 let vatClient: string | null = null;
 export function setVatClient(uuid: string | null) { vatClient = uuid; }
-const withClient = (params?: Record<string, unknown>) => (vatClient ? { ...(params || {}), client: vatClient } : params);
+// The workspace's own VAT (accounting: the workspace is the business) instead of yours.
+let vatScope: 'namespace' | null = null;
+export function setVatScope(scope: 'namespace' | null) { vatScope = scope; }
+const withClient = (params?: Record<string, unknown>) => {
+  const p: Record<string, unknown> = { ...(params || {}) };
+  if (vatClient) p.client = vatClient;
+  else if (vatScope) p.scope = vatScope;
+  return Object.keys(p).length ? p : undefined;
+};
 const get = (url: string, params?: Record<string, unknown>, extra?: Record<string, unknown>) =>
   apiClient.get(url, { ...(extra || {}), params: withClient(params) });
 const post = (url: string, body?: unknown, extra?: Record<string, unknown>) =>
@@ -195,6 +211,9 @@ export const vatService = {
     const r = await apiClient.get('/auth/hmrc/initiate',
       { params: { source: 'vat', purpose, redirect_url: redirectUrl } });
     return r.data?.auth_url;
+  },
+  async checkInvoice(uuid: string): Promise<VatInvoiceCheckResult> {
+    return data(await apiClient.get(`${BASE}/invoices/${uuid}/check`));
   },
   // Accountants (agents)
   async agentProfile(): Promise<{ arn: string } | null> {

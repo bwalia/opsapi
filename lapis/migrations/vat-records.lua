@@ -87,6 +87,9 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_vat_registrations_vrn ON vat_registrations (vrn)")
         -- Added after release by vat-ai step 5; here too so a fresh database gets it.
         db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS ai_job_started_at TIMESTAMP")
+        -- Added later by vat-invoices step 2 (sorts before this key); here for fresh databases.
+        db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS sales_from VARCHAR(10) NOT NULL DEFAULT 'auto'")
+        db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS business_address TEXT")
     end,
 
     [2] = function()

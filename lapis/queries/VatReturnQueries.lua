@@ -12,6 +12,7 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local VAT = require("lib.vat")
 local Return = require("lib.vat-return")
+local VatInvoice = require("lib.vat-invoice")
 
 local Q = {}
 
@@ -63,8 +64,26 @@ function Q.collect_lines(reg, period_start, period_end)
               AND e.status IN ('approved', 'posted') AND e.expense_date BETWEEN ? AND ?]],
             reg.namespace_id, period_start, period_end, reg.namespace_id, period_start, period_end)
     end
+    rows = rows or {}
+    local notes = {}
+    local inv_lines = {}
+    if null(reg.user_id) then
+        inv_lines, notes = Q.invoice_lines(reg, period_start, period_end)
+        local mode = reg.sales_from or "auto"
+        local use_invoices = mode == "invoices" or (mode == "auto" and #inv_lines > 0)
+        if use_invoices then
+            -- Sales come from the invoices: customer payments in the bank aren't sales again.
+            local kept = {}
+            for _, r in ipairs(rows) do if r.dir ~= "CREDIT" then kept[#kept + 1] = r end end
+            rows = kept
+            notes[#notes + 1] = "Sales are taken from your issued invoices; money received in the bank isn't "
+                .. "counted again."
+        else
+            inv_lines = {}
+        end
+    end
     local lines, uncoded = {}, 0
-    for _, r in ipairs(rows or {}) do
+    for _, r in ipairs(rows) do
         local direction = (r.dir == "CREDIT") and "sale" or "purchase"
         if null(r.vat_code) or null(r.net_amount) then
             uncoded = uncoded + 1
@@ -72,7 +91,62 @@ function Q.collect_lines(reg, period_start, period_end)
             lines[#lines + 1] = to_line(r, direction)
         end
     end
-    return lines, uncoded, rows or {}
+    for _, l in ipairs(inv_lines) do
+        lines[#lines + 1] = l
+        -- So the drill-down can show invoice lines too.
+        rows[#rows + 1] = { ref = l.id, date = l.date, description = l.description, amount = l.gross,
+            vat_code = l.vat_code, net_amount = l.net, vat_amount = l.vat, vat_notional = l.notional_vat,
+            dir = "CREDIT" }
+    end
+    return lines, uncoded, rows, notes
+end
+
+--- Engine sale lines from a workspace's issued invoices for a period (lib/vat-invoice),
+-- plus notes about invoices left out (not in pounds, rates that aren't UK VAT rates).
+function Q.invoice_lines(reg, period_start, period_end)
+    local has = db.query("SELECT to_regclass('public.invoices') IS NOT NULL AS ok")[1]
+    if not (has and (has.ok == true or has.ok == "t")) then return {}, {} end
+    local invs = db.query([[SELECT i.id, i.invoice_number, i.status, i.issue_date, i.tax_point, i.currency
+        FROM invoices i
+        WHERE i.namespace_id = ? AND i.deleted_at IS NULL
+          AND i.status IN ('sent', 'paid', 'partially_paid', 'overdue')
+          AND (COALESCE(i.tax_point, i.issue_date) BETWEEN ? AND ?
+               OR EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.id
+                          AND p.payment_date BETWEEN ? AND ?))]],
+        reg.namespace_id, period_start, period_end, period_start, period_end) or {}
+    if #invs == 0 then return {}, {} end
+    local ids = {}
+    for _, i in ipairs(invs) do ids[#ids + 1] = db.escape_literal(i.id) end
+    local by_inv = {}
+    for _, l in ipairs(db.query("SELECT * FROM invoice_line_items WHERE invoice_id IN (" .. table.concat(ids, ",")
+        .. ") ORDER BY invoice_id, sort_order, id") or {}) do
+        by_inv[l.invoice_id] = by_inv[l.invoice_id] or {}
+        table.insert(by_inv[l.invoice_id], l)
+    end
+    local pays = {}
+    for _, p in ipairs(db.query("SELECT invoice_id, amount, payment_date FROM invoice_payments WHERE invoice_id IN ("
+        .. table.concat(ids, ",") .. ")") or {}) do
+        pays[p.invoice_id] = pays[p.invoice_id] or {}
+        table.insert(pays[p.invoice_id], p)
+    end
+    for _, i in ipairs(invs) do
+        i.lines = by_inv[i.id] or {}
+        i.payments = pays[i.id] or {}
+        if not null(i.tax_point) then i.tax_point = tostring(i.tax_point) else i.tax_point = nil end
+        i.issue_date = tostring(i.issue_date)
+    end
+    local lines, skipped = VatInvoice.engine_lines(invs, { period_start = period_start, period_end = period_end,
+        scheme = reg.scheme })
+    local notes = {}
+    if skipped.foreign_currency > 0 then
+        notes[#notes + 1] = skipped.foreign_currency .. " invoice(s) aren't in pounds and were left out: the VAT "
+            .. "return needs the sterling figures."
+    end
+    if skipped.unknown_rate > 0 then
+        notes[#notes + 1] = skipped.unknown_rate .. " invoice line(s) use a tax rate that isn't a UK VAT rate and "
+            .. "were left out."
+    end
+    return lines, notes
 end
 
 function Q.list_adjustments(reg, period_start, period_end)
@@ -96,7 +170,7 @@ function Q.preview(reg, period_start, period_end, opts)
     opts = opts or {}
     local months, err = Q.check_period(period_start, period_end)
     if not months then return nil, err end
-    local lines, uncoded = Q.collect_lines(reg, period_start, period_end)
+    local lines, uncoded, _, notes = Q.collect_lines(reg, period_start, period_end)
     local adjustments = Q.list_adjustments(reg, period_start, period_end)
     local result = Return.build(lines, reg, {
         period_start = period_start, period_end = period_end, period_months = months,
@@ -111,6 +185,7 @@ function Q.preview(reg, period_start, period_end, opts)
         table.insert(result.warnings, 1, uncoded .. " line(s) in this period have no VAT code yet and are "
             .. "left out. Code them before filing.")
     end
+    for _, n in ipairs(notes or {}) do table.insert(result.notes, n) end
     local ok_valid, errs = Return.validate(result.boxes)
     result.valid = ok_valid
     result.validation = ok_valid and nil or errs

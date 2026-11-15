@@ -30,6 +30,7 @@ import {
 import { generateInvoicePdf, previewInvoicePdfUrl, invoicePdfBase64 } from '@/lib/invoice-pdf';
 import { paymentMethodsService, type PaymentMethod } from '@/services/payment-methods.service';
 import HowToPay from '@/components/payments/HowToPay';
+import VatInvoiceCheck from '@/components/vat/VatInvoiceCheck';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -894,6 +895,8 @@ function InvoiceDetailContent() {
           </div>
         </div>
       </div>
+
+      <VatInvoiceCheck invoiceUuid={uuid} refreshKey={invoice} />
 
       {/* Line Items */}
       <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">

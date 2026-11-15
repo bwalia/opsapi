@@ -113,6 +113,7 @@ local vat_ai = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-ai") 
 local vat_menu = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-menu") or {}
 local vat_management = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-management") or {}
 local vat_agents = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-agents") or {}
+local vat_invoices = load_if_enabled(ProjectConfig.FEATURES.VAT, "migrations.vat-invoices") or {}
 -- My Income: definition-driven income types (schema + estimator mapping on income_types),
 -- per-namespace overrides, the user's per-year figures, RBAC module + menu items.
 local tax_my_income_dynamic = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-dynamic") or {}
@@ -2130,6 +2131,10 @@ local _migrations = {
     ['zz_tax_statement_processing_job'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_statement_processing_job, 1),
     ['zz_tax_landlord_filing_1_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_landlord_filing, 1),
     ['zz_tax_landlord_filing_2_property_business'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_landlord_filing, 2),
+    -- VAT (docs/plans/VAT_MTD.md). Keys run in NAME order, not file order: zz_vat_ai_* and
+    -- zz_vat_management_* sort BEFORE zz_vat_records_*, so on a fresh database they run before
+    -- vat_registrations exists. A later step that alters vat_registrations must guard on the
+    -- table AND the same column must be added in vat-records step 1 for fresh databases.
     ['zz_vat_records_1_registrations'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 1),
     ['zz_vat_records_2_rules'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 2),
     ['zz_vat_records_3_tax_transactions'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_records, 3),
@@ -2146,6 +2151,8 @@ local _migrations = {
     ['zz_vat_management_2_agents'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_agents, 1),
     ['zz_vat_management_3_agent_clients'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_agents, 2),
     ['zz_vat_management_4_agent_menu'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_agents, 3),
+    ['zz_vat_management_5_invoice_vat'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_invoices, 1),
+    ['zz_vat_management_6_sales_from'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_invoices, 2),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),
