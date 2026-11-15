@@ -122,6 +122,20 @@ End-to-end "File My Tax" flow (sidebar: Tax → File My Tax; the old "File with 
 
 **Testing without a browser OAuth flow:** mint a JWT for a user with a stored `hmrc_tokens` row by HMAC-signing `{userinfo:{uuid,sub}, iat, exp, iss:"opsapi"}` with `$JWT_SECRET_KEY` (the container lacks `perl`, so `resty` CLI won't run — build the JWT with `openssl dgst -sha256 -hmac`). Syntax-check Lua via `docker exec opsapi /usr/local/openresty/luajit/bin/luajit -b <file> /dev/null`.
 
+### HMRC MTD VAT (VAT returns)
+Feature `vat` (presets `all`, `tax_copilot`, `business`; RBAC modules `vat`, `vat_agent`). Plan and phase notes: `docs/plans/VAT_MTD.md`; runbook `docs/runbooks/vat-mtd.md`; go-live checklist `docs/plans/VAT_PRODUCTION_CHECKLIST.md`.
+
+**Layers**
+- `lib/vat.lua` (codes, splits, VRN check, supplier rules, due dates), `lib/vat-return.lua` (the deterministic 9-box engine: schemes, reverse charges, partial exemption, margin, VAT groups, adjustments — **the AI never computes a figure**), `lib/vat-schemes.lua` (annual PE adjustment, capital goods scheme, EC Sales List), `lib/vat-classifier.lua` (rules → memory → LLM coding, then `harmonise`), `lib/vat-invoice.lua` (our invoices as sales lines + valid-VAT-invoice check), `lib/vat-einvoice.lua` (Peppol UBL), `lib/hmrc-vat-client.lua`, `lib/hmrc-agent-client.lua`.
+- Queries `Vat*Queries.lua`; one route file `routes/vat.lua` with `resolve()`: default = the signed-in person's registration, `?scope=namespace` = the workspace's (needs `vat`), `?client=<link>` = an accountant's client (needs `vat_agent` + an HMRC-confirmed link).
+- Frontend: `app/dashboard/tax/vat/page.tsx`, `app/dashboard/tax/vat/clients/page.tsx`, `components/vat/*`, `services/vat.service.ts`.
+
+**Gotchas**
+- Migration keys run in **name** order: `zz_vat_ai_*` / `zz_vat_management_*` sort before `zz_vat_records_*`. A later step that alters `vat_registrations` must guard `table_exists` and the column must also be added in vat-records step 1 (see the comment above the VAT keys in `migrations.lua`).
+- Filing is behind `VAT_FILING_ENABLED` (production only files when `"true"`); a member of a VAT group can't file (the representative does); uncoded lines block filing.
+- AI coding runs as a DB-claimed job (`vat_registrations.ai_job_started_at`) so two pods never run it twice; the model is never offered `MARGIN`.
+- Sandbox needs the Developer Hub app subscribed to VAT (MTD) and Agent Authorisation; connect with `/auth/hmrc/initiate?purpose=vat` (or `vat_agent`).
+
 ## Frontend architecture (opsapi-dashboard/)
 
 Next.js 16 App Router + React 19 + TypeScript + Tailwind v4 + Zustand. Runs on port 8039, built with `output: "standalone"` for Docker.

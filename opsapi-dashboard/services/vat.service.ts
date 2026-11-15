@@ -134,6 +134,20 @@ export interface VatEcSalesList {
   frequency_hint: 'monthly' | 'quarterly'; notes: string[];
 }
 
+export interface EinvoiceCheck {
+  valid: boolean; errors: Array<{ rule: string; message: string }>; warnings: string[];
+}
+export interface EinvoiceImport {
+  check: EinvoiceCheck; document: string; duplicate: boolean; recorded?: string[]; note?: string;
+  data: { invoice_number?: string; issue_date?: string; currency?: string;
+    supplier: { name?: string; vat_id?: string }; totals: { tax_exclusive?: number; tax?: number; payable?: number } };
+  purchases?: Array<{ vat_code: string; net: number; vat: number; gross: number }> | null;
+}
+export interface EinvoiceDocument {
+  uuid: string; direction: 'in' | 'out'; invoice_number?: string; issue_date?: string; party_name?: string;
+  party_vat_id?: string; total?: number; vat_total?: number; valid: boolean; status: string; updated_at: string;
+}
+
 const data = <T,>(r: { data?: { data?: T } }) => r.data?.data as T;
 
 // An accountant working on a client's VAT: every call carries ?client=<link uuid>
@@ -292,6 +306,24 @@ export const vatService = {
   },
   async setInvoiceVatDetails(uuid: string, body: { customer_vat_number?: string; tax_point?: string }) {
     return data(await apiClient.put(`${BASE}/invoices/${uuid}/vat-details`, body));
+  },
+  // E-invoicing (phase 11)
+  async einvoiceCheckInvoice(uuid: string): Promise<{ check: EinvoiceCheck; filename: string }> {
+    return data(await apiClient.get(`${BASE}/invoices/${uuid}/einvoice`, { params: { check: 1 } }));
+  },
+  async downloadEinvoice(uuid: string): Promise<void> {
+    const r = await apiClient.get(`${BASE}/invoices/${uuid}/einvoice`, { responseType: 'blob' });
+    const name = /filename="([^"]+)"/.exec(String(r.headers['content-disposition'] || ''))?.[1] || 'einvoice.xml';
+    const url = URL.createObjectURL(r.data as Blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  },
+  async importEinvoice(xml: string, record = false): Promise<EinvoiceImport> {
+    return data(await post(`${BASE}/einvoice/import`, { xml, record }));
+  },
+  async einvoiceDocuments(direction?: 'in' | 'out'): Promise<EinvoiceDocument[]> {
+    return data(await get(`${BASE}/einvoice/documents`, direction ? { direction } : undefined)) || [];
   },
   // Accountants (agents)
   async agentProfile(): Promise<{ arn: string } | null> {

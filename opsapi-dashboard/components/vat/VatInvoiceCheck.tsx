@@ -9,19 +9,23 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileCode2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { formatCurrency } from '@/lib/utils';
-import vatService, { type VatInvoiceCheckResult } from '@/services/vat.service';
+import vatService, { type EinvoiceCheck, type VatInvoiceCheckResult } from '@/services/vat.service';
 
 const gbp = (n: number) => formatCurrency(n, 'GBP', 'en-GB');
 
 export default function VatInvoiceCheck({ invoiceUuid, refreshKey }: { invoiceUuid: string; refreshKey?: unknown }) {
   const [res, setRes] = useState<VatInvoiceCheckResult | null>(null);
+  const [einv, setEinv] = useState<EinvoiceCheck | null>(null);
   useEffect(() => {
     let live = true;
     vatService.checkInvoice(invoiceUuid).then((r) => { if (live) setRes(r); }).catch(() => { if (live) setRes(null); });
     return () => { live = false; };
   }, [invoiceUuid, refreshKey]);
+  const checkEinvoice = () => vatService.einvoiceCheckInvoice(invoiceUuid).then((r) => setEinv(r.check))
+    .catch((e) => toast.error(e?.response?.data?.error || 'Could not build the e-invoice'));
   if (!res) return null;
   const missing = Array.isArray(res.missing) ? res.missing : [];
   const breakdown = Array.isArray(res.breakdown) ? res.breakdown : [];
@@ -53,6 +57,21 @@ export default function VatInvoiceCheck({ invoiceUuid, refreshKey }: { invoiceUu
               <span className="tabular-nums">net {gbp(b.net)} · VAT {gbp(b.vat)}</span>
             </div>
           ))}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-secondary-100 pt-3 text-sm">
+        <FileCode2 className="h-4 w-4 text-secondary-500" />
+        <span className="text-secondary-700">E-invoice (Peppol UBL)</span>
+        <button type="button" className="text-primary-700 underline" onClick={checkEinvoice}>Check</button>
+        <button type="button" className="text-primary-700 underline" onClick={() => vatService.downloadEinvoice(invoiceUuid)
+          .catch((e) => toast.error(e?.response?.status === 409 ? 'Issue the invoice first' : 'Download failed'))}>Download XML</button>
+      </div>
+      {einv && (
+        <div className={`mt-2 rounded-lg p-2 text-xs ${einv.valid ? 'bg-green-50 text-green-900' : 'bg-amber-50 text-amber-900'}`}
+          data-testid="vat-einvoice-check">
+          {einv.valid ? 'Passes the Peppol BIS 3.0 checks.' : 'Fix these before sending it as an e-invoice:'}
+          {(Array.isArray(einv.errors) ? einv.errors : []).map((e) => <p key={e.rule + e.message}>• {e.message} ({e.rule})</p>)}
+          {(Array.isArray(einv.warnings) ? einv.warnings : []).map((w) => <p key={w}>{w}</p>)}
         </div>
       )}
       {!res.supplier_vrn && (

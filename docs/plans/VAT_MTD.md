@@ -340,6 +340,11 @@ The UK is moving to mandatory e-invoicing for VAT-registered businesses from Apr
 - Keep the data model ready to exchange through an access point when the UK model is final.
 - Track the HMRC guidance, and record what changes when it is published.
 
+Shipped (phase 11): UBL 2.1 / Peppol BIS Billing 3.0 export of issued invoices, import of
+supplier e-invoices (recorded as pending purchases with the VAT coded), a business-rule check,
+and `vat_einvoice_documents` as the outbox/inbox for a future access point. What is and isn't
+covered, and the guidance log: `docs/plans/VAT_EINVOICING.md`.
+
 ## Testing and definition of done
 
 For each phase:
