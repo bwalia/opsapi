@@ -50,6 +50,7 @@ function treatment(t: TaxTransaction): { text: string; tone: 'in' | 'out' | 'off
 
 function sourceLabel(t: TaxTransaction): string {
   if (t.is_manually_reviewed) return 'You';
+  if (t.classified_by === 'learned') return 'Learned from your history';
   if (t.classified_by === 'rule_engine') return 'Known merchant';
   if (t.classified_by === 'ai') {
     return t.confidence_score != null ? `AI · ${Math.round(Number(t.confidence_score) * 100)}% sure` : 'AI';
