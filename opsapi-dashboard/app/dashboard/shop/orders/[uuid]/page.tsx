@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, PackageCheck, Printe
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
+import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } from '@/components/shop/DeliveryChangeRequests';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { MoreMenu, NextStepPanel, PoNumberField, StatusTimeline, activePurchaseOrder, orderNextStep, orderTimeline, type PanelAction } from '@/components/shop/workflow';
 import { purchaseOrdersService } from '@/services/purchase-orders.service';
@@ -218,6 +219,11 @@ function OrderDetail() {
 
       <div className="flex flex-wrap items-center gap-3">
         <OrderStatusBadge status={order.status} />
+        {order.delivery_change_pending && (
+          <a href="#delivery-changes" className="inline-flex items-center rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-800 hover:underline print:hidden">
+            Delivery change requested
+          </a>
+        )}
         {order.paid_at && <span className="text-sm text-secondary-500">Paid {formatDateTime(order.paid_at)}</span>}
         {order.customer_po_number && <span className="text-sm text-secondary-700">Customer PO <span className="font-mono">{order.customer_po_number}</span></span>}
         {step.key === 'awaiting_bank_transfer' && (
@@ -234,6 +240,16 @@ function OrderDetail() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
+          <div id="delivery-changes" className="scroll-mt-24">
+            <DeliveryChangeRequests
+              order={order}
+              editable={editable}
+              onChanged={(o) => {
+                setOrder(o);
+                setNotes(o.internal_notes ?? '');
+              }}
+            />
+          </div>
           <Card>
             <SectionTitle>Lines</SectionTitle>
             <LinesTable lines={order.lines} currency={cur} />
@@ -304,7 +320,7 @@ function OrderDetail() {
                 <p className="text-secondary-700">{formatAddress(order.shipping_address)}</p>
               </div>
             )}
-            {(order.delivery_method || order.delivery_address) && (
+            {(order.delivery_method || order.delivery_address || order.delivery_date || order.delivery_window) && (
               <div className="mt-4 border-t border-secondary-100 pt-3 text-sm">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-secondary-500">Deliver directly to (agreed on the order)</p>
                 {order.delivery_address && (
@@ -315,6 +331,12 @@ function OrderDetail() {
                 {order.delivery_address?.email && <p className="text-secondary-600">{order.delivery_address.email}</p>}
                 {order.delivery_address?.vat_number && <p className="text-secondary-600">VAT {order.delivery_address.vat_number}</p>}
                 {order.delivery_method && <p className="mt-1 text-secondary-700">Method: {order.delivery_method}</p>}
+                {(order.delivery_date || order.delivery_window) && (
+                  <p className="mt-1 text-secondary-700">
+                    When: {order.delivery_date ? formatDeliveryDate(order.delivery_date) : 'date not set'}
+                    {order.delivery_window ? `, ${DELIVERY_WINDOW_LABEL[order.delivery_window].toLowerCase()}` : ''}
+                  </p>
+                )}
               </div>
             )}
             {order.billing_address && (

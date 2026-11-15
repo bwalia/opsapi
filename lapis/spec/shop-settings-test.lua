@@ -69,5 +69,18 @@ check("alert email: checkout untouched", S.checkoutEnabled(1) == false)
 res = S.update(1, { order_alert_email = "" })
 check("alert email: blank clears it", res and S.orderAlertEmail(1) == nil)
 
+check("no row: customer delivery notifications are off", S.customerDeliveryNotifications(1) == false)
+row = nil
+check("no row at all: customer delivery notifications are off", S.customerDeliveryNotifications(1) == false
+    and S.get(1).customer_delivery_notifications == false)
+res, err = S.update(1, { customer_delivery_notifications = "true" })
+check("customer notifications: a string is rejected", res == nil and err and err.code == "VALIDATION_ERROR")
+res = S.update(1, { customer_delivery_notifications = true })
+check("customer notifications: true turns them on", res and res.customer_delivery_notifications == true
+    and S.customerDeliveryNotifications(1) == true)
+check("customer notifications: checkout untouched", S.checkoutEnabled(1) == false)
+res = S.update(1, { customer_delivery_notifications = false })
+check("customer notifications: false turns them off", res and S.customerDeliveryNotifications(1) == false)
+
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

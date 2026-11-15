@@ -20,6 +20,13 @@
       POST              /orders/:uuid/purchase-order          { supplier_uuid?, supplier_name?, costs?, … }
       POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
                                                goods via Stripe less the Trade discount clawback
+      GET               /orders/:uuid/delivery-changes   the customer's delivery change requests (also on GET /orders/:uuid
+                                               as delivery_change_requests; GET /orders?filter=delivery_change_pending)
+      POST              /orders/:uuid/delivery-changes/:request_uuid/approve  { staff_note? } applies the requested address,
+                                               date and window to the order (idempotent; 409 once shipped)
+      POST              /orders/:uuid/delivery-changes/:request_uuid/decline  { staff_note } the reason, shown to the
+                                               customer (idempotent). The customer is emailed about either only while
+                                               settings.customer_delivery_notifications is on
       GET/POST          /quotes                GET/PUT /quotes/:uuid   (?filter=awaiting_authorisation|awaiting_payment|
                                                needs_supplier_po|bank_transfer_due, ?kind=quote|order)
       POST              /quotes/:uuid/revise   { reason, customer?, delivery_address?, delivery_method?,
@@ -27,7 +34,9 @@
       GET               /chats (?consent=true) GET /chats/:uuid
       GET/POST          /knowledge             DELETE /knowledge/:source_ref   POST /knowledge/reindex
       GET               /dashboard
-      GET/PUT           /settings              { checkout_enabled } — false: no online payment for orders, enquiries only
+      GET/PUT           /settings              { checkout_enabled } — false: no online payment for orders, enquiries only;
+                                               { customer_delivery_notifications } — false (default): customers are
+                                               not emailed about delivery change decisions
       GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 60|120, refund threshold, …)
       GET               /membership/members    (?status=&q=)
       GET               /waitlist              (?product_uuid=&include_notified=; members first)
@@ -64,6 +73,7 @@ local Search = require("queries.ShopSearchQueries")
 local Dashboard = require("queries.ShopDashboardQueries")
 local ShopStripe = require("queries.ShopStripeQueries")
 local Legal = require("queries.ShopLegalQueries")
+local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
 
 local BASE = "/api/v2/shop/admin"
 
@@ -304,6 +314,27 @@ return function(app)
         if not body then return bad end
         local u = self.current_user or {}
         return result(Orders.adminRefund(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    -- customer delivery change requests ---------------------------------------------
+    app:get(BASE .. "/orders/:uuid/delivery-changes", guard("read", function(self, ns_id)
+        local rows, err = DeliveryChange.adminList(ns_id, self.params.uuid)
+        if not rows then return U.from_err(err) end
+        return U.ok(rows, 200, { total = #rows, limit = #rows, offset = 0 })
+    end))
+
+    app:post(BASE .. "/orders/:uuid/delivery-changes/:request_uuid/approve", guard("update", function(self, ns_id)
+        local body = U.read_json() or {}
+        local u = self.current_user or {}
+        return result(DeliveryChange.approve(ns_id, self.params.uuid, self.params.request_uuid, body,
+            u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    app:post(BASE .. "/orders/:uuid/delivery-changes/:request_uuid/decline", guard("update", function(self, ns_id)
+        local body = U.read_json() or {}
+        local u = self.current_user or {}
+        return result(DeliveryChange.decline(ns_id, self.params.uuid, self.params.request_uuid, body,
+            u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
 
     -- quotes ----------------------------------------------------------------------

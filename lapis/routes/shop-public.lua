@@ -30,7 +30,9 @@
       POST   /checkout                           { …, membership?: { interval, accept_terms, terms_version } } joins Trade in the same payment
                                                  409 CHECKOUT_DISABLED while settings.checkout_enabled is false
       GET    /settings                           { checkout_enabled } — false: enquiries (quotes) only, no online payment
-      GET    /orders/:uuid?t=                    payment_method; bank transfer: payment_methods, payment_reference
+      GET    /orders/:uuid?t=                    payment_method; bank transfer: payment_methods, payment_reference;
+                                                 delivery_date, delivery_window; with X-Member-Token: viewer_owns_order
+                                                 and (owner only) pending_delivery_change
       POST   /chat-sessions                      { cart_token?, email?, name?, phone? } (+ BFF X-Visitor-Country)
       POST   /chat-sessions/:uuid/messages
       POST   /chat-sessions/:uuid/requirements   { requirements: {goal, models, budget_gbp, …} } (AI advisor)
@@ -57,6 +59,19 @@
       POST   /auth/password                      { email, password } → { session_token, email } + emails a code (BFF only)
       POST   /auth/password/verify               { session_token, code } → { session_token, email, expires_in_days } (BFF only)
       GET    /customer/quotes                    the signed-in customer's quotes, matched on email (X-Member-Token)
+      GET    /customer/orders                    the signed-in customer's orders, matched on email (X-Member-Token)
+
+    Delivery change requests (X-Member-Token required; the signed-in email must be the order's email. ?t= / body t,
+    the order link's token, is optional but must match when sent. Nothing changes until staff approve):
+      GET    /customer/orders/:uuid/delivery-changes          { order, current, requests, can_request, blocked_reason,
+                                                               earliest_date, latest_date, windows }
+      POST   /customer/orders/:uuid/delivery-changes          { address: {name, company?, line1, line2?, city, county?,
+                                                               postcode, country?, phone?}, date?: YYYY-MM-DD,
+                                                               window?: all_day|am|pm, note?, user_agent? (BFF) } → 201
+                                                               the same view + request + message. UK addresses only;
+                                                               weekday from the next working day, ≤ 90 days; one
+                                                               pending request per order; ≤ 5 requests per order a day
+      POST   /customer/orders/:uuid/delivery-changes/:request_uuid/cancel   cancel your pending request
 
     Legal acceptances (append-only evidence of the statements a customer ticks; the shop decides which
     document versions are current):
@@ -92,6 +107,7 @@ local CustomerAuth = require("queries.ShopCustomerAuthQueries")
 local Legal = require("queries.ShopLegalQueries")
 local SurveyRules = require("lib.shop-survey")
 local Survey = require("queries.ShopSurveyQueries")
+local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -322,7 +338,8 @@ return function(app)
     end))
 
     app:get(BASE .. "/orders/:uuid", public(function(self, ns_id)
-        local order = Orders.publicView(ns_id, self.params.uuid, self.params.t)
+        local m = ngx.ctx.shop_member
+        local order = Orders.publicView(ns_id, self.params.uuid, self.params.t, m and m.email or nil)
         if not order then return U.fail(404, "ORDER_NOT_FOUND", "Order not found") end
         return U.ok(order)
     end))
@@ -485,6 +502,54 @@ return function(app)
         if not m then return bad end
         local data, meta = Quote.forCustomer(ns_id, m.email, self.params)
         return U.ok(data, 200, meta)
+    end))
+
+    app:get(BASE .. "/customer/orders", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local data, meta = DeliveryChange.ordersForCustomer(ns_id, m.email, self.params)
+        return U.ok(data, 200, meta)
+    end))
+
+    -- Delivery change requests: signed-in customers only, on their own orders (the token alone is never enough).
+    local function requester_ip(self)
+        if is_bff(self) and not self.req.headers["x-visitor-ip"] then
+            local xff = self.req.headers["x-forwarded-for"]
+            local first = type(xff) == "string" and xff:match("^%s*([%x%.:]+)")
+            if first and #first <= 45 then return first end
+        end
+        return visitor_ip(self)
+    end
+
+    app:get(BASE .. "/customer/orders/:uuid/delivery-changes", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local res, err = DeliveryChange.forCustomer(ns_id, self.params.uuid, m.email, self.params.t)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
+    end))
+
+    app:post(BASE .. "/customer/orders/:uuid/delivery-changes", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local body, bad_body = body_or_400()
+        if not body then return bad_body end
+        local ua = is_bff(self) and body.user_agent or self.req.headers["user-agent"]
+        local meta = { ip = requester_ip(self), user_agent = type(ua) == "string" and ua:sub(1, 400) or nil }
+        local res, err = DeliveryChange.createForCustomer(ns_id, self.params.uuid, m.email, body.t or self.params.t,
+            body, meta)
+        if not res then return U.from_err(err) end
+        return U.ok(res, 201)
+    end))
+
+    app:post(BASE .. "/customer/orders/:uuid/delivery-changes/:request_uuid/cancel", public(function(self, ns_id)
+        local m, bad = member_or_401()
+        if not m then return bad end
+        local body = U.read_json() or {}
+        local res, err = DeliveryChange.cancelForCustomer(ns_id, self.params.uuid, self.params.request_uuid, m.email,
+            body.t or self.params.t)
+        if not res then return U.from_err(err) end
+        return U.ok(res)
     end))
 
     app:post(BASE .. "/legal/acceptances", public(function(self, ns_id)

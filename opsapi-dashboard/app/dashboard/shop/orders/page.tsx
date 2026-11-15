@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Landmark, Plus, Search, ShoppingCart } from 'lucide-react';
+import { Landmark, Plus, Search, ShoppingCart, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Pagination, Table } from '@/components/ui';
@@ -30,6 +30,9 @@ function OrdersContent() {
   // "Bank transfer due": orders awaiting a bank transfer, oldest first.
   const [btDue, setBtDue] = useState(false);
   const [btDueCount, setBtDueCount] = useState(0);
+  // Customers waiting for an answer to a delivery change request.
+  const [dcPending, setDcPending] = useState(false);
+  const [dcPendingCount, setDcPendingCount] = useState(0);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -46,6 +49,7 @@ function OrdersContent() {
         status: btDue ? '' : status,
         q: q || undefined,
         bank_transfer_due: btDue,
+        filter: dcPending ? 'delivery_change_pending' : '',
         limit: PER_PAGE,
         offset: (page - 1) * PER_PAGE,
       })
@@ -54,13 +58,14 @@ function OrdersContent() {
         setRows(res.data);
         setTotal(res.meta.total);
         setBtDueCount(res.bankTransferDue);
+        setDcPendingCount(res.deliveryChangePending);
       })
       .catch((err) => active && toast.error(extractApiError(err, 'Failed to load orders')))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [status, q, page, btDue]);
+  }, [status, q, page, btDue, dcPending]);
 
   const vips = useVipStatus(rows.map((o) => o.email));
 
@@ -108,6 +113,11 @@ function OrdersContent() {
             <span className="inline-flex items-center rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">
               <Landmark className="mr-1 h-3 w-3" /> Bank transfer due
               {typeof o.days_waiting === 'number' && ` · ${o.days_waiting === 0 ? 'today' : `${o.days_waiting} day${o.days_waiting === 1 ? '' : 's'}`}`}
+            </span>
+          )}
+          {o.delivery_change_pending && (
+            <span className="inline-flex items-center rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">
+              <Truck className="mr-1 h-3 w-3" /> Delivery change requested
             </span>
           )}
         </div>
@@ -159,6 +169,24 @@ function OrdersContent() {
             <Landmark className="h-4 w-4" /> Bank transfer due
             <span className={`rounded-full px-1.5 text-xs ${btDueCount > 0 ? 'bg-warning-500 text-white' : 'bg-secondary-200 text-secondary-600'}`}>
               {btDueCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={dcPending}
+            onClick={() => {
+              setDcPending((v) => !v);
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+              dcPending
+                ? 'border-warning-400 bg-warning-50 text-warning-800'
+                : 'border-secondary-300 bg-surface text-secondary-700 hover:border-warning-300'
+            }`}
+          >
+            <Truck className="h-4 w-4" /> Delivery change requested
+            <span className={`rounded-full px-1.5 text-xs ${dcPendingCount > 0 ? 'bg-warning-500 text-white' : 'bg-secondary-200 text-secondary-600'}`}>
+              {dcPendingCount}
             </span>
           </button>
           <FilterSelect

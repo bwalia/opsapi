@@ -32,6 +32,7 @@ function SettingsContent() {
   const [savingBill, setSavingBill] = useState(false);
   const [alertEmail, setAlertEmail] = useState('');
   const [savingAlert, setSavingAlert] = useState(false);
+  const [savingNotify, setSavingNotify] = useState(false);
 
   useEffect(() => {
     shopService
@@ -77,6 +78,28 @@ function SettingsContent() {
       toast.error(extractApiError(e, 'Could not save'));
     } finally {
       setSavingBill(false);
+    }
+  };
+
+  const setCustomerNotifications = async (on: boolean) => {
+    if (
+      on &&
+      !(await confirmDialog({
+        title: 'Email customers about delivery changes?',
+        message:
+          'Customers will be emailed from the shop’s current sending address when you approve or decline their delivery change request. Only turn this on once the sending address has been changed.',
+        confirmText: 'Turn on',
+      }))
+    )
+      return;
+    setSavingNotify(true);
+    try {
+      setSettings(await shopService.updateSettings({ customer_delivery_notifications: on }));
+      toast.success(on ? 'Customers will be emailed about delivery changes' : 'Customers will not be emailed about delivery changes');
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingNotify(false);
     }
   };
 
@@ -143,6 +166,27 @@ function SettingsContent() {
           disabled={!canUpdate('shop')}
           onChange={(e) => setAlertEmail(e.target.value)}
         />
+      </Card>
+      <Card className="p-6">
+        <div className="flex items-start justify-between gap-6">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">Email customers about delivery changes</h2>
+            <p className="text-sm text-secondary-600">
+              {settings?.customer_delivery_notifications
+                ? 'On: when you approve or decline a customer’s delivery change request, we email them the outcome.'
+                : 'Off: customers are not emailed when you approve or decline their delivery change request. They see the outcome on their order page.'}
+            </p>
+            <p className="text-xs text-secondary-500">
+              Keep this off until the shop’s sending email address has been changed. There is no SMS sending yet. New requests always alert staff (New-order alerts above).
+            </p>
+          </div>
+          <Switch
+            aria-label="Email customers about delivery changes"
+            checked={!!settings?.customer_delivery_notifications}
+            disabled={!settings || savingNotify || !canUpdate('shop')}
+            onChange={setCustomerNotifications}
+          />
+        </div>
       </Card>
       <Card className="p-6">
         <div className="mb-4 flex items-start justify-between gap-4">

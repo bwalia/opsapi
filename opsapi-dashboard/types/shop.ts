@@ -488,6 +488,47 @@ export interface ShopOrder extends ShopTotals {
   /** Awaiting a bank transfer, and for how many days. */
   bank_transfer_due?: boolean;
   days_waiting?: number | null;
+  /** Agreed delivery day (YYYY-MM-DD) and time window, set when staff approve a delivery change. */
+  delivery_date?: string | null;
+  delivery_window?: ShopDeliveryWindow | null;
+  /** A customer's delivery change request is waiting for staff. */
+  delivery_change_pending?: boolean;
+  /** The customer's delivery change requests, newest first (order detail only). */
+  delivery_change_requests?: ShopDeliveryChangeRequest[];
+}
+
+export type ShopDeliveryWindow = 'all_day' | 'am' | 'pm';
+
+/** A signed-in customer asking to change where / when their order is delivered. Nothing changes until approved. */
+export interface ShopDeliveryChangeRequest {
+  uuid: string;
+  status: 'pending' | 'approved' | 'declined' | 'cancelled';
+  requested_address: ShopDeliveryAddress;
+  /** null = keep the order's date / window. */
+  requested_date: string | null;
+  requested_window: ShopDeliveryWindow | null;
+  customer_note: string | null;
+  /** What the order said before (at request time; refreshed when approved). */
+  previous_delivery_address: ShopDeliveryAddress | null;
+  previous_delivery_date: string | null;
+  previous_delivery_window: ShopDeliveryWindow | null;
+  /** Shown to the customer on their order page (e.g. why it was declined). */
+  staff_note: string | null;
+  requested_by_email: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  cancelled_at: string | null;
+  customer_notified_at: string | null;
+  created_at: string;
+}
+
+export interface ShopDeliveryChangeDecision {
+  request: ShopDeliveryChangeRequest;
+  /** Clicked twice: it was already decided this way. */
+  already: boolean;
+  customer_notified: boolean;
+  customer_notifications_enabled: boolean;
+  order: ShopOrder;
 }
 
 export type ShopPaymentMethodKind = 'card' | 'bank_transfer' | 'cheque' | 'other';
