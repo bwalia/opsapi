@@ -57,6 +57,10 @@ class Hmrc:
             body = request.content.decode()
             assert "grant_type=client_credentials" in body and "client_id=cid" in body
             return httpx.Response(200, json={"access_token": "srv-token", "expires_in": 14400})
+        if request.url.path == "/create-test-user/agents":
+            assert json.loads(request.content) == {"serviceNames": ["agent-services"]}
+            return httpx.Response(201, json={"userId": "1", "password": FAKE_HMRC_PW, "userFullName": "A Gent",
+                                             "agentServicesAccountNumber": "SARN1234567"})
         if request.url.path == "/create-test-user/organisations":
             assert json.loads(request.content) == {"serviceNames": ["mtd-vat"]}
             org = dict(ORG, password=FAKE_HMRC_PW)
@@ -163,3 +167,8 @@ def test_services_lists_both_kinds():
     d = client(Hmrc()).get("/hmrc-test-users/api/services").json()
     assert [s["key"] for s in d["kinds"]["organisation"] if s["default"]] == ["mtd-vat"]
     assert len(d["services"]) == 3
+
+
+def test_creates_an_agent_with_an_arn():
+    r = client(Hmrc()).post("/hmrc-test-users/api/test-users", json={"kind": "agent"})
+    assert r.status_code == 201 and r.json()["arn"] == "SARN1234567" and r.json()["kind"] == "agent"

@@ -91,39 +91,56 @@ export interface VatReport {
   top_suppliers: Array<{ supplier: string; spend: number; vat: number; lines: number }>;
 }
 
+export interface VatAgentClient {
+  uuid: string; client_vrn: string; status: 'pending' | 'accepted' | 'active' | 'rejected' | 'expired' | 'cancelled' | 'revoked';
+  client_action_url?: string | null; expires_on?: string | null; last_checked_at?: string | null;
+  business_name?: string | null;
+}
+
 export interface VatObligation { periodKey: string; start: string; end: string; due: string; status: 'O' | 'F';
   received?: string }
 
 const data = <T,>(r: { data?: { data?: T } }) => r.data?.data as T;
 
+// An accountant working on a client's VAT: every call carries ?client=<link uuid>
+// (lapis/routes/vat.lua resolve()). null = your own VAT.
+let vatClient: string | null = null;
+export function setVatClient(uuid: string | null) { vatClient = uuid; }
+const withClient = (params?: Record<string, unknown>) => (vatClient ? { ...(params || {}), client: vatClient } : params);
+const get = (url: string, params?: Record<string, unknown>, extra?: Record<string, unknown>) =>
+  apiClient.get(url, { ...(extra || {}), params: withClient(params) });
+const post = (url: string, body?: unknown, extra?: Record<string, unknown>) =>
+  apiClient.post(url, body, { ...(extra || {}), params: withClient() });
+const put = (url: string, body?: unknown) => apiClient.put(url, body, { params: withClient() });
+
 export const vatService = {
   async codes(): Promise<{ codes: VatCode[]; schemes: Array<{ key: VatScheme; label: string }> }> {
-    return data(await apiClient.get(`${BASE}/codes`));
+    return data(await get(`${BASE}/codes`));
   },
   async registration(): Promise<VatRegistration | null> {
-    return data(await apiClient.get(`${BASE}/registration`)) || null;
+    return data(await get(`${BASE}/registration`)) || null;
   },
   async saveRegistration(r: Partial<VatRegistration>): Promise<VatRegistration> {
-    return data(await apiClient.put(`${BASE}/registration`, r));
+    return data(await put(`${BASE}/registration`, r));
   },
   async status(taxYear?: string): Promise<VatStatus> {
-    return data(await apiClient.get(`${BASE}/transactions/classify-status`, { params: { tax_year: taxYear } }));
+    return data(await get(`${BASE}/transactions/classify-status`, { tax_year: taxYear }));
   },
   async classify(opts: { tax_year?: string; period_start?: string; period_end?: string; recode?: boolean }) {
     return data<{ started: boolean; pending: number; already_running?: boolean }>(
-      await apiClient.post(`${BASE}/transactions/classify`, opts));
+      await post(`${BASE}/transactions/classify`, opts));
   },
   async applyRules(taxYear?: string) {
     return data<{ matched: number; unmatched: number }>(
-      await apiClient.post(`${BASE}/transactions/apply-rules`, { tax_year: taxYear }));
+      await post(`${BASE}/transactions/apply-rules`, { tax_year: taxYear }));
   },
   async reviewQueue(): Promise<VatReviewLine[]> {
-    return data(await apiClient.get(`${BASE}/review`)) || [];
+    return data(await get(`${BASE}/review`)) || [];
   },
   async setLineVat(uuid: string, body: { vat_code: string; vat_amount?: number; reclaimable_pct?: number;
     reason?: string }) {
     return data<{ learned_rule?: { match_value: string; vat_code: string } | null }>(
-      await apiClient.put(`${BASE}/transactions/${uuid}`, body));
+      await put(`${BASE}/transactions/${uuid}`, body));
   },
   async readReceipt(uuid: string, file: File) {
     const b64 = await new Promise<string>((resolve, reject) => {
@@ -132,52 +149,71 @@ export const vatService = {
       fr.onerror = () => reject(fr.error);
       fr.readAsDataURL(file);
     });
-    return data(await apiClient.post(`${BASE}/transactions/${uuid}/receipt`, { mime: file.type, data: b64 },
+    return data(await post(`${BASE}/transactions/${uuid}/receipt`, { mime: file.type, data: b64 },
       { timeout: 180000 }));
   },
   async preview(period_start: string, period_end: string): Promise<VatReturnPreview> {
-    return data(await apiClient.post(`${BASE}/returns/preview`, { period_start, period_end }));
+    return data(await post(`${BASE}/returns/preview`, { period_start, period_end }));
   },
   async saveDraft(period_start: string, period_end: string): Promise<VatReturnRow> {
-    return data(await apiClient.post(`${BASE}/returns`, { period_start, period_end }));
+    return data(await post(`${BASE}/returns`, { period_start, period_end }));
   },
   async returns(): Promise<VatReturnRow[]> {
-    return data(await apiClient.get(`${BASE}/returns`)) || [];
+    return data(await get(`${BASE}/returns`)) || [];
   },
   async getReturn(uuid: string, lines = false): Promise<VatReturnRow> {
-    return data(await apiClient.get(`${BASE}/returns/${uuid}`, { params: lines ? { lines: 1 } : undefined }));
+    return data(await get(`${BASE}/returns/${uuid}`, lines ? { lines: 1 } : undefined));
   },
   async obligations(params: { from?: string; to?: string; status?: 'O' | 'F' } = {}): Promise<VatObligation[]> {
-    return data(await apiClient.get(`${BASE}/hmrc/obligations`, { params })) || [];
+    return data(await get(`${BASE}/hmrc/obligations`, params)) || [];
   },
   async submit(uuid: string, period_key: string): Promise<VatReturnRow> {
-    return data(await apiClient.post(`${BASE}/returns/${uuid}/submit`,
+    return data(await post(`${BASE}/returns/${uuid}/submit`,
       { period_key, declaration_accepted: true }, { timeout: 120000 }));
   },
   async hmrcReturn(period_key: string): Promise<Record<string, number | string>> {
-    return data(await apiClient.get(`${BASE}/hmrc/returns/${encodeURIComponent(period_key)}`));
+    return data(await get(`${BASE}/hmrc/returns/${encodeURIComponent(period_key)}`));
   },
   async threshold(): Promise<VatThreshold> {
-    return data(await apiClient.get(`${BASE}/threshold`));
+    return data(await get(`${BASE}/threshold`));
   },
   async report(from: string, to: string): Promise<VatReport> {
-    return data(await apiClient.get(`${BASE}/reports`, { params: { from, to } }));
+    return data(await get(`${BASE}/reports`, { from, to }));
   },
   async penalties(): Promise<Record<string, unknown>> {
-    return data(await apiClient.get(`${BASE}/hmrc/penalties`));
+    return data(await get(`${BASE}/hmrc/penalties`));
   },
   async exportReturn(uuid: string): Promise<void> {
-    const r = await apiClient.get(`${BASE}/returns/${uuid}/export`, { responseType: 'blob' });
+    const r = await get(`${BASE}/returns/${uuid}/export`, undefined, { responseType: 'blob' });
     const name = /filename="([^"]+)"/.exec(String(r.headers['content-disposition'] || ''))?.[1] || 'vat-return.csv';
     const url = URL.createObjectURL(r.data as Blob);
     const a = document.createElement('a');
     a.href = url; a.download = name; a.click();
     URL.revokeObjectURL(url);
   },
-  async connectUrl(redirectUrl: string): Promise<string> {
+  async connectUrl(redirectUrl: string, purpose: 'vat' | 'vat_agent' = 'vat'): Promise<string> {
     const r = await apiClient.get('/auth/hmrc/initiate',
-      { params: { source: 'vat', purpose: 'vat', redirect_url: redirectUrl } });
+      { params: { source: 'vat', purpose, redirect_url: redirectUrl } });
     return r.data?.auth_url;
+  },
+  // Accountants (agents)
+  async agentProfile(): Promise<{ arn: string } | null> {
+    return data(await apiClient.get(`${BASE}/agent/profile`)) || null;
+  },
+  async saveAgentProfile(arn: string): Promise<{ arn: string }> {
+    return data(await apiClient.put(`${BASE}/agent/profile`, { arn }));
+  },
+  async agentClients(): Promise<VatAgentClient[]> {
+    return data(await apiClient.get(`${BASE}/agent/clients`)) || [];
+  },
+  async inviteClient(vrn: string, vat_registration_date?: string): Promise<VatAgentClient> {
+    return data(await apiClient.post(`${BASE}/agent/clients`, { vrn, vat_registration_date }));
+  },
+  async refreshClient(uuid: string): Promise<VatAgentClient> {
+    return data(await apiClient.post(`${BASE}/agent/clients/${uuid}/refresh`, {}));
+  },
+  async cancelClient(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/agent/clients/${uuid}`);
   },
 };
 

@@ -45,6 +45,14 @@
     GET    /api/v2/vat/hmrc/(liabilities|payments|penalties)  ?from&to
     (sandbox only: ?test_scenario= / "test_scenario" passes HMRC's Gov-Test-Scenario)
 
+    Accountants (phase 8; RBAC module vat_agent; connect with /auth/hmrc/initiate?purpose=vat_agent):
+    GET/PUT /api/v2/vat/agent/profile           your Agent Reference Number { arn }
+    GET    /api/v2/vat/agent/clients            your clients and where each request stands
+    POST   /api/v2/vat/agent/clients            ask a client for authority at HMRC { vrn, vat_registration_date? }
+    POST   /api/v2/vat/agent/clients/:uuid/refresh  check with HMRC (active once HMRC confirms)
+    DELETE /api/v2/vat/agent/clients/:uuid      stop / cancel
+    Then any VAT route with ?client=<uuid> acts on that client's VAT.
+
     VAT management (phase 6):
     GET    /api/v2/vat/threshold                rolling 12-month taxable turnover vs the registration threshold
     GET    /api/v2/vat/reports                  ?from&to  VAT by code and supplier; reclaimable vs blocked
@@ -65,6 +73,7 @@ local VatReturnQueries = require("queries.VatReturnQueries")
 local VatAiQueries = require("queries.VatAiQueries")
 local VatFilingQueries = require("queries.VatFilingQueries")
 local VatManagementQueries = require("queries.VatManagementQueries")
+local VatAgentQueries = require("queries.VatAgentQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -104,6 +113,34 @@ local function business_of(self, action)
         return nil, actor
     end
     return actor, actor
+end
+
+-- Whose VAT is this request about? Returns (registration, owner_user_id, actor_id)
+-- or (nil, nil, nil, error_response).
+--   default             the signed-in person's own registration
+--   ?scope=namespace    the workspace's own (needs the "vat" permission)
+--   ?client=<link uuid> a client's, for an accountant (needs "vat_agent", a link of
+--                       theirs in this workspace that HMRC has confirmed: 'active')
+local function resolve(self, action)
+    local actor = user_pk(self)
+    if not actor then return nil, nil, nil, err(401, "User not found") end
+    local client = self.params.client
+    if client and client ~= "" then
+        if not NamespaceMiddleware.hasPermission(self, "vat_agent", action) then
+            return nil, nil, nil, err(403, "You don't have permission to act for clients' VAT")
+        end
+        local reg = require("queries.VatAgentQueries").active_registration(self.namespace.id, actor, client)
+        if not reg then
+            return nil, nil, nil, err(403, "HMRC hasn't confirmed you can act for this client yet")
+        end
+        local owner = reg.user_id
+        if owner == nil or owner == ngx.null then owner = actor end
+        return reg, owner, actor
+    end
+    local uid, _, e = business_of(self, action); if e then return nil, nil, nil, e end
+    local reg = VatQueries.get_registration(self.namespace.id, uid)
+    if not reg then return nil, nil, nil, err(409, "Add your VAT registration first") end
+    return reg, uid or actor, actor
 end
 
 local function registration_json(r)
@@ -152,10 +189,14 @@ return function(app)
 
     -- Rules need a registration: they belong to a business.
     local function with_registration(self, action)
-        local uid, actor, e = business_of(self, action); if e then return nil, nil, e end
-        local r = VatQueries.get_registration(self.namespace.id, uid)
-        if not r then return nil, nil, err(409, "Add your VAT registration first") end
-        return r, actor
+        local reg, _, actor, e = resolve(self, action); if e then return nil, nil, e end
+        return reg, actor
+    end
+
+    -- Bank lines belong to the registration's owner (the client, for an accountant).
+    local function own_registration(self, action)
+        local reg, owner, _, e = resolve(self, action or "read"); if e then return nil, nil, e end
+        return reg, owner
     end
 
     app:get("/api/v2/vat/rules", authed(function(self)
@@ -187,11 +228,9 @@ return function(app)
 
     -- Bank lines are always the person's own (tax_transactions is per user).
     app:post("/api/v2/vat/transactions/apply-rules", authed(function(self)
-        local actor = user_pk(self); if not actor then return err(401, "User not found") end
-        local reg = VatQueries.get_registration(self.namespace.id, actor)
-        if not reg then return err(409, "Add your VAT registration first") end
+        local reg, owner, _, e = resolve(self, "update"); if e then return e end
         local body = read_body(self)
-        local res = VatQueries.apply_rules(reg, actor, {
+        local res = VatQueries.apply_rules(reg, owner, {
             tax_year = body.tax_year, statement_id = body.statement_id,
             refresh = body.refresh == true or body.refresh == "true",
         })
@@ -199,10 +238,8 @@ return function(app)
     end))
 
     app:put("/api/v2/vat/transactions/:uuid", authed(function(self)
-        local actor = user_pk(self); if not actor then return err(401, "User not found") end
-        local reg = VatQueries.get_registration(self.namespace.id, actor)
-        if not reg then return err(409, "Add your VAT registration first") end
-        local row, msg, status = VatQueries.set_transaction_vat(reg, actor, self.params.uuid, read_body(self), actor)
+        local reg, owner, actor, e = resolve(self, "update"); if e then return e end
+        local row, msg, status = VatQueries.set_transaction_vat(reg, owner, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
         -- Two agreeing decisions for a supplier teach the business a rule.
         local ok_l, learned = pcall(VatAiQueries.learn, reg, self.params.uuid, actor)
@@ -263,36 +300,30 @@ return function(app)
         return { status = 200, json = { success = true } }
     end))
     -- ---------------------------------------------------------------- AI coding
-    local function own_registration(self)
-        local actor = user_pk(self); if not actor then return nil, nil, err(401, "User not found") end
-        local reg = VatQueries.get_registration(self.namespace.id, actor)
-        if not reg then return nil, nil, err(409, "Add your VAT registration first") end
-        return reg, actor
-    end
 
     app:post("/api/v2/vat/transactions/classify", authed(function(self)
-        local reg, actor, e = own_registration(self); if e then return e end
+        local reg, owner, _, e = resolve(self, "update"); if e then return e end
         local b = read_body(self)
-        local res, msg = VatAiQueries.start(reg, actor, { tax_year = b.tax_year, period_start = b.period_start,
+        local res, msg = VatAiQueries.start(reg, owner, { tax_year = b.tax_year, period_start = b.period_start,
             period_end = b.period_end, recode = b.recode == true or b.recode == "true" })
         if not res then return err(500, msg) end
         return { status = 202, json = { success = true, data = res } }
     end))
 
     app:get("/api/v2/vat/transactions/classify-status", authed(function(self)
-        local reg, actor, e = own_registration(self); if e then return e end
+        local reg, owner, e = own_registration(self); if e then return e end
         return { status = 200, json = { success = true,
-            data = VatAiQueries.status(reg, actor, { tax_year = self.params.tax_year }) } }
+            data = VatAiQueries.status(reg, owner, { tax_year = self.params.tax_year }) } }
     end))
 
     app:get("/api/v2/vat/review", authed(function(self)
-        local reg, actor, e = own_registration(self); if e then return e end
-        return { status = 200, json = { success = true, data = VatAiQueries.review_queue(reg, actor) } }
+        local reg, owner, e = own_registration(self); if e then return e end
+        return { status = 200, json = { success = true, data = VatAiQueries.review_queue(reg, owner) } }
     end))
 
     app:post("/api/v2/vat/transactions/:uuid/receipt", authed(function(self)
-        local reg, actor, e = own_registration(self); if e then return e end
-        local row, msg, status = VatAiQueries.read_receipt(reg, actor, self.params.uuid, read_body(self), actor)
+        local reg, owner, actor, e = resolve(self, "update"); if e then return e end
+        local row, msg, status = VatAiQueries.read_receipt(reg, owner, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
         return { status = 200, json = { success = true, data = row } }
     end))
@@ -367,12 +398,12 @@ return function(app)
     end))
 
     app:get("/api/v2/vat/reports", authed(function(self)
-        local reg, actor, e = own_registration(self); if e then return e end
+        local reg, owner, e = own_registration(self); if e then return e end
         local from, to = self.params.from, self.params.to
         if not (from and to and from:match("^%d%d%d%d%-%d%d%-%d%d$") and to:match("^%d%d%d%d%-%d%d%-%d%d$")) then
             return err(400, "Give from and to like 2026-01-01")
         end
-        return { status = 200, json = { success = true, data = VatManagementQueries.report(reg, actor, from, to) } }
+        return { status = 200, json = { success = true, data = VatManagementQueries.report(reg, owner, from, to) } }
     end))
 
     app:get("/api/v2/vat/returns/:uuid/export", authed(function(self)
@@ -383,5 +414,53 @@ return function(app)
         if fmt == "json" then return { status = 200, json = { success = true, data = out } } end
         ngx.header["Content-Disposition"] = 'attachment; filename="' .. filename .. '"'
         return { status = 200, content_type = "text/csv; charset=utf-8", layout = false, out }
+    end))
+    -- ---------------------------------------------------------------- accountants
+    local function agent(self, action)
+        local actor = user_pk(self); if not actor then return nil, err(401, "User not found") end
+        if not NamespaceMiddleware.hasPermission(self, "vat_agent", action) then
+            return nil, err(403, "You don't have permission to act for clients' VAT")
+        end
+        return actor
+    end
+    local function uuid_of(self) local u = self.current_user or {}; return u.uuid or u.id or u.sub end
+
+    app:get("/api/v2/vat/agent/profile", authed(function(self)
+        local actor, e = agent(self, "read"); if e then return e end
+        return { status = 200, json = { success = true,
+            data = VatAgentQueries.profile(self.namespace.id, actor) or cjson.null } }
+    end))
+
+    app:put("/api/v2/vat/agent/profile", authed(function(self)
+        local actor, e = agent(self, "update"); if e then return e end
+        local row, msg, status = VatAgentQueries.save_profile(self.namespace.id, actor, read_body(self).arn)
+        if not row then return err(status or 400, msg) end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:get("/api/v2/vat/agent/clients", authed(function(self)
+        local actor, e = agent(self, "read"); if e then return e end
+        return { status = 200, json = { success = true, data = VatAgentQueries.list(self.namespace.id, actor) } }
+    end))
+
+    app:post("/api/v2/vat/agent/clients", authed(function(self)
+        local actor, e = agent(self, "create"); if e then return e end
+        local row, resp = VatAgentQueries.invite(self.namespace.id, actor, uuid_of(self), read_body(self))
+        if not row then return resp end
+        return { status = 201, json = { success = true, data = row } }
+    end))
+
+    app:post("/api/v2/vat/agent/clients/:uuid/refresh", authed(function(self)
+        local actor, e = agent(self, "read"); if e then return e end
+        local row, resp = VatAgentQueries.refresh(self.namespace.id, actor, uuid_of(self), self.params.uuid)
+        if not row then return resp end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:delete("/api/v2/vat/agent/clients/:uuid", authed(function(self)
+        local actor, e = agent(self, "delete"); if e then return e end
+        local ok, resp = VatAgentQueries.cancel(self.namespace.id, actor, uuid_of(self), self.params.uuid)
+        if not ok then return resp end
+        return { status = 200, json = { success = true } }
     end))
 end

@@ -41,6 +41,7 @@
     <div id="kind" style="display:flex;gap:16px;margin-bottom:8px">
       <label class="svc"><input type="radio" name="kind" value="individual" checked> A taxpayer (File My Tax)</label>
       <label class="svc"><input type="radio" name="kind" value="organisation"> A VAT-registered business</label>
+      <label class="svc"><input type="radio" name="kind" value="agent"> An accountant (agent)</label>
     </div>
     <div id="services"></div>
     <div style="margin-top:12px"><button class="primary" id="go">Create test user</button></div>
@@ -103,6 +104,7 @@
       card.className = "card";
       card.innerHTML = `<strong>${d.name || "Test user"}</strong>`
         + row("User ID", d.user_id) + row("Password", d.password) + row("VAT number (VRN)", d.vrn)
+        + row("Agent Reference Number", d.arn)
         + row("NINO", d.nino) + row("CT UTR", d.ct_utr) + row("Company number", d.company_registration_number)
         + row("SA UTR", d.sa_utr) + row("MTD IT ID", d.mtd_it_id) + row("Date of birth", d.date_of_birth)
         + row("Email", d.email) + row("Address", d.address)

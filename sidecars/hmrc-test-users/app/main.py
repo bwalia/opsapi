@@ -51,8 +51,11 @@ ORG_SERVICES = {
     "corporation-tax": "Corporation Tax (CT UTR)",
 }
 DEFAULT_ORG_SERVICES = ["mtd-vat"]
+# An accountant (agent) — gets an Agent Reference Number (ARN) for acting for clients.
+AGENT_SERVICES = {"agent-services": "Agent services (gives an Agent Reference Number)"}
 KINDS = {"individual": ("individuals", SERVICES, DEFAULT_SERVICES),
-         "organisation": ("organisations", ORG_SERVICES, DEFAULT_ORG_SERVICES)}
+         "organisation": ("organisations", ORG_SERVICES, DEFAULT_ORG_SERVICES),
+         "agent": ("agents", AGENT_SERVICES, ["agent-services"])}
 
 
 class CreateRequest(BaseModel):
@@ -190,6 +193,19 @@ def create_app(settings: Settings | None = None, transport: httpx.BaseTransport 
             raise HTTPException(502, f"HMRC could not create a test user (HTTP {r.status_code}): {detail}")
 
         d = r.json()
+        if kind == "agent":
+            log.info("created HMRC sandbox test agent (ARN ending %s)",
+                     str(d.get("agentServicesAccountNumber", ""))[-4:])
+            return JSONResponse({
+                "kind": "agent",
+                "user_id": d.get("userId"),
+                "password": d.get("password"),
+                "arn": d.get("agentServicesAccountNumber"),
+                "name": d.get("userFullName"),
+                "email": d.get("emailAddress"),
+                "service_names": names,
+                "sandbox": True,
+            }, status_code=201, headers={"Cache-Control": "no-store"})
         if kind == "organisation":
             org = d.get("organisationDetails") or {}
             # Never log the password: only that a business was made, and its VRN tail.

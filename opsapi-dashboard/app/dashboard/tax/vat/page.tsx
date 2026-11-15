@@ -21,6 +21,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
   BOX_LABELS,
+  setVatClient,
   type Boxes,
   type VatCode,
   type VatObligation,
@@ -372,6 +373,9 @@ function ReportCard({ report }: { report: VatReport }) {
 
 function VatPage() {
   const params = useSearchParams();
+  // An accountant opening a client's VAT (from Tax → VAT clients): every call carries it.
+  const client = params.get('client');
+  setVatClient(client);
   const [loading, setLoading] = useState(true);
   const [reg, setReg] = useState<VatRegistration | null>(null);
   const [codes, setCodes] = useState<VatCode[]>([]);
@@ -515,6 +519,12 @@ function VatPage() {
     <div className="space-y-4">
       <PageHeader title="VAT" icon={<Receipt className="h-5 w-5" />}
         description="Code your VAT with AI, check the few lines it's unsure about, and file your VAT return with HMRC." />
+      {client && (
+        <div className="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900">
+          You&apos;re working on a client&apos;s VAT{reg ? ` — ${reg.business_name || 'VAT number ' + reg.vrn}` : ''}.
+          {' '}<a href="/dashboard/tax/vat/clients" className="underline">Back to your clients</a>
+        </div>
+      )}
 
       {!reg && threshold && <ThresholdCard t={threshold} />}
       <Registration reg={reg} schemes={schemes} onSaved={async (r) => { setReg(r); await refresh(); }} />
