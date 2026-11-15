@@ -104,7 +104,7 @@ function VC.messages(lines, ctx)
         "overseas suppliers are RC_SERVICES. reclaimable_pct is the share of input VAT the business can",
         "reclaim: 100 normally, 0 for business entertainment, 50 for cars with private use.",
         "Answer ONLY with JSON: {\"lines\": [{\"i\": <line number>, \"vat_code\": \"...\",",
-        "\"reclaimable_pct\": <0-100>, \"confidence\": <0-1>, \"reason\": \"<one short sentence>\"}]}.",
+        "\"reclaimable_pct\": <0-100>, \"confidence\": <0-1>, \"reason\": \"<at most 10 words>\"}]}.",
         "If unsure, say so with a low confidence rather than guessing.",
     }, "\n")
     local ctx_lines = { "Business: " .. tostring(ctx.business_name or "UK business")
@@ -266,6 +266,47 @@ function VC.classify(lines, deps)
         end
     end
     return results, stats
+end
+
+--- Make the model consistent with itself: when it coded one supplier differently
+-- on different lines (batches don't see each other), give every such line the
+-- majority answer and flag it for a person to confirm.
+-- @return number of lines changed or flagged
+function VC.harmonise(lines, results)
+    local groups = {}
+    for i, l in ipairs(lines) do
+        local r = results[i]
+        if r and not r.error and r.source == "ai" then
+            local k = VC.memory_key(l)
+            if k ~= "" then
+                groups[k] = groups[k] or {}
+                table.insert(groups[k], i)
+            end
+        end
+    end
+    local touched = 0
+    for _, idx in pairs(groups) do
+        local tally, best = {}, nil
+        for _, i in ipairs(idx) do
+            local r = results[i]
+            local id = r.vat_code .. "|" .. tostring(r.reclaimable_pct)
+            tally[id] = (tally[id] or 0) + 1
+            if not best or tally[id] > tally[best] then best = id end
+        end
+        if next(tally, next(tally)) ~= nil then -- more than one answer
+            local code, pct = best:match("^([^|]+)|(.*)$")
+            for _, i in ipairs(idx) do
+                local r = results[i]
+                r.vat_code = code
+                r.reclaimable_pct = tonumber(pct)
+                r.reason = (r.reason or "") .. " (The AI coded this supplier differently on other lines.)"
+                r.review_reasons = r.review_reasons or {}
+                table.insert(r.review_reasons, "The AI coded this supplier differently on other lines: please confirm.")
+                touched = touched + 1
+            end
+        end
+    end
+    return touched
 end
 
 --- Code from a receipt's extracted figures (vision model output, already decoded).
