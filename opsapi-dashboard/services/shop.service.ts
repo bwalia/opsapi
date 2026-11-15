@@ -171,6 +171,8 @@ export interface ShopSettings {
   checkout_enabled: boolean;
   /** "Bill to" on supplier purchase orders raised from paid shop orders. */
   po_bill_to?: PurchaseOrderParty | null;
+  /** Where the staff "new order" alert goes (unset: the Leads → Notifications admin email). */
+  order_alert_email?: string | null;
   updated_at: string | null;
 }
 
@@ -181,7 +183,7 @@ export const shopService = {
     return unwrap<ShopSettings>(res);
   },
 
-  async updateSettings(body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to'>>): Promise<ShopSettings> {
+  async updateSettings(body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email'>>): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);
   },

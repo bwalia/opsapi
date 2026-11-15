@@ -13,9 +13,16 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 local row -- the namespace's shop_settings row (nil = never saved)
 package.preload["lapis.db"] = function()
     return {
-        query = function(sql, ns_id, value)
+        NULL = setmetatable({}, { __tostring = function() return "NULL" end }),
+        query = function(sql, a, b)
             if sql:match("^%s*SELECT") then return row and { row } or {} end
-            if sql:match("INSERT INTO shop_settings") then row = { checkout_enabled = value, updated_at = "now" } end
+            if sql:match("INSERT INTO shop_settings") then row = row or { checkout_enabled = false, updated_at = "now" } end
+            local col = sql:match("UPDATE shop_settings SET ([%w_]+) = ")
+            if col and row then
+                local v = a
+                if type(v) == "table" then v = nil end -- db.NULL
+                row[col] = v
+            end
             return {}
         end,
     }
@@ -49,6 +56,18 @@ check("update: true switches checkout on", res and res.checkout_enabled == true 
 
 res = S.update(1, { checkout_enabled = false })
 check("update: false switches it off again", res and res.checkout_enabled == false and S.checkoutEnabled(1) == false)
+
+check("no row: no order alert email", S.orderAlertEmail(1) == nil)
+res, err = S.update(1, { order_alert_email = "not an email" })
+check("alert email: an invalid address is rejected", res == nil and err and err.code == "VALIDATION_ERROR")
+res, err = S.update(1, { order_alert_email = "a@x.com, b@x.com" })
+check("alert email: a list is rejected (one address)", res == nil and err and err.code == "VALIDATION_ERROR")
+res = S.update(1, { order_alert_email = "  sales@workstation.co.uk " })
+check("alert email: saved trimmed", res and res.order_alert_email == "sales@workstation.co.uk"
+    and S.orderAlertEmail(1) == "sales@workstation.co.uk", res and res.order_alert_email)
+check("alert email: checkout untouched", S.checkoutEnabled(1) == false)
+res = S.update(1, { order_alert_email = "" })
+check("alert email: blank clears it", res and S.orderAlertEmail(1) == nil)
 
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

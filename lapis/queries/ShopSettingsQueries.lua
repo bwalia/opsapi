@@ -8,6 +8,9 @@
     po_bill_to        the "Bill to" block on supplier purchase orders raised from paid
                       shop orders: { company, line1, line2, city, county, postcode,
                       country, phone, email, vat_number }.
+    order_alert_email the staff "new order" alert (an order paid online, or a customer choosing bank
+                      transfer) goes here; unset = the Leads → Notifications admin email, else the
+                      workspace owner. Customers are never emailed by this alert.
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")
@@ -18,11 +21,17 @@ local BILL_TO_KEYS = { "company", "line1", "line2", "city", "county", "postcode"
                        "vat_number" }
 
 function Q.get(ns_id)
-    local row = db.query([[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, updated_at
-                             FROM shop_settings WHERE namespace_id = ?]], ns_id)[1]
+    local ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
+                                              updated_at FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    if not ok then -- before migration zzs50
+        rows = db.query([[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, updated_at
+                            FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    end
+    local row = rows[1]
     return {
         checkout_enabled = row ~= nil and row.checkout_enabled == true,
         po_bill_to = row and U.nz(row.po_bill_to) and U.dec(row.po_bill_to, U.null) or U.null,
+        order_alert_email = row and U.nz(row.order_alert_email) or U.null,
         updated_at = row and row.updated_at or U.null,
     }
 end
@@ -48,11 +57,28 @@ function Q.checkoutEnabled(ns_id)
     return Q.get(ns_id).checkout_enabled
 end
 
---- body: { checkout_enabled?, po_bill_to? } (at least one).
+--- Where the staff "new order" alert goes, or nil (then the lead-notification admin email is used).
+function Q.orderAlertEmail(ns_id)
+    local e = Q.get(ns_id).order_alert_email
+    return e ~= U.null and e or nil
+end
+
+--- body: { checkout_enabled?, po_bill_to?, order_alert_email? } (at least one).
 function Q.update(ns_id, body)
     local has_checkout, has_bill = body.checkout_enabled ~= nil, body.po_bill_to ~= nil
-    if not has_checkout and not has_bill then
-        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled or po_bill_to)")
+    local has_alert = body.order_alert_email ~= nil
+    if not has_checkout and not has_bill and not has_alert then
+        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to or order_alert_email)")
+    end
+    local alert
+    if has_alert then
+        alert = U.nz(body.order_alert_email ~= U.null and body.order_alert_email or nil)
+        if alert ~= nil then
+            alert = tostring(alert):gsub("^%s+", ""):gsub("%s+$", "")
+            if #alert > 254 or not alert:match("^[^@%s,;]+@[^@%s,;]+%.[^@%s,;]+$") then
+                return nil, U.err(400, "VALIDATION_ERROR", "order_alert_email must be one email address")
+            end
+        end
     end
     if has_checkout and type(body.checkout_enabled) ~= "boolean" then
         return nil, U.err(400, "VALIDATION_ERROR", "checkout_enabled must be true or false")
@@ -67,6 +93,10 @@ function Q.update(ns_id, body)
     if has_checkout then
         db.query("UPDATE shop_settings SET checkout_enabled = ?, updated_at = NOW() WHERE namespace_id = ?",
             body.checkout_enabled, ns_id)
+    end
+    if has_alert then
+        db.query("UPDATE shop_settings SET order_alert_email = ?, updated_at = NOW() WHERE namespace_id = ?",
+            alert or db.NULL, ns_id)
     end
     if has_bill then
         db.query("UPDATE shop_settings SET po_bill_to = ?::jsonb, updated_at = NOW() WHERE namespace_id = ?",

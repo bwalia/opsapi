@@ -2738,6 +2738,7 @@ local _migrations = {
     ['zzs47_shop_supplier_po_contacts'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 3),
     ['zzs48_shop_supplier_po_indexes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 4),
     ['zzs49_shop_purchase_orders_access'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 5),
+    ['zzs50_shop_order_alert_email'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_auth_migrations, 3),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

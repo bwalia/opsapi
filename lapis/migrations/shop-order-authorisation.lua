@@ -19,6 +19,8 @@
         shop_orders: discount_minor (staff + Trade discount carried from the quote), delivery_method,
         delivery_address.
 
+    [3] shop_settings.order_alert_email: where the "new order" staff alert goes (else the Leads → Notifications
+        admin email, else the workspace owner).
     [2] shop_settings.po_bill_to (jsonb): the "Bill to" block on supplier purchase orders raised from
         paid shop orders (company, address, phone, email, VAT number).
 
@@ -61,5 +63,8 @@ return {
     end,
     [2] = function()
         db.query("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS po_bill_to jsonb")
+    end,
+    [3] = function()
+        db.query("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS order_alert_email varchar(254)")
     end,
 }

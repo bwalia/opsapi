@@ -14,6 +14,7 @@
 ]]
 
 local db = require("lapis.db")
+local function U_nz(v) return type(v) == "string" and v:match("%S") and v or nil end
 local Global = require("helper.global")
 
 local CrmLeadNotificationQueries = {}
@@ -201,7 +202,12 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
     local ok, err = pcall(function()
         local settings = CrmLeadNotificationQueries.getEffective(namespace.id)
         local admin_email = nil
-        if settings.notify_admin ~= false then
+        -- opts.to: a staff alert with its own recipient (shop order alerts → Shop settings), sent even when
+        -- lead emails are turned off.
+        local to = opts and U_nz(opts.to)
+        if to then
+            admin_email = to
+        elseif settings.notify_admin ~= false then
             admin_email = CrmLeadNotificationQueries.resolveAdminEmail(namespace.id, settings)
         end
         -- Snapshot into a plain payload — no ngx.var / DB access inside the timer.
@@ -214,7 +220,7 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
             -- the owner email + Telegram go out, the submitter gets nothing.
             staff = opts and type(opts.staff) == "table" and opts.staff or nil,
             settings = {
-                notify_admin = settings.notify_admin ~= false,
+                notify_admin = settings.notify_admin ~= false or to ~= nil,
                 send_confirmation = settings.send_confirmation ~= false,
                 telegram_enabled = settings.telegram_enabled == true,
                 telegram_bot_token = settings.telegram_bot_token,
