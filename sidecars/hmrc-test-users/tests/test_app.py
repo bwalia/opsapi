@@ -1,6 +1,7 @@
 """Tests for the HMRC test-user generator, with HMRC replaced by a mock transport."""
 
 import base64
+import json
 import os
 import secrets
 import sys
@@ -29,6 +30,11 @@ CREATED = {
 }
 
 
+ORG = {"userId": "085603804356", "password": None, "userFullName": "Ida Newton", "emailAddress": "ida@example.com",
+       "vrn": "666119668", "ctUtr": "1235267231", "crn": "12345678",
+       "organisationDetails": {"name": "Company ABF123", "address": {"line1": "1 Abbey Road", "postcode": "TS1 1PA"}}}
+
+
 def settings(**over):
     s = Settings()
     s.environment, s.client_id, s.client_secret = "sandbox", "cid", "csecret"
@@ -51,6 +57,10 @@ class Hmrc:
             body = request.content.decode()
             assert "grant_type=client_credentials" in body and "client_id=cid" in body
             return httpx.Response(200, json={"access_token": "srv-token", "expires_in": 14400})
+        if request.url.path == "/create-test-user/organisations":
+            assert json.loads(request.content) == {"serviceNames": ["mtd-vat"]}
+            org = dict(ORG, password=FAKE_HMRC_PW)
+            return httpx.Response(201, json=org)
         if request.url.path == "/create-test-user/individuals":
             assert request.headers["authorization"] == "Bearer srv-token"
             assert request.headers["accept"] == "application/vnd.hmrc.1.0+json"
@@ -130,3 +140,26 @@ def test_page_and_health():
 def test_missing_credentials():
     r = client(Hmrc(), client_id="").post("/hmrc-test-users/api/test-users", json={})
     assert r.status_code == 503
+
+
+def test_creates_a_vat_registered_business():
+    r = client(Hmrc()).post("/hmrc-test-users/api/test-users", json={"kind": "organisation"})
+    assert r.status_code == 201
+    d = r.json()
+    assert d["kind"] == "organisation" and d["vrn"] == "666119668" and d["password"] == FAKE_HMRC_PW
+    assert d["name"] == "Company ABF123" and d["company_registration_number"] == "12345678"
+
+
+def test_organisation_services_are_checked():
+    hmrc = Hmrc()
+    r = client(hmrc).post("/hmrc-test-users/api/test-users", json={"kind": "organisation",
+                                                                    "service_names": ["mtd-income-tax"]})
+    assert r.status_code == 400 and hmrc.calls == []
+    r = client(Hmrc()).post("/hmrc-test-users/api/test-users", json={"kind": "company"})
+    assert r.status_code == 400
+
+
+def test_services_lists_both_kinds():
+    d = client(Hmrc()).get("/hmrc-test-users/api/services").json()
+    assert [s["key"] for s in d["kinds"]["organisation"] if s["default"]] == ["mtd-vat"]
+    assert len(d["services"]) == 3

@@ -45,8 +45,19 @@ SERVICES = {
 }
 DEFAULT_SERVICES = list(SERVICES)
 
+# A VAT-registered business (organisation test user) for testing VAT (MTD).
+ORG_SERVICES = {
+    "mtd-vat": "VAT (MTD) — gives a VAT registration number (VRN)",
+    "corporation-tax": "Corporation Tax (CT UTR)",
+}
+DEFAULT_ORG_SERVICES = ["mtd-vat"]
+KINDS = {"individual": ("individuals", SERVICES, DEFAULT_SERVICES),
+         "organisation": ("organisations", ORG_SERVICES, DEFAULT_ORG_SERVICES)}
+
 
 class CreateRequest(BaseModel):
+    # "individual" (a taxpayer for File My Tax) or "organisation" (a VAT-registered business)
+    kind: str | None = None
     service_names: list[str] | None = None
 
 
@@ -140,22 +151,30 @@ def create_app(settings: Settings | None = None, transport: httpx.BaseTransport 
     @router.get("/api/services")
     def services(request: Request) -> dict:
         check_access(request)
-        return {"services": [{"key": k, "label": v, "default": k in DEFAULT_SERVICES} for k, v in SERVICES.items()]}
+        out = {}
+        for kind, (_, services_, defaults) in KINDS.items():
+            out[kind] = [{"key": k, "label": v, "default": k in defaults} for k, v in services_.items()]
+        # "services" kept for older pages: the individual list.
+        return {"services": out["individual"], "kinds": out}
 
     @router.post("/api/test-users")
     def create_test_user(request: Request, body: CreateRequest | None = None) -> JSONResponse:
         check_access(request)
         if not (settings.client_id and settings.client_secret):
             raise HTTPException(503, "HMRC_CLIENT_ID / HMRC_CLIENT_SECRET are not set for this app.")
-        names = (body.service_names if body and body.service_names else DEFAULT_SERVICES)
-        unknown = [n for n in names if n not in SERVICES]
+        kind = (body.kind if body and body.kind else "individual")
+        if kind not in KINDS:
+            raise HTTPException(400, "kind must be individual or organisation")
+        path, allowed, defaults = KINDS[kind]
+        names = (body.service_names if body and body.service_names else defaults)
+        unknown = [n for n in names if n not in allowed]
         if unknown:
             raise HTTPException(400, f"Unknown service(s): {', '.join(unknown)}")
         check_rate(request)
 
         token = server_token()
         with http() as c:
-            r = c.post(f"{settings.base_url}/create-test-user/individuals",
+            r = c.post(f"{settings.base_url}/create-test-user/{path}",
                        json={"serviceNames": names},
                        headers={"Authorization": f"Bearer {token}",
                                 "Accept": "application/vnd.hmrc.1.0+json",
@@ -171,10 +190,28 @@ def create_app(settings: Settings | None = None, transport: httpx.BaseTransport 
             raise HTTPException(502, f"HMRC could not create a test user (HTTP {r.status_code}): {detail}")
 
         d = r.json()
+        if kind == "organisation":
+            org = d.get("organisationDetails") or {}
+            # Never log the password: only that a business was made, and its VRN tail.
+            log.info("created HMRC sandbox test organisation (VRN ending %s)", str(d.get("vrn", ""))[-4:])
+            return JSONResponse({
+                "kind": "organisation",
+                "user_id": d.get("userId"),
+                "password": d.get("password"),
+                "vrn": d.get("vrn"),
+                "ct_utr": d.get("ctUtr"),
+                "company_registration_number": d.get("crn"),
+                "name": org.get("name") or d.get("userFullName"),
+                "email": d.get("emailAddress"),
+                "address": org.get("address"),
+                "service_names": names,
+                "sandbox": True,
+            }, status_code=201, headers={"Cache-Control": "no-store"})
         person = d.get("individualDetails") or {}
         # Never log the password: only that a user was made, and its NINO tail.
         log.info("created HMRC sandbox test user (NINO ending %s)", str(d.get("nino", ""))[-4:])
         return JSONResponse({
+            "kind": "individual",
             "user_id": d.get("userId"),
             "password": d.get("password"),
             "nino": d.get("nino"),

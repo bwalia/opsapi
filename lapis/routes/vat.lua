@@ -38,6 +38,13 @@
     POST   /api/v2/vat/admin/eval               platform admin: measure the live model on the labelled set
     GET    /api/v2/vat/admin/eval               the last runs
 
+    HMRC VAT (MTD) (phase 4) — connect with /auth/hmrc/initiate?purpose=vat first:
+    GET    /api/v2/vat/hmrc/obligations         ?from&to&status=O|F  open / filed VAT periods
+    POST   /api/v2/vat/returns/:uuid/submit     BINDING { period_key, declaration_accepted: true }
+    GET    /api/v2/vat/hmrc/returns/:period_key the return HMRC holds
+    GET    /api/v2/vat/hmrc/(liabilities|payments|penalties)  ?from&to
+    (sandbox only: ?test_scenario= / "test_scenario" passes HMRC's Gov-Test-Scenario)
+
     Whose business: `?scope=user` (default) is the signed-in person's own VAT
     registration (many sole traders share a namespace); `?scope=namespace` is the
     namespace's (accounting), and needs the "vat" module permission.
@@ -51,6 +58,7 @@ local VAT = require("lib.vat")
 local VatQueries = require("queries.VatQueries")
 local VatReturnQueries = require("queries.VatReturnQueries")
 local VatAiQueries = require("queries.VatAiQueries")
+local VatFilingQueries = require("queries.VatFilingQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -311,5 +319,38 @@ return function(app)
     app:get("/api/v2/vat/admin/eval", authed(function(self)
         local e = platform_admin(self); if e then return e end
         return { status = 200, json = { success = true, data = VatAiQueries.eval_runs() } }
+    end))
+    -- ---------------------------------------------------------------- HMRC VAT (MTD)
+    local function user_uuid_of(self)
+        local u = self.current_user or {}
+        return u.uuid or u.id or u.sub
+    end
+
+    app:get("/api/v2/vat/hmrc/obligations", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local list, resp = VatFilingQueries.obligations(reg, user_uuid_of(self), self.params)
+        if not list then return resp end
+        return { status = 200, json = { success = true, data = list } }
+    end))
+
+    app:post("/api/v2/vat/returns/:uuid/submit", authed(function(self)
+        local reg, actor, e = with_registration(self, "update"); if e then return e end
+        local row, resp = VatFilingQueries.submit(reg, self.params.uuid, actor, user_uuid_of(self), read_body(self))
+        if not row then return resp end
+        return { status = 200, json = { success = true, data = row } }
+    end))
+
+    app:get("/api/v2/vat/hmrc/returns/:period_key", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local data, resp = VatFilingQueries.view(reg, user_uuid_of(self), self.params.period_key, self.params)
+        if not data then return resp end
+        return { status = 200, json = { success = true, data = data } }
+    end))
+
+    app:get("/api/v2/vat/hmrc/:what", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local data, resp = VatFilingQueries.account(reg, user_uuid_of(self), self.params.what, self.params)
+        if not data then return resp end
+        return { status = 200, json = { success = true, data = data } }
     end))
 end
