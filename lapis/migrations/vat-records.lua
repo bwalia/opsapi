@@ -85,6 +85,8 @@ return {
         db.query([[CREATE UNIQUE INDEX IF NOT EXISTS uq_vat_registrations_active
             ON vat_registrations (namespace_id, COALESCE(user_id, 0)) WHERE status = 'active']])
         db.query("CREATE INDEX IF NOT EXISTS idx_vat_registrations_vrn ON vat_registrations (vrn)")
+        -- Added after release by vat-ai step 5; here too so a fresh database gets it.
+        db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS ai_job_started_at TIMESTAMP")
     end,
 
     [2] = function()

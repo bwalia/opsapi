@@ -74,6 +74,9 @@ return {
 
     [5] = function()
         -- One AI coding run per business across all pods (queries/VatAiQueries claim_job).
+        -- Keys run in name order, so on a fresh database this runs before
+        -- zz_vat_records_1 creates the table; that migration adds the column itself.
+        if not table_exists("vat_registrations") then return end
         db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS ai_job_started_at TIMESTAMP")
     end,
 
