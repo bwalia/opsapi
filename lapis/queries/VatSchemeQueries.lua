@@ -60,9 +60,15 @@ function Q.annual(reg, year_start, year_end)
     if not months then return nil, err, 400 end
     local lines, uncoded = VatReturnQueries.collect_lines(reg, year_start, year_end)
     local claimed, returns, missing = 0, 0, 0
-    for _, r in ipairs(db.query([[SELECT box4, calculation FROM vat_returns WHERE registration_id = ?
-        AND period_start >= ? AND period_end <= ? AND status IN ('draft', 'submitting', 'submitted')
-        ORDER BY period_start, (status = 'submitted') DESC]], reg.id, year_start, year_end) or {}) do
+    local seen = {}
+    for _, r in ipairs(db.query([[SELECT period_start, period_end, box4, calculation FROM vat_returns
+        WHERE registration_id = ? AND period_start >= ? AND period_end <= ?
+          AND status IN ('draft', 'submitting', 'submitted')
+        ORDER BY period_start, (status = 'submitted') DESC, id DESC]], reg.id, year_start, year_end) or {}) do
+        -- One return per period: the filed one when there is also a newer draft.
+        local key = tostring(r.period_start) .. ":" .. tostring(r.period_end)
+        if seen[key] then goto continue end
+        seen[key] = true
         local c = r.calculation
         if type(c) == "string" then
             local ok, t = pcall(cjson.decode, c); c = ok and t or nil
@@ -72,8 +78,11 @@ function Q.annual(reg, year_start, year_end)
         if type(pe) == "table" and tonumber(pe.input_vat_recovered) then
             claimed = claimed + tonumber(pe.input_vat_recovered)
         else
+            -- Not worked out under partial exemption: it recovered its whole Box 4.
+            claimed = claimed + (tonumber(r.box4) or 0)
             missing = missing + 1
         end
+        ::continue::
     end
     local res = Schemes.annual_adjustment(lines, reg, claimed)
     res.year = { start = year_start, ["end"] = year_end }
@@ -85,8 +94,8 @@ function Q.annual(reg, year_start, year_end)
             .. "was recovered."
     end
     if missing > 0 then
-        res.warnings[#res.warnings + 1] = missing .. " return(s) weren't worked out under partial exemption; "
-            .. "check what they recovered."
+        res.warnings[#res.warnings + 1] = missing .. " return(s) weren't worked out under partial exemption: "
+            .. "their whole Box 4 is counted as recovered."
     end
     if uncoded > 0 then
         res.warnings[#res.warnings + 1] = uncoded .. " line(s) in the year have no VAT code yet."
