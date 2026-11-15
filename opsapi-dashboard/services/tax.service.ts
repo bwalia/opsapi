@@ -100,7 +100,7 @@ export interface TaxTransaction {
   bank_account_uuid?: string;
   bank_name?: string;
   account_name?: string;
-  classified_by?: string;   // rule_engine | ai | fallback | user
+  classified_by?: string;   // learned | rule_engine | ai | fallback | user
   reasoning?: string;       // why it was classified this way
   hmrc_box?: string;        // SA103F box the row lands in
   hmrc_label?: string;

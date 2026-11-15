@@ -179,6 +179,11 @@ return function(app)
                         profile_type = profile_type,
                         llm_provider = llm_provider,
                         trace_id = trace_id,
+                        -- Learn from this user's confirmed past transactions; look up
+                        -- similar examples only inside the statement's own namespace.
+                        user_id = user_id,
+                        exclude_statement_id = statement_id,
+                        namespace_id = stmt.namespace_id,
                     })
 
                     -- Update transactions with classification results

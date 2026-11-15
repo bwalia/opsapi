@@ -47,7 +47,7 @@ function TrainingDataQueries.searchSimilar(embedding, limit, threshold)
 
     local sql = string.format([[
         SELECT * FROM (
-            (SELECT id, original_description as description, category, hmrc_category,
+            (SELECT id, description, category, hmrc_category,
                     confidence, is_tax_deductible, source,
                     1 - (embedding <=> '%s'::vector) as similarity
              FROM classification_training_data

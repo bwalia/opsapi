@@ -139,11 +139,16 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Query pgvector for similar transactions
-function Classifier.rag_lookup(embedding, limit, threshold)
+function Classifier.rag_lookup(embedding, limit, threshold, namespace_id)
     limit = limit or 5
     threshold = threshold or 0.7
 
     if not embedding or #embedding == 0 then
+        return {}
+    end
+    -- Past examples belong to one firm: never search another tenant's transactions.
+    namespace_id = tonumber(namespace_id)
+    if not namespace_id then
         return {}
     end
 
@@ -156,12 +161,12 @@ function Classifier.rag_lookup(embedding, limit, threshold)
 
     -- Search both training and reference data with UNION ALL
     local sql = string.format([[
-        (SELECT original_description as description, category, hmrc_category,
+        (SELECT description, category, hmrc_category,
                 confidence, is_tax_deductible, source,
                 1 - (embedding <=> '%s'::vector) as similarity,
                 CASE WHEN source = 'accountant_correction' THEN 1.25 ELSE 1.1 END as weight
          FROM classification_training_data
-         WHERE embedding IS NOT NULL
+         WHERE embedding IS NOT NULL AND namespace_id = %d
          ORDER BY embedding <=> '%s'::vector
          LIMIT %d)
         UNION ALL
@@ -175,7 +180,7 @@ function Classifier.rag_lookup(embedding, limit, threshold)
          LIMIT %d)
         ORDER BY similarity DESC
         LIMIT %d
-    ]], vec_literal, vec_literal, limit, vec_literal, vec_literal, limit, limit)
+    ]], vec_literal, namespace_id, vec_literal, limit, vec_literal, vec_literal, limit, limit)
 
     local ok, results = pcall(db.query, "SELECT * FROM (" .. sql .. ") combined")
     if not ok or not results then
@@ -248,7 +253,10 @@ function Classifier.adjust_confidence(llm_result, rag_results, affinity, transac
 
     -- Anomaly: very large transactions get reduced confidence
     local amount = tonumber(transaction.amount) or 0
-    if amount > 10000 then
+    -- A payee the user confirmed before at a similar size is not an anomaly.
+    local seen_before = llm_result.learned_max_abs
+        and math.abs(amount) <= llm_result.learned_max_abs * 1.25
+    if amount > 10000 and not seen_before then
         confidence = math.max(0.10, confidence - 0.15)
     end
 
@@ -317,6 +325,138 @@ function Classifier.classify_by_rules(cleaned, is_credit)
         if text:find(rule[1], 1, true) then return rule[2] end
     end
     return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Layer 2.4: Learned memory (the taxpayer's own confirmed history)
+-- ---------------------------------------------------------------------------
+-- Transactions the taxpayer (or their accountant) already confirmed, or that went on a
+-- filed return, teach the classifier: the same payee in the same direction gets the same
+-- category next time, without a model call. Scoped to one user, so one client's history
+-- never classifies another client's transactions.
+
+local MONTH_WORDS = {
+    jan = true, feb = true, mar = true, apr = true, may = true, jun = true, jul = true,
+    aug = true, sep = true, sept = true, oct = true, nov = true, dec = true,
+    january = true, february = true, march = true, april = true, june = true, july = true,
+    august = true, september = true, october = true, november = true, december = true,
+}
+
+--- A payee key that survives references, dates and amounts in the bank description.
+-- @param description string
+-- @return string|nil
+function Classifier.learn_key(description)
+    local words = {}
+    for w in tostring(description or ""):lower():gsub("[^%a]+", " "):gmatch("%S+") do
+        if not MONTH_WORDS[w] then words[#words + 1] = w end
+    end
+    local key = table.concat(words, " ")
+    if #key < 3 then return nil end
+    return key
+end
+
+--- UK tax year ("2024-25") for an ISO date, or nil.
+local function uk_tax_year(date_str)
+    local y, m, d = tostring(date_str or ""):match("^(%d%d%d%d)-(%d%d)-(%d%d)")
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if not y then return nil end
+    local start = (m > 4 or (m == 4 and d >= 6)) and y or (y - 1)
+    return string.format("%d-%02d", start, (start + 1) % 100)
+end
+Classifier._uk_tax_year = uk_tax_year
+
+--- Build the memory from past rows (pure: no DB). Only unambiguous payees are kept:
+-- at least 80% of the past rows for a payee agree on one category.
+-- @param rows table  { description, transaction_type, category, hmrc_category, amount, transaction_date }
+-- @return table|nil memory keyed by "<payee key>|C" or "|D"
+function Classifier.build_learned_memory(rows)
+    if not rows or #rows == 0 then return nil end
+    local acc = {}
+    for _, r in ipairs(rows) do
+        local key = Classifier.learn_key(Classifier.clean_merchant(r.description))
+        if key and r.category and r.category ~= "" and r.category ~= "uncategorised_expense" then
+            local k = key .. "|" .. (tostring(r.transaction_type):upper() == "CREDIT" and "C" or "D")
+            local e = acc[k]
+            if not e then
+                e = { n = 0, counts = {}, hmrc = {}, max_abs = 0, years = {} }
+                acc[k] = e
+            end
+            e.n = e.n + 1
+            e.counts[r.category] = (e.counts[r.category] or 0) + 1
+            e.hmrc[r.category] = e.hmrc[r.category] or r.hmrc_category
+            local amt = math.abs(tonumber(r.amount) or 0)
+            if amt > e.max_abs then e.max_abs = amt end
+            local ty = uk_tax_year(r.transaction_date)
+            if ty then e.years[ty] = true end
+        end
+    end
+    local memory, size = {}, 0
+    for k, e in pairs(acc) do
+        local best, best_n = nil, 0
+        for cat, n in pairs(e.counts) do
+            if n > best_n or (n == best_n and best and cat < best) then best, best_n = cat, n end
+        end
+        if best and best_n / e.n >= 0.8 then
+            local years = {}
+            for y in pairs(e.years) do years[#years + 1] = y end
+            table.sort(years)
+            memory[k] = { category = best, hmrc_category = e.hmrc[best], n = best_n,
+                max_abs = e.max_abs, years = years }
+            size = size + 1
+        end
+    end
+    if size == 0 then return nil end
+    return memory
+end
+
+--- Load what this user has already confirmed (or filed).
+-- @param user_id number
+-- @param exclude_statement_id number|nil  the statement being classified
+-- @return table|nil memory
+function Classifier.load_learned_memory(user_id, exclude_statement_id)
+    user_id = tonumber(user_id)
+    if not user_id then return nil end
+    local ok, rows = pcall(db.query, [[
+        SELECT t.description, t.transaction_type, t.category, t.hmrc_category, t.amount,
+               t.transaction_date::text AS transaction_date
+        FROM tax_transactions t
+        JOIN tax_statements s ON s.id = t.statement_id
+        WHERE t.user_id = ? AND s.id <> ?
+          AND t.category IS NOT NULL AND t.category <> ''
+          AND (t.classification_status = 'CONFIRMED' OR s.workflow_step = 'FILED')
+        ORDER BY t.transaction_date DESC NULLS LAST
+        LIMIT 20000]], user_id, tonumber(exclude_statement_id) or 0)
+    if not ok then
+        ngx.log(ngx.WARN, "[tax-classifier] learned memory unavailable: ", tostring(rows))
+        return nil
+    end
+    return Classifier.build_learned_memory(rows)
+end
+
+--- Classification from the learned memory, or nil when this payee is new to the user.
+-- @param memory table|nil
+-- @param cleaned string  cleaned merchant description
+-- @param is_credit boolean
+-- @param valid_keys table|nil  set of current tax_categories keys
+function Classifier.learned_match(memory, cleaned, is_credit, valid_keys)
+    if not memory then return nil end
+    local key = Classifier.learn_key(cleaned)
+    if not key then return nil end
+    local m = memory[key .. "|" .. (is_credit and "C" or "D")]
+    if not m then return nil end
+    if valid_keys and next(valid_keys) ~= nil and not valid_keys[m.category] then return nil end
+    local label = tostring(m.category):gsub("_", " ")
+    local when = #m.years > 0 and (" in " .. table.concat(m.years, ", ")) or ""
+    return {
+        category = m.category,
+        hmrc_category = m.hmrc_category,
+        confidence = 0.97,
+        reasoning = string.format(
+            "Learned from your confirmed history: this payee was confirmed as %s %d time%s%s.",
+            label, m.n, m.n == 1 and "" or "s", when),
+        classified_by = "learned",
+        learned_max_abs = m.max_abs,
+    }
 end
 
 --- Classify a single transaction through the five-layer pipeline
@@ -413,19 +553,23 @@ function Classifier.classify_transaction(transaction, opts)
     -- high-confidence, direction-aware matches; everything else falls through to the LLM.
     local classification, err
     local rag_results = {}
-    local rule_cat = Classifier.classify_by_rules(cleaned, is_credit)
-    if rule_cat then
+    -- Layer 2.4 first: the taxpayer's own confirmed history beats generic rules and the model.
+    local learned = Classifier.learned_match(opts.learned, cleaned, is_credit, all_category_keys)
+    local rule_cat = (not learned) and Classifier.classify_by_rules(cleaned, is_credit) or nil
+    if learned then
+        classification = learned
+    elseif rule_cat then
         classification = { category = rule_cat, confidence = 0.95,
             reasoning = "Matched a known-merchant rule.", classified_by = "rule_engine" }
     else
         -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
-        local embedding_result = LLMClient.generate_embedding({
+        local embedding_result = opts.namespace_id and LLMClient.generate_embedding({
             text = cleaned,
             provider = opts.llm_provider,
             trace_id = opts.trace_id,
         })
         if embedding_result and embedding_result.embedding then
-            rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6)
+            rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6, opts.namespace_id)
         end
 
         -- Build few-shot examples from RAG
@@ -591,7 +735,9 @@ function Classifier.classify_transaction(transaction, opts)
     local cat_income = meta and meta.income
     local risky_large = is_credit and not cat_income
         or (not is_credit and classification.is_tax_deductible ~= false)
-    if amount > 10000 and risky_large then
+    local seen_before = classification.learned_max_abs
+        and amount <= classification.learned_max_abs * 1.25
+    if amount > 10000 and risky_large and not seen_before then
         table.insert(review_reasons, string.format("large amount (£%.2f) — verify", amount))
     end
 
@@ -610,7 +756,8 @@ function Classifier.classify_transaction(transaction, opts)
             .. " [REVIEW: " .. table.concat(review_reasons, "; ") .. "]"
     end
 
-    -- Keep "rule_engine" if the rule engine answered; otherwise it was the LLM.
+    classification.learned_max_abs = nil
+    -- Keep "learned"/"rule_engine" if they answered; otherwise it was the LLM.
     classification.classified_by = classification.classified_by or "ai"
     classification.cleaned_description = cleaned
 
@@ -634,6 +781,11 @@ function Classifier.classify_batch(transactions, opts)
     opts.categories = categories
     -- Direction + catalogue-hmrc metadata, once for the batch (per-txn fallback exists).
     opts.cat_meta = Classifier.category_meta()
+    -- The user's confirmed history, once for the batch (false = looked up, none yet).
+    if opts.learned == nil and opts.user_id then
+        opts.learned = Classifier.load_learned_memory(opts.user_id, opts.exclude_statement_id) or false
+    end
+    if opts.learned == false then opts.learned = nil end
 
     -- Phase 2: preload the HMRC box map + per-profile guidance once for the whole batch
     -- (avoids a DB round-trip per transaction). `false` means "looked up, none found".
