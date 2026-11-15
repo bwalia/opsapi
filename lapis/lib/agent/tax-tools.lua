@@ -860,6 +860,16 @@ register({
 -- ===================== definitions + executor =====================
 
 --- Ollama tool definitions (function schemas) for the whole curated tax tool set.
+-- VAT tools (lib/agent/vat-tools.lua) join the registry when the "vat" feature is on.
+do
+    local ok_pc, ProjectConfig = pcall(require, "helper.project-config")
+    local on = ok_pc and ProjectConfig.isFeatureEnabled and ProjectConfig.isFeatureEnabled("vat")
+    if on then
+        local ok_vt, VatTools = pcall(require, "lib.agent.vat-tools")
+        if ok_vt then VatTools.install(register) end
+    end
+end
+
 function TaxTools.definitions()
     local defs = {}
     for _, name in ipairs(order) do
