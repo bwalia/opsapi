@@ -6,7 +6,9 @@
 --
 -- Input lines (from tax_transactions / accounting tables, already VAT-coded):
 --   { id, date, direction = "sale"|"purchase", vat_code, net, vat, notional_vat,
---     reclaimable_pct, gross, capital_asset?, relevant_goods? }
+--     reclaimable_pct, gross, capital_asset?, relevant_goods?,
+--     attribution? = "taxable"|"exempt"|"residual" (partial exemption; default residual),
+--     intra_group? (a supply between members of a VAT group: left off the return) }
 -- Registration: { scheme = standard|cash|flat_rate|annual, flat_rate_pct,
 --   flat_rate_first_year, limited_cost_trader, partially_exempt, recovery_pct }
 -- Adjustments: { type = "fuel_scale"|"bad_debt_relief"|"correction", ... } (see below)
@@ -14,7 +16,8 @@
 -- Sources: VAT Notice 700/12 (filling in the return), 733 (Flat Rate Scheme),
 -- 731 (cash accounting), 732 (annual accounting), 700/45 (correcting errors),
 -- 700/18 (bad debt relief), 706 (partial exemption), 741A / 735 (reverse charges),
--- 702 (postponed import VAT).
+-- 702 (postponed import VAT), 706 (partial exemption), 706/2 (capital goods
+-- scheme), 718 (margin schemes), 700/2 (group registration).
 
 local VAT = require("lib.vat")
 
@@ -34,7 +37,8 @@ Return.FRS_CAPITAL_THRESHOLD = 2000       -- VAT-inclusive, single purchase (Not
 Return.CORRECTION_FLOOR = 10000           -- Notice 700/45
 Return.CORRECTION_CAP = 50000
 Return.BAD_DEBT_MONTHS = 6                -- Notice 700/18
-Return.DE_MINIMIS_MONTHLY = 625           -- Notice 706, test 1
+Return.DE_MINIMIS_MONTHLY = 625           -- Notice 706, tests 1, 2 and the original test
+Return.MARGIN_FRACTION = 1 / 6            -- Notice 718: VAT in a margin at 20% is 1/6
 
 local function num(x) return tonumber(x) or 0 end
 
@@ -72,6 +76,36 @@ function Return.de_minimis_test(total_input_vat, exempt_supplies, all_supplies, 
         and num(exempt_supplies) <= 0.5 * num(all_supplies)
 end
 
+--- Standard method recovery % (Notice 706 §6.4): taxable supplies over all
+-- supplies, rounded UP to the next whole number. No supplies at all: 100%.
+function Return.recovery_pct(taxable_supplies, exempt_supplies)
+    local t, x = math.max(0, num(taxable_supplies)), math.max(0, num(exempt_supplies))
+    if t + x <= 0 then return 100 end
+    return math.min(100, math.ceil(t / (t + x) * 100 - 1e-9))
+end
+
+--- All three de minimis tests (Notice 706 §11). Passing any one means all input VAT
+-- is recovered for the period.
+-- @param t { total_input, taxable_input, exempt_input, residual_input, exempt_supplies,
+--   all_supplies, recovery_pct, months }
+-- @return passed, { test1, test2, original, exempt_input_tax, limit }
+function Return.de_minimis(t)
+    local months = tonumber(t.months) or 3
+    local limit = Return.DE_MINIMIS_MONTHLY * months
+    local total = num(t.total_input)
+    local half = num(t.exempt_supplies) <= 0.5 * num(t.all_supplies)
+    local pct = num(t.recovery_pct)
+    -- Test 1: total input tax ≤ £625/month and exempt supplies ≤ half of all supplies.
+    local test1 = total <= limit and half
+    -- Test 2: total input tax less that wholly used for taxable supplies ≤ £625/month, same half rule.
+    local test2 = (total - num(t.taxable_input)) <= limit and half
+    -- Original test: exempt input tax ≤ £625/month and ≤ half of all input tax.
+    local exempt_input_tax = round2(num(t.exempt_input) + num(t.residual_input) * (100 - pct) / 100)
+    local original = exempt_input_tax <= limit and exempt_input_tax <= 0.5 * total
+    return test1 or test2 or original, { test1 = test1, test2 = test2, original = original,
+        exempt_input_tax = exempt_input_tax, limit = limit }
+end
+
 --- Build the return.
 -- @param lines table, @param reg table, @param opts { period_start, period_end,
 --   adjustments = {...}, period_months }
@@ -97,6 +131,11 @@ function Return.build(lines, reg, opts)
 
     local flat = scheme == "flat_rate"
     local turnover_gross, exempt_sales, all_sales = 0, 0, 0
+    -- Reclaimable input VAT by how the purchase is used (partial exemption).
+    local attr = { taxable = 0, exempt = 0, residual = 0 }
+    -- Margin scheme, global accounting (Notice 718).
+    local margin_sales, margin_purchases, margin_seen = 0, 0, false
+    local intra_group = 0
     local input_vat_total = 0
     local input_refs = {}
 
@@ -105,6 +144,20 @@ function Return.build(lines, reg, opts)
         local id = l.id
         if not c then
             warnings[#warnings + 1] = "Line " .. tostring(id) .. " has no VAT code and is left out."
+        elseif l.intra_group == true then
+            -- Supplies between members of a VAT group are disregarded (Notice 700/2 §2.2).
+            intra_group = intra_group + 1
+        elseif c.margin and not flat then
+            local gross = l.gross ~= nil and num(l.gross) or (num(l.net) + num(l.vat))
+            margin_seen = true
+            if l.direction == "sale" then
+                margin_sales = margin_sales + gross
+                all_sales = all_sales + gross
+            elseif l.direction == "purchase" then
+                -- Eligible stock bought with no VAT to reclaim: value only, in Box 7.
+                margin_purchases = margin_purchases + gross
+                add(7, gross, id)
+            end
         elseif not c.outside then
             local net, vat, notional = num(l.net), num(l.vat), num(l.notional_vat)
             local pct = l.reclaimable_pct
@@ -156,6 +209,9 @@ function Return.build(lines, reg, opts)
                         add(4, round2(vat * pct / 100), id); add(7, net, id)
                         input_vat_total = input_vat_total + vat
                     end
+                    local reclaimed = round2((c.reverse and notional or vat) * pct / 100)
+                    local a = attr[l.attribution or ""] and l.attribution or "residual"
+                    attr[a] = attr[a] + reclaimed
                     if vat > 0 or notional > 0 then input_refs[#input_refs + 1] = id end
                 end
             end
@@ -183,18 +239,60 @@ function Return.build(lines, reg, opts)
         end
     end
 
-    -- Partial exemption: recover only the recovery % of input VAT unless de minimis.
+    -- Margin scheme, global accounting (Notice 718 §11): VAT is 1/6 of the period's
+    -- margin (eligible sales less eligible purchases). A negative margin is carried
+    -- forward to reduce the next period's.
+    local margin_info
+    if margin_seen then
+        local brought = math.max(0, num(opts.margin_brought_forward))
+        local margin = round2(margin_sales - margin_purchases - brought)
+        local vat = margin > 0 and round2(margin * Return.MARGIN_FRACTION) or 0
+        if vat > 0 then add(1, vat, "margin") end
+        add(6, margin_sales - vat, "margin")
+        margin_info = { sales = round2(margin_sales), purchases = round2(margin_purchases),
+            brought_forward = brought, margin = margin, vat = vat,
+            carried_forward = margin < 0 and -margin or 0 }
+        notes[#notes + 1] = margin < 0
+            and string.format("Margin scheme: a negative margin of £%.2f is carried forward.", -margin)
+            or string.format("Margin scheme: VAT of £%.2f on a margin of £%.2f.", vat, margin)
+    end
+    if intra_group > 0 then
+        notes[#notes + 1] = intra_group .. " supply(ies) between VAT group members left off the return."
+    end
+
+    -- Partial exemption, standard method (Notice 706): input VAT on purchases used only
+    -- for taxable supplies is recovered in full, on those used only for exempt supplies
+    -- not at all, and on shared (residual) costs by the recovery %. All of it is
+    -- recovered when any de minimis test passes.
     local pe_info
     if not flat and (reg.partially_exempt == true or reg.partially_exempt == "t") then
-        local dm = Return.de_minimis_test(input_vat_total, exempt_sales, all_sales, months)
-        local pct = dm and 100 or math.max(0, math.min(100, num(reg.recovery_pct)))
+        local taxable_supplies = all_sales - exempt_sales
+        local computed = Return.recovery_pct(taxable_supplies, exempt_sales)
+        local pct = opts.recovery_pct
+        local basis = "override"
+        if pct == nil then
+            local r = tonumber(reg.recovery_pct)
+            if r ~= nil then pct, basis = r, "provisional" else pct, basis = computed, "this_period" end
+        end
+        pct = math.max(0, math.min(100, num(pct)))
         local before = b[4]
-        b[4] = round2(before * pct / 100)
-        pe_info = { de_minimis = dm, recovery_pct = pct, input_vat_before = round2(before),
-            input_vat_recovered = b[4] }
+        local dm, tests = Return.de_minimis({ total_input = input_vat_total, taxable_input = attr.taxable,
+            exempt_input = attr.exempt, residual_input = attr.residual, exempt_supplies = exempt_sales,
+            all_supplies = all_sales, recovery_pct = pct, months = months })
+        local recovered_residual = round2(attr.residual * pct / 100)
+        if not dm then
+            b[4] = round2(before - attr.exempt - (attr.residual - recovered_residual))
+        end
+        pe_info = { de_minimis = dm, tests = tests, recovery_pct = pct, basis = basis,
+            this_period_pct = computed, taxable_supplies = round2(taxable_supplies),
+            exempt_supplies = round2(exempt_sales), input_vat_before = round2(before),
+            taxable_input = round2(attr.taxable), exempt_input = round2(attr.exempt),
+            residual_input = round2(attr.residual), residual_recovered = recovered_residual,
+            input_vat_recovered = round2(b[4]) }
         notes[#notes + 1] = dm
             and "Partial exemption: under the de minimis limits, so all input VAT is recovered."
-            or string.format("Partial exemption: %.2f%% of input VAT recovered.", pct)
+            or string.format("Partial exemption: %.2f%% of shared input VAT recovered (%s).", pct,
+                basis == "this_period" and "this period's supplies" or "your provisional rate")
     end
 
     -- Adjustments.
@@ -214,6 +312,10 @@ function Return.build(lines, reg, opts)
             else
                 add(4, num(a.vat), ref)
             end
+        elseif a.type == "cgs" or a.type == "pe_annual" then
+            -- Capital goods scheme (Notice 706/2) or partial exemption annual adjustment
+            -- (Notice 706 §10): more (or less) input VAT.
+            add(4, num(a.vat), ref)
         elseif a.type == "correction" then
             corrections[#corrections + 1] = a
             correction_net = correction_net + num(a.box1) - num(a.box4)
@@ -253,7 +355,7 @@ function Return.build(lines, reg, opts)
     end
     return {
         boxes = boxes, direction = direction, audit = audit, warnings = warnings, notes = notes,
-        flat_rate = flat_info, partial_exemption = pe_info,
+        flat_rate = flat_info, partial_exemption = pe_info, margin = margin_info,
         corrections = (#corrections > 0) and corrections or nil, scheme = scheme,
     }
 end

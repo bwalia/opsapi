@@ -18,7 +18,7 @@ end
 -- yet. Exempt income (residential rent, interest) and money that isn't a supply
 -- (transfers, refunds, loans) don't count.
 M.TAXABLE_INCOME_CATEGORIES = { sales_income = true, consulting_income = true, income_other = true }
-local TAXABLE_CODES = { STD20 = true, RED5 = true, ZERO = true, RC_CIS = true, NI_EU_GOODS = true }
+local TAXABLE_CODES = { STD20 = true, RED5 = true, ZERO = true, RC_CIS = true, NI_EU_GOODS = true, MARGIN = true }
 
 --- Does a money-in line count as taxable turnover?
 function M.is_taxable_sale(line)

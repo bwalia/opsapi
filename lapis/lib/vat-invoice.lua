@@ -145,7 +145,9 @@ function M.engine_lines(invoices, opts)
                             out[#out + 1] = { id = "i" .. tostring(inv.id) .. ":" .. i, direction = "sale",
                                 vat_code = code, net = money(net * share), vat = money(vat * share),
                                 notional_vat = def.reverse and money(net * share * def.rate / 100) or 0,
-                                gross = money((net + vat) * share), description = l.description }
+                                gross = money((net + vat) * share), description = l.description,
+                                customer_name = inv.customer_name, customer_vat_number = inv.customer_vat_number,
+                                invoice_number = inv.invoice_number }
                         end
                     end
                 end

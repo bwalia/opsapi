@@ -321,6 +321,16 @@ Steps that need the user (HMRC application and forms) are reported, not done.
 - VAT groups (one VRN, several members).
 - Northern Ireland EU sales lists where required.
 
+Shipped (phase 10): `lib/vat-return.lua` (purchase attribution taxable/exempt/residual, recovery %
+rounded up, de minimis tests 1, 2 and the original test, margin global accounting with negative
+margins carried forward, intra-group supplies left out, `cgs` / `pe_annual` adjustments),
+`lib/vat-schemes.lua` (annual adjustment, capital goods intervals and disposal with the output-tax
+cap, EC Sales List), `queries/VatSchemeQueries.lua`, `migrations/vat-schemes.lua`, the routes listed
+in `routes/vat.lua`, and `components/vat/VatSchemesPanel.tsx`. A VAT group's representative
+collects every member's lines; members join with a one-time code and can't file on their own. The
+EC Sales List is a CSV to key into HMRC's online service (not HMRC's bulk file format). The AI is
+never offered the MARGIN code.
+
 ## Phase 11: e-invoicing readiness
 
 The UK is moving to mandatory e-invoicing for VAT-registered businesses from April 2029.

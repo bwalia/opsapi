@@ -86,7 +86,10 @@ end
 -- ------------------------------------------------------------------ model
 
 local CODE_LIST = {}
-for _, c in ipairs(VAT.CODES) do CODE_LIST[#CODE_LIST + 1] = c.code .. " = " .. c.label end
+-- The margin scheme is a choice the business makes about its stock, never a guess.
+for _, c in ipairs(VAT.CODES) do
+    if not c.margin then CODE_LIST[#CODE_LIST + 1] = c.code .. " = " .. c.label end
+end
 
 --- The messages for one model call (a batch of lines).
 -- ctx: { scheme, business_name, partially_exempt, examples = { {description, direction, vat_code,
@@ -142,6 +145,7 @@ function VC.parse(text, n, decode)
     for _, item in ipairs(list) do
         local i = tonumber(type(item) == "table" and item.i or nil)
         local c = type(item) == "table" and VAT.code(item.vat_code) or nil
+        if c and c.margin then c = nil end
         if i and i >= 1 and i <= n and math.floor(i) == i and c then
             local pct = tonumber(item.reclaimable_pct)
             if pct == nil or pct < 0 or pct > 100 then pct = c.reclaimable end

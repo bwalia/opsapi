@@ -29,6 +29,10 @@ VAT.CODES = {
     -- accounts for it (Boxes 2 and 4) — so it splits like a reverse charge.
     { code = "NI_EU_GOODS", label = "Northern Ireland: goods to/from the EU", rate = 20, reclaimable = 100,
       reverse = true },
+    -- Second-hand goods under the margin scheme (Notice 718): no VAT on the invoice;
+    -- the return charges 1/6 of the period's margin (global accounting).
+    { code = "MARGIN", label = "Margin scheme (second-hand goods)", rate = 0, reclaimable = 0, no_vat = true,
+      margin = true },
 }
 
 local BY_CODE = {}
