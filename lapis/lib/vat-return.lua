@@ -260,6 +260,21 @@ function Return.build(lines, reg, opts)
         notes[#notes + 1] = intra_group .. " supply(ies) between VAT group members left off the return."
     end
 
+    -- Exempt sales without partial exemption switched on: input VAT used for exempt
+    -- supplies isn't recoverable (Notice 706), so say so rather than reclaim it silently.
+    local pe_on = reg.partially_exempt == true or reg.partially_exempt == "t"
+    if not flat and not pe_on and exempt_sales > 0 and input_vat_total > 0 then
+        if all_sales - exempt_sales <= 0 then
+            warnings[#warnings + 1] = string.format("All your sales this period are exempt (£%.2f), so the VAT on "
+                .. "your costs can't normally be reclaimed. Check with your accountant before filing — and whether "
+                .. "you should be VAT registered (or opt to tax) at all.", exempt_sales)
+        else
+            warnings[#warnings + 1] = string.format("You made exempt sales (£%.2f): VAT on costs used for them can't "
+                .. "be reclaimed. Turn on partial exemption in your VAT details so the return works this out.",
+                exempt_sales)
+        end
+    end
+
     -- Partial exemption, standard method (Notice 706): input VAT on purchases used only
     -- for taxable supplies is recovered in full, on those used only for exempt supplies
     -- not at all, and on shared (residual) costs by the recovery %. All of it is

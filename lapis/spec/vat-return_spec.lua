@@ -122,6 +122,17 @@ r = R.build({ line("sale", 60000, "STD20"), line("sale", 10000, "EXEMPT"), line(
 check("de minimis (£1,000 input VAT ≤ £1,875, exempt ≤ 50%): all recovered", eq(r.boxes.box4, 1000)
     and r.partial_exemption.de_minimis == true, r.boxes.box4)
 
+r = R.build({ line("sale", 40000, "EXEMPT"), line("purchase", 1200, "STD20") }, { scheme = "standard" })
+local w = table.concat(r.warnings, " ")
+check("only exempt sales and not partially exempt: warned the VAT can't normally be reclaimed",
+    w:find("All your sales this period are exempt", 1, true) ~= nil, w)
+r = R.build({ line("sale", 12000, "STD20"), line("sale", 4000, "EXEMPT"), line("purchase", 1200, "STD20") },
+    { scheme = "standard" })
+w = table.concat(r.warnings, " ")
+check("some exempt sales: told to turn on partial exemption", w:find("Turn on partial exemption", 1, true) ~= nil, w)
+r = R.build(pl, { scheme = "standard", partially_exempt = true, recovery_pct = 60 })
+check("no warning once partial exemption is on", not table.concat(r.warnings, " "):find("exempt sales", 1, true))
+
 print("== adjustments")
 r = R.build({ line("sale", 1200, "STD20") }, { scheme = "standard" }, {
     period_end = "2026-03-31",
