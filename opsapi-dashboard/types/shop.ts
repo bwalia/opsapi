@@ -531,6 +531,64 @@ export interface ShopDeliveryChangeDecision {
   order: ShopOrder;
 }
 
+/** "Email the customer" on the order page: a preset filled in for the order. */
+export interface ShopOrderUpdatePreset {
+  key: 'received_reserved' | 'in_stock_book_delivery' | 'dispatched' | 'delayed' | 'custom' | string;
+  label: string;
+  headline: string;
+  message: string;
+}
+
+/** One update email sent for an order (tests to staff included). */
+export interface ShopOrderUpdateEmail {
+  uuid: string;
+  kind: string;
+  headline: string;
+  body: string;
+  subject: string | null;
+  to_email: string;
+  sent_by: string | null;
+  test: boolean;
+  created_at: string;
+}
+
+export interface ShopOrderUpdateInfo {
+  presets: ShopOrderUpdatePreset[];
+  /** The customer's email (null: the order has none, so it can't be emailed). */
+  to: string | null;
+  customer_name: string | null;
+  /** Shop settings → "Customer emails from the shop". Off: only test sends to staff. */
+  customer_emails_enabled: boolean;
+  email_configured: boolean;
+  /** The signed-in staff member's email (where test sends go). */
+  test_to: string | null;
+  signature: string;
+  limits: { headline_max: number; message_max: number; per_day: number; sent_last_24h: number };
+  history: ShopOrderUpdateEmail[];
+}
+
+export interface ShopOrderUpdatePreview {
+  subject: string;
+  html: string;
+  /** The workspace has its own version of the template (Settings → Email templates). */
+  customised: boolean;
+  to: string | null;
+  headline: string;
+  message: string;
+  kind: string;
+  warnings: string[];
+}
+
+export interface ShopOrderUpdateSendResult {
+  sent: boolean;
+  test: boolean;
+  to: string;
+  subject: string;
+  logged: boolean;
+  history: ShopOrderUpdateEmail[];
+  order: ShopOrder;
+}
+
 export type ShopPaymentMethodKind = 'card' | 'bank_transfer' | 'cheque' | 'other';
 
 export interface ShopOrderMarkPaid {

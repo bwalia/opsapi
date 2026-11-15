@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
 import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } from '@/components/shop/DeliveryChangeRequests';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
+import { OrderUpdateEmail } from '@/components/shop/OrderUpdateEmail';
 import { MoreMenu, NextStepPanel, PoNumberField, StatusTimeline, activePurchaseOrder, orderNextStep, orderTimeline, type PanelAction } from '@/components/shop/workflow';
 import { purchaseOrdersService } from '@/services/purchase-orders.service';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
@@ -250,6 +251,14 @@ function OrderDetail() {
               }}
             />
           </div>
+          <OrderUpdateEmail
+            order={order}
+            editable={editable}
+            onChanged={(o) => {
+              setOrder(o);
+              setNotes(o.internal_notes ?? '');
+            }}
+          />
           <Card>
             <SectionTitle>Lines</SectionTitle>
             <LinesTable lines={order.lines} currency={cur} />

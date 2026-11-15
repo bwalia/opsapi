@@ -13,8 +13,10 @@
                       workspace owner. Customers are never emailed by this alert.
     customer_delivery_notifications
                       false (default) → nothing is sent to customers when staff approve or decline a
-                      delivery change request (they see the outcome on their order page). Leave it off
-                      until the shop's sending address is changed.
+                      delivery change request (they see the outcome on their order page), and staff can
+                      only send test copies of order update emails ("Email the customer" on the order page,
+                      queries/ShopOrderUpdateQueries.lua) to themselves. The dashboard calls it "Customer
+                      emails from the shop". Leave it off until the shop's sending address is changed.
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")

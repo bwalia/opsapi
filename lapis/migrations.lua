@@ -194,6 +194,7 @@ local shop_order_auth_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, 
 local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-bank-transfer") or {}
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
+local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
 -- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
 local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
     and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
@@ -2743,6 +2744,8 @@ local _migrations = {
     -- Delivery change requests from signed-in customers + the agreed delivery date/window (migrations/shop-delivery-changes.lua)
     ['zzs51_shop_delivery_change_requests'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 1),
     ['zzs52_shop_customer_delivery_notifications'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 2),
+    -- Order update emails staff send from the order page, test sends included (migrations/shop-order-emails.lua)
+    ['zzs53_shop_order_emails'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_email_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

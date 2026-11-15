@@ -44,6 +44,9 @@ import type {
   ShopOrderMarkPaid,
   ShopOrderStatus,
   ShopOrderUpdate,
+  ShopOrderUpdateInfo,
+  ShopOrderUpdatePreview,
+  ShopOrderUpdateSendResult,
   ShopProduct,
   ShopProductInput,
   ShopProductListItem,
@@ -175,7 +178,10 @@ export interface ShopSettings {
   po_bill_to?: PurchaseOrderParty | null;
   /** Where the staff "new order" alert goes (unset: the Leads → Notifications admin email). */
   order_alert_email?: string | null;
-  /** Email customers when a delivery change request is approved or declined. Off by default. */
+  /**
+   * "Customer emails from the shop": order update emails staff send from the order page, and the
+   * outcome of a delivery change request. Off by default (test sends to staff always work).
+   */
   customer_delivery_notifications?: boolean;
   updated_at: string | null;
 }
@@ -332,6 +338,27 @@ export const shopService = {
   async declineDeliveryChange(orderUuid: string, requestUuid: string, staffNote: string): Promise<ShopDeliveryChangeDecision> {
     const res = await apiClient.post(`${BASE}/orders/${orderUuid}/delivery-changes/${requestUuid}/decline`, { staff_note: staffNote }, JSON_BODY);
     return unwrap<ShopDeliveryChangeDecision>(res);
+  },
+
+  /** "Email the customer": presets filled in for this order, the recipient, the switch and the history. */
+  async getOrderUpdateEmail(orderUuid: string): Promise<ShopOrderUpdateInfo> {
+    const res = await apiClient.get(`${BASE}/orders/${orderUuid}/update-email/presets`);
+    return unwrap<ShopOrderUpdateInfo>(res);
+  },
+
+  /** Render the update email for this order (the workspace's template version if it has one). */
+  async previewOrderUpdateEmail(orderUuid: string, body: { preset?: string; headline?: string; message?: string }): Promise<ShopOrderUpdatePreview> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/update-email/preview`, body, JSON_BODY);
+    return unwrap<ShopOrderUpdatePreview>(res);
+  },
+
+  /**
+   * Send the update email. test: a [TEST] copy to the signed-in user only. A real send needs Shop settings →
+   * "Customer emails from the shop" on (409 CUSTOMER_EMAILS_OFF) and allows 5 per order per 24 hours.
+   */
+  async sendOrderUpdateEmail(orderUuid: string, body: { preset?: string; headline: string; message: string; test?: boolean }): Promise<ShopOrderUpdateSendResult> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/update-email`, body, JSON_BODY);
+    return unwrap<ShopOrderUpdateSendResult>(res);
   },
 
   /** Record a payment that arrived outside Stripe (bank transfer, cheque, other); the order becomes paid. */

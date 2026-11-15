@@ -85,9 +85,9 @@ function SettingsContent() {
     if (
       on &&
       !(await confirmDialog({
-        title: 'Email customers about delivery changes?',
+        title: 'Turn on customer emails from the shop?',
         message:
-          'Customers will be emailed from the shop’s current sending address when you approve or decline their delivery change request. Only turn this on once the sending address has been changed.',
+          'Customers will be emailed from the shop’s current sending address: order updates your team sends from an order page, and the outcome when you approve or decline a delivery change request. Only turn this on once the sending address has been changed.',
         confirmText: 'Turn on',
       }))
     )
@@ -95,7 +95,7 @@ function SettingsContent() {
     setSavingNotify(true);
     try {
       setSettings(await shopService.updateSettings({ customer_delivery_notifications: on }));
-      toast.success(on ? 'Customers will be emailed about delivery changes' : 'Customers will not be emailed about delivery changes');
+      toast.success(on ? 'Customer emails from the shop are on' : 'Customer emails from the shop are off');
     } catch (e) {
       toast.error(extractApiError(e, 'Could not save'));
     } finally {
@@ -170,18 +170,18 @@ function SettingsContent() {
       <Card className="p-6">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-secondary-900">Email customers about delivery changes</h2>
+            <h2 className="text-base font-semibold text-secondary-900">Customer emails from the shop (order updates and delivery decisions)</h2>
             <p className="text-sm text-secondary-600">
               {settings?.customer_delivery_notifications
-                ? 'On: when you approve or decline a customer’s delivery change request, we email them the outcome.'
-                : 'Off: customers are not emailed when you approve or decline their delivery change request. They see the outcome on their order page.'}
+                ? 'On: your team can email a customer an update from the order page (“Email the customer”), and customers are emailed the outcome when you approve or decline their delivery change request.'
+                : 'Off: no emails go to customers from the shop. On an order page you can still send a test of an update to yourself. Customers see delivery change decisions on their order page.'}
             </p>
             <p className="text-xs text-secondary-500">
               Keep this off until the shop’s sending email address has been changed. There is no SMS sending yet. New requests always alert staff (New-order alerts above).
             </p>
           </div>
           <Switch
-            aria-label="Email customers about delivery changes"
+            aria-label="Customer emails from the shop"
             checked={!!settings?.customer_delivery_notifications}
             disabled={!settings || savingNotify || !canUpdate('shop')}
             onChange={setCustomerNotifications}

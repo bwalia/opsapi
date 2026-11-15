@@ -27,6 +27,12 @@
       POST              /orders/:uuid/delivery-changes/:request_uuid/decline  { staff_note } the reason, shown to the
                                                customer (idempotent). The customer is emailed about either only while
                                                settings.customer_delivery_notifications is on
+      GET               /orders/:uuid/update-email/presets   order update emails: presets filled in for this order,
+                                               the recipient, whether customer emails are on, and the history
+      POST              /orders/:uuid/update-email/preview   { preset?, headline?, message? } → { subject, html, to, warnings }
+      POST              /orders/:uuid/update-email   { preset?, headline, message, test? } test: a [TEST] copy to the
+                                               signed-in user only; a real send needs settings.customer_delivery_notifications
+                                               (409 CUSTOMER_EMAILS_OFF), max 5 per order per 24 hours (429)
       GET/POST          /quotes                GET/PUT /quotes/:uuid   (?filter=awaiting_authorisation|awaiting_payment|
                                                needs_supplier_po|bank_transfer_due, ?kind=quote|order)
       POST              /quotes/:uuid/revise   { reason, customer?, delivery_address?, delivery_method?,
@@ -74,6 +80,7 @@ local Dashboard = require("queries.ShopDashboardQueries")
 local ShopStripe = require("queries.ShopStripeQueries")
 local Legal = require("queries.ShopLegalQueries")
 local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
+local OrderUpdates = require("queries.ShopOrderUpdateQueries")
 
 local BASE = "/api/v2/shop/admin"
 
@@ -335,6 +342,23 @@ return function(app)
         local u = self.current_user or {}
         return result(DeliveryChange.decline(ns_id, self.params.uuid, self.params.request_uuid, body,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    -- order update emails to the customer ("Email the customer" on the order page) ----------------
+    app:get(BASE .. "/orders/:uuid/update-email/presets", guard("update", function(self, ns_id)
+        return result(OrderUpdates.presets(ns_id, self.params.uuid, user_id(self)))
+    end))
+
+    app:post(BASE .. "/orders/:uuid/update-email/preview", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return result(OrderUpdates.preview(ns_id, self.params.uuid, body, user_id(self)))
+    end))
+
+    app:post(BASE .. "/orders/:uuid/update-email", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return result(OrderUpdates.send(ns_id, self.params.uuid, body, user_id(self)))
     end))
 
     -- quotes ----------------------------------------------------------------------
