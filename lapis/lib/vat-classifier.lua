@@ -300,7 +300,8 @@ function VC.harmonise(lines, results)
                 r.vat_code = code
                 r.reclaimable_pct = tonumber(pct)
                 r.reason = (r.reason or "") .. " (The AI coded this supplier differently on other lines.)"
-                r.review_reasons = r.review_reasons or {}
+                -- The risk checks depend on the code: work them out again for the new one.
+                r.review_reasons = VC.review_reasons(lines[i], r)
                 table.insert(r.review_reasons, "The AI coded this supplier differently on other lines: please confirm.")
                 touched = touched + 1
             end
