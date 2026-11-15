@@ -167,11 +167,11 @@ local hl = {
     { description = "ROOFLINE REPAIRS LTD", direction = "purchase", amount = 120 },
 }
 local hr = {
-    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
-    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
 }
 hr[2].review_reasons = { "£80.00 of VAT reclaimed without a VAT receipt." } -- from its standard-rated guess
 local touched = VC.harmonise(hl, hr)
