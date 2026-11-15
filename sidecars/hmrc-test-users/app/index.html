@@ -38,6 +38,10 @@
 
   <div class="card">
     <div class="note">Sandbox only. Copy the password now: it is shown once and is not stored here.</div>
+    <div id="kind" style="display:flex;gap:16px;margin-bottom:8px">
+      <label class="svc"><input type="radio" name="kind" value="individual" checked> A taxpayer (File My Tax)</label>
+      <label class="svc"><input type="radio" name="kind" value="organisation"> A VAT-registered business</label>
+    </div>
     <div id="services"></div>
     <div style="margin-top:12px"><button class="primary" id="go">Create test user</button></div>
     <div class="err" id="err" role="alert"></div>
@@ -61,11 +65,19 @@
   const $ = (id) => document.getElementById(id);
   if (UI) { $("ui-link").style.display = "block"; $("ui-href").href = UI + "/dashboard/tax/file"; }
 
+  let KINDS = {};
+  const kindNow = () => document.querySelector('input[name="kind"]:checked').value;
+  function showServices() {
+    const list = KINDS[kindNow()] || [];
+    $("services").innerHTML = list.map((s) =>
+      `<label class="svc"><input type="checkbox" value="${s.key}" ${s.default ? "checked" : ""}> ${s.label}</label>`).join("");
+  }
   async function loadServices() {
     const r = await fetch(PREFIX + "/api/services");
     const d = await r.json();
-    $("services").innerHTML = d.services.map((s) =>
-      `<label class="svc"><input type="checkbox" value="${s.key}" ${s.default ? "checked" : ""}> ${s.label}</label>`).join("");
+    KINDS = d.kinds || { individual: d.services };
+    showServices();
+    document.querySelectorAll('input[name="kind"]').forEach((el) => el.addEventListener("change", showServices));
   }
 
   function row(label, value) {
@@ -83,14 +95,15 @@
     try {
       const r = await fetch(PREFIX + "/api/test-users", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_names: names }),
+        body: JSON.stringify({ kind: kindNow(), service_names: names }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `<strong>${d.name || "Test user"}</strong>`
-        + row("User ID", d.user_id) + row("Password", d.password) + row("NINO", d.nino)
+        + row("User ID", d.user_id) + row("Password", d.password) + row("VAT number (VRN)", d.vrn)
+        + row("NINO", d.nino) + row("CT UTR", d.ct_utr) + row("Company number", d.company_registration_number)
         + row("SA UTR", d.sa_utr) + row("MTD IT ID", d.mtd_it_id) + row("Date of birth", d.date_of_birth)
         + row("Email", d.email) + row("Address", d.address)
         + `<div style="margin-top:10px"><button class="copy" data-json='${JSON.stringify(d).replace(/'/g, "&#39;")}'>Copy all as JSON</button></div>`;

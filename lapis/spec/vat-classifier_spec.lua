@@ -167,13 +167,16 @@ local hl = {
     { description = "ROOFLINE REPAIRS LTD", direction = "purchase", amount = 120 },
 }
 local hr = {
-    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
-    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
-    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, confidence = 0.9, review_reasons = {} },
 }
+hr[2].review_reasons = { "£80.00 of VAT reclaimed without a VAT receipt." } -- from its standard-rated guess
 local touched = VC.harmonise(hl, hr)
+check("the old code's warnings are dropped when the code changes",
+    #hr[2].review_reasons == 1 and hr[2].review_reasons[1]:find("differently") ~= nil, hr[2].review_reasons[1])
 check("the odd one out takes the majority answer", hr[2].vat_code == "EXEMPT" and hr[2].reclaimable_pct == 0)
 check("every line of that supplier is flagged to confirm", touched == 3 and #hr[1].review_reasons == 1
     and #hr[3].review_reasons == 1, touched)

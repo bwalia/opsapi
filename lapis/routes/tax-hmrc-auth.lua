@@ -87,6 +87,17 @@ end
 -- Routes
 -- ---------------------------------------------------------------------------
 
+-- What to ask HMRC for. ?purpose=vat also asks for the VAT (MTD) scopes, which need
+-- the HMRC application subscribed to the VAT (MTD) API; income-tax connections
+-- don't ask for them, so they keep working without that subscription.
+local Scopes = {}
+function Scopes.for_purpose(purpose)
+    if purpose == "vat" then
+        return "read:self-assessment write:self-assessment read:vat write:vat"
+    end
+    return "read:self-assessment write:self-assessment"
+end
+
 return function(app)
 
     -- NOTE: do NOT touch the database here. app.lua loads every route module
@@ -185,7 +196,7 @@ return function(app)
             auth_base,
             ngx.escape_uri(client_id),
             ngx.escape_uri(redirect_uri),
-            ngx.escape_uri("read:self-assessment write:self-assessment"),
+            ngx.escape_uri(Scopes.for_purpose(self.params.purpose)),
             ngx.escape_uri(state)
         )
 
