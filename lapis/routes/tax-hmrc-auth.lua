@@ -95,6 +95,11 @@ function Scopes.for_purpose(purpose)
     if purpose == "vat" then
         return "read:self-assessment write:self-assessment read:vat write:vat"
     end
+    if purpose == "vat_agent" then
+        -- An accountant: ask clients for authority, check it, and file their VAT.
+        return "read:vat write:vat read:sent-invitations write:sent-invitations write:cancel-invitations "
+            .. "read:check-relationship"
+    end
     return "read:self-assessment write:self-assessment"
 end
 

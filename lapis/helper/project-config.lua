@@ -603,6 +603,7 @@ ProjectConfig.PROJECT_MODULES = {
     -- permission; a namespace-wide (accounting) registration and its rules need "vat".
     vat = {
         { machine_name = "vat", name = "VAT", description = "VAT registration, VAT coding rules and VAT records", category = "Accounting" },
+        { machine_name = "vat_agent", name = "VAT clients (accountants)", description = "Act for clients' VAT once HMRC confirms the client authorised you", category = "Accounting" },
     },
 
     -- Academy (LMS) modules — RBAC module that routes/academy.lua gates on ("courses")
