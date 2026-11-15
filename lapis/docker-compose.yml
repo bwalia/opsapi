@@ -293,7 +293,10 @@ services:
     healthcheck:
       # kafka-topics --list can hang under single-node KRaft; api-versions is a
       # fast, reliable "is the broker accepting connections?" probe.
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      # Must target kafka:29092 — the PLAINTEXT listener binds to the `kafka`
+      # alias (container IP), not 127.0.0.1, so localhost:29092 always fails
+      # and the container sits "unhealthy" even when the broker is up.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:29092"]
       interval: 30s
       timeout: 15s
       retries: 5
