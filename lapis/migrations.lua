@@ -2137,6 +2137,7 @@ local _migrations = {
     ['zz_vat_ai_2_rule_candidates'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 2),
     ['zz_vat_ai_3_eval_runs'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 3),
     ['zz_vat_ai_4_seed_rules'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 4),
+    ['zz_vat_ai_5_job_claim'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 5),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

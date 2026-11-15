@@ -72,6 +72,11 @@ return {
         ]])
     end,
 
+    [5] = function()
+        -- One AI coding run per business across all pods (queries/VatAiQueries claim_job).
+        db.query("ALTER TABLE vat_registrations ADD COLUMN IF NOT EXISTS ai_job_started_at TIMESTAMP")
+    end,
+
     [4] = function()
         if not table_exists("vat_rules") then return end
         for _, r in ipairs(require("lib.vat-seed-rules")) do

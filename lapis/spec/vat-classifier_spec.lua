@@ -158,5 +158,27 @@ check("5% receipt; total mismatch and bad VRN warned", rc.vat_code == "RED5" and
 check("VAT larger than the payment is refused", VC.from_receipt(10, { vat_amount = 20, vat_rate = 20 }) == nil)
 check("no rate or VAT on the receipt -> refused", VC.from_receipt(10, { total = 10 }) == nil)
 
+print("== the model is made consistent with itself across batches")
+local hl = {
+    { description = "HARBOUR BLOCK MGMT SERVICE CHARGE", direction = "purchase", amount = 400 },
+    { description = "HARBOUR BLOCK MGMT SERVICE CHARGE", direction = "purchase", amount = 400 },
+    { description = "HARBOUR BLOCK MGMT SERVICE CHARGE", direction = "purchase", amount = 400 },
+    { description = "ROOFLINE REPAIRS LTD", direction = "purchase", amount = 900 },
+    { description = "ROOFLINE REPAIRS LTD", direction = "purchase", amount = 120 },
+}
+local hr = {
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
+    { source = "ai", vat_code = "EXEMPT", reclaimable_pct = 0, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
+    { source = "ai", vat_code = "STD20", reclaimable_pct = 100, review_reasons = {} },
+}
+local touched = VC.harmonise(hl, hr)
+check("the odd one out takes the majority answer", hr[2].vat_code == "EXEMPT" and hr[2].reclaimable_pct == 0)
+check("every line of that supplier is flagged to confirm", touched == 3 and #hr[1].review_reasons == 1
+    and #hr[3].review_reasons == 1, touched)
+check("a supplier coded the same way everywhere is left alone",
+    #hr[4].review_reasons == 0 and #hr[5].review_reasons == 0)
+
 print(failures == 0 and "\nALL PASSED" or ("\n" .. failures .. " FAILED"))
 os.exit(failures == 0 and 0 or 1)

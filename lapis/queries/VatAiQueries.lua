@@ -26,7 +26,7 @@ end
 local function model_fn(feature)
     return function(messages)
         local Llm = require("lib.agent.llm")
-        local msg, err = Llm.chat(messages, nil, { json = true, temperature = 0, max_tokens = 3000,
+        local msg, err = Llm.chat(messages, nil, { json = true, temperature = 0, max_tokens = 1600,
             usage = { feature = feature or "vat_classify" } })
         if not msg then
             ngx.log(ngx.WARN, "[vat-ai] model call failed: ", tostring(err))
@@ -125,36 +125,68 @@ end
 function Q.classify_now(reg, user_id, opts)
     local lines = Q.lines_to_code(reg, user_id, opts)
     if #lines == 0 then return { lines = 0 } end
-    local results, stats = VC.classify(lines, {
+    local deps = {
         rules = Q.rules(reg), decisions = Q.decisions(reg),
         model = (opts or {}).no_model and nil or model_fn("vat_classify"), decode = cjson.decode,
         ctx = { scheme = reg.scheme, business_name = reg.business_name,
             partially_exempt = reg.partially_exempt == true or reg.partially_exempt == "t" },
-    })
-    Q.save_results(reg, lines, results)
-    stats.lines = #lines
-    return stats
+    }
+    -- One model batch at a time, saved as it goes: progress shows, and a slow or
+    -- failed batch doesn't lose the others.
+    local all_results, total = {}, { rule = 0, memory = 0, ai = 0, failed = 0, model_calls = 0, review = 0 }
+    for start = 1, #lines, VC.BATCH do
+        local chunk = {}
+        for j = start, math.min(start + VC.BATCH - 1, #lines) do chunk[#chunk + 1] = lines[j] end
+        local results, stats = VC.classify(chunk, deps)
+        Q.save_results(reg, chunk, results)
+        for k, v in pairs(stats) do total[k] = (total[k] or 0) + v end
+        for _, r in ipairs(results) do all_results[#all_results + 1] = r end
+        Q.touch_job(reg)
+    end
+    -- Then make the model consistent with itself across batches and save the changes.
+    total.harmonised = VC.harmonise(lines, all_results)
+    if total.harmonised > 0 then Q.save_results(reg, lines, all_results) end
+    total.lines = #lines
+    return total
 end
 
-local function lock_key(reg) return "vat_classify:" .. tostring(reg.id) end
+-- One coding run per business across every pod: a claim on the registration row.
+-- A claim older than 30 minutes is treated as dead (pod restarted mid-run).
+function Q.claim_job(reg)
+    local r = db.query([[UPDATE vat_registrations SET ai_job_started_at = NOW()
+        WHERE id = ? AND (ai_job_started_at IS NULL OR ai_job_started_at < NOW() - INTERVAL '30 minutes')
+        RETURNING id]], reg.id)
+    return r and #r > 0
+end
+function Q.touch_job(reg)
+    db.query("UPDATE vat_registrations SET ai_job_started_at = NOW() WHERE id = ? AND ai_job_started_at IS NOT NULL",
+        reg.id)
+end
+function Q.release_job(reg)
+    db.query("UPDATE vat_registrations SET ai_job_started_at = NULL WHERE id = ?", reg.id)
+end
+local function job_running(reg)
+    local r = db.query([[SELECT 1 FROM vat_registrations WHERE id = ?
+        AND ai_job_started_at > NOW() - INTERVAL '30 minutes']], reg.id)
+    return r and #r > 0
+end
 
 --- Start coding in the background; returns at once.
 -- @return { started = bool, pending = n }
 function Q.start(reg, user_id, opts)
     local pending = #Q.lines_to_code(reg, user_id, opts)
     if pending == 0 then return { started = false, pending = 0 } end
-    local dict = ngx.shared.cache
-    if dict and not dict:add(lock_key(reg), true, 1800) then
+    if not Q.claim_job(reg) then
         return { started = false, already_running = true, pending = pending }
     end
     local ok, err = ngx.timer.at(0, function(premature)
-        if premature then return end
+        if premature then Q.release_job(reg) return end
         local ok2, res = pcall(Q.classify_now, reg, user_id, opts)
         if not ok2 then ngx.log(ngx.ERR, "[vat-ai] classify failed: ", tostring(res)) end
-        if dict then dict:delete(lock_key(reg)) end
+        Q.release_job(reg)
     end)
     if not ok then
-        if dict then dict:delete(lock_key(reg)) end
+        Q.release_job(reg)
         return nil, "Couldn't start: " .. tostring(err)
     end
     return { started = true, pending = pending }
@@ -175,8 +207,7 @@ function Q.status(reg, user_id, opts)
             COUNT(*) FILTER (WHERE t.vat_review AND COALESCE(t.vat_source, '') <> 'user') AS to_check
         FROM tax_transactions t LEFT JOIN tax_statements s ON s.id = t.statement_id
         WHERE t.user_id = ? AND t.namespace_id = ?]] .. extra, user_id, reg.namespace_id)[1] or {}
-    local dict = ngx.shared.cache
-    r.running = dict and dict:get(lock_key(reg)) and true or false
+    r.running = job_running(reg)
     for k, v in pairs(r) do if k ~= "running" then r[k] = tonumber(v) or 0 end end
     return r
 end
