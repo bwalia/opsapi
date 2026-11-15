@@ -28,7 +28,9 @@ import vatService, {
   type VatReturnRow,
   type VatReviewLine,
   type VatScheme,
+  type VatReport,
   type VatStatus,
+  type VatThreshold,
 } from '@/services/vat.service';
 
 const gbp = (n?: number | null) => (n === null || n === undefined ? '—' : formatCurrency(Number(n), 'GBP', 'en-GB'));
@@ -306,6 +308,68 @@ function BoxesGrid({ boxes, onBox }: { boxes: Boxes; onBox?: (k: keyof Boxes) =>
   );
 }
 
+function ThresholdCard({ t }: { t: VatThreshold }) {
+  const colour = t.status === 'over' ? 'border-red-200 bg-red-50 text-red-900'
+    : t.status === 'approaching' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-secondary-200 bg-surface';
+  return (
+    <div className={`rounded-2xl border p-4 sm:p-6 ${colour}`} data-testid="vat-threshold">
+      <p className="font-semibold">Do you need to register for VAT?</p>
+      <p className="mt-1 text-sm">
+        Your taxable turnover for the 12 months to {t.as_of} is <strong>{gbp(t.turnover)}</strong> — {t.pct}% of the
+        {' '}{gbp(t.threshold)} registration threshold.
+      </p>
+      {t.status === 'over' && t.register_by && (
+        <p className="mt-2 text-sm font-medium">You went over at the end of {t.crossed_month}. You must register with HMRC
+          by {t.register_by}.</p>
+      )}
+      {t.status === 'approaching' && (
+        <p className="mt-2 text-sm">You&apos;re getting close. You must register within 30 days of going over.</p>
+      )}
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/60">
+        <div className={`h-full ${t.status === 'over' ? 'bg-red-500' : t.status === 'approaching' ? 'bg-amber-500'
+          : 'bg-primary-500'}`} style={{ width: `${Math.min(100, t.pct)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({ report }: { report: VatReport }) {
+  return (
+    <div className="mt-4 space-y-3" data-testid="vat-report">
+      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+        {[['VAT on sales', report.totals.output_vat], ['VAT on purchases', report.totals.input_vat],
+          ['Reclaimable', report.totals.reclaimable], ['Can\'t be reclaimed', report.totals.blocked]].map(([l, v]) => (
+          <div key={l as string} className="rounded-lg border border-secondary-200 bg-surface p-2">
+            <p className="text-xs text-secondary-500">{l}</p>
+            <p className="font-semibold tabular-nums">{gbp(v as number)}</p>
+          </div>
+        ))}
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-secondary-200">
+        <table className="w-full text-xs">
+          <thead className="bg-secondary-50 text-secondary-500">
+            <tr><th className="px-2 py-1.5 text-left">VAT code</th><th className="px-2 py-1.5 text-right">Lines</th>
+              <th className="px-2 py-1.5 text-right">Sales (net)</th><th className="px-2 py-1.5 text-right">Purchases (net)</th>
+              <th className="px-2 py-1.5 text-right">Reclaimable</th></tr>
+          </thead>
+          <tbody className="divide-y divide-secondary-100">
+            {report.by_code.map((c) => (
+              <tr key={c.vat_code}><td className="px-2 py-1">{c.label || c.vat_code}</td>
+                <td className="px-2 py-1 text-right">{c.lines}</td><td className="px-2 py-1 text-right">{gbp(c.sales_net)}</td>
+                <td className="px-2 py-1 text-right">{gbp(c.purchases_net)}</td>
+                <td className="px-2 py-1 text-right">{gbp(c.reclaimable)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {report.top_suppliers.length > 0 && (
+        <p className="text-xs text-secondary-600">Biggest suppliers: {report.top_suppliers.slice(0, 5)
+          .map((s) => `${s.supplier} (${gbp(s.spend)})`).join(', ')}</p>
+      )}
+    </div>
+  );
+}
+
 function VatPage() {
   const params = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -327,6 +391,9 @@ function VatPage() {
   const [filing, setFiling] = useState(false);
   const [theirs, setTheirs] = useState<Record<string, number | string> | null>(null);
   const [history, setHistory] = useState<VatReturnRow[]>([]);
+  const [threshold, setThreshold] = useState<VatThreshold | null>(null);
+  const [report, setReport] = useState<VatReport | null>(null);
+  const [penalties, setPenalties] = useState<Record<string, unknown> | null>(null);
 
   const periods = useMemo(() => periodsFor(reg?.stagger || 'quarterly_mar'), [reg?.stagger]);
 
@@ -343,6 +410,7 @@ function VatPage() {
         const [c, r] = await Promise.all([vatService.codes(), vatService.registration()]);
         setCodes(c.codes); setSchemes(c.schemes); setReg(r);
         if (r) await refresh();
+        else vatService.threshold().then(setThreshold).catch(() => undefined);
       } catch (e) {
         toast.error(extractApiError(e, 'Could not load VAT'));
       } finally {
@@ -369,6 +437,7 @@ function VatPage() {
     try {
       const list = await vatService.obligations({ status: 'O' });
       setObligations(list); setHmrcState('connected');
+      vatService.penalties().then(setPenalties).catch(() => undefined);
       if (period) {
         const match = list.find((o) => o.start === period.start && o.end === period.end);
         setPeriodKey(match?.periodKey || list[0]?.periodKey || '');
@@ -400,6 +469,7 @@ function VatPage() {
     try {
       const d = await vatService.saveDraft(period.start, period.end);
       setDraft(await vatService.getReturn(d.uuid, true));
+      vatService.report(period.start, period.end).then(setReport).catch(() => setReport(null));
       await refresh();
     } catch (e) {
       toast.error(extractApiError(e, 'Could not build the return'));
@@ -446,6 +516,7 @@ function VatPage() {
       <PageHeader title="VAT" icon={<Receipt className="h-5 w-5" />}
         description="Code your VAT with AI, check the few lines it's unsure about, and file your VAT return with HMRC." />
 
+      {!reg && threshold && <ThresholdCard t={threshold} />}
       <Registration reg={reg} schemes={schemes} onSaved={async (r) => { setReg(r); await refresh(); }} />
 
       {reg && (
@@ -481,6 +552,7 @@ function VatPage() {
                   <strong>{gbp(Number(draft.box5))}</strong>
                   {draft.due_date ? ` · due by ${draft.due_date}` : ''} · {draft.line_count} lines
                 </p>
+                {report && <ReportCard report={report} />}
                 {boxLines && (
                   <div className="rounded-lg border border-secondary-200 bg-surface p-3">
                     <p className="text-sm font-medium text-secondary-900">Behind Box {openBox?.replace('box', '')} ({boxLines.length})</p>
@@ -507,6 +579,14 @@ function VatPage() {
               </div>
             )}
             {hmrcState === 'error' && <p className="mt-2 text-sm text-red-700">{hmrcMsg}</p>}
+            {penalties && (() => {
+              const pts = (penalties as { lateSubmissionPenalty?: { summary?: { activePenaltyPoints?: number;
+                penaltyChargeAmount?: number } } }).lateSubmissionPenalty?.summary;
+              return pts ? (
+                <p className="mt-2 text-xs text-secondary-600">HMRC late-filing penalty points: <strong>
+                  {pts.activePenaltyPoints ?? 0}</strong>{pts.penaltyChargeAmount ? ` · penalty ${gbp(pts.penaltyChargeAmount)}` : ''}</p>
+              ) : null;
+            })()}
             {hmrcState === 'connected' && !filed && (
               <div className="mt-2 space-y-3">
                 <label className="block text-sm">VAT period HMRC is waiting for
@@ -576,7 +656,11 @@ function VatPage() {
                 {history.map((h) => (
                   <div key={h.uuid} className="flex flex-wrap justify-between gap-2 py-2">
                     <span>{h.period_start} to {h.period_end}{h.period_key ? ` · ${h.period_key}` : ''}</span>
-                    <span className="tabular-nums">Box 5 {gbp(Number(h.box5))} ·{' '}
+                    <span className="tabular-nums">
+                      <button type="button" className="mr-2 text-primary-700 underline"
+                        onClick={() => vatService.exportReturn(h.uuid).catch((e) => toast.error(extractApiError(e, 'Export failed')))}>
+                        Download lines (CSV)</button>
+                      Box 5 {gbp(Number(h.box5))} ·{' '}
                       <span className={h.status === 'submitted' ? 'text-green-700' : h.status === 'failed' ? 'text-red-700' : 'text-secondary-600'}>
                         {h.status === 'submitted' ? 'filed' : h.status}</span></span>
                   </div>

@@ -45,6 +45,11 @@
     GET    /api/v2/vat/hmrc/(liabilities|payments|penalties)  ?from&to
     (sandbox only: ?test_scenario= / "test_scenario" passes HMRC's Gov-Test-Scenario)
 
+    VAT management (phase 6):
+    GET    /api/v2/vat/threshold                rolling 12-month taxable turnover vs the registration threshold
+    GET    /api/v2/vat/reports                  ?from&to  VAT by code and supplier; reclaimable vs blocked
+    GET    /api/v2/vat/returns/:uuid/export     ?format=csv|json  every line behind every box (inspection)
+
     Whose business: `?scope=user` (default) is the signed-in person's own VAT
     registration (many sole traders share a namespace); `?scope=namespace` is the
     namespace's (accounting), and needs the "vat" module permission.
@@ -59,6 +64,7 @@ local VatQueries = require("queries.VatQueries")
 local VatReturnQueries = require("queries.VatReturnQueries")
 local VatAiQueries = require("queries.VatAiQueries")
 local VatFilingQueries = require("queries.VatFilingQueries")
+local VatManagementQueries = require("queries.VatManagementQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -352,5 +358,30 @@ return function(app)
         local data, resp = VatFilingQueries.account(reg, user_uuid_of(self), self.params.what, self.params)
         if not data then return resp end
         return { status = 200, json = { success = true, data = data } }
+    end))
+    -- ---------------------------------------------------------------- management
+    app:get("/api/v2/vat/threshold", authed(function(self)
+        local actor = user_pk(self); if not actor then return err(401, "User not found") end
+        local data = VatManagementQueries.threshold(self.namespace.id, actor)
+        return { status = 200, json = { success = true, data = data } }
+    end))
+
+    app:get("/api/v2/vat/reports", authed(function(self)
+        local reg, actor, e = own_registration(self); if e then return e end
+        local from, to = self.params.from, self.params.to
+        if not (from and to and from:match("^%d%d%d%d%-%d%d%-%d%d$") and to:match("^%d%d%d%d%-%d%d%-%d%d$")) then
+            return err(400, "Give from and to like 2026-01-01")
+        end
+        return { status = 200, json = { success = true, data = VatManagementQueries.report(reg, actor, from, to) } }
+    end))
+
+    app:get("/api/v2/vat/returns/:uuid/export", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local fmt = self.params.format == "json" and "json" or "csv"
+        local out, msg, status, filename = VatManagementQueries.export(reg, self.params.uuid, fmt)
+        if not out then return err(status or 404, msg) end
+        if fmt == "json" then return { status = 200, json = { success = true, data = out } } end
+        ngx.header["Content-Disposition"] = 'attachment; filename="' .. filename .. '"'
+        return { status = 200, content_type = "text/csv; charset=utf-8", layout = false, out }
     end))
 end
