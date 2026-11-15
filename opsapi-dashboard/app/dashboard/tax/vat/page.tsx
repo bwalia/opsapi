@@ -8,7 +8,9 @@
  *   4. Your VAT return (9 boxes in plain English; click a box to see its lines)
  *   5. File with HMRC (connect for VAT, pick HMRC's open period, declare, file; receipt;
  *      our figures next to HMRC's copy)
- *   6. Past returns
+ *   6. Other VAT schemes (partial exemption annual adjustment, capital goods, VAT group,
+ *      EC Sales List) — components/vat/VatSchemesPanel.tsx
+ *   7. Past returns
  * The figures come from our VAT engine (lapis/lib/vat-return.lua), never the AI.
  */
 
@@ -18,6 +20,7 @@ import { CheckCircle2, FileCheck2, Loader2, Receipt, RefreshCw, Sparkles, Upload
 import toast from 'react-hot-toast';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
+import VatSchemesPanel from '@/components/vat/VatSchemesPanel';
 import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
   BOX_LABELS,
@@ -678,6 +681,9 @@ function VatPage() {
               </div>
             )}
           </div>
+
+          {reg && <VatSchemesPanel reg={reg} workspace={workspace} period={period}
+            onChanged={() => { if (draft) build(); }} />}
 
           {history.length > 0 && (
             <div className={card}>

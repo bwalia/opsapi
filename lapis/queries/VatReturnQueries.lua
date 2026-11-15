@@ -37,7 +37,31 @@ local function to_line(r, direction)
         net = tonumber(r.net_amount), vat = tonumber(r.vat_amount) or 0, notional_vat = tonumber(r.vat_notional) or 0,
         reclaimable_pct = not null(r.vat_reclaimable_pct) and tonumber(r.vat_reclaimable_pct) or nil,
         gross = math.abs(tonumber(r.amount) or 0), description = r.description,
+        attribution = not null(r.vat_attribution) and r.vat_attribution or nil,
     }
+end
+
+--- The workspaces whose records make up this registration's return: its own, plus
+-- the active members when it is a VAT group's representative. Also the member names
+-- (supplies to them are inside the group).
+function Q.group_namespaces(reg)
+    local ids, names = { reg.namespace_id }, {}
+    if not null(reg.user_id) then return ids, names end
+    local has = db.query("SELECT to_regclass('public.vat_group_members') IS NOT NULL AS ok")[1]
+    if not (has and (has.ok == true or has.ok == "t")) then return ids, names end
+    for _, m in ipairs(db.query([[SELECT member_namespace_id, member_name FROM vat_group_members
+        WHERE group_registration_id = ? AND status = 'active' AND member_namespace_id IS NOT NULL]], reg.id) or {}) do
+        ids[#ids + 1] = m.member_namespace_id
+        names[#names + 1] = m.member_name
+    end
+    if #names > 0 and not null(reg.business_name) then names[#names + 1] = reg.business_name end
+    return ids, names
+end
+
+local function in_list(ids)
+    local out = {}
+    for _, id in ipairs(ids) do out[#out + 1] = db.escape_literal(id) end
+    return "(" .. table.concat(out, ",") .. ")"
 end
 
 --- The VAT-coded lines (and the count of uncoded ones) for a business and period.
@@ -46,29 +70,48 @@ function Q.collect_lines(reg, period_start, period_end)
     if not null(reg.user_id) then
         rows = db.query([[SELECT 't' || t.id AS ref, t.transaction_date AS date, t.transaction_type AS dir,
                 t.amount, t.description, t.vat_code, t.net_amount, t.vat_amount, t.vat_notional,
-                t.vat_reclaimable_pct
+                t.vat_reclaimable_pct, t.vat_attribution
             FROM tax_transactions t
             WHERE t.namespace_id = ? AND t.user_id = ? AND t.transaction_date BETWEEN ? AND ?]],
             reg.namespace_id, reg.user_id, period_start, period_end)
     else
+        local ns = in_list((Q.group_namespaces(reg)))
         rows = db.query([[SELECT 'b' || b.id AS ref, b.transaction_date AS date, upper(b.transaction_type) AS dir,
                 b.amount, b.description, b.vat_code, b.net_amount, b.vat_amount, b.vat_notional,
-                b.vat_reclaimable_pct
+                b.vat_reclaimable_pct, b.vat_attribution
             FROM accounting_bank_transactions b
-            WHERE b.namespace_id = ? AND b.deleted_at IS NULL AND b.transaction_date BETWEEN ? AND ?
+            WHERE b.namespace_id IN ]] .. ns .. [[ AND b.deleted_at IS NULL AND b.transaction_date BETWEEN ? AND ?
             UNION ALL
             SELECT 'e' || e.id, e.expense_date, 'DEBIT', e.amount, e.description, e.vat_code, e.net_amount,
-                e.vat_amount, e.vat_notional, e.vat_reclaimable_pct
+                e.vat_amount, e.vat_notional, e.vat_reclaimable_pct, e.vat_attribution
             FROM accounting_expenses e
-            WHERE e.namespace_id = ? AND e.deleted_at IS NULL AND e.bank_transaction_id IS NULL
+            WHERE e.namespace_id IN ]] .. ns .. [[ AND e.deleted_at IS NULL AND e.bank_transaction_id IS NULL
               AND e.status IN ('approved', 'posted') AND e.expense_date BETWEEN ? AND ?]],
-            reg.namespace_id, period_start, period_end, reg.namespace_id, period_start, period_end)
+            period_start, period_end, period_start, period_end)
     end
     rows = rows or {}
     local notes = {}
     local inv_lines = {}
     if null(reg.user_id) then
-        inv_lines, notes = Q.invoice_lines(reg, period_start, period_end)
+        local ids, member_names = Q.group_namespaces(reg)
+        for _, ns_id in ipairs(ids) do
+            local part = {}
+            for k, v in pairs(reg) do part[k] = v end
+            part.namespace_id = ns_id
+            local l2, n2 = Q.invoice_lines(part, period_start, period_end)
+            for _, l in ipairs(l2) do inv_lines[#inv_lines + 1] = l end
+            for _, n in ipairs(n2) do notes[#notes + 1] = n end
+        end
+        -- Invoices to another member of the VAT group are inside the group.
+        if #member_names > 0 then
+            local lower = {}
+            for _, nm in ipairs(member_names) do lower[nm:lower()] = true end
+            for _, l in ipairs(inv_lines) do
+                if l.customer_name and lower[tostring(l.customer_name):lower()] then l.intra_group = true end
+            end
+            notes[#notes + 1] = "VAT group: invoices to other members are left off. Code bank payments "
+                .. "between members as Outside the scope."
+        end
         local mode = reg.sales_from or "auto"
         local use_invoices = mode == "invoices" or (mode == "auto" and #inv_lines > 0)
         if use_invoices then
@@ -106,7 +149,11 @@ end
 function Q.invoice_lines(reg, period_start, period_end)
     local has = db.query("SELECT to_regclass('public.invoices') IS NOT NULL AS ok")[1]
     if not (has and (has.ok == true or has.ok == "t")) then return {}, {} end
-    local invs = db.query([[SELECT i.id, i.invoice_number, i.status, i.issue_date, i.tax_point, i.currency
+    local cv = db.query([[SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices'
+        AND column_name = 'customer_vat_number']])
+    local vat_col = (cv and #cv > 0) and "i.customer_vat_number" or "NULL"
+    local invs = db.query([[SELECT i.id, i.invoice_number, i.status, i.issue_date, i.tax_point, i.currency,
+            i.customer_name, ]] .. vat_col .. [[ AS customer_vat_number
         FROM invoices i
         WHERE i.namespace_id = ? AND i.deleted_at IS NULL
           AND i.status IN ('sent', 'paid', 'partially_paid', 'overdue')
@@ -164,6 +211,31 @@ local function adj_for_engine(rows)
     return out
 end
 
+--- The negative margin carried forward from the latest earlier return (margin scheme).
+function Q.margin_brought_forward(reg, period_start)
+    local prev = db.query([[SELECT calculation FROM vat_returns WHERE registration_id = ? AND period_end < ?
+        AND status IN ('draft', 'submitting', 'submitted') ORDER BY period_end DESC,
+        (status = 'submitted') DESC, id DESC LIMIT 1]], reg.id, period_start)[1]
+    if not prev then return 0 end
+    local c = prev.calculation
+    if type(c) == "string" then
+        local ok, t = pcall(cjson.decode, c); c = ok and t or nil
+    end
+    local m = type(c) == "table" and type(c.margin) == "table" and tonumber(c.margin.carried_forward) or 0
+    return m or 0
+end
+
+--- The VAT group this registration's workspace is a member of (not as representative), or nil.
+function Q.group_of(reg)
+    if not null(reg.user_id) then return nil end
+    local has = db.query("SELECT to_regclass('public.vat_group_members') IS NOT NULL AS ok")[1]
+    if not (has and (has.ok == true or has.ok == "t")) then return nil end
+    return db.query([[SELECT m.uuid, m.member_name, r.business_name AS group_name, r.vrn AS group_vrn
+        FROM vat_group_members m JOIN vat_registrations r ON r.id = m.group_registration_id
+        WHERE m.member_namespace_id = ? AND m.status = 'active' AND m.group_registration_id <> ? LIMIT 1]],
+        reg.namespace_id, reg.id)[1]
+end
+
 --- Build (without saving) the return for a period.
 -- opts: { relevant_goods_gross? }  @return result or nil, message
 function Q.preview(reg, period_start, period_end, opts)
@@ -176,7 +248,14 @@ function Q.preview(reg, period_start, period_end, opts)
         period_start = period_start, period_end = period_end, period_months = months,
         adjustments = adj_for_engine(adjustments),
         relevant_goods_gross = tonumber(opts.relevant_goods_gross),
+        margin_brought_forward = Q.margin_brought_forward(reg, period_start),
     })
+    local group = Q.group_of(reg)
+    if group then
+        table.insert(result.warnings, 1, "This workspace is in a VAT group (" .. tostring(group.group_name or "")
+            .. "): the group's representative files one return for every member.")
+        result.group_member_of = group
+    end
     result.period = { start = period_start, ["end"] = period_end,
         due_date = VAT.due_date(period_end, reg.scheme) }
     result.line_count = #lines
@@ -206,7 +285,7 @@ function Q.save_draft(reg, period_start, period_end, actor_id, opts)
         line_count = res.line_count, uncoded_count = res.uncoded_count,
         due_date = res.period.due_date or db.NULL,
         calculation = cjson.encode({ warnings = res.warnings, notes = res.notes, audit = res.audit,
-            flat_rate = res.flat_rate, partial_exemption = res.partial_exemption,
+            flat_rate = res.flat_rate, partial_exemption = res.partial_exemption, margin = res.margin,
             corrections = res.corrections, valid = res.valid, validation = res.validation }),
         updated_at = db.raw("NOW()"),
     }
@@ -315,12 +394,16 @@ function Q.create_adjustment(reg, f, actor_id)
         if not valid_date(f.due_date) then return nil, "due_date (when the invoice was due) is required", 400 end
         row.due_date = f.due_date
         row.written_off = f.written_off == true or f.written_off == "true"
+    elseif f.type == "cgs" or f.type == "pe_annual" then
+        ok, err = money("vat", true); if not ok then return nil, err, 400 end
+        if f.capital_item_id then row.capital_item_id = tonumber(f.capital_item_id) end
+        if f.interval_no then row.interval_no = tonumber(f.interval_no) end
     elseif f.type == "correction" then
         ok, err = money("box1"); if not ok then return nil, err, 400 end
         ok, err = money("box4"); if not ok then return nil, err, 400 end
         if row.box1 == nil and row.box4 == nil then return nil, "Give the Box 1 and/or Box 4 correction", 400 end
     else
-        return nil, "type must be fuel_scale, bad_debt_relief or correction", 400
+        return nil, "type must be fuel_scale, bad_debt_relief, correction, cgs or pe_annual", 400
     end
     db.insert("vat_adjustments", row)
     return db.query([[SELECT * FROM vat_adjustments WHERE registration_id = ? ORDER BY id DESC LIMIT 1]], reg.id)[1]

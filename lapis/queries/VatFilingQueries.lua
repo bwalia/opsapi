@@ -113,6 +113,10 @@ function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
     if draft.status ~= "draft" then
         return nil, { status = 409, json = { success = false, error = "This return is already " .. draft.status } }
     end
+    if VatReturnQueries.group_of(reg) then
+        return nil, { status = 409, json = { success = false, code = "VAT_GROUP_MEMBER",
+            error = "This workspace is in a VAT group: the group's representative files the return." } }
+    end
 
     local token, terr, tcode = Q.token(user_uuid)
     if not token then return nil, { status = 409, json = { success = false, error = terr, code = tcode } } end

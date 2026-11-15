@@ -108,6 +108,32 @@ export interface VatAgentClient {
 export interface VatObligation { periodKey: string; start: string; end: string; due: string; status: 'O' | 'F';
   received?: string }
 
+export interface VatAnnualAdjustment {
+  annual_pct: number; de_minimis: boolean; should_recover: number; claimed: number; adjustment: number;
+  direction: 'claim' | 'repay' | 'none'; taxable_supplies: number; exempt_supplies: number; note: string;
+  warnings: string[]; returns_counted: number;
+}
+
+export type CapitalKind = 'land' | 'building' | 'civil_engineering' | 'refurbishment' | 'ship' | 'aircraft';
+export interface VatCapitalItem {
+  uuid: string; description: string; kind: CapitalKind; kind_label?: string; cost_ex_vat: number; input_vat: number;
+  original_use_pct: number; intervals: number; first_used_on?: string | null; disposed_on?: string | null;
+  adjustments: Array<{ uuid: string; period_start: string; period_end: string; interval_no?: number | null;
+    vat: number; description?: string }>;
+}
+
+export interface VatGroupInfo {
+  members: Array<{ uuid: string; member_name: string; status: 'pending' | 'active'; joined: boolean;
+    invite_code?: string | null; joined_at?: string | null }>;
+  member_of?: { member_name: string; group_name?: string; group_vrn?: string } | null;
+}
+
+export interface VatEcSalesList {
+  rows: Array<{ country: string; vat_number: string; value: number; indicator: number }>;
+  total: number; missing: Array<{ customer_name?: string; net: number; invoice?: string }>;
+  frequency_hint: 'monthly' | 'quarterly'; notes: string[];
+}
+
 const data = <T,>(r: { data?: { data?: T } }) => r.data?.data as T;
 
 // An accountant working on a client's VAT: every call carries ?client=<link uuid>
@@ -214,6 +240,58 @@ export const vatService = {
   },
   async checkInvoice(uuid: string): Promise<VatInvoiceCheckResult> {
     return data(await apiClient.get(`${BASE}/invoices/${uuid}/check`));
+  },
+  // Less common schemes (phase 10)
+  async peAnnual(year_start: string, year_end: string): Promise<VatAnnualAdjustment> {
+    return data(await get(`${BASE}/partial-exemption/annual`, { year_start, year_end }));
+  },
+  async peAnnualApply(body: { year_start: string; year_end: string; period_start: string; period_end: string }) {
+    return data(await post(`${BASE}/partial-exemption/annual`, body));
+  },
+  async capitalItems(): Promise<VatCapitalItem[]> {
+    return data(await get(`${BASE}/capital-items`)) || [];
+  },
+  async addCapitalItem(body: { description: string; kind: CapitalKind; cost_ex_vat: number; input_vat: number;
+    original_use_pct: number; short_lease?: boolean; first_used_on?: string }): Promise<VatCapitalItem> {
+    return data(await post(`${BASE}/capital-items`, body));
+  },
+  async deleteCapitalItem(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/capital-items/${uuid}`, { params: withClient() });
+  },
+  async adjustCapitalItem(uuid: string, body: { interval_no: number; use_pct: number; period_start: string;
+    period_end: string }) {
+    return data(await post(`${BASE}/capital-items/${uuid}/adjust`, body));
+  },
+  async disposeCapitalItem(uuid: string, body: { disposed_on: string; intervals_used: number; sale_taxable: boolean;
+    sale_output_vat?: number; period_start: string; period_end: string }) {
+    return data<{ adjustment: number; remaining_intervals: number; capped: boolean }>(
+      await post(`${BASE}/capital-items/${uuid}/dispose`, body));
+  },
+  async group(): Promise<VatGroupInfo> {
+    return data(await get(`${BASE}/group`));
+  },
+  async inviteGroupMember(member_name: string) {
+    return data<{ uuid: string; member_name: string; invite_code: string }>(
+      await post(`${BASE}/group/members`, { member_name }));
+  },
+  async removeGroupMember(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/group/members/${uuid}`, { params: withClient() });
+  },
+  async joinGroup(code: string) {
+    return data<{ member_name: string; status: string }>(await apiClient.post(`${BASE}/group/join`, { code }));
+  },
+  async ecSalesList(period_start: string, period_end: string): Promise<VatEcSalesList> {
+    return data(await get(`${BASE}/ec-sales-list`, { period_start, period_end }));
+  },
+  async downloadEcSalesList(period_start: string, period_end: string): Promise<void> {
+    const r = await get(`${BASE}/ec-sales-list`, { period_start, period_end, format: 'csv' }, { responseType: 'blob' });
+    const url = URL.createObjectURL(r.data as Blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `ec-sales-list-${period_end}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  },
+  async setInvoiceVatDetails(uuid: string, body: { customer_vat_number?: string; tax_point?: string }) {
+    return data(await apiClient.put(`${BASE}/invoices/${uuid}/vat-details`, body));
   },
   // Accountants (agents)
   async agentProfile(): Promise<{ arn: string } | null> {

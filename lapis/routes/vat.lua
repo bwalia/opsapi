@@ -57,6 +57,26 @@
     GET    /api/v2/vat/invoices/:uuid/check     what a valid VAT invoice must show and this one is
                                                  missing; VAT by rate; reverse-charge wording
 
+    Less common schemes (phase 10):
+    PUT    /api/v2/vat/attribution              partial exemption: how purchases are used
+                                                 { refs = ["t12","b3","e4"], attribution = taxable|exempt|residual }
+    GET    /api/v2/vat/partial-exemption/annual ?year_start&year_end  the annual adjustment (Notice 706)
+    POST   /api/v2/vat/partial-exemption/annual { year_start, year_end, period_start, period_end } put it on a return
+    GET    /api/v2/vat/capital-items            capital goods scheme items (Notice 706/2)
+    POST   /api/v2/vat/capital-items            { description, kind, cost_ex_vat, input_vat, original_use_pct,
+                                                  short_lease?, first_used_on? }
+    DELETE /api/v2/vat/capital-items/:uuid
+    POST   /api/v2/vat/capital-items/:uuid/adjust  { interval_no, use_pct, period_start, period_end }
+    POST   /api/v2/vat/capital-items/:uuid/dispose { disposed_on, intervals_used, sale_taxable, sale_output_vat?,
+                                                     period_start, period_end }
+    GET    /api/v2/vat/group                    VAT group members (representative) / the group this workspace is in
+    POST   /api/v2/vat/group/members            { member_name } -> invite_code for the member workspace
+    DELETE /api/v2/vat/group/members/:uuid
+    POST   /api/v2/vat/group/join               { code } this workspace joins a VAT group
+    GET    /api/v2/vat/ec-sales-list            ?period_start&period_end&format=json|csv  (Northern Ireland)
+    PUT    /api/v2/vat/invoices/:uuid/vat-details { customer_vat_number?, tax_point? }
+    Margin scheme: code second-hand stock MARGIN (global accounting, Notice 718).
+
     VAT management (phase 6):
     GET    /api/v2/vat/threshold                rolling 12-month taxable turnover vs the registration threshold
     GET    /api/v2/vat/reports                  ?from&to  VAT by code and supplier; reclaimable vs blocked
@@ -78,6 +98,7 @@ local VatAiQueries = require("queries.VatAiQueries")
 local VatFilingQueries = require("queries.VatFilingQueries")
 local VatManagementQueries = require("queries.VatManagementQueries")
 local VatAgentQueries = require("queries.VatAgentQueries")
+local VatSchemeQueries = require("queries.VatSchemeQueries")
 
 local function read_body(self)
     ngx.req.read_body()
@@ -493,4 +514,137 @@ return function(app)
         result.supplier_vrn = reg and reg.vrn or nil
         return { status = 200, json = { success = true, data = result } }
     end))
+
+    -- ---------------------------------------------------------------- schemes (phase 10)
+    local function ok_json(data, status) return { status = status or 200, json = { success = true, data = data } } end
+    local function result(row, msg, status, created)
+        if not row then return err(status or 400, msg) end
+        return ok_json(row, created and 201 or 200)
+    end
+
+    app:put("/api/v2/vat/attribution", authed(function(self)
+        local reg, owner, _, e = resolve(self, "update"); if e then return e end
+        return result(VatSchemeQueries.set_attribution(reg, owner, read_body(self)))
+    end))
+
+    app:get("/api/v2/vat/partial-exemption/annual", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        return result(VatSchemeQueries.annual(reg, self.params.year_start, self.params.year_end))
+    end))
+
+    app:post("/api/v2/vat/partial-exemption/annual", authed(function(self)
+        local reg, actor, e = with_registration(self, "create"); if e then return e end
+        local b = read_body(self)
+        local a, msg, status = VatSchemeQueries.annual(reg, b.year_start, b.year_end)
+        if not a then return err(status or 400, msg) end
+        if a.adjustment == 0 then return err(409, "There's no adjustment to make for that year") end
+        return result(VatReturnQueries.create_adjustment(reg, { period_start = b.period_start,
+            period_end = b.period_end, type = "pe_annual", vat = a.adjustment,
+            description = string.format("Partial exemption annual adjustment %s to %s (%d%%)", b.year_start,
+                b.year_end, a.annual_pct) }, actor))
+    end))
+
+    app:get("/api/v2/vat/capital-items", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        return ok_json(VatSchemeQueries.list_items(reg))
+    end))
+
+    app:post("/api/v2/vat/capital-items", authed(function(self)
+        local reg, actor, e = with_registration(self, "create"); if e then return e end
+        local row, msg, status = VatSchemeQueries.create_item(reg, read_body(self), actor)
+        return result(row, msg, status, true)
+    end))
+
+    app:delete("/api/v2/vat/capital-items/:uuid", authed(function(self)
+        local reg, _, e = with_registration(self, "delete"); if e then return e end
+        return result(VatSchemeQueries.delete_item(reg, self.params.uuid))
+    end))
+
+    app:post("/api/v2/vat/capital-items/:uuid/adjust", authed(function(self)
+        local reg, actor, e = with_registration(self, "create"); if e then return e end
+        local row, msg, status = VatSchemeQueries.adjust_item(reg, self.params.uuid, read_body(self), actor)
+        return result(row, msg, status, true)
+    end))
+
+    app:post("/api/v2/vat/capital-items/:uuid/dispose", authed(function(self)
+        local reg, actor, e = with_registration(self, "update"); if e then return e end
+        return result(VatSchemeQueries.dispose_item(reg, self.params.uuid, read_body(self), actor))
+    end))
+
+    app:get("/api/v2/vat/group", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        return result(VatSchemeQueries.group(reg))
+    end))
+
+    app:post("/api/v2/vat/group/members", authed(function(self)
+        local reg, actor, e = with_registration(self, "manage"); if e then return e end
+        local row, msg, status = VatSchemeQueries.invite_member(reg, read_body(self), actor)
+        return result(row, msg, status, true)
+    end))
+
+    app:delete("/api/v2/vat/group/members/:uuid", authed(function(self)
+        local reg, _, e = with_registration(self, "manage"); if e then return e end
+        return result(VatSchemeQueries.remove_member(reg, self.params.uuid))
+    end))
+
+    app:post("/api/v2/vat/group/join", authed(function(self)
+        if not NamespaceMiddleware.hasPermission(self, "vat", "manage") then
+            return err(403, "You don't have permission to manage this workspace's VAT")
+        end
+        local actor = user_pk(self)
+        if not actor then return err(401, "User not found") end
+        return result(VatSchemeQueries.join(self.namespace.id, read_body(self).code, actor))
+    end))
+
+    app:get("/api/v2/vat/ec-sales-list", authed(function(self)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local res, msg, status = VatSchemeQueries.ec_sales_list(reg, self.params.period_start, self.params.period_end)
+        if not res then return err(status or 400, msg) end
+        if self.params.format == "csv" then
+            ngx.header["Content-Disposition"] = string.format('attachment; filename="ec-sales-list-%s.csv"',
+                tostring(self.params.period_end):gsub("[^%d%-]", ""))
+            return { status = 200, content_type = "text/csv; charset=utf-8", layout = false,
+                require("lib.vat-schemes").ec_sales_csv(res) }
+        end
+        return ok_json(res)
+    end))
+
+    app:put("/api/v2/vat/invoices/:uuid/vat-details", authed(function(self)
+        if not NamespaceMiddleware.hasPermission(self, "invoices", "update") then
+            return err(403, "You don't have permission to change invoices")
+        end
+        local inv = db.query([[SELECT id, status FROM invoices WHERE uuid = ? AND namespace_id = ?
+            AND deleted_at IS NULL LIMIT 1]], self.params.uuid, self.namespace.id)[1]
+        if not inv then return err(404, "Invoice not found") end
+        local b, upd = read_body(self), {}
+        if b.customer_vat_number ~= nil then
+            local v = b.customer_vat_number
+            if v == "" or v == cjson.null then
+                upd.customer_vat_number = db.NULL
+            else
+                local cc, no = require("lib.vat-schemes").eu_vat_number(v)
+                if cc then
+                    upd.customer_vat_number = cc .. no
+                else
+                    local gb = VAT.valid_vrn(v)
+                    if not gb then return err(400, "That isn't a valid EU or UK VAT number") end
+                    upd.customer_vat_number = "GB" .. gb
+                end
+            end
+        end
+        if b.tax_point ~= nil then
+            if b.tax_point == "" or b.tax_point == cjson.null then
+                upd.tax_point = db.NULL
+            elseif type(b.tax_point) == "string" and b.tax_point:match("^%d%d%d%d%-%d%d%-%d%d$") then
+                upd.tax_point = b.tax_point
+            else
+                return err(400, "tax_point must be a date (YYYY-MM-DD)")
+            end
+        end
+        if not next(upd) then return err(400, "Nothing to change") end
+        upd.updated_at = db.raw("NOW()")
+        db.update("invoices", upd, { id = inv.id })
+        return ok_json(db.query("SELECT uuid, customer_vat_number, tax_point FROM invoices WHERE id = ?", inv.id)[1])
+    end))
+
 end
