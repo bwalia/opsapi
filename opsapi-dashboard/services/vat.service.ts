@@ -78,6 +78,19 @@ export interface VatReturnRow extends Boxes {
     vat_code?: string; net?: number; vat?: number; adjustment?: string }>>;
 }
 
+export interface VatThreshold {
+  turnover: number; threshold: number; pct: number; status: 'ok' | 'approaching' | 'over';
+  as_of: string; crossed_month?: string; register_by?: string;
+}
+
+export interface VatReport {
+  from: string; to: string;
+  totals: { output_vat: number; input_vat: number; reclaimable: number; blocked: number };
+  by_code: Array<{ vat_code: string; label?: string; lines: number; sales_net: number; purchases_net: number;
+    output_vat: number; input_vat: number; reclaimable: number; blocked: number }>;
+  top_suppliers: Array<{ supplier: string; spend: number; vat: number; lines: number }>;
+}
+
 export interface VatObligation { periodKey: string; start: string; end: string; due: string; status: 'O' | 'F';
   received?: string }
 
@@ -143,6 +156,23 @@ export const vatService = {
   },
   async hmrcReturn(period_key: string): Promise<Record<string, number | string>> {
     return data(await apiClient.get(`${BASE}/hmrc/returns/${encodeURIComponent(period_key)}`));
+  },
+  async threshold(): Promise<VatThreshold> {
+    return data(await apiClient.get(`${BASE}/threshold`));
+  },
+  async report(from: string, to: string): Promise<VatReport> {
+    return data(await apiClient.get(`${BASE}/reports`, { params: { from, to } }));
+  },
+  async penalties(): Promise<Record<string, unknown>> {
+    return data(await apiClient.get(`${BASE}/hmrc/penalties`));
+  },
+  async exportReturn(uuid: string): Promise<void> {
+    const r = await apiClient.get(`${BASE}/returns/${uuid}/export`, { responseType: 'blob' });
+    const name = /filename="([^"]+)"/.exec(String(r.headers['content-disposition'] || ''))?.[1] || 'vat-return.csv';
+    const url = URL.createObjectURL(r.data as Blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
   },
   async connectUrl(redirectUrl: string): Promise<string> {
     const r = await apiClient.get('/auth/hmrc/initiate',
