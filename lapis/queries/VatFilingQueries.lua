@@ -58,10 +58,12 @@ function Q.token(user_uuid)
     return token
 end
 
+-- err is our own text (it can hold the URL with the VAT number, socket errors): logged, never sent.
 local function hmrc_error(err, body, status)
     local msg, code = Client.explain(body)
+    ngx.log(ngx.WARN, "[vat-hmrc] ", tostring(err), " (HTTP ", tostring(status), ")")
     return { status = (status and status >= 400 and status < 500) and 422 or 502,
-        json = { success = false, error = msg, code = code, detail = err, hmrc = body } }
+        json = { success = false, error = msg, code = code, hmrc = body } }
 end
 
 function Q.obligations(reg, user_uuid, params)

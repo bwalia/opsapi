@@ -20,6 +20,7 @@ import { CheckCircle2, FileCheck2, Loader2, Receipt, RefreshCw, Sparkles, Upload
 import toast from 'react-hot-toast';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { confirmDialog } from '@/components/ui';
 import VatSchemesPanel from '@/components/vat/VatSchemesPanel';
 import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
@@ -27,6 +28,7 @@ import vatService, {
   setVatClient,
   setVatScope,
   type Boxes,
+  type VatAccountant,
   type VatCode,
   type VatObligation,
   type VatRegistration,
@@ -386,6 +388,40 @@ function ReportCard({ report }: { report: VatReport }) {
   );
 }
 
+// The accountants linked to this VAT: the business can see them and stop one acting for it.
+function Accountants() {
+  const [list, setList] = useState<VatAccountant[]>([]);
+  const load = useCallback(() => { vatService.accountants().then(setList).catch(() => undefined); }, []);
+  useEffect(load, [load]);
+  if (list.length === 0) return null;
+  const remove = async (a: VatAccountant) => {
+    if (!(await confirmDialog({ title: 'Stop this accountant working on your VAT?', danger: true, confirmText: 'Stop',
+      message: 'They will no longer see or file your VAT here. To end their authority at HMRC too, remove them '
+        + 'in your HMRC business tax account.' }))) return;
+    try {
+      await vatService.removeAccountant(a.uuid);
+      toast.success('They can no longer work on your VAT here');
+      load();
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not remove them'));
+    }
+  };
+  return (
+    <div className={card} data-testid="vat-accountants">
+      <p className="font-semibold text-secondary-900">Accountants who can work on your VAT</p>
+      <div className="mt-2 divide-y divide-secondary-100 text-sm">
+        {list.map((a) => (
+          <div key={a.uuid} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span>{[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || 'An accountant'} · agent {a.arn}
+              {' · '}{a.status === 'active' ? 'confirmed by HMRC' : 'waiting for you to accept at HMRC'}</span>
+            <button type="button" className="text-xs text-red-700 underline" onClick={() => remove(a)}>Stop</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function VatPage() {
   const params = useSearchParams();
   // An accountant opening a client's VAT (from Tax → VAT clients): every call carries it.
@@ -684,6 +720,8 @@ function VatPage() {
 
           {reg && <VatSchemesPanel reg={reg} workspace={workspace} period={period}
             onChanged={() => { if (draft) build(); }} />}
+
+          {!client && <Accountants />}
 
           {history.length > 0 && (
             <div className={card}>

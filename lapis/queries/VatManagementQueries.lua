@@ -58,13 +58,13 @@ function Q.export(reg, uuid, format)
         string.format("vat-return-%s-%s-to-%s.csv", reg.vrn, row.period_start, row.period_end)
 end
 
---- VAT by code and supplier for a person's coded lines in a date range.
-function Q.report(reg, user_id, from, to)
-    local rows = db.query([[SELECT transaction_type, vat_code, net_amount, vat_amount, vat_notional,
-            vat_reclaimable_pct, description, cleaned_merchant_name AS merchant
-        FROM tax_transactions
-        WHERE namespace_id = ? AND user_id = ? AND vat_code IS NOT NULL AND vat_code <> 'OUTSIDE'
-          AND transaction_date BETWEEN ? AND ?]], reg.namespace_id, user_id, from, to) or {}
+--- VAT by code and supplier for the business's coded lines in a date range.
+function Q.report(reg, from, to)
+    local src = VatReturnQueries.lines_from(reg)
+    local rows = src and db.query([[SELECT l.dir AS transaction_type, l.vat_code, l.net_amount, l.vat_amount,
+            l.vat_notional, l.vat_reclaimable_pct, l.description, l.merchant
+        FROM ]] .. src .. [[ WHERE l.vat_code IS NOT NULL AND l.vat_code <> 'OUTSIDE'
+          AND l.date BETWEEN ? AND ?]], from, to) or {}
     local lines = {}
     for _, r in ipairs(rows) do
         lines[#lines + 1] = { vat_code = r.vat_code,

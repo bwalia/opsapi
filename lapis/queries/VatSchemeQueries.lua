@@ -13,7 +13,7 @@ local VatReturnQueries = require("queries.VatReturnQueries")
 local Q = {}
 
 local function null(v) return v == nil or v == db.NULL or (ngx and v == ngx.null) end
-local function valid_date(s) return type(s) == "string" and s:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil end
+local valid_date = VAT.valid_date
 
 -- ---------------------------------------------------------------------------
 -- Partial exemption
@@ -22,8 +22,8 @@ local function valid_date(s) return type(s) == "string" and s:match("^%d%d%d%d%-
 Q.ATTRIBUTIONS = { taxable = true, exempt = true, residual = true }
 
 --- Say how purchases are used: { refs = {"t12", "b3", "e4"}, attribution }.
--- t = the owner's tax_transactions; b/e = the workspace's bank lines / expenses.
-function Q.set_attribution(reg, owner_user_id, body)
+-- t = the person's tax_transactions (their own registration); b/e = the workspace's bank lines / expenses.
+function Q.set_attribution(reg, body)
     body = body or {}
     local a = body.attribution
     if a == "" or a == cjson.null then a = nil end
@@ -39,7 +39,7 @@ function Q.set_attribution(reg, owner_user_id, body)
         local res
         if kind == "t" and not null(reg.user_id) then
             res = db.query([[UPDATE tax_transactions SET vat_attribution = ? WHERE id = ? AND namespace_id = ?
-                AND user_id = ?]], value, id, reg.namespace_id, owner_user_id)
+                AND user_id = ?]], value, id, reg.namespace_id, reg.user_id)
         elseif kind == "b" and null(reg.user_id) then
             res = db.query([[UPDATE accounting_bank_transactions SET vat_attribution = ? WHERE id = ?
                 AND namespace_id = ?]], value, id, reg.namespace_id)
@@ -111,7 +111,8 @@ function Q.list_items(reg)
     local items = db.query("SELECT * FROM vat_capital_items WHERE registration_id = ? ORDER BY id", reg.id) or {}
     for _, it in ipairs(items) do
         it.adjustments = db.query([[SELECT uuid, period_start, period_end, interval_no, vat, description
-            FROM vat_adjustments WHERE capital_item_id = ? ORDER BY interval_no, id]], it.id) or {}
+            FROM vat_adjustments WHERE capital_item_id = ? AND registration_id = ? ORDER BY interval_no, id]],
+            it.id, reg.id) or {}
         it.kind_label = (Schemes.CGS_KINDS[it.kind] or {}).label
     end
     return items
@@ -142,7 +143,8 @@ end
 function Q.delete_item(reg, uuid)
     local it, err, status = own_item(reg, uuid)
     if not it then return nil, err, status end
-    local used = db.query("SELECT 1 FROM vat_adjustments WHERE capital_item_id = ? LIMIT 1", it.id)
+    local used = db.query("SELECT 1 FROM vat_adjustments WHERE capital_item_id = ? AND registration_id = ? LIMIT 1",
+        it.id, reg.id)
     if used and #used > 0 then return nil, "This item has adjustments on returns; remove them first.", 409 end
     db.query("DELETE FROM vat_capital_items WHERE id = ?", it.id)
     return true
@@ -159,7 +161,8 @@ function Q.adjust_item(reg, uuid, f, actor_id)
         return nil, "interval_no must be 2–" .. tostring(it.intervals) .. " (the first interval is the original "
             .. "claim)", 400
     end
-    local dup = db.query("SELECT 1 FROM vat_adjustments WHERE capital_item_id = ? AND interval_no = ?", it.id, n)
+    local dup = db.query([[SELECT 1 FROM vat_adjustments WHERE capital_item_id = ? AND registration_id = ?
+        AND interval_no = ?]], it.id, reg.id, n)
     if dup and #dup > 0 then return nil, "That interval is already adjusted.", 409 end
     local use = tonumber(f.use_pct)
     if not use or use < 0 or use > 100 then return nil, "use_pct must be 0–100", 400 end
@@ -239,6 +242,14 @@ function Q.remove_member(reg, uuid)
     if not m then return nil, "Member not found", 404 end
     db.update("vat_group_members", { status = "removed", updated_at = db.raw("NOW()") }, { id = m.id })
     return true
+end
+
+--- A member workspace leaves its VAT group (the representative removes members instead).
+function Q.leave(namespace_id)
+    local r = db.query([[UPDATE vat_group_members SET status = 'removed', updated_at = NOW()
+        WHERE member_namespace_id = ? AND status = 'active' RETURNING id]], namespace_id)
+    if not r or #r == 0 then return nil, "This workspace isn't a member of a VAT group", 404 end
+    return { status = "removed" }
 end
 
 --- A workspace joins a group with the code its representative gave it.
