@@ -212,7 +212,7 @@ return {
             },
             {
                 key = "orders",
-                name = "Orders",
+                name = "Sales Orders",
                 icon = "ShoppingCart",
                 path = "/dashboard/orders",
                 module = "orders",
