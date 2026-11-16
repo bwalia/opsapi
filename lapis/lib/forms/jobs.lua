@@ -75,7 +75,7 @@ local function deliver(event)
     if not s or s.status == "spam" then return true end
 
     local NamespaceMail = require("helper.namespace-mail")
-    local mail_ok = NamespaceMail.smtp(s.namespace_id) ~= nil or require("helper.mail").isConfigured()
+    local mail_ok = NamespaceMail.canSend(s.namespace_id, "forms")
 
     local sent = decode(s.notifications, {})
     local settings = decode(s.settings, {})

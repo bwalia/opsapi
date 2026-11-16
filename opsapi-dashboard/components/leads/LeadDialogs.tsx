@@ -110,6 +110,56 @@ export function LogCallDialog({ lead, outcomes, onClose, onDone }: {
 }
 
 // ---------------------------------------------------------------------------
+// Email the lead (a question, a follow-up)
+// ---------------------------------------------------------------------------
+
+export function EmailLeadDialog({ lead, subject: draftSubject, body: draftBody, onClose, onDone }: {
+  lead: Lead; subject?: string; body?: string; onClose: () => void; onDone: (l: Lead) => void;
+}) {
+  const [subject, setSubject] = useState(draftSubject ?? '');
+  const [message, setMessage] = useState(draftBody ?? `Hi ${lead.first_name || 'there'},\n\n`);
+  const [ccMe, setCcMe] = useState(false);
+  const f = useForm<Awaited<ReturnType<typeof leadsService.email>>>();
+  const ready = subject.trim() !== '' && message.trim() !== '';
+  return (
+    <Modal isOpen onClose={onClose} size="lg" title={`Email ${fullName(lead)}`}
+      footer={<>
+        <Button variant="ghost" onClick={onClose} disabled={f.busy}>Cancel</Button>
+        <Button disabled={!ready} isLoading={f.busy} onClick={() => f.run(
+          () => leadsService.email(lead.uuid, { subject: subject.trim(), message, cc_me: ccMe }),
+          (r) => {
+            toast.success(r.account === 'platform' ? `Email sent to ${r.to}` : `Email sent to ${r.to} from ${r.account}`);
+            onDone(r.lead);
+          })}>Send email</Button>
+      </>}>
+      <div className="space-y-4">
+        <p className="text-sm text-secondary-600">
+          To <span className="font-medium text-secondary-900">{lead.email}</span>. Sent from the workspace&apos;s
+          Questions and follow-up email account (Workspace → Email) and saved on the lead&apos;s timeline. Replies go to that
+          account&apos;s reply-to address, or to you.
+        </p>
+        <div>
+          <label className={labelCls} htmlFor="lead-email-subject">Subject</label>
+          <input id="lead-email-subject" className={cn(field, 'mt-1')} value={subject} maxLength={200}
+            onChange={(e) => setSubject(e.target.value)} placeholder="A quick question about your enquiry" />
+          <FieldError message={f.errors.subject} />
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="lead-email-message">Message</label>
+          <textarea id="lead-email-message" rows={8} className={cn(field, 'mt-1')} value={message} maxLength={20000}
+            onChange={(e) => setMessage(e.target.value)} />
+          <FieldError message={f.errors.message} />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-secondary-700">
+          <input type="checkbox" checked={ccMe} onChange={(e) => setCcMe(e.target.checked)} />
+          Send me a copy
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Plan a step
 // ---------------------------------------------------------------------------
 

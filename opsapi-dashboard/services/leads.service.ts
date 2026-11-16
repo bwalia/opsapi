@@ -450,6 +450,9 @@ export const leadsService = {
     lost_reason?: string }) =>
     call<{ lead: Lead; next_step: unknown; suggestion?: { action: string; message: string } }>(
       apiClient.post(`${L}/${uuid}/calls`, body, JSON_BODY)),
+  /** Email the lead (a question, a follow-up) through the workspace's "Questions and follow-up" email account. */
+  email: (uuid: string, body: { subject: string; message: string; cc_me?: boolean }) =>
+    call<{ lead: Lead; to: string; account: string }>(apiClient.post(`${L}/${uuid}/email`, body, JSON_BODY)),
   planStep: (uuid: string, body: { type: string; due_at: string; note?: string; subject?: string }) =>
     call<Lead>(apiClient.post(`${L}/${uuid}/steps`, body, JSON_BODY)),
   finishStep: (uuid: string, activityUuid: string, status: 'completed' | 'cancelled', note?: string) =>

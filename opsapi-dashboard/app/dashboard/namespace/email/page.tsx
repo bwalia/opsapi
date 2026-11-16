@@ -3,192 +3,355 @@
 /**
  * Workspace → Email — /dashboard/namespace/email
  *
- * The workspace's own SMTP server (falls back to the platform's) and its
- * versions of the built-in emails. Templates use {{placeholders}}; every email
+ * The workspace's own SMTP accounts, which account sends which kind of email
+ * (leads, follow-ups, shop, invoices…; falls back to the default account, then
+ * the platform's server), and its versions of the built-in emails. Templates use {{placeholders}}; every email
  * has a default that "Reset" brings back.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Mail, RotateCcw, Send } from 'lucide-react';
+import { ArrowLeft, Mail, Pencil, Plus, RotateCcw, Send, Star, Trash2 } from 'lucide-react';
 import { Button, Card, ConfirmDialog, Input, Modal, Select, Switch, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError, Pill } from '@/components/field-service/shared';
 import { formatRelativeTime } from '@/lib/utils';
-import { namespaceMailService, type EmailTemplate, type MailSettings } from '@/services/namespace-mail.service';
+import {
+  namespaceMailService,
+  type EmailTemplate,
+  type MailAccount,
+  type MailAccountInput,
+  type MailAccountsOverview,
+  type MailSecurity,
+} from '@/services/namespace-mail.service';
 
-function SmtpCard({ editable }: { editable: boolean }) {
-  const [current, setCurrent] = useState<MailSettings | null>(null);
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('587');
-  const [security, setSecurity] = useState<'starttls' | 'ssl' | 'none'>('starttls');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [fromEmail, setFromEmail] = useState('');
-  const [fromName, setFromName] = useState('');
-  const [replyTo, setReplyTo] = useState('');
-  const [enabled, setEnabled] = useState(true);
+type AccountForm = {
+  name: string; host: string; port: string; security: MailSecurity; username: string; password: string;
+  fromEmail: string; fromName: string; replyTo: string; enabled: boolean; isDefault: boolean;
+};
+
+const blankForm = (first: boolean): AccountForm => ({
+  name: first ? 'Main' : '', host: '', port: '587', security: 'starttls', username: '', password: '',
+  fromEmail: '', fromName: '', replyTo: '', enabled: true, isDefault: first,
+});
+
+function AccountDialog({ account, first, onClose, onSaved }: {
+  account: MailAccount | 'new' | null; first: boolean; onClose: () => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState<AccountForm>(blankForm(first));
   const [saving, setSaving] = useState(false);
-  const [testTo, setTestTo] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [removeOpen, setRemoveOpen] = useState(false);
-
-  const fill = (m: MailSettings) => {
-    setCurrent(m);
-    setHost(m.host || '');
-    setPort(String(m.port || 587));
-    setSecurity(m.security || 'starttls');
-    setUsername(m.username || '');
-    setPassword('');
-    setFromEmail(m.from_email || '');
-    setFromName(m.from_name || '');
-    setReplyTo(m.reply_to || '');
-    setEnabled(m.enabled ?? true);
-  };
+  const editing = account && account !== 'new' ? account : null;
 
   useEffect(() => {
-    namespaceMailService.getSettings().then(fill).catch((err) => toast.error(apiError(err, 'Failed to load email settings')));
-  }, []);
+    if (!account) return;
+    if (account === 'new') return setForm(blankForm(first));
+    setForm({
+      name: account.name, host: account.host, port: String(account.port), security: account.security,
+      username: account.username || '', password: '', fromEmail: account.from_email, fromName: account.from_name || '',
+      replyTo: account.reply_to || '', enabled: account.enabled, isDefault: account.is_default,
+    });
+  }, [account, first]);
+
+  const set = <K extends keyof AccountForm>(k: K, v: AccountForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    const input: MailAccountInput = {
+      name: form.name.trim(), host: form.host.trim(), port: Number(form.port), security: form.security,
+      username: form.username.trim(), ...(form.password ? { password: form.password } : {}),
+      from_email: form.fromEmail.trim(), from_name: form.fromName.trim(), reply_to: form.replyTo.trim(),
+      enabled: form.enabled, ...(form.isDefault ? { is_default: true } : {}),
+    };
     try {
-      fill(
-        await namespaceMailService.saveSettings({
-          host: host.trim(),
-          port: Number(port),
-          security,
-          username: username.trim(),
-          ...(password ? { password } : {}),
-          from_email: fromEmail.trim(),
-          from_name: fromName.trim(),
-          reply_to: replyTo.trim(),
-          enabled,
-        })
-      );
-      toast.success('Email settings saved');
+      if (editing) await namespaceMailService.updateAccount(editing.uuid, input);
+      else await namespaceMailService.createAccount(input);
+      toast.success(editing ? 'Email account saved' : 'Email account added');
+      onSaved();
     } catch (err) {
-      toast.error(apiError(err, 'Could not save'));
+      toast.error(apiError(err, 'Could not save the email account'));
     } finally {
       setSaving(false);
     }
   };
 
-  const test = async () => {
-    setTesting(true);
-    try {
-      await namespaceMailService.test(testTo.trim());
-      toast.success(`Test email sent to ${testTo.trim()}`);
-    } catch (err) {
-      toast.error(apiError(err, 'The test email failed'));
-    } finally {
-      setTesting(false);
-      namespaceMailService.getSettings().then(fill).catch(() => undefined);
-    }
-  };
-
-  const remove = async () => {
-    try {
-      await namespaceMailService.removeSettings();
-      fill({ configured: false });
-      setRemoveOpen(false);
-      toast.success('Back to the platform email server');
-    } catch (err) {
-      toast.error(apiError(err, 'Could not remove'));
-    }
-  };
-
   return (
-    <Card className="shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-secondary-900">Email server (SMTP)</h2>
-          <p className="text-sm text-secondary-500">
-            Emails from this workspace (account links, licence keys) are sent through this server. Without one, the
-            platform&apos;s server is used.
-          </p>
-        </div>
-        {current?.configured && (
-          <Pill className={current.last_error ? 'bg-red-50 text-red-700' : current.last_tested_at ? 'bg-green-50 text-green-700' : 'bg-secondary-100 text-secondary-600'}>
-            {current.last_error ? 'Last test failed' : current.last_tested_at ? `Tested ${formatRelativeTime(current.last_tested_at)}` : 'Not tested'}
-          </Pill>
-        )}
-      </div>
-      {current?.last_error && (
-        <p className="mt-2 rounded-lg bg-red-50 p-2 text-sm text-red-700" role="alert">
-          {current.last_error}
-        </p>
-      )}
-      <form onSubmit={save} className="mt-4 space-y-4">
-        <fieldset disabled={!editable} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Server" value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.example.com" required />
+    <Modal isOpen={!!account} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'Add an email account'} size="2xl">
+      <form onSubmit={save} className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Input label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Sales, Support, Shop…"
+            helperText="Only you see this; it's how you pick the account below." required maxLength={80} />
+          <Input label="Server" value={form.host} onChange={(e) => set('host', e.target.value)} placeholder="smtp.example.com" required />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Port" type="number" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} required />
-            <Select label="Security" value={security} onChange={(e) => setSecurity(e.target.value as typeof security)}>
+            <Input label="Port" type="number" min={1} max={65535} value={form.port} onChange={(e) => set('port', e.target.value)} required />
+            <Select label="Security" value={form.security} onChange={(e) => set('security', e.target.value as MailSecurity)}>
               <option value="starttls">STARTTLS</option>
               <option value="ssl">SSL/TLS</option>
               <option value="none">None</option>
             </Select>
           </div>
-          <Input label="Username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-          <Input
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            placeholder={current?.has_password ? 'Saved — leave blank to keep' : ''}
-          />
-          <Input label="From address" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} placeholder="billing@example.com" required />
-          <Input label="From name" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Example Ltd" helperText="Billing emails use the app's display name." />
-          <Input label="Reply-to (optional)" type="email" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} />
+          <Input label="Username" value={form.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
+          <Input label="Password" type="password" value={form.password} onChange={(e) => set('password', e.target.value)}
+            autoComplete="new-password" placeholder={editing?.has_password ? 'Saved — leave blank to keep' : ''} />
+          <Input label="From address" type="email" value={form.fromEmail} onChange={(e) => set('fromEmail', e.target.value)}
+            placeholder="sales@example.com" required />
+          <Input label="From name" value={form.fromName} onChange={(e) => set('fromName', e.target.value)} placeholder="Example Ltd Sales" />
+          <Input label="Reply-to (optional)" type="email" value={form.replyTo} onChange={(e) => set('replyTo', e.target.value)} />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
             <div>
-              <p className="text-sm font-medium text-secondary-800">Use this server</p>
-              <p className="text-xs text-secondary-500">Turn off to fall back to the platform&apos;s server.</p>
+              <p className="text-sm font-medium text-secondary-800">Use this account</p>
+              <p className="text-xs text-secondary-500">Off: its emails go through the default instead.</p>
             </div>
-            <Switch checked={enabled} onChange={setEnabled} aria-label="Use this server" />
+            <Switch checked={form.enabled} onChange={(v) => set('enabled', v)} aria-label="Use this account" />
           </div>
-        </fieldset>
-        {editable && (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {current?.configured ? (
-              <Button type="button" variant="ghost" className="text-error-600" onClick={() => setRemoveOpen(true)}>
-                Remove
-              </Button>
-            ) : (
-              <span />
-            )}
-            <Button type="submit" isLoading={saving}>
-              Save
+          <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
+            <div>
+              <p className="text-sm font-medium text-secondary-800">Default account</p>
+              <p className="text-xs text-secondary-500">Sends every email not given another account.</p>
+            </div>
+            <Switch checked={form.isDefault} onChange={(v) => set('isDefault', v)} aria-label="Default account"
+              disabled={!!editing?.is_default} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" isLoading={saving}>{editing ? 'Save' : 'Add account'}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function accountStatus(a: MailAccount) {
+  if (!a.enabled) return { text: 'Off', cls: 'bg-secondary-100 text-secondary-600' };
+  if (a.last_error) return { text: 'Last test failed', cls: 'bg-red-50 text-red-700' };
+  if (a.last_tested_at) return { text: `Tested ${formatRelativeTime(a.last_tested_at)}`, cls: 'bg-green-50 text-green-700' };
+  return { text: 'Not tested', cls: 'bg-secondary-100 text-secondary-600' };
+}
+
+function MailAccounts({ editable }: { editable: boolean }) {
+  const [overview, setOverview] = useState<MailAccountsOverview | null>(null);
+  const [editing, setEditing] = useState<MailAccount | 'new' | null>(null);
+  const [testing, setTesting] = useState<MailAccount | null>(null);
+  const [testTo, setTestTo] = useState('');
+  const [sending, setSending] = useState(false);
+  const [removing, setRemoving] = useState<MailAccount | null>(null);
+  const [savingRoute, setSavingRoute] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    namespaceMailService.overview().then(setOverview).catch((err) => toast.error(apiError(err, 'Failed to load email accounts')));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const accounts = overview?.accounts ?? [];
+  const byUuid = new Map(accounts.map((a) => [a.uuid, a]));
+  const defaultAccount = accounts.find((a) => a.is_default);
+  const platform = overview?.platform;
+  const platformLabel = platform?.configured ? `Platform server (${platform.from_email})` : 'Platform server (not set up)';
+
+  const sendTest = async () => {
+    if (!testing) return;
+    setSending(true);
+    try {
+      await namespaceMailService.testAccount(testing.uuid, testTo.trim());
+      toast.success(`Test email sent to ${testTo.trim()} from ${testing.name}`);
+      setTesting(null);
+    } catch (err) {
+      toast.error(apiError(err, 'The test email failed'));
+    } finally {
+      setSending(false);
+      load();
+    }
+  };
+
+  const remove = async () => {
+    if (!removing) return;
+    try {
+      await namespaceMailService.deleteAccount(removing.uuid);
+      toast.success(`${removing.name} removed`);
+      setRemoving(null);
+      load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not remove'));
+    }
+  };
+
+  const makeDefault = async (a: MailAccount) => {
+    try {
+      await namespaceMailService.makeDefault(a.uuid);
+      toast.success(`${a.name} is now the default`);
+      load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not change the default'));
+    }
+  };
+
+  const route = async (key: string, uuid: string) => {
+    setSavingRoute(key);
+    try {
+      const routing = await namespaceMailService.saveRouting({ [key]: uuid || null });
+      setOverview((o) => (o ? { ...o, routing } : o));
+      load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not change the account'));
+    } finally {
+      setSavingRoute(null);
+    }
+  };
+
+  // What actually sends a purpose's email, for the hint under each row.
+  const effective = (key: string, uuid: string | null) => {
+    const chosen = uuid ? byUuid.get(uuid) : undefined;
+    if (chosen && chosen.enabled) return chosen.from_email;
+    if (key !== 'default' && defaultAccount?.enabled) return `${defaultAccount.from_email} (default)`;
+    return platform?.configured ? `${platform.from_email} (platform)` : 'nothing — no server is set up';
+  };
+
+  return (
+    <>
+      <Card className="shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold text-secondary-900">Email accounts (SMTP)</h2>
+            <p className="text-sm text-secondary-500">
+              Add a server for each address you send from — e.g. sales@ for new enquiries, support@ for questions to
+              customers. Without any, the platform&apos;s server is used.
+            </p>
+          </div>
+          {editable && (
+            <Button size="sm" onClick={() => setEditing('new')}>
+              <Plus className="w-4 h-4 mr-1" /> Add account
+            </Button>
+          )}
+        </div>
+        {!overview ? null : accounts.length === 0 ? (
+          <p className="mt-4 rounded-lg border border-dashed border-secondary-300 p-4 text-sm text-secondary-500">
+            No email accounts yet. Every email goes through the {platformLabel.charAt(0).toLowerCase() + platformLabel.slice(1)}.
+          </p>
+        ) : (
+          <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
+            {accounts.map((a) => {
+              const st = accountStatus(a);
+              return (
+                <li key={a.uuid} className="px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-2 font-medium text-secondary-900">
+                        {a.name}
+                        {a.is_default && <Pill className="bg-primary-50 text-primary-700">Default</Pill>}
+                        <Pill className={st.cls}>{st.text}</Pill>
+                      </p>
+                      <p className="truncate text-xs text-secondary-500">
+                        {a.from_name ? `${a.from_name} <${a.from_email}>` : a.from_email} · {a.host}:{a.port}
+                      </p>
+                    </div>
+                    {editable && (
+                      <div className="flex flex-wrap gap-2">
+                        {!a.is_default && (
+                          <Button size="sm" variant="ghost" onClick={() => makeDefault(a)}>
+                            <Star className="w-4 h-4 mr-1" /> Make default
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => { setTestTo(''); setTesting(a); }}>
+                          <Send className="w-4 h-4 mr-1" /> Test
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditing(a)}>
+                          <Pencil className="w-4 h-4 mr-1" /> Edit
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-error-600" onClick={() => setRemoving(a)} aria-label={`Remove ${a.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {a.last_error && (
+                    <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-700" role="alert">
+                      {a.last_error}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+
+      {overview && (
+        <Card className="shadow-sm">
+          <h2 className="text-base font-semibold text-secondary-900">Which account sends what</h2>
+          <p className="text-sm text-secondary-500">
+            Choose the account for each kind of email. &ldquo;Use the default&rdquo; sends it through the default
+            account; an account that&apos;s switched off falls back to the default too.
+          </p>
+          <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
+            {overview.routing.map((r) => (
+              <li key={r.key} className="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[1fr_260px] sm:items-center">
+                <div className="min-w-0">
+                  <p className="font-medium text-secondary-900">{r.name}</p>
+                  <p className="text-xs text-secondary-500">{r.description}</p>
+                  <p className="mt-0.5 text-xs text-secondary-400">Sent from {effective(r.key, r.account_uuid)}</p>
+                </div>
+                <Select
+                  aria-label={`Account for ${r.name}`}
+                  value={r.account_uuid || ''}
+                  disabled={!editable || savingRoute === r.key || (r.key === 'default' ? false : accounts.length === 0)}
+                  onChange={(e) => route(r.key, e.target.value)}
+                >
+                  <option value="">{r.key === 'default' ? platformLabel : 'Use the default'}</option>
+                  {accounts.map((a) => (
+                    <option key={a.uuid} value={a.uuid}>
+                      {a.name}{a.enabled ? '' : ' (off)'}
+                    </option>
+                  ))}
+                </Select>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <AccountDialog
+        account={editing}
+        first={accounts.length === 0}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          load();
+        }}
+      />
+      <Modal isOpen={!!testing} onClose={() => setTesting(null)} title={testing ? `Send a test from ${testing.name}` : ''} size="md">
+        <div className="space-y-4">
+          <Input label="Send a test email to" type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setTesting(null)}>Cancel</Button>
+            <Button type="button" onClick={sendTest} isLoading={sending} disabled={!testTo.trim()}>
+              <Send className="w-4 h-4 mr-1.5" /> Send test
             </Button>
           </div>
-        )}
-      </form>
-      {editable && current?.configured && (
-        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-secondary-100 pt-4">
-          <div className="flex-1 min-w-[220px]">
-            <Input label="Send a test email to" type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-          </div>
-          <Button type="button" variant="outline" onClick={test} isLoading={testing} disabled={!testTo.trim()}>
-            <Send className="w-4 h-4 mr-1.5" /> Send test
-          </Button>
         </div>
-      )}
+      </Modal>
       <ConfirmDialog
-        isOpen={removeOpen}
-        onClose={() => setRemoveOpen(false)}
+        isOpen={!!removing}
+        onClose={() => setRemoving(null)}
         onConfirm={remove}
-        title="Remove this email server?"
-        message="This workspace's emails will be sent through the platform's server again."
+        title={removing ? `Remove ${removing.name}?` : ''}
+        message={
+          removing?.is_default
+            ? 'This is the default account. Emails it sends will go through the platform’s server until you pick another default.'
+            : 'Emails sent through this account will go through the default account instead.'
+        }
         confirmText="Remove"
         variant="warning"
       />
-    </Card>
+    </>
   );
 }
 
@@ -332,8 +495,8 @@ function EmailContent() {
       <Link href="/dashboard/namespace" className="inline-flex items-center text-sm text-secondary-500 hover:text-secondary-800">
         <ArrowLeft className="w-4 h-4 mr-1" /> My workspace
       </Link>
-      <PageHeader title="Email" description="Your own email server and the emails this workspace sends." icon={<Mail className="w-5 h-5" />} />
-      <SmtpCard editable={editable} />
+      <PageHeader title="Email" description="Your own email accounts, which one sends what, and the emails this workspace sends." icon={<Mail className="w-5 h-5" />} />
+      <MailAccounts editable={editable} />
       {templates.length > 0 && (
         <Card className="shadow-sm">
           <h2 className="text-base font-semibold text-secondary-900">Templates</h2>

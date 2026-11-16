@@ -303,7 +303,7 @@ return function(app)
             if type(user_email) ~= "string" or not user_email:match(EMAIL) then user_email = nil end
             local mail = { to = to, subject = subject, html = html, attachments = attachments,
                 from_name = company, reply_to = user_email }
-            local smtp = NamespaceMail.smtp(self.namespace.id)
+            local smtp = NamespaceMail.smtp(self.namespace.id, "invoices")
             if smtp then
                 if not NamespaceMail.hostOk(smtp.host) then
                     return fail("This workspace's mail server address isn't allowed - check Settings > Email",

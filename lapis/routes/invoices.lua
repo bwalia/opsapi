@@ -469,7 +469,7 @@ return function(app)
             filename = filename:gsub("[^%w%.%-_ ]", "_"):sub(1, 120)
 
             -- The workspace's own SMTP when it has one (its address, its reputation).
-            local smtp = require("helper.namespace-mail").smtp(self.namespace.id)
+            local smtp = require("helper.namespace-mail").smtp(self.namespace.id, "invoices")
             local ok, mail_err = Mail.send({
                 to = to,
                 subject = subject:sub(1, 200),

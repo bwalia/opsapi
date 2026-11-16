@@ -161,7 +161,7 @@ end
 local function email_configured(ns_id)
     local Mail = require("helper.mail")
     local NamespaceMail = require("helper.namespace-mail")
-    return NamespaceMail.smtp(ns_id) ~= nil or Mail.isConfigured()
+    return NamespaceMail.smtp(ns_id, "shop_orders") ~= nil or Mail.isConfigured()
 end
 
 function Q.presets(ns_id, uuid, user_id)

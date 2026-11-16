@@ -238,6 +238,7 @@ local function staff_alert(o, req, cur)
             company_name = U.nz(customer.company) or req.address.company, source = "shop_delivery_change", notes = notes,
         }, {
             to = require("queries.ShopSettingsQueries").orderAlertEmail(o.namespace_id),
+            purpose = "shop_orders",
             staff = {
                 subject = "Delivery change request: " .. o.order_number .. " (" .. tostring(name) .. ")",
                 headline = "Delivery change requested",
@@ -401,7 +402,7 @@ local function notify_customer(o, r, decision)
         if not to then return false end
         local Mail = require("helper.mail")
         local NamespaceMail = require("helper.namespace-mail")
-        local smtp = NamespaceMail.smtp(o.namespace_id)
+        local smtp = NamespaceMail.smtp(o.namespace_id, "shop_orders")
         if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
         if not smtp and not Mail.isConfigured() then return false end
         local addr = U.dec(r.requested_address, {})

@@ -274,7 +274,7 @@ function FormQueries.get(namespace_id, uuid)
     end
     out.published_keys = setmetatable(keys, cjson.array_mt)
     -- Where this workspace's emails go out from (the Settings tab says so).
-    local smtp_ok, smtp = pcall(require("helper.namespace-mail").smtp, namespace_id)
+    local smtp_ok, smtp = pcall(require("helper.namespace-mail").smtp, namespace_id, "forms")
     out.email_via = (smtp_ok and smtp) and "workspace"
         or (require("helper.mail").isConfigured() and "platform" or "none")
     out.can_hide_branding = require("lib.forms.limits").of(namespace_id).hide_branding == true
