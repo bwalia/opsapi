@@ -132,7 +132,7 @@ function Q.import(reg, actor, xml, record)
     local doc = store(reg.namespace_id, {
         registration_id = reg.id, direction = "in", format = Einvoice.FORMAT, document_id = doc_id:sub(1, 255),
         invoice_number = d.invoice_number and tostring(d.invoice_number):sub(1, 255) or db.NULL,
-        issue_date = (d.issue_date and d.issue_date:match("^%d%d%d%d%-%d%d%-%d%d$")) and d.issue_date or db.NULL,
+        issue_date = VAT.valid_date(d.issue_date) and d.issue_date or db.NULL,
         party_name = d.supplier and d.supplier.name and tostring(d.supplier.name):sub(1, 255) or db.NULL,
         party_vat_id = supplier_vat and tostring(supplier_vat):sub(1, 30) or db.NULL,
         currency = d.currency and tostring(d.currency):sub(1, 3) or db.NULL,

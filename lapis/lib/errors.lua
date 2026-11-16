@@ -162,6 +162,8 @@ local INPUT_ERRORS = {
         "A value in the request isn't one of the allowed values." },
     { "out of range for type", 400, "VALIDATION_400", "out_of_range",
         "A number in the request is out of range." },
+    { "date/time field value out of range", 400, "VALIDATION_400", "out_of_range",
+        "A date in the request isn't a real date." },
     { "value too long for type", 422, "VALIDATION_422", "too_long",
         "A value in the request is too long." },
     { "null value in column \"([%w_]+)\"[^\n]*violates not%-null constraint", 422, "VALIDATION_422", "required",

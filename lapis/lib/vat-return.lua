@@ -357,7 +357,9 @@ function Return.build(lines, reg, opts)
 
     local boxes = {
         box1 = round2(b[1]), box2 = round2(b[2]),
-        box6 = whole(b[6]), box7 = whole(b[7]), box8 = whole(b[8]), box9 = whole(b[9]),
+        -- Round to the penny first: a float sum of 100.00 can be 99.999999...
+        box6 = whole(round2(b[6])), box7 = whole(round2(b[7])), box8 = whole(round2(b[8])),
+        box9 = whole(round2(b[9])),
         box4 = round2(b[4]),
     }
     boxes.box3 = round2(boxes.box1 + boxes.box2)
