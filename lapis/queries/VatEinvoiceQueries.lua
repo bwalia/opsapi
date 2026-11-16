@@ -26,11 +26,20 @@ local function has_column(tbl, col)
     return r and #r > 0
 end
 
--- Keep a document; the same (direction, document id) replaces the earlier copy.
+-- Documents belong to one VAT registration (a person's own, or the workspace's): sole
+-- traders share a workspace, so the workspace alone never scopes them.
+local function reg_id(reg)
+    local id = type(reg) == "table" and reg.id or reg
+    return tonumber(id) or 0
+end
+
+-- Keep a document; the same (registration, direction, document id) replaces the earlier copy.
 local function store(namespace_id, row)
     row.namespace_id = namespace_id
-    local prev = db.query([[SELECT id, status FROM vat_einvoice_documents WHERE namespace_id = ? AND direction = ?
-        AND document_id = ? LIMIT 1]], namespace_id, row.direction, row.document_id)[1]
+    local rid = reg_id(row.registration_id)
+    local prev = db.query([[SELECT id, status FROM vat_einvoice_documents WHERE namespace_id = ?
+        AND COALESCE(registration_id, 0) = ? AND direction = ? AND document_id = ? LIMIT 1]],
+        namespace_id, rid, row.direction, row.document_id)[1]
     if prev then
         if prev.status == "recorded" then row.status = nil end -- never undo "recorded"
         row.updated_at = db.raw("NOW()")
@@ -38,8 +47,9 @@ local function store(namespace_id, row)
         return db.query("SELECT * FROM vat_einvoice_documents WHERE id = ?", prev.id)[1], true
     end
     db.insert("vat_einvoice_documents", row)
-    return db.query([[SELECT * FROM vat_einvoice_documents WHERE namespace_id = ? AND direction = ?
-        AND document_id = ?]], namespace_id, row.direction, row.document_id)[1], false
+    return db.query([[SELECT * FROM vat_einvoice_documents WHERE namespace_id = ?
+        AND COALESCE(registration_id, 0) = ? AND direction = ? AND document_id = ?]],
+        namespace_id, rid, row.direction, row.document_id)[1], false
 end
 
 local function summary(res)
@@ -117,7 +127,8 @@ function Q.import(reg, actor, xml, record)
     local doc_id = tostring(supplier_vat or (d.supplier and d.supplier.name) or "?") .. ":"
         .. tostring(d.invoice_number or "?")
     local existing = db.query([[SELECT uuid, status FROM vat_einvoice_documents WHERE namespace_id = ?
-        AND direction = 'in' AND document_id = ? LIMIT 1]], reg.namespace_id, doc_id)[1]
+        AND COALESCE(registration_id, 0) = ? AND direction = 'in' AND document_id = ? LIMIT 1]],
+        reg.namespace_id, reg_id(reg), doc_id)[1]
     local doc = store(reg.namespace_id, {
         registration_id = reg.id, direction = "in", format = Einvoice.FORMAT, document_id = doc_id:sub(1, 255),
         invoice_number = d.invoice_number and tostring(d.invoice_number):sub(1, 255) or db.NULL,
@@ -179,8 +190,9 @@ end
 -- Documents
 -- ---------------------------------------------------------------------------
 
-function Q.list(namespace_id, direction)
+function Q.list(namespace_id, reg, direction)
     local where = "namespace_id = " .. db.escape_literal(namespace_id)
+        .. " AND registration_id = " .. db.escape_literal(reg_id(reg))
     if direction == "in" or direction == "out" then
         where = where .. " AND direction = " .. db.escape_literal(direction)
     end
@@ -189,9 +201,9 @@ function Q.list(namespace_id, direction)
         FROM vat_einvoice_documents WHERE ]] .. where .. [[ ORDER BY updated_at DESC LIMIT 200]]) or {}
 end
 
-function Q.get(namespace_id, uuid)
-    local r = db.query("SELECT * FROM vat_einvoice_documents WHERE uuid = ? AND namespace_id = ? LIMIT 1",
-        uuid, namespace_id)[1]
+function Q.get(namespace_id, reg, uuid)
+    local r = db.query([[SELECT * FROM vat_einvoice_documents WHERE uuid = ? AND namespace_id = ?
+        AND registration_id = ? LIMIT 1]], uuid, namespace_id, reg_id(reg))[1]
     if not r then return nil, "E-invoice not found", 404 end
     r.validation = decode(r.validation)
     r.expense_ids = decode(r.expense_ids)

@@ -2163,6 +2163,7 @@ local _migrations = {
     ['zz_vat_schemes_4_group_members'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_schemes, 4),
     ['zz_vat_schemes_5_customer_vat_number'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_schemes, 5),
     ['zz_vat_schemes_6_einvoice_documents'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_einvoice, 1),
+    ['zz_vat_schemes_7_einvoice_per_registration'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_einvoice, 2),
     -- My Income (dynamic income types). Sorts after every numbered income_types seed
     -- (717+, dividend/interest/overseas/pension panels) and the 'tax' parent menu.
     ['zz_tax_my_income_1_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 1),

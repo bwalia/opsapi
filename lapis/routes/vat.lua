@@ -696,14 +696,14 @@ return function(app)
     end))
 
     app:get("/api/v2/vat/einvoice/documents", authed(function(self)
-        local _, _, e = with_registration(self, "read"); if e then return e end
+        local reg, _, e = with_registration(self, "read"); if e then return e end
         return { status = 200, json = { success = true,
-            data = VatEinvoiceQueries.list(self.namespace.id, self.params.direction) } }
+            data = VatEinvoiceQueries.list(self.namespace.id, reg, self.params.direction) } }
     end))
 
     app:get("/api/v2/vat/einvoice/documents/:uuid", authed(function(self)
-        local _, _, e = with_registration(self, "read"); if e then return e end
-        local row, msg, status = VatEinvoiceQueries.get(self.namespace.id, self.params.uuid)
+        local reg, _, e = with_registration(self, "read"); if e then return e end
+        local row, msg, status = VatEinvoiceQueries.get(self.namespace.id, reg, self.params.uuid)
         if not row then return err(status or 404, msg) end
         return { status = 200, json = { success = true, data = row } }
     end))
