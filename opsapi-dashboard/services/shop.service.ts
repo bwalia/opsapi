@@ -13,6 +13,7 @@ import type {
   ShopCategoryInput,
   ShopChatSession,
   ShopCredit,
+  ShopBelowCostReport,
   ShopPriceChange,
   ShopPriceChangeStatus,
   ShopSupplier,
@@ -566,6 +567,12 @@ export const shopService = {
 
   async decidePriceChange(uuid: string, approve: boolean): Promise<ShopPriceChange> {
     return unwrap<ShopPriceChange>(await apiClient.post(`${BASE}/price-changes/${uuid}/${approve ? 'approve' : 'reject'}`, {}, JSON_BODY));
+  },
+
+  /** Products/options priced below cost, products with no known cost, and (optionally) open quotes below cost. */
+  async getBelowCostReport(includeQuotes = false): Promise<ShopBelowCostReport> {
+    const qs = buildQueryString({ include_quotes: includeQuotes ? 'true' : undefined });
+    return unwrap<ShopBelowCostReport>(await apiClient.get(`${BASE}/pricing/below-cost${qs}`));
   },
 
   // ---------------- Credits (loyalty) ----------------

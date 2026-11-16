@@ -20,6 +20,7 @@ local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
 local Rules = require("lib.shop-quote-rules")
 local Deal = require("queries.ShopDealQueries")
+local Cost = require("queries.ShopCostQueries")
 
 local ShopQuoteQueries = {}
 
@@ -230,7 +231,8 @@ local function valid_until_of(v)
 end
 
 --- Price an array of {product_slug, qty, selections, price_override_minor?}.
--- opts.admin allows overrides, inactive products and invalid configurations.
+-- opts.admin allows overrides, inactive products and invalid configurations, but never a price below cost:
+-- staff get 422 BELOW_COST (item, price, cost), a customer 409 PRICE_CHECK_REQUIRED (and staff an alert).
 -- Returns (lines, err).
 function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
     opts = opts or {}
@@ -238,7 +240,7 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
         return nil, U.err(400, "VALIDATION_ERROR", "at least one line is required")
     end
     if #inputs > 100 then return nil, U.err(400, "VALIDATION_ERROR", "too many lines") end
-    local lines = {}
+    local lines, below = {}, {}
     for i, l in ipairs(inputs) do
         if type(l) ~= "table" then return nil, U.err(400, "VALIDATION_ERROR", "line " .. i .. " is invalid") end
         if opts.admin and (l.custom == true or (not U.nz(l.product_slug) and U.nz(l.name))) then
@@ -249,19 +251,42 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
             goto continue
         end
         do
-        local priced, bundle_or_err = Catalog.priceRequest(ns_id, l, { admin = opts.admin })
+        local priced, bundle_or_err, _, cost = Catalog.priceRequest(ns_id, l, { admin = opts.admin })
         if not priced then return nil, bundle_or_err end
-        if not priced.valid and not opts.admin then
+        local override = opts.admin and U.nz(l.price_override_minor) ~= nil and U.int(l.price_override_minor, nil) or nil
+        -- An unpriced quote_only line (no override) has no price to check yet.
+        local unit = override or priced.unit_price_minor
+        local unpriced = priced.price_mode == "quote_only" and override == nil
+        if not unpriced and Pricing.below_cost(unit, cost) then
+            local p = bundle_or_err.product
+            below[#below + 1] = { line_index = i, line_uuid = U.nz(l.uuid), product_id = p.id, product_uuid = p.uuid,
+                product_name = p.name, sku = p.sku, qty = priced.qty, unit_price_minor = unit,
+                unit_cost_minor = cost.unit_cost_minor }
+        end
+        if not priced.valid and not opts.admin and not (cost and cost.below_cost) then
             return nil, U.err(422, "INVALID_CONFIGURATION", "Line " .. i .. " has an invalid configuration",
                 { violations = priced.violations, line_index = i })
         end
         local line = Catalog.lineSnapshot(bundle_or_err, priced, U.nz(l.uuid))
-        if opts.admin and U.nz(l.price_override_minor) ~= nil and U.int(l.price_override_minor, nil) then
-            line = Pricing.apply_override(line, l.price_override_minor)
+        if override then
+            line = Pricing.apply_override(line, override)
+            -- the staff price is what counts: drop the list price's below_cost flag when it clears the cost
+            if cost and cost.below_cost and not Pricing.below_cost(override, cost) then
+                local kept = {}
+                for _, v in ipairs(line.violations or {}) do
+                    if v.rule ~= "below_cost" then kept[#kept + 1] = v end
+                end
+                line.violations = U.arr(kept)
+                line.valid = #kept == 0
+            end
         end
         lines[#lines + 1] = line
         end
         ::continue::
+    end
+    if #below > 0 then
+        if opts.admin then return nil, Cost.adminError(below) end
+        return nil, Cost.refuse(ns_id, below, "quote")
     end
     return lines
 end
@@ -411,6 +436,8 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
         if not cart then return nil, U.err(404, "CART_NOT_FOUND", "Cart not found") end
         local view = Cart.view(ns_id, cart)
         if #view.lines == 0 then return nil, U.err(400, "EMPTY_CART", "The cart is empty") end
+        local below = Cost.checkLines(ns_id, view.lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "quote") end
         for i, l in ipairs(view.lines) do
             if not l.valid then
                 return nil, U.err(422, "INVALID_CONFIGURATION", "Line " .. i .. " has an invalid configuration",

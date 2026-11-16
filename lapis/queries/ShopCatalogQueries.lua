@@ -19,6 +19,7 @@ local U = require("lib.shop-util")
 local Pricing = require("lib.shop-pricing")
 local Stock = require("queries.ShopStockQueries")
 local Insights = require("queries.ShopInsightsQueries")
+local Cost = require("lib.shop-cost")
 
 local ShopCatalogQueries = {}
 
@@ -60,6 +61,15 @@ local OPTION_PRICE_SQL = [[
 local OPTION_FOLLOWS_SQL = [[
     (cp.id IS NOT NULL AND cp.price_mode <> 'quote_only' AND cp.base_price_minor > 0)
 ]]
+
+-- Costs (pence ex VAT, lib/shop-cost.lua). Staff-only: never selected into PRODUCT_COLS or any public shape.
+-- A product costs its linked supplier item's cost, else its manual cost_minor (NULL = unknown).
+-- An option costs its component product's cost, else its own cost_minor.
+-- Aliases: p = product, si = p's supplier item; o = option, cp = component, csi = cp's supplier item.
+local PRODUCT_COST_SQL = "COALESCE(si.cost_minor, p.cost_minor)"
+local OPTION_COST_SQL = "COALESCE(csi.cost_minor, cp.cost_minor, o.cost_minor)"
+ShopCatalogQueries.PRODUCT_COST_SQL = PRODUCT_COST_SQL
+ShopCatalogQueries.OPTION_COST_SQL = OPTION_COST_SQL
 
 -- ---------------------------------------------------------------------------
 -- members' early access (shop_products.public_launch_at)
@@ -180,6 +190,14 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
     local p = rows[1]
     if not p then return nil end
     norm_product(p)
+    local c = db.query([[
+        SELECT p.cost_minor AS manual_cost_minor, si.cost_minor AS supplier_cost_minor
+          FROM shop_products p LEFT JOIN shop_supplier_items si ON si.id = p.supplier_item_id
+         WHERE p.id = ?
+    ]], p.id)[1] or {}
+    p.manual_cost_minor = tonumber(c.manual_cost_minor)
+    p.supplier_cost_minor = tonumber(c.supplier_cost_minor)
+    p.cost_minor = Cost.effective(p.supplier_cost_minor, p.manual_cost_minor)
 
     local groups = db.query([[
         SELECT id, uuid, code, name, description, selection, required, min_qty, max_qty, sort_order, is_active
@@ -192,10 +210,13 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
                o.stock_qty, o.max_qty, o.is_default, o.is_active, o.sort_order, o.attributes::text AS attributes,
                cp.uuid AS component_uuid, cp.sku AS component_sku, cp.name AS component_name,
                cp.allow_backorder AS component_allow_backorder, cp.lead_time_days AS component_lead_time_days,
-               cp.status AS component_status
+               cp.status AS component_status,
+               ]] .. OPTION_COST_SQL .. [[ AS cost_minor, o.cost_minor AS manual_cost_minor,
+               COALESCE(csi.cost_minor, cp.cost_minor) AS component_cost_minor
           FROM shop_options o
           JOIN shop_option_groups g ON g.id = o.group_id
           LEFT JOIN shop_products cp ON cp.id = o.component_product_id
+          LEFT JOIN shop_supplier_items csi ON csi.id = cp.supplier_item_id
          WHERE g.product_id = ?
          ORDER BY o.sort_order, o.id
     ]], p.id)
@@ -229,6 +250,9 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
         o.price_delta_minor = tonumber(o.price_delta_minor) or 0
         o.stored_price_delta_minor = tonumber(o.stored_price_delta_minor) or 0
         o.price_follows_component = o.price_follows_component == true
+        o.cost_minor = tonumber(o.cost_minor)
+        o.manual_cost_minor = tonumber(o.manual_cost_minor)
+        o.component_cost_minor = tonumber(o.component_cost_minor)
         if U.nz(o.component_product_id) then
             local a = pav[o.component_product_id]
             o.available = a and a.available or 0
@@ -281,15 +305,17 @@ function ShopCatalogQueries.priceBundle(bundle, selections, qty)
         price_verified = p.price_verified == true,
         available = p.available, stock_key = p.stock_key,
         allow_backorder = p.allow_backorder ~= false, lead_time_days = tonumber(p.lead_time_days) or 10,
+        cost_minor = p.cost_minor,
     }
-    local priced, demand = Pricing.price(product, bundle.groups, bundle.rules, selections, qty)
+    local priced, demand, cost = Pricing.price(product, bundle.groups, bundle.rules, selections, qty)
     -- JSON shaping
     priced.breakdown = U.arr(priced.breakdown)
     for _, v in ipairs(priced.violations) do v.groups = U.arr(v.groups) end
     priced.violations = U.arr(priced.violations)
     priced.availability.shortages = U.arr(priced.availability.shortages)
     for g, list in pairs(priced.selections) do priced.selections[g] = U.arr(list) end
-    return priced, demand
+    -- cost (third value) is staff-only: callers must never put it in a customer response or snapshot
+    return priced, demand, cost
 end
 
 --- Line snapshot = Priced + {uuid, product_uuid, product_name, sku, image}.
@@ -306,7 +332,7 @@ function ShopCatalogQueries.lineSnapshot(bundle, priced, line_uuid)
 end
 
 --- Price a {product_slug, qty, selections} request for a namespace.
--- Returns (priced, bundle, demand) or (nil, err).
+-- Returns (priced, bundle, demand, cost) or (nil, err). cost is staff-only (see priceBundle).
 function ShopCatalogQueries.priceRequest(ns_id, req, opts)
     opts = opts or {}
     if type(req) ~= "table" or not U.nz(req.product_slug) then
@@ -322,8 +348,8 @@ function ShopCatalogQueries.priceRequest(ns_id, req, opts)
     if selections ~= nil and type(selections) ~= "table" then
         return nil, U.err(400, "VALIDATION_ERROR", "selections must be an object")
     end
-    local priced, demand = ShopCatalogQueries.priceBundle(bundle, selections, qty)
-    return priced, bundle, demand
+    local priced, demand, cost = ShopCatalogQueries.priceBundle(bundle, selections, qty)
+    return priced, bundle, demand, cost
 end
 
 --- Product(full) shape.
@@ -643,6 +669,11 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
         public_launch_at = p.public_launch_at or U.null,
         pricing_source = p.pricing_source or "manual",
         margin_pct = tonumber(p.margin_pct) or U.null,
+        -- costs (staff only): manual cost, the linked supplier item's cost, and the one that counts
+        cost_minor = p.manual_cost_minor or U.null,
+        supplier_cost_minor = p.supplier_cost_minor or U.null,
+        effective_cost_minor = p.cost_minor or U.null,
+        cost_source = (p.supplier_cost_minor and "supplier") or (p.manual_cost_minor and "manual") or U.null,
         category = U.nz(p.category_uuid) and { uuid = p.category_uuid, slug = p.category_slug,
             name = p.category_name } or U.null,
         from_price_minor = Pricing.from_price(p, (function()
@@ -669,6 +700,10 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
                 price_delta_minor = o.price_delta_minor,
                 stored_price_delta_minor = o.stored_price_delta_minor,
                 price_follows_component = o.price_follows_component,
+                -- cost of one unit (staff only): the component product's when it has one, else cost_minor
+                cost_minor = o.manual_cost_minor or U.null,
+                effective_cost_minor = o.cost_minor or U.null,
+                cost_source = (o.component_cost_minor and "component") or (o.manual_cost_minor and "option") or U.null,
                 stock_qty = U.nz(o.stock_qty) and tonumber(o.stock_qty) or U.null,
                 component_product = U.nz(o.component_product_id) and {
                     uuid = o.component_uuid, sku = o.component_sku, name = o.component_name } or U.null,
@@ -781,6 +816,8 @@ local function validate_product_doc(doc, existing)
         if not m or m < -50 or m > 500 then return "margin_pct must be between -50 and 500" end
     end
     if doc.base_price_minor ~= nil and not U.int(doc.base_price_minor, nil) then return "base_price_minor must be an integer" end
+    local _, _, cerr = Cost.parse(doc.cost_minor, cjson.null)
+    if cerr then return cerr end
     if doc.option_groups ~= nil and type(doc.option_groups) ~= "table" then return "option_groups must be an array" end
     if doc.rules ~= nil and type(doc.rules) ~= "table" then return "rules must be an array" end
     for _, g in ipairs(type(doc.option_groups) == "table" and doc.option_groups or {}) do
@@ -790,6 +827,8 @@ local function validate_product_doc(doc, existing)
         end
         for _, o in ipairs(type(g.options) == "table" and g.options or {}) do
             if type(o) ~= "table" or not U.nz(o.code) then return "every option in group " .. g.code .. " needs a code" end
+            local _, _, oerr = Cost.parse(o.cost_minor, cjson.null)
+            if oerr then return "option " .. g.code .. "." .. tostring(o.code) .. ": " .. oerr end
         end
     end
     for _, r in ipairs(type(doc.rules) == "table" and doc.rules or {}) do
@@ -850,6 +889,9 @@ local function save_groups(ns_id, product_id, groups_doc, keep_option_stock, kee
                 attributes = jsonb(type(o.attributes) == "table" and o.attributes or nil, {}),
                 updated_at = db.raw("NOW()"),
             }
+            -- cost_minor: absent = unchanged (partial update), null = cleared (validated in validate_product_doc)
+            local ckind, cval = Cost.parse(o.cost_minor, cjson.null)
+            if ckind == "set" then ofields.cost_minor = cval elseif ckind == "clear" then ofields.cost_minor = db.NULL end
             local oex = db.query("SELECT id FROM shop_options WHERE group_id = ? AND code = ?", gid, o.code)[1]
             local oid
             if oex then
@@ -925,6 +967,14 @@ local function save_rules(product_id, rules_doc)
     end
 end
 
+--- Below-cost problems with a product and its active options as stored now (lib/shop-cost.lua check_product).
+-- Returns a list (empty when fine).
+function ShopCatalogQueries.belowCost(ns_id, product_id)
+    local b = ShopCatalogQueries.loadBundle(ns_id, { id = product_id })
+    if not b then return {} end
+    return Cost.check_product(b.product, b.groups)
+end
+
 --- Create or update a product document (transactional).
 -- opts.uuid      update this product (PUT); otherwise upsert by sku
 -- opts.user_id   for stock movement attribution
@@ -986,6 +1036,10 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
         -- validated in validate_product_doc
         if doc.pricing_source ~= nil then fields.pricing_source = doc.pricing_source end
         if doc.margin_pct ~= nil then fields.margin_pct = tonumber(doc.margin_pct) or db.NULL end
+        do
+            local ckind, cval = Cost.parse(doc.cost_minor, cjson.null)
+            if ckind == "set" then fields.cost_minor = cval elseif ckind == "clear" then fields.cost_minor = db.NULL end
+        end
         if doc.public_launch_at ~= nil then
             -- null/"" = launched for everyone; otherwise an ISO timestamp (members see it early_access_hours sooner)
             fields.public_launch_at = U.nz(doc.public_launch_at) and tostring(doc.public_launch_at) or db.NULL
@@ -1048,6 +1102,11 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
         end
         if type(doc.rules) == "table" then
             save_rules(product_id, doc.rules)
+        end
+        -- Never below cost (hard rule, no override): the saved product and its options, as they now stand.
+        local below = ShopCatalogQueries.belowCost(ns_id, product_id)
+        if #below > 0 then
+            return nil, U.err(422, "BELOW_COST", Cost.summary(below), { items = U.arr(below) })
         end
         Insights.snapshotPrices(ns_id, { product_id })
         local uuid = db.query("SELECT uuid FROM shop_products WHERE id = ?", product_id)[1].uuid
