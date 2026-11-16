@@ -82,6 +82,6 @@ autoscaling:
 # Plain, non-secret env for this release (templates/deployment.yaml → extraEnv).
 extraEnv:
   # OpsAPI's own Ollama copies on the Mac Studio (devops/ollama-host): the gateway's /opsapi rule checks the
-  # same signed key (OLLAMA_API_KEY in Vault) and fails over copy A -> copy B -> the shared Ollama.
+  # same signed key (OLLAMA_API_KEY in Vault) and shares requests between copy A and copy B (shared Ollama last).
   # Overrides OLLAMA_URL in Vault.
   OLLAMA_URL: "https://ollama.workstation.co.uk/opsapi"
