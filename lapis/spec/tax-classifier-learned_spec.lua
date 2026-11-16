@@ -4,8 +4,9 @@
 
     Checks that a payee confirmed in an earlier year is classified the same way without a
     model call, that ambiguous or new payees still go to the model, that the large-amount
-    check accepts a payee seen before at a similar size, and that similar-example lookup
-    never runs without a namespace.
+    check accepts a payee seen before at a similar size, that bank wording with no payee
+    ("FASTER PAYMENT RECEIVED") or a single confirmation is never learned, and that
+    similar-example lookup is limited to the taxpayer (namespace AND user).
 
     Standalone: run in the API image from the repo root:
         docker run --rm -v "$PWD:/w" -w /w bwalia/opsapi:latest \
@@ -50,6 +51,14 @@ check("references and months are ignored",
 check("same payee, different month, same key",
     C.learn_key("KESTREL COFFEE CO QTR RENT JUN 24") == C.learn_key("KESTREL COFFEE CO QTR RENT SEP 25"))
 check("too short to learn", C.learn_key("12 / 4") == nil)
+-- Bank wording with no payee must never become a key (#916): after a few unnamed
+-- credits were confirmed as rent, every later unnamed credit was filed as rent at 0.97.
+for _, d in ipairs({ "FASTER PAYMENT RECEIVED", "DIRECT DEBIT", "CHQ", "BGC CREDIT REF 1234", "TFR FROM A/C 1234",
+    "STANDING ORDER", "CASH DEPOSIT", "TRANSFER TO SAVINGS", "LOAN", "REFUND", "Mr J" }) do
+    check("no payee in '" .. d .. "': not learned", C.learn_key(d) == nil, C.learn_key(d))
+end
+check("a named payee among bank wording is learned",
+    C.learn_key("FASTER PAYMENT RECEIVED J SMITH") == "faster payment received j smith")
 check("tax year from a date (before 6 April)", C._uk_tax_year("2025-04-05") == "2024-25")
 check("tax year from a date (6 April on)", C._uk_tax_year("2025-04-06") == "2025-26")
 
@@ -76,6 +85,15 @@ check("rent remittance learned as rental income",
 check("direction is part of the key", mem and mem["hartwell lettings rent remittance|D"] == nil)
 check("ambiguous payee is not learned", mem and mem["clearview windows ltd|D"] == nil)
 check("nothing to learn from nothing", C.build_learned_memory({}) == nil)
+check("one confirmation is not enough to learn a payee", C.build_learned_memory({
+    { description = "ACME CONSULTING", transaction_type = "CREDIT", category = "sales_income", amount = 900,
+      transaction_date = "2024-07-01" } }) == nil)
+local unnamed = {}
+for m = 1, 6 do
+    unnamed[m] = { description = "FASTER PAYMENT RECEIVED REF " .. m, transaction_type = "CREDIT",
+        category = "rental_income", amount = 1200, transaction_date = string.format("2024-%02d-01", m + 3) }
+end
+check("unnamed credits confirmed as rent teach nothing", C.build_learned_memory(unnamed) == nil)
 
 print("== matching")
 local valid = { rental_income = true, transfer = true, repairs_property = true }
@@ -114,11 +132,19 @@ check("no namespace: no similar-example lookup", embed_calls == 0, embed_calls)
 
 opts.namespace_id = 7
 C.classify_transaction({ description = "SPARKWELL ELECTRICAL", amount = 300, transaction_type = "DEBIT" }, opts)
+check("namespace without a user: no similar-example lookup", embed_calls == 0, embed_calls)
+
+-- Self sign-ups share one namespace: the examples (descriptions go into the prompt)
+-- must be the taxpayer's own, not other people's in the same namespace (#916).
+opts.user_id = 42
+C.classify_transaction({ description = "SPARKWELL ELECTRICAL", amount = 300, transaction_type = "DEBIT" }, opts)
 local scoped = false
 for _, q in ipairs(queries) do
-    if q:find("classification_training_data", 1, true) and q:find("namespace_id = 7", 1, true) then scoped = true end
+    if q:find("classification_training_data", 1, true) and q:find("namespace_id = 7 AND user_id = 42", 1, true) then
+        scoped = true
+    end
 end
-check("similar-example lookup is limited to the namespace", embed_calls == 1 and scoped)
+check("similar-example lookup is limited to the user in the namespace", embed_calls == 1 and scoped)
 
 print(failures == 0 and "\nall passed" or ("\n" .. failures .. " failed"))
 os.exit(failures == 0 and 0 or 1)

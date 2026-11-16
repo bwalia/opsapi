@@ -139,16 +139,18 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Query pgvector for similar transactions
-function Classifier.rag_lookup(embedding, limit, threshold, namespace_id)
+function Classifier.rag_lookup(embedding, limit, threshold, namespace_id, user_id)
     limit = limit or 5
     threshold = threshold or 0.7
 
     if not embedding or #embedding == 0 then
         return {}
     end
-    -- Past examples belong to one firm: never search another tenant's transactions.
-    namespace_id = tonumber(namespace_id)
-    if not namespace_id then
+    -- Past examples are one taxpayer's own: their descriptions go into the prompt, and
+    -- self sign-ups share one namespace, so the namespace alone would show the model
+    -- other people's transactions. Never search without both.
+    namespace_id, user_id = tonumber(namespace_id), tonumber(user_id)
+    if not namespace_id or not user_id then
         return {}
     end
 
@@ -166,7 +168,7 @@ function Classifier.rag_lookup(embedding, limit, threshold, namespace_id)
                 1 - (embedding <=> '%s'::vector) as similarity,
                 CASE WHEN source = 'accountant_correction' THEN 1.25 ELSE 1.1 END as weight
          FROM classification_training_data
-         WHERE embedding IS NOT NULL AND namespace_id = %d
+         WHERE embedding IS NOT NULL AND namespace_id = %d AND user_id = %d
          ORDER BY embedding <=> '%s'::vector
          LIMIT %d)
         UNION ALL
@@ -180,7 +182,7 @@ function Classifier.rag_lookup(embedding, limit, threshold, namespace_id)
          LIMIT %d)
         ORDER BY similarity DESC
         LIMIT %d
-    ]], vec_literal, namespace_id, vec_literal, limit, vec_literal, vec_literal, limit, limit)
+    ]], vec_literal, namespace_id, user_id, vec_literal, limit, vec_literal, vec_literal, limit, limit)
 
     local ok, results = pcall(db.query, "SELECT * FROM (" .. sql .. ") combined")
     if not ok or not results then
@@ -342,17 +344,35 @@ local MONTH_WORDS = {
     august = true, september = true, october = true, november = true, december = true,
 }
 
---- A payee key that survives references, dates and amounts in the bank description.
+-- Bank wording that says how money moved, not who paid. A description made only of
+-- these ("FASTER PAYMENT RECEIVED", "DIRECT DEBIT", "CHQ") names no payee: learning it
+-- would file every later unnamed credit (a loan, a refund, a transfer) the same way.
+local GENERIC_WORDS = {}
+for w in ([[faster payment payments pymt pmt fp fpi fpo received receipt credit credits cr debit debits dr
+    direct dd standing order so sto transfer transfers tfr trf xfer from to by via ref reference bank giro bgc
+    bacs chaps chq cheque cheques deposit deposited cash atm withdrawal online mobile internet banking
+    transaction card contactless pos purchase inward outward incoming outgoing paid pay payee in out the and
+    of for a an account acc acct ac savings current interest charge charges fee fees refund loan money
+    mr mrs ms miss]]):gmatch("%a+") do
+    GENERIC_WORDS[w] = true
+end
+-- Confirmed rows a payee needs before it is learned (one confirmation can be a one-off).
+local MIN_LEARNED_ROWS = 2
+
+--- A payee key that survives references, dates and amounts in the bank description,
+-- or nil when the description names no payee (only generic bank wording).
 -- @param description string
 -- @return string|nil
 function Classifier.learn_key(description)
-    local words = {}
+    local words, named = {}, false
     for w in tostring(description or ""):lower():gsub("[^%a]+", " "):gmatch("%S+") do
-        if not MONTH_WORDS[w] then words[#words + 1] = w end
+        if not MONTH_WORDS[w] then
+            words[#words + 1] = w
+            if #w >= 3 and not GENERIC_WORDS[w] then named = true end
+        end
     end
-    local key = table.concat(words, " ")
-    if #key < 3 then return nil end
-    return key
+    if not named then return nil end
+    return table.concat(words, " ")
 end
 
 --- UK tax year ("2024-25") for an ISO date, or nil.
@@ -366,7 +386,7 @@ end
 Classifier._uk_tax_year = uk_tax_year
 
 --- Build the memory from past rows (pure: no DB). Only unambiguous payees are kept:
--- at least 80% of the past rows for a payee agree on one category.
+-- at least MIN_LEARNED_ROWS past rows, and 80% of them, agree on one category.
 -- @param rows table  { description, transaction_type, category, hmrc_category, amount, transaction_date }
 -- @return table|nil memory keyed by "<payee key>|C" or "|D"
 function Classifier.build_learned_memory(rows)
@@ -396,7 +416,7 @@ function Classifier.build_learned_memory(rows)
         for cat, n in pairs(e.counts) do
             if n > best_n or (n == best_n and best and cat < best) then best, best_n = cat, n end
         end
-        if best and best_n / e.n >= 0.8 then
+        if best and best_n >= MIN_LEARNED_ROWS and best_n / e.n >= 0.8 then
             local years = {}
             for y in pairs(e.years) do years[#years + 1] = y end
             table.sort(years)
@@ -563,13 +583,13 @@ function Classifier.classify_transaction(transaction, opts)
             reasoning = "Matched a known-merchant rule.", classified_by = "rule_engine" }
     else
         -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
-        local embedding_result = opts.namespace_id and LLMClient.generate_embedding({
+        local embedding_result = opts.namespace_id and opts.user_id and LLMClient.generate_embedding({
             text = cleaned,
             provider = opts.llm_provider,
             trace_id = opts.trace_id,
         })
         if embedding_result and embedding_result.embedding then
-            rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6, opts.namespace_id)
+            rag_results = Classifier.rag_lookup(embedding_result.embedding, 5, 0.6, opts.namespace_id, opts.user_id)
         end
 
         -- Build few-shot examples from RAG
