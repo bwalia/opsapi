@@ -36,8 +36,9 @@ The app refuses to start unless `HMRC_ENVIRONMENT=sandbox`. The password is show
 | POST | `/hmrc-test-users/api/test-users` | `{"service_names": [...]}` (optional) → 201 with the credentials |
 | GET | `/healthz` | liveness/readiness |
 
-The POST is limited per IP (`RATE_LIMIT_PER_HOUR`, default 20) because every test
-user is created with OpsAPI's HMRC application.
+The POST is limited per client address (`RATE_LIMIT_PER_HOUR`, default 20) because every
+test user is created with OpsAPI's HMRC application. The address is the one the ingress
+added to `X-Forwarded-For` (`TRUSTED_PROXY_HOPS` from the right), never one the caller sent.
 
 ## Environment
 
@@ -46,7 +47,9 @@ user is created with OpsAPI's HMRC application.
 | `HMRC_CLIENT_ID`, `HMRC_CLIENT_SECRET` | HMRC sandbox application |
 | `HMRC_ENVIRONMENT` | must be `sandbox` |
 | `ROOT_PATH` | path prefix it is served under (chart: `/hmrc-test-users`) |
-| `ACCESS_PASSWORD` | optional HTTP Basic password for the page and API |
+| `ACCESS_PASSWORD` | HTTP Basic password for the page and API. **Required**: the app won't start without it (the chart won't deploy without `hmrcTestUsers.accessSecret`) |
+| `ALLOW_NO_PASSWORD` | `true` only to run it on your own machine without a password |
+| `TRUSTED_PROXY_HOPS` | proxies in front that append to `X-Forwarded-For` (default 1, the ingress) |
 | `RATE_LIMIT_PER_HOUR` | default 20 |
 | `OPSAPI_UI_URL` | optional link back to File My Tax |
 
@@ -55,6 +58,12 @@ user is created with OpsAPI's HMRC application.
 ```bash
 cd sidecars/hmrc-test-users
 pip install -r requirements-dev.txt && python -m pytest -q tests
-HMRC_CLIENT_ID=... HMRC_CLIENT_SECRET=... ROOT_PATH=/hmrc-test-users \
+HMRC_CLIENT_ID=... HMRC_CLIENT_SECRET=... ROOT_PATH=/hmrc-test-users ALLOW_NO_PASSWORD=true \
   uvicorn app.main:app --port 8080     # http://localhost:8080/hmrc-test-users/
 ```
+
+## Deploying a new build
+
+On `main` the workflow pushes `bwalia/opsapi-hmrc-test-users:<git sha>` and prints that tag.
+Put it in `values-workstation-int.yaml` (`hmrcTestUsers.image.tag`) in a PR: the chart only
+runs pinned builds, so a deploy is reproducible.

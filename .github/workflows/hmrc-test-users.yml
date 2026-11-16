@@ -51,18 +51,9 @@ jobs:
             bwalia/opsapi-hmrc-test-users:latest
             bwalia/opsapi-hmrc-test-users:${{ github.sha }}
 
-      - name: Restart the int pod onto the new image
-        env:
-          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+      - name: Say which tag to pin
         run: |
-          [ -n "$KUBECONFIG_BASE64" ] || { echo "::warning::no KUBE_CONFIG_DATA_K3S; image pushed, pod not restarted"; exit 0; }
-          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
-          export KUBECONFIG=$PWD/kubeconfig
-          # The Deployment exists once the chart is deployed with hmrcTestUsers.enabled.
-          if kubectl -n int get deploy/workstation-opsapi-hmrc-test-users >/dev/null 2>&1; then
-            kubectl -n int rollout restart deploy/workstation-opsapi-hmrc-test-users
-            kubectl -n int rollout status deploy/workstation-opsapi-hmrc-test-users --timeout=180s
-          else
-            echo "Deployment not there yet: it starts with the next opsapi deploy."
-          fi
-          rm -f kubeconfig
+          # The chart runs the tag pinned in values-workstation-int.yaml (hmrcTestUsers.image.tag),
+          # so a deploy is reproducible and helm never swaps the image underneath us. To ship
+          # this build, set that tag to the line below in a PR.
+          echo "::notice::Built bwalia/opsapi-hmrc-test-users:${{ github.sha }} — pin it in values-workstation-int.yaml (hmrcTestUsers.image.tag) to deploy it."

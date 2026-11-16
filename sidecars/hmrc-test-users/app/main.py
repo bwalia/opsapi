@@ -74,7 +74,13 @@ class Settings:
         root = os.getenv("ROOT_PATH", "").strip("/")
         self.prefix = "/" + root if root else ""
         self.access_password = os.getenv("ACCESS_PASSWORD", "")
+        # Only for running it on your own machine: without a password anyone who can reach
+        # the page could mint sandbox taxpayers with this release's HMRC application.
+        self.allow_no_password = os.getenv("ALLOW_NO_PASSWORD", "").strip().lower() == "true"
         self.rate_limit = int(os.getenv("RATE_LIMIT_PER_HOUR", "20"))
+        # Proxies in front of the app that append to X-Forwarded-For (the chart's ingress);
+        # the client address is the entry they added, never one the caller sent.
+        self.trusted_proxy_hops = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
         self.opsapi_ui_url = os.getenv("OPSAPI_UI_URL", "").rstrip("/")
 
 
@@ -83,6 +89,8 @@ def create_app(settings: Settings | None = None, transport: httpx.BaseTransport 
     if settings.environment != "sandbox":
         # Test users only exist in HMRC's sandbox; never point this at live HMRC.
         raise RuntimeError("HMRC_ENVIRONMENT must be 'sandbox' for the test-user generator")
+    if not settings.access_password and not settings.allow_no_password:
+        raise RuntimeError("ACCESS_PASSWORD is required (set ALLOW_NO_PASSWORD=true only on your own machine)")
 
     app = FastAPI(title="HMRC sandbox test users", docs_url=None, redoc_url=None, openapi_url=None)
     router = APIRouter(prefix=settings.prefix)
@@ -129,10 +137,22 @@ def create_app(settings: Settings | None = None, transport: httpx.BaseTransport 
         raise HTTPException(401, "Sign in to use the test-user generator",
                             headers={"WWW-Authenticate": 'Basic realm="HMRC test users"'})
 
+    def client_ip(request: Request) -> str:
+        # The LEFT of X-Forwarded-For is whatever the caller sent; only the entries our own
+        # proxies appended (the right-most trusted_proxy_hops) can be believed.
+        peer = request.client.host if request.client else "?"
+        hops = settings.trusted_proxy_hops
+        chain = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if hops == 0 or len(chain) < hops:
+            return peer
+        return chain[-hops]
+
     def check_rate(request: Request) -> None:
-        ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-              or (request.client.host if request.client else "?"))
+        ip = client_ip(request)
         now = time.time()
+        if len(hits) > 10000:  # bounded memory: drop addresses with no recent requests
+            for k in [k for k, v in hits.items() if not v or now - v[-1] > 3600]:
+                del hits[k]
         q = hits[ip]
         while q and now - q[0] > 3600:
             q.popleft()
