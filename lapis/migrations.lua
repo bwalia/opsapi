@@ -2173,6 +2173,11 @@ local _migrations = {
     ['zz_tax_my_income_4_seed'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 4),
     ['zz_tax_my_income_5_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 5),
     ['zz_tax_my_income_6_menu'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_my_income_dynamic, 6),
+    -- Step 4 again: its first run missed the built-in types where Config-as-Code keeps
+    -- them in the tax-copilot namespace (994_cmi_ns_cleanup_to_tax_copilot). Fills only
+    -- empty forms, so it is a no-op where step 4 already did its job.
+    ['zz_tax_my_income_7_seed_shared_catalogue'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT,
+        tax_my_income_dynamic, 4),
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),

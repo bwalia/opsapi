@@ -14,7 +14,11 @@
       * compute_full's new pension / other income / tax-at-source inputs;
       * the agent's income types come from the table (legacy keys still work);
       * TaxIncomeQueries scopes every user query by namespace_id AND user_id, and a
-        workspace edit of a system type writes an override, never the shared row.
+        workspace edit of a system type writes an override, never the shared row;
+      * a built-in type is "system" by its key, not by namespace_id NULL/0: on diy the
+        Config-as-Code catalogue lives in the tax-copilot namespace (#885);
+      * a removed property/job leaves the estimate; a duplicate create is a 409;
+        linked-form fields are validated (both admin APIs).
 
     Standalone (no DB / nginx): lapis.db, resty.http and helper.global are stubbed.
         docker run --rm -v "$PWD:/repo" -w /repo bwalia/opsapi-base:latest \
@@ -223,6 +227,28 @@ for _, r in ipairs(other) do if r.income_type_key == "salary" then hidden = fals
 check("a namespace can hide a system type for itself", hidden)
 check("custom keys are namespaced", IncomeTypes.custom_key(7, "crypto") == "ns7_crypto")
 
+-- #885: where Config-as-Code keeps the catalogue in the tax-copilot namespace (diy:
+-- 994_cmi_ns_cleanup_to_tax_copilot, config/registry.lua), those rows are still the
+-- shared catalogue — for every workspace, tax-copilot included.
+local cmi = {
+    { id = 11, income_type_key = "dividends", display_name = "Dividends", display_order = 1, is_active = true,
+        namespace_id = 3 },
+    { id = 12, income_type_key = "ns3_crypto", display_name = "TC's own", display_order = 2, is_active = true,
+        namespace_id = 3 },
+}
+check("a catalogue row owned by tax-copilot is a system row", IncomeTypes.is_system(cmi[1]))
+check("tax-copilot's own type is not", not IncomeTypes.is_system(cmi[2]))
+check("NULL / 0 rows are system", IncomeTypes.is_system({ income_type_key = "salary" })
+    and IncomeTypes.is_system({ income_type_key = "salary", namespace_id = 0 }))
+local for7 = IncomeTypes.resolve(cmi, {}, 7)
+check("another workspace sees the tax-copilot catalogue, not tax-copilot's own types",
+    #for7 == 1 and for7[1].income_type_key == "dividends" and for7[1].origin == "system")
+local for3 = IncomeTypes.resolve(cmi, { { namespace_id = 3, income_type_id = 11, display_name = "Divs" } }, 3)
+check("for tax-copilot itself it is still system (edits are overrides)",
+    for3[1].origin == "system" and for3[1].display_name == "Divs" and for3[2].origin == "custom")
+check("the SQL test matches", IncomeTypes.system_sql("it")
+    == "(COALESCE(it.namespace_id, 0) = 0 OR NOT starts_with(it.income_type_key, 'ns' || it.namespace_id || '_'))")
+
 -- ============================================================================
 print("status + progress")
 -- ============================================================================
@@ -397,7 +423,7 @@ check("upsert writes the caller's namespace + user", q and q.args[2] == 7 and q.
 Q.types_for(7)
 q = last("FROM income_types")
 check("catalogue read = system rows + this namespace only",
-    q and q.sql:find("COALESCE%(namespace_id, 0%) = 0 OR namespace_id = %?") and q.args[1] == 7)
+    q and q.sql:find(IncomeTypes.system_sql() .. " OR namespace_id = ?", 1, true) and q.args[1] == 7)
 
 -- workspace edit of a system type → override row, not the shared catalogue row
 responders = {
@@ -415,6 +441,53 @@ check("workspace edit writes this namespace's override", wrote_override ~= nil
 queries = {}
 Q.update_type(7, "rental", { display_name = "Rental (all)" }, "global")
 check("platform-default edit updates the shared row", last("UPDATE income_types SET") ~= nil)
+-- tax-copilot's admins editing a catalogue row Config-as-Code put in their namespace
+responders = {
+    { "SELECT * FROM income_types WHERE income_type_key", function()
+        return { { id = 11, income_type_key = "dividends", namespace_id = 3 } }
+    end },
+}
+queries = {}
+Q.update_type(3, "dividends", { display_name = "Divs" }, "namespace")
+check("tax-copilot admins can't edit the shared catalogue row", last("UPDATE income_types SET") == nil
+    and last("UPDATE income_type_namespace_overrides SET") ~= nil)
+responders = {}
+
+print("queries: smaller #885 fixes")
+responders = { { "INSERT INTO income_types", function() return {} end } }
+local made, cerr, cstatus = Q.create_custom(7, { key = "crypto", display_name = "Crypto", display_order = 10 })
+check("a create that loses the race is a 409, not a 500", made == nil and cstatus == 409, cerr)
+check("the insert can't throw on a duplicate", last("INSERT INTO income_types").sql
+    :find("ON CONFLICT (income_type_key) DO NOTHING", 1, true) ~= nil)
+responders = {
+    { "FROM income_types", function()
+        return { { id = 1, income_type_key = "rental", namespace_id = NULL, is_active = true,
+            field_schema = seeded.rental.field_schema, estimator_mapping = seeded.rental.estimator_mapping,
+            entity_type = "property" } }
+    end },
+    { "FROM user_profile_entities", function() return { { uuid = "p1", entity_type = "property" } } end },
+    { "FROM tax_income_records", function()
+        return {
+            { income_type_key = "rental", entity_uuid = "p1", status = "done", figures = { rents = 12000 } },
+            { income_type_key = "rental", entity_uuid = "p-removed", status = "done", figures = { rents = 9000 } },
+        }
+    end },
+}
+local inp = Q.estimator_inputs(42, "2025-26", 7)
+check("a removed property's figures leave the estimate", near(inp.inputs.property_rents, 12000),
+    inp.inputs.property_rents)
+responders = {}
+check("admin linked-form fields: a non-http link is refused", not IncomeTypes.validate_definition(
+    { linked_form_weblink = "javascript:alert(1)" }, { current = seeded.rental }))
+check("admin linked-form fields: a non-text title is refused", not IncomeTypes.validate_definition(
+    { linked_form_title = { "x" } }, { current = seeded.rental }))
+local ITQ0 = require("queries.IncomeTypeQueries")
+local _, lerr, lstatus = ITQ0.create({ income_type_key = "x", display_name = "X",
+    linked_form_weblink = "javascript:alert(1)" })
+check("diy admin create refuses a non-http link (400)", lstatus == 400, lerr)
+responders = { { "SELECT id FROM income_types WHERE uuid", function() return { { id = 1 } } end } }
+_, lerr, lstatus = ITQ0.update("uuid-1", { linked_form_description = { bad = true } })
+check("diy admin update refuses a non-text description (400)", lstatus == 400, lerr)
 responders = {}
 
 -- diy-facing catalogue reads stay system-only
@@ -426,6 +499,10 @@ check("diy dropdown excludes workspaces' own types", q and q.sql:find("COALESCE%
 ITQ.manual_entry_keys()
 q = last("FROM income_types")
 check("diy validation excludes workspaces' own types", q and q.sql:find("COALESCE%(namespace_id, 0%) = 0"))
+check("diy catalogue still shows the tax-copilot-owned built-ins", q and q.sql:find(IncomeTypes.system_sql(), 1, true))
+ITQ.admin_list({})
+q = last("FROM income_types")
+check("diy admin list uses the same test", q and q.sql:find(IncomeTypes.system_sql("it"), 1, true))
 
 print(failures == 0 and "all passed" or (failures .. " failed"))
 os.exit(failures == 0 and 0 or 1)
