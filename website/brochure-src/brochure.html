@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>AI tax filing – recorded scenarios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  :root {
+    --ink: #12161a; --paper: #f7f6f2; --viridian: #0a7a57; --mint: #3dd69e;
+    --muted: #4c5652; --line: #dedcd4; --raised: #ffffff; --tint: #e9f3ee;
+    --night: #12161a; --night-text: #f1f2ee; --night-muted: #b0b7b4;
+    --display: "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif;
+    --body: "Instrument Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--body); font-size: 9.6pt; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a { color: var(--viridian); text-decoration: none; }
+  .page { width: 210mm; height: 297mm; padding: 16mm 16mm 14mm; position: relative;
+    page-break-after: always; overflow: hidden; display: flex; flex-direction: column; }
+  .page:last-child { page-break-after: auto; }
+  .eyebrow { font-family: var(--mono); font-size: 7.6pt; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--viridian); font-weight: 500; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .runhead { display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 5mm; border-bottom: 1px solid var(--line); margin-bottom: 7mm; }
+  .runhead img { height: 6.2mm; width: auto; }
+  .runhead span { font-family: var(--mono); font-size: 7.4pt; color: var(--muted); }
+  .foot { margin-top: auto; padding-top: 4mm; border-top: 1px solid var(--line); display: flex;
+    justify-content: space-between; font-family: var(--mono); font-size: 7pt; color: var(--muted); }
+
+  /* cover */
+  .cover { background: var(--night); color: var(--night-text); padding: 18mm; }
+  .cover .logo { height: 9mm; width: auto; align-self: flex-start; }
+  .cover .hero { margin-top: 44mm; }
+  .cover .eyebrow { color: var(--mint); }
+  .cover h1 { font-size: 34pt; line-height: 1.06; margin: 5mm 0 7mm; font-weight: 700; max-width: 160mm; }
+  .cover .lede { font-size: 12.5pt; line-height: 1.5; color: var(--night-muted); max-width: 150mm; }
+  .cover .lede b { color: var(--night-text); font-weight: 500; }
+  .grid9 { position: absolute; right: 18mm; top: 18mm; }
+  .cover .list { margin-top: 16mm; display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 8mm; max-width: 170mm; }
+  .cover .list div { border-top: 1px solid #2a3035; padding-top: 2.6mm; font-size: 9.6pt; color: var(--night-text); }
+  .cover .list span { font-family: var(--mono); color: var(--mint); font-size: 8pt; margin-right: 2.5mm; }
+  .cover .bottom { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end;
+    font-family: var(--mono); font-size: 7.6pt; color: var(--night-muted); border-top: 1px solid #2a3035; padding-top: 5mm; }
+  .cover .bottom b { color: var(--night-text); font-weight: 500; }
+
+  /* how to read */
+  .intro { display: grid; grid-template-columns: 1.15fr 1fr; gap: 9mm; }
+  .intro h2 { font-size: 19pt; line-height: 1.15; margin: 2mm 0 4mm; }
+  .intro p { margin: 0 0 3mm; }
+  .box { background: var(--raised); border: 1px solid var(--line); border-radius: 2mm; padding: 5mm; }
+  .box h3 { font-size: 11pt; margin-bottom: 2.5mm; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-top: 7mm; }
+  .tbl th { text-align: left; font-family: var(--mono); font-weight: 500; font-size: 7.2pt; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 2mm 2mm 2mm 0; }
+  .tbl td { border-bottom: 1px solid var(--line); padding: 2.4mm 2mm 2.4mm 0; vertical-align: top; }
+  .tbl td.n { font-family: var(--mono); color: var(--viridian); width: 8mm; }
+  .tbl td.d { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+  .tick { list-style: none; padding: 0; margin: 0; }
+  .tick li { padding-left: 5mm; position: relative; margin-bottom: 1.8mm; }
+  .tick li::before { content: ""; position: absolute; left: 0; top: 1.6mm; width: 2mm; height: 2mm;
+    background: var(--viridian); border-radius: .35mm; }
+
+  /* scenario cards */
+  .card { display: grid; grid-template-columns: 74mm 1fr; gap: 6mm; padding-bottom: 6mm; margin-bottom: 6mm;
+    border-bottom: 1px solid var(--line); }
+  .card:last-of-type { border-bottom: 0; margin-bottom: 0; }
+  .shot { display: block; border-radius: 1.6mm; overflow: hidden; border: 1px solid var(--line); position: relative; background: #fff; }
+  .shot img { display: block; width: 100%; }
+  .shot .play { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 13mm; height: 13mm;
+    border-radius: 50%; background: rgba(18,22,26,.86); display: flex; align-items: center; justify-content: center; }
+  .shot .play::after { content: ""; margin-left: 1mm; border-left: 4.2mm solid var(--mint);
+    border-top: 2.6mm solid transparent; border-bottom: 2.6mm solid transparent; }
+  .meta { display: flex; gap: 4mm; align-items: center; margin-top: 3mm; }
+  .meta img { width: 19mm; height: 19mm; }
+  .meta .lk { font-family: var(--mono); font-size: 7.8pt; line-height: 1.5; }
+  .meta .lk b { display: block; font-weight: 500; color: var(--ink); }
+  .card h3 { font-size: 13.2pt; line-height: 1.2; margin: 1.2mm 0 2.4mm; }
+  .card .what { margin: 0 0 3mm; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 2.6mm 5mm; font-size: 8.7pt; }
+  .facts .k { font-family: var(--mono); font-size: 7pt; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .6mm; }
+  .facts .full { grid-column: 1 / -1; background: var(--tint); border-radius: 1.4mm; padding: 2.4mm 3mm; }
+  .facts .full .k { color: var(--viridian); }
+  .tags { margin-top: 2.6mm; display: flex; flex-wrap: wrap; gap: 1.4mm; }
+  .tags span { font-family: var(--mono); font-size: 6.9pt; border: 1px solid var(--line); border-radius: 1mm; padding: .5mm 1.6mm; color: var(--muted); background: #fff; }
+
+  /* offer */
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+  .offer .box { padding: 4mm 4.5mm; }
+  .offer h2 { font-size: 19pt; margin: 2mm 0 2mm; }
+  .offer .sub { color: var(--muted); margin: 0 0 4.5mm; max-width: 165mm; font-size: 10.2pt; }
+  .offer .box p { margin: 0; font-size: 8.9pt; }
+  .limits { margin-top: 4mm; }
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin-top: 3mm; }
+  .steps div { border-top: 2px solid var(--viridian); padding-top: 2.4mm; font-size: 8.6pt; }
+  .steps b { font-family: var(--mono); color: var(--viridian); font-weight: 500; display: block; font-size: 7.6pt; margin-bottom: 1mm; }
+  .contact { margin-top: 5mm; background: var(--night); color: var(--night-text); border-radius: 2mm; padding: 6mm 7mm;
+    display: flex; justify-content: space-between; align-items: center; }
+  .contact h3 { font-size: 14pt; margin-bottom: 1.5mm; }
+  .contact p { margin: 0; color: var(--night-muted); font-size: 9pt; }
+  .contact .who { font-family: var(--mono); font-size: 8.6pt; line-height: 1.7; text-align: right; }
+  .contact .who a { color: var(--mint); }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <img class="logo" src="opsapi-logo-dark.svg" alt="OpsAPI">
+  <svg class="grid9" width="34mm" height="34mm" viewBox="0 0 32 32" aria-hidden="true">
+    <g fill="#2a3035"><rect x="0" y="10" width="6" height="6" rx="1"/><rect x="8" y="10" width="6" height="6" rx="1"/><rect x="16" y="10" width="6" height="6" rx="1"/><rect x="0" y="18" width="6" height="6" rx="1"/><rect x="8" y="18" width="6" height="6" rx="1"/><rect x="16" y="18" width="6" height="6" rx="1"/><rect x="0" y="26" width="6" height="6" rx="1"/><rect x="8" y="26" width="6" height="6" rx="1"/><rect x="16" y="26" width="6" height="6" rx="1"/></g>
+    <rect x="26" y="0" width="6" height="6" rx="1" fill="#3dd69e"/>
+  </svg>
+  <div class="hero">
+    <div class="eyebrow">AI tax filing · UK · Making Tax Digital</div>
+    <h1>Seven recorded tax returns, filed with HMRC by software and an AI agent.</h1>
+    <p class="lede">Each video is a real run of the application, recorded end to end against <b>HMRC's sandbox</b>. Bank statements go in, an AI agent reads and sorts every transaction, a person checks the result, and the return goes to HMRC through <b>Making Tax Digital</b>. Watch the scenarios closest to your business, then we build and set up a version for you.</p>
+  </div>
+  <div class="list">
+    <div><span>01</span>Landlord return, learning from last year (with voice)</div>
+    <div><span>02</span>Landlord Self Assessment, filed with HMRC</div>
+    <div><span>03</span>Landlord VAT return under MTD for VAT</div>
+    <div><span>04</span>AI sorts transactions, an accountant reviews</div>
+    <div><span>05</span>Bank statements to HMRC-ready figures</div>
+    <div><span>06</span>Sole trader: AI bookkeeping to HMRC filing</div>
+    <div><span>07</span>Your own branded app for your end customers</div>
+  </div>
+  <div class="bottom">
+    <div><b>One API for sign-in, workspaces and business modules.</b><br>opsapi.org</div>
+    <div style="text-align:right">Scenario guide for new customers<br>November 2026</div>
+  </div>
+</section>
+
+<!-- ============ HOW TO READ ============ -->
+<section class="page">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>AI tax filing · recorded scenarios</span></div>
+  <div class="intro">
+    <div>
+      <div class="eyebrow">Before you watch</div>
+      <h2>What you are evaluating</h2>
+      <p>A tax return application for the UK with an AI agent built in. It reads bank statements (PDF or CSV), sorts each transaction into the right HMRC category, works out the figures, and files with HMRC through Making Tax Digital for Income Tax and for VAT.</p>
+      <p>The agent does the slow reading and sorting. People make the decisions: the client confirms the figures, an accountant can review any line, and nothing is sent to HMRC until someone ticks the declaration.</p>
+      <p>We sell it as a customised build: your branding, your categories and rules, your HMRC credentials, and an AI agent set up for your clients, hosted by us or on your own servers.</p>
+    </div>
+    <div class="box">
+      <h3>Every video shows</h3>
+      <ul class="tick">
+        <li>The working application, not slides or a mock-up</li>
+        <li>On-screen captions explaining each step</li>
+        <li>Long AI steps sped up, with the real time stated</li>
+        <li>HMRC's own consent screen and responses (sandbox)</li>
+        <li>Test people and test businesses only, no real taxpayer data</li>
+      </ul>
+      <h3 style="margin-top:4.5mm">Watch on YouTube</h3>
+      <p style="margin:0">Click a thumbnail in this PDF, or scan its QR code with a phone. The videos are unlisted: only people with the link can find them.</p>
+    </div>
+  </div>
+
+  <table class="tbl">
+    <thead><tr><th></th><th>Scenario</th><th>Who it suits</th><th>Tax covered</th><th>Length</th></tr></thead>
+    <tbody>
+      <tr><td class="n">01</td><td><a href="https://youtu.be/SN6tJKGKN1M">Landlord return: AI learns from last year (with voice)</a></td><td>Landlords with large portfolios, property accountants</td><td>Income Tax (MTD ITSA), UK property</td><td class="d">4:58</td></tr>
+      <tr><td class="n">02</td><td><a href="https://youtu.be/Zw7udRqE8FQ">Landlord Self Assessment, filed with HMRC</a></td><td>Landlords, letting agents, property accountants</td><td>Income Tax (MTD ITSA), UK property</td><td class="d">5:55</td></tr>
+      <tr><td class="n">03</td><td><a href="https://youtu.be/NoESPLppAlc">Landlord VAT return under MTD</a></td><td>VAT-registered landlords, commercial property</td><td>VAT, 9 boxes, partial exemption</td><td class="d">2:33</td></tr>
+      <tr><td class="n">04</td><td><a href="https://youtu.be/_N9YtS_jMKA">AI sorts, an accountant reviews</a></td><td>Accountancy practices, bookkeepers</td><td>Income Tax, transaction review</td><td class="d">5:35</td></tr>
+      <tr><td class="n">05</td><td><a href="https://youtu.be/aK2fMdtoIUI">Bank statements to HMRC-ready figures</a></td><td>Landlords doing their own return</td><td>Income Tax, finance costs</td><td class="d">3:36</td></tr>
+      <tr><td class="n">06</td><td><a href="https://youtu.be/N3hxLIOb2FQ">AI bookkeeping to HMRC filing</a></td><td>Sole traders, contractors, freelancers</td><td>Income Tax (MTD ITSA), self-employment</td><td class="d">2:24</td></tr>
+      <tr><td class="n">07</td><td><a href="https://youtu.be/PEyJKsYIN-c">Your own branded app for your end customers</a></td><td>Firms launching a branded consumer app</td><td>Self Assessment, white label</td><td class="d">0:27</td></tr>
+    </tbody>
+  </table>
+  <div class="foot"><span>OpsAPI · opsapi.org</span><span>2</span></div>
+</section>
+
+<!-- ============ SCENARIOS ============ -->
+<section class="page">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>Scenarios 01–02 · landlords, Income Tax</span></div>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/SN6tJKGKN1M"><img src="t0.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_SN6tJKGKN1M.svg" alt=""><div class="lk"><b>Watch · 4:58 · with voice</b><a href="https://youtu.be/SN6tJKGKN1M">youtu.be/SN6tJKGKN1M</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 01 · New · Income Tax · narrated</div>
+      <h3>A landlord with 100 properties files, and the AI learns from last year</h3>
+      <p class="what">Jordan, a landlord with 100 properties, files the 2025-26 return with the AI assistant and no accountant step: confirm the year in one click, connect to HMRC, send the figures and file. Narrated in a British voice, with subtitles.</p>
+      <div class="facts">
+        <div><div class="k">Learning from last year</div>274 of 275 transactions sorted from what Jordan confirmed in 2024-25, with no AI model call. 1 goes to the model, 1 is flagged.</div>
+        <div><div class="k">The application</div>The estimate includes mortgage interest: £571,273 tax on £1,477,310 property profit, no Class 4 National Insurance.</div>
+        <div class="full"><div class="k">For your evaluation</div>The second year: every decision a client confirms is reused, so fewer AI calls and a faster return.</div>
+      </div>
+      <div class="tags"><span>MTD ITSA</span><span>Learns from last year</span><span>Narrated</span></div>
+    </div>
+  </article>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/Zw7udRqE8FQ"><img src="t1.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_Zw7udRqE8FQ.svg" alt=""><div class="lk"><b>Watch · 5:55</b><a href="https://youtu.be/Zw7udRqE8FQ">youtu.be/Zw7udRqE8FQ</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 02 · Income Tax · UK property</div>
+      <h3>Landlord Self Assessment, from bank statements to filed with HMRC</h3>
+      <p class="what">A landlord with a mixed residential and commercial portfolio tells the AI assistant about their lets, uploads twelve monthly bank statements and lets the agent read and sort every line. The application works out the tax, the landlord signs in with their Government Gateway account to connect to HMRC, and the return is filed through Making Tax Digital.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Interviews the landlord in chat, reads each statement, sorts 275 transactions into HMRC property categories and asks about the ones it is unsure of.</div>
+        <div><div class="k">The application</div>Keeps residential mortgage interest as a 20% tax credit, not an expense, shows a live tax estimate and exports a tax sheet (.xlsx).</div>
+        <div class="full"><div class="k">For your evaluation</div>The complete Income Tax journey in one take: connect to HMRC, send the figures, get HMRC's calculation back and make the final declaration.</div>
+      </div>
+      <div class="tags"><span>MTD ITSA</span><span>SA105 property</span><span>Finance-cost restriction</span><span>HMRC OAuth</span></div>
+    </div>
+  </article>
+  <div class="foot"><span>Recorded against HMRC's sandbox with test taxpayers</span><span>3</span></div>
+</section>
+
+<!-- ============ SCENARIOS ============ -->
+<section class="page">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>Scenarios 03–04 · VAT and accountant review</span></div>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/NoESPLppAlc"><img src="t2.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_NoESPLppAlc.svg" alt=""><div class="lk"><b>Watch · 2:33</b><a href="https://youtu.be/NoESPLppAlc">youtu.be/NoESPLppAlc</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 03 · VAT · Making Tax Digital for VAT</div>
+      <h3>Landlord VAT return: coded lines to the 9 boxes to HMRC's receipt</h3>
+      <p class="what">A VAT-registered property business codes every bank line with a VAT treatment, works out the quarter's 9-box return, opens any box to see the lines behind it, and submits it to HMRC. It then works out the annual partial-exemption adjustment and carries it to the next return.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Suggests a VAT rate for each line only after your own rules and past decisions, and flags lines that need a receipt or a second look.</div>
+        <div><div class="k">The application</div>A rules engine calculates the 9 boxes, never the AI. It handles partial exemption (here, 45% of VAT on shared costs is reclaimed) and keeps HMRC's receipt.</div>
+        <div class="full"><div class="k">For your evaluation</div>A VAT return you can audit: every box links to its lines, figures are downloadable as CSV, and HMRC's copy is kept beside yours.</div>
+      </div>
+      <div class="tags"><span>MTD VAT</span><span>9-box return</span><span>Partial exemption</span><span>Annual adjustment</span></div>
+    </div>
+  </article>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/_N9YtS_jMKA"><img src="t3.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr__N9YtS_jMKA.svg" alt=""><div class="lk"><b>Watch · 5:35</b><a href="https://youtu.be/_N9YtS_jMKA">youtu.be/_N9YtS_jMKA</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 04 · Accountancy practices</div>
+      <h3>The AI sorts a landlord's transactions, then an accountant reviews them</h3>
+      <p class="what">After the agent has sorted the year's transactions, an accountant works through its list. Each correction is explained on screen: a service charge is a running cost, a repair to a fitted appliance is allowable, and money moved between the client's own accounts is not an expense.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Sorts every line and keeps a short list of the ones it was unsure of, ready for a person to decide.</div>
+        <div><div class="k">The application</div>A review queue with filters (please check, not confirmed, money in, money out), a one-click change of category and "confirm the rest" once the doubtful lines are done.</div>
+        <div class="full"><div class="k">For your evaluation</div>How a practice keeps a qualified person in charge while the agent does the volume work, so one accountant can review many clients a day.</div>
+      </div>
+      <div class="tags"><span>Human in the loop</span><span>Review queue</span><span>Allowable expenses</span></div>
+    </div>
+  </article>
+  <div class="foot"><span>Recorded against HMRC's sandbox with test taxpayers</span><span>4</span></div>
+</section>
+
+<!-- ============ SCENARIOS ============ -->
+<section class="page">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>Scenarios 05–06 · self-service and sole traders</span></div>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/aK2fMdtoIUI"><img src="t4.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_aK2fMdtoIUI.svg" alt=""><div class="lk"><b>Watch · 3:36</b><a href="https://youtu.be/aK2fMdtoIUI">youtu.be/aK2fMdtoIUI</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 05 · Landlords doing their own return</div>
+      <h3>From bank statements to HMRC-ready figures</h3>
+      <p class="what">The preparation half of a landlord's return. The landlord picks "Do it with the AI assistant", which opens beside the figures for the same tax year. The assistant asks about mortgage interest, treating residential and commercial loans differently, and the figures update as the statements are read.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Asks the questions a tax adviser would ask, then reads the statements in the background so the landlord can leave the page.</div>
+        <div><div class="k">The application</div>A progress checklist, key dates for the tax year and an estimate that updates as the agent works.</div>
+        <div class="full"><div class="k">For your evaluation</div>The guided self-service experience for clients who want to do it themselves but not alone. The landlord can stop here and send everything to their accountant.</div>
+      </div>
+      <div class="tags"><span>Conversational intake</span><span>Mortgage interest</span><span>Self-service</span></div>
+    </div>
+  </article>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/N3hxLIOb2FQ"><img src="t5.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_N3hxLIOb2FQ.svg" alt=""><div class="lk"><b>Watch · 2:24</b><a href="https://youtu.be/N3hxLIOb2FQ">youtu.be/N3hxLIOb2FQ</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 06 · Income Tax · self-employment</div>
+      <h3>Sole trader: AI bookkeeping to HMRC filing</h3>
+      <p class="what">A self-employed consultant starts with an empty dashboard, uploads two monthly statements and lets the agent sort them into HMRC categories. Personal spending such as groceries is kept out of the business figures. The figures go to HMRC, HMRC works out the tax, and the return is filed.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Separates business income and costs from personal spending and marks anything it is not sure of for the owner to check.</div>
+        <div><div class="k">The application</div>Shows exactly what will be sent to HMRC, adds disallowable costs back to profit, and asks HMRC for the tax bill before anything is filed.</div>
+        <div class="full"><div class="k">For your evaluation</div>The shortest route for a sole trader or contractor under Making Tax Digital for Income Tax, from nothing uploaded to filed.</div>
+      </div>
+      <div class="tags"><span>MTD ITSA</span><span>SA103 self-employment</span><span>Bookkeeping</span></div>
+    </div>
+  </article>
+  <div class="foot"><span>Recorded against HMRC's sandbox with test taxpayers</span><span>5</span></div>
+</section>
+
+<!-- ============ SCENARIOS ============ -->
+<section class="page">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>Scenario 07 · white label</span></div>
+
+  <article class="card">
+    <div>
+      <a class="shot" href="https://youtu.be/PEyJKsYIN-c"><img src="t6.jpg" alt=""><span class="play"></span></a>
+      <div class="meta"><img src="qr_PEyJKsYIN-c.svg" alt=""><div class="lk"><b>Watch · 0:27</b><a href="https://youtu.be/PEyJKsYIN-c">youtu.be/PEyJKsYIN-c</a></div></div>
+    </div>
+    <div>
+      <div class="eyebrow">Scenario 07 · White label</div>
+      <h3>Your own branded app for your end customers, the full flow in under half a minute</h3>
+      <p class="what">The same engine under your brand, for your end customers. The user signs in, sets up a tax profile, uploads statements, then follows six clear stages (upload, extract, classify, reconcile, calculate and file) to the HMRC filing page.</p>
+      <div class="facts">
+        <div><div class="k">The AI agent</div>Classifies each transaction against HMRC categories, explains its suggestion and lets the user bulk-approve the confident ones.</div>
+        <div><div class="k">The application</div>Its own sign-in (email, Apple, Google), its own domain and design, and the same filing back end as scenarios 01–06.</div>
+        <div class="full"><div class="k">For your evaluation</div>What your firm could offer its own clients as part of your service, under your name, not ours.</div>
+      </div>
+      <div class="tags"><span>White label</span><span>Consumer app</span><span>Self Assessment</span></div>
+    </div>
+  </article>
+  <div class="foot"><span>Recorded against HMRC's sandbox with test taxpayers</span><span>6</span></div>
+</section>
+
+<!-- ============ OFFER ============ -->
+<section class="page offer">
+  <div class="runhead"><img src="opsapi-logo-light.svg" alt="OpsAPI"><span>Your customised build</span></div>
+  <div class="eyebrow">What you get</div>
+  <h2>Customised software with the AI agent set up for you</h2>
+  <p class="sub">You choose the scenarios that match your business. We build them under your brand, set up the AI agent on your categories and rules, connect it to HMRC with your credentials, and run it with you until the first live returns are filed.</p>
+
+  <div class="cols2">
+    <div class="box"><h3>An app you offer your clients</h3><p>Your name, domain and sign-in, as in scenario 06, with iPhone and Android apps in the enterprise licence. Clients use it in place of QuickBooks or Xero, email and Dropbox.</p></div>
+    <div class="box"><h3>AI agent setup</h3><p>The chat assistant, the statement reader and the transaction classifier, configured with your categories, your rules and your past decisions. It asks before guessing, and a person signs off.</p></div>
+    <div class="box"><h3>HMRC Making Tax Digital</h3><p>Income Tax Self Assessment (updates, calculation, final declaration) and VAT (9 boxes, partial exemption, annual adjustment). Includes HMRC's fraud-prevention headers and help getting your production credentials.</p></div>
+    <div class="box"><h3>Hosting and data</h3><p>Hosted in the UK by us, or on your own servers. Run the agent on a hosted model, or on a local model so bank statements never leave your network.</p></div>
+  </div>
+
+  <div class="box limits">
+    <h3>What it does not do</h3>
+    <ul class="tick" style="columns:2; column-gap:8mm;">
+      <li>The AI never calculates the tax or the VAT boxes. A rules engine does, and HMRC confirms.</li>
+      <li>Nothing is filed without a person confirming the figures and ticking the declaration.</li>
+      <li>These videos use HMRC's sandbox. Live filing needs your HMRC production approval, which can take a few weeks.</li>
+      <li>HMRC does not accept a final declaration before the tax year ends. The app shows the estimate until then.</li>
+      <li>Speed depends on the model. On our test server, a local model took about two hours to read 12 monthly statements. A GPU or a hosted model is much faster.</li>
+    </ul>
+  </div>
+
+  <div class="eyebrow" style="margin-top:4.5mm">How we start</div>
+  <div class="steps">
+    <div><b>01 · Watch</b>Pick the scenarios closest to your clients.</div>
+    <div><b>02 · Scope call</b>30 minutes on your client types, volumes and branding.</div>
+    <div><b>03 · Pilot</b>Your branded build with the agent set up, tested on your sample statements.</div>
+    <div><b>04 · Go live</b>HMRC production credentials, your first live returns, then hand-over.</div>
+  </div>
+
+  <div class="contact">
+    <div><h3>Start a pilot</h3><p>Tell us which scenarios you watched and how many clients you file for.</p></div>
+    <div class="who">Balinder Walia<br><a href="mailto:balinder@tenthmatrix.com">balinder@tenthmatrix.com</a><br>+44 7515 356 146<br><a href="https://opsapi.org/ai-tax-filing/">opsapi.org</a></div>
+  </div>
+  <div class="foot"><span>OpsAPI © 2024–2026 Balinder Walia. All rights reserved.</span><span>7</span></div>
+</section>
+
+</body>
+</html>
