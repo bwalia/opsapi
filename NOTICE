@@ -1,0 +1,19 @@
+OpsAPI
+Copyright (c) 2024-2026 Balinder Walia. All rights reserved.
+See LICENSE. Licensing enquiries: bwalia@tenthmatrix.co.uk
+
+This repository includes third-party components that remain under their own
+licences. Those licences apply to those components only, not to OpsAPI:
+
+- nginx-lua-prometheus (lapis/opt/nginx-lua-prometheus)
+  Copyright (c) 2016-2019 Anton Tolchanov. MIT License (see its LICENSE file).
+
+- lua-resty-jwt helpers (lapis/opt/lua-resty-jwt)
+  From the lua-resty-jwt project by SkyLothar and contributors. Apache License 2.0.
+
+- lapis/archive
+  Archived material distributed under the Boost Software License 1.0
+  (see lapis/archive/LICENSE).
+
+Packages installed from npm, LuaRocks, OPM and container base images at build
+time are not part of this repository and are licensed by their own authors.

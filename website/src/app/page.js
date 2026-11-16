@@ -67,7 +67,7 @@ export default function Home() {
             <section className="band hero">
                 <div className="container-x hero__grid">
                     <div>
-                        <p className="eyebrow">Open source · OpenResty · Lua · PostgreSQL</p>
+                        <p className="eyebrow">Self-hosted · OpenResty · Lua · PostgreSQL</p>
                         <h1 className="display-x">One API for sign-in, tenants and business modules</h1>
                         <p className="lead-x">
                             OpsAPI is a self-hosted, multi-tenant API platform. It signs your users in once for every app,
@@ -175,7 +175,7 @@ export default function Home() {
             <section className="band section">
                 <div className="container-x" style={{ textAlign: 'left' }}>
                     <h2>Read the code</h2>
-                    <p className="lead-x">OpsAPI is open source. Run it from Docker Hub, or clone it and bring the whole stack up with one script.</p>
+                    <p className="lead-x">The source is on GitHub for you to read. To run OpsAPI for your business you need a licence from us; then run it from Docker Hub, or bring the whole stack up with one script.</p>
                     <div className="hero__actions">
                         <a href={SITE.github} className="btn-x btn-x--primary">bwalia/opsapi on GitHub</a>
                         <a href={SITE.dockerHub} className="btn-x btn-x--ghost">bwalia/opsapi on Docker Hub</a>

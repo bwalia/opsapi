@@ -41,7 +41,7 @@ export default function SiteFooter() {
                         </ul>
                     </div>
                 </div>
-                <div className="footer-base">OpsAPI is open source on GitHub. Built and run by Workstation.</div>
+                <div className="footer-base">© 2024–2026 Balinder Walia. All rights reserved. Source on GitHub, licensed by agreement. Built and run by Workstation.</div>
             </div>
         </footer>
     );

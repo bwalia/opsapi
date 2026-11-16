@@ -791,3 +791,11 @@ GOOGLE_CLIENT_ID=your-client-id
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
 ```
+
+## Licence
+
+Copyright (c) 2024-2026 Balinder Walia. All rights reserved.
+
+OpsAPI is proprietary software. The source is published for viewing only; using, copying, modifying, distributing or hosting it needs a written licence from Balinder Walia. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for third-party components. The TypeScript SDK (`sdk/typescript`) and the MCP server (`mcp`) are MIT-licensed so customers can integrate with a licensed OpsAPI.
+
+Licensing enquiries: bwalia@tenthmatrix.co.uk

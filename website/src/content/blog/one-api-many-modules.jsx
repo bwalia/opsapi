@@ -93,7 +93,7 @@ export default function Body() {
                 <li><strong>One person, one account.</strong> Customers and staff sign in once across products, with roles per workspace.</li>
                 <li><strong>Faster new products.</strong> The tenth module costs less than the first because sign-in, roles and integrations are already there.</li>
                 <li><strong>Integrations once.</strong> Webhooks, API keys and the TypeScript client work the same for every module, so partners integrate once.</li>
-                <li><strong>Your infrastructure.</strong> It's open source and self-hosted, so data stays where you run it and there's no per-user fee.</li>
+                <li><strong>Your infrastructure.</strong> It's self-hosted, so data stays where you run it and there's no per-user fee.</li>
             </ul>
 
             <h2>What you still own</h2>
