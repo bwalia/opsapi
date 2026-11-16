@@ -9,6 +9,9 @@
 */ -}}
 {{- $htu := .Values.hmrcTestUsers | default dict }}
 {{- if $htu.enabled }}
+{{- if not $htu.accessSecret }}
+{{- fail "hmrcTestUsers.accessSecret is required: without it anyone who can reach the page can make HMRC sandbox users with this release's HMRC application" }}
+{{- end }}
 {{- $name := printf "%s-hmrc-test-users" .Release.Name }}
 {{- $img := $htu.image | default dict }}
 {{- $path := $htu.path | default "/hmrc-test-users" }}
@@ -43,8 +46,9 @@ spec:
         runAsUser: 10001
       containers:
         - name: hmrc-test-users
-          image: "{{ $img.repository | default "bwalia/opsapi-hmrc-test-users" }}:{{ $img.tag | default "latest" }}"
-          imagePullPolicy: {{ $img.pullPolicy | default "Always" }}
+          # A pinned build (the :<git sha> tag .github/workflows/hmrc-test-users.yml pushes), never :latest.
+          image: "{{ $img.repository | default "bwalia/opsapi-hmrc-test-users" }}:{{ required "hmrcTestUsers.image.tag is required: pin the :<git sha> build" $img.tag }}"
+          imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
           ports:
             - name: http
               containerPort: 8080
@@ -55,6 +59,9 @@ spec:
               value: {{ $path | quote }}
             - name: RATE_LIMIT_PER_HOUR
               value: {{ $htu.rateLimitPerHour | default 20 | quote }}
+            # Proxies that append to X-Forwarded-For in front of the app (the ingress).
+            - name: TRUSTED_PROXY_HOPS
+              value: {{ $htu.trustedProxyHops | default 1 | quote }}
             {{- if .Values.frontendUrl }}
             - name: OPSAPI_UI_URL
               value: {{ .Values.frontendUrl | quote }}
@@ -69,14 +76,12 @@ spec:
                 secretKeyRef:
                   name: {{ $htu.credentialsSecret | default .Values.hmrcCredentialsSecret | quote }}
                   key: HMRC_CLIENT_SECRET
-            {{- if $htu.accessSecret }}
-            # HTTP Basic sign-in for the page (any user name, this password).
+            # HTTP Basic sign-in for the page (any user name, this password). Required.
             - name: ACCESS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $htu.accessSecret | quote }}
                   key: ACCESS_PASSWORD
-            {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
@@ -112,6 +117,11 @@ metadata:
   name: {{ $name }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  # Same TLS as the release's main ingress (same hosts).
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
     - host: {{ .host }}

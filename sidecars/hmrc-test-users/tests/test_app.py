@@ -39,6 +39,7 @@ def settings(**over):
     s = Settings()
     s.environment, s.client_id, s.client_secret = "sandbox", "cid", "csecret"
     s.base_url, s.prefix, s.access_password, s.rate_limit = "https://hmrc.test", "/hmrc-test-users", "", 20
+    s.allow_no_password, s.trusted_proxy_hops = True, 1
     for k, v in over.items():
         setattr(s, k, v)
     return s
@@ -172,3 +173,20 @@ def test_services_lists_both_kinds():
 def test_creates_an_agent_with_an_arn():
     r = client(Hmrc()).post("/hmrc-test-users/api/test-users", json={"kind": "agent"})
     assert r.status_code == 201 and r.json()["arn"] == "SARN1234567" and r.json()["kind"] == "agent"
+
+
+def test_refuses_to_start_without_a_password():
+    with pytest.raises(RuntimeError):
+        create_app(settings(allow_no_password=False))
+    create_app(settings(allow_no_password=False, access_password=FAKE_ACCESS_PW))  # fine with one
+
+
+def test_rate_limit_ignores_a_spoofed_forwarded_for():
+    c = client(Hmrc(), rate_limit=2)
+    # The caller rotates the address it claims; the ingress appends the real one last.
+    codes = [c.post("/hmrc-test-users/api/test-users", json={},
+                    headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"}).status_code for i in range(3)]
+    assert codes == [201, 201, 429]
+    # A different real client (ingress-added address) has its own allowance.
+    other = c.post("/hmrc-test-users/api/test-users", json={}, headers={"X-Forwarded-For": "203.0.113.8"})
+    assert other.status_code == 201

@@ -281,8 +281,10 @@ hmrcTestUsers:
   path: /hmrc-test-users
   image:
     repository: bwalia/opsapi-hmrc-test-users
-    tag: latest
-    pullPolicy: Always
+    # A pinned build: .github/workflows/hmrc-test-users.yml pushes :<git sha> on main and
+    # says which tag to put here; never :latest.
+    tag: 7a4b71d829c84e7624860a1394e3c59a500b787b
+    pullPolicy: IfNotPresent
   accessSecret: workstation-opsapi-hmrc-test-users
   rateLimitPerHour: 20
 
