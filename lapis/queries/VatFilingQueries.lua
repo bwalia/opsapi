@@ -89,6 +89,15 @@ local function same_figures(ours, hmrc)
     return true
 end
 
+--- Do two sets of boxes match to the penny?
+function Q.same_boxes(a, b)
+    for i = 1, 9 do
+        local k = "box" .. i
+        if math.abs((tonumber(a[k]) or 0) - (tonumber(b[k]) or 0)) > 0.005 then return false end
+    end
+    return true
+end
+
 --- File a draft return with HMRC. body: { period_key, declaration_accepted, test_scenario? }
 -- @return filed row or nil, response
 function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
@@ -121,15 +130,21 @@ function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
     local token, terr, tcode = Q.token(user_uuid)
     if not token then return nil, { status = 409, json = { success = false, error = terr, code = tcode } } end
 
-    -- In production the period must be one HMRC has open (the sandbox accepts any key).
+    -- In production the key must be the open HMRC period with exactly this return's dates,
+    -- so one period's figures can't go under another's key (the sandbox's obligations are
+    -- canned, so it accepts any key).
     if not Client.is_sandbox() then
         local open = Client.obligations(token, reg.vrn, { from = draft.period_start, to = draft.period_end,
             status = "O" }) or {}
         local found = false
-        for _, o in ipairs(open) do if o.periodKey == period_key then found = true end end
+        for _, o in ipairs(open) do
+            if o.periodKey == period_key and tostring(o.start) == tostring(draft.period_start)
+                and tostring(o["end"]) == tostring(draft.period_end) then found = true end
+        end
         if not found then
-            return nil, { status = 422, json = { success = false,
-                error = "HMRC doesn't have that period open for this VAT number." } }
+            return nil, { status = 422, json = { success = false, code = "PERIOD_MISMATCH",
+                error = "HMRC doesn't have a period open for this VAT number with this return's dates ("
+                    .. tostring(draft.period_start) .. " to " .. tostring(draft.period_end) .. ")." } }
         end
     end
 
@@ -141,6 +156,13 @@ function Q.submit(reg, return_uuid, actor_id, user_uuid, body)
             error = fresh.uncoded_count .. " line(s) in this period have no VAT code. Code them before filing." } }
     end
     local boxes = boxes_of(fresh)
+    -- File only what the person reviewed and declared: if the records changed since
+    -- (AI coding, a colleague, a newly paid invoice), show the new figures first.
+    if not Q.same_boxes(boxes_of(draft), boxes) then
+        return nil, { status = 409, json = { success = false, code = "FIGURES_CHANGED",
+            error = "Your figures changed since you checked them. Review the updated return, then file it.",
+            data = { uuid = fresh.uuid, boxes = boxes } } }
+    end
     local ok_v, verrs = Return.validate(boxes)
     if not ok_v then
         return nil, { status = 422, json = { success = false, code = "INVALID_BOXES",

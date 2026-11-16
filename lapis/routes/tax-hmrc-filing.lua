@@ -88,6 +88,31 @@ local function filingKind(user_id, tax_year)
     return SELF_EMPLOYMENT, profile
 end
 
+-- TAX_DIRECT_FILING_ENABLED=false: nothing is sent to HMRC from File My Tax (the UI also
+-- hides direct filing). Checked on the server so a direct API call can't file either.
+local function directFilingOff()
+    return os.getenv("TAX_DIRECT_FILING_ENABLED") == "false"
+end
+
+local function today()
+    return os.date("!%Y-%m-%d")
+end
+
+-- Income in the year's estimate that a `kind` filing doesn't send HMRC (savings,
+-- dividends, pensions, employment, My Income...). nil, err if the estimate can't be read.
+local function unfiledIncome(user_id, tax_year, kind)
+    local ok, res = pcall(function()
+        local TaxTools = require("lib.agent.tax-tools")
+        local est = TaxTools.compute_year(user_id, tax_year, TaxTools.profile_for(user_id, tax_year))
+        return require("lib.hmrc-aggregator").unfiled_income(est and est.schedules, kind)
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[hmrc] couldn't read the estimate before filing: ", tostring(res))
+        return nil, "couldn't check"
+    end
+    return res
+end
+
 -- The stored filing business for a kind.
 local function storedBusiness(profile, kind)
     if not profile then return nil end
@@ -206,6 +231,10 @@ end
 -- binding return would silently under-report them.
 local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     opts = opts or {}
+    if directFilingOff() then
+        return nil, { status = 403, json = { code = "DIRECT_FILING_OFF",
+            error = "Filing with HMRC from here is switched off. Choose \"Our accountant files it\"." } }
+    end
     local tax_year = self.params.tax_year
     if not tax_year then
         return nil, { status = 400, json = { error = "tax_year is required (e.g. 2025-26)" } }
@@ -240,11 +269,20 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     local agg, aerr
     if is_property then
         agg, aerr = require("lib.hmrc-property-aggregator").build_cumulative_body({
-            user_id = user_id, tax_year = tax_year, profile = fprofile })
+            user_id = user_id, tax_year = tax_year, period_end = opts.period_end, profile = fprofile })
     else
-        agg, aerr = Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year })
+        agg, aerr = Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year,
+            period_end = opts.period_end })
     end
     if not agg then return nil, { status = 400, json = { error = aerr } } end
+    -- Live HMRC refuses an update more than 10 days before its period ends: say when
+    -- it can go instead of sending it (the sandbox accepts any dates).
+    local from = (not Client.is_sandbox()) and Aggregator.too_early(agg.tax_year_end, today()) or nil
+    if from then
+        return nil, { status = 422, json = { code = "TOO_EARLY", can_submit_from = from,
+            error = "HMRC takes the update for the period ending " .. agg.tax_year_end .. " from " .. from
+                .. ". Pick the quarter HMRC has open now, or come back then." } }
+    end
     if #agg.negative_fields > 0 then
         if is_property then
             return nil, { status = 422, json = {
@@ -261,7 +299,7 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
                 .. "miscategorised credit/refund before submitting.",
             negative_fields = agg.negative_fields,
             offending_transactions = Aggregator.credit_offenders(
-                { user_id = user_id, tax_year = tax_year }, neg_fields) } }
+                { user_id = user_id, tax_year = tax_year, period_end = opts.period_end }, neg_fields) } }
     end
     if agg.empty then
         return nil, { status = 422, json = { error = "No income or expenses to submit for this tax year" } }
@@ -362,11 +400,13 @@ return function(app)
             local result, err
             if kind == PROPERTY then
                 result, err = require("lib.hmrc-property-aggregator").build_cumulative_body({
-                    user_id = user_id, tax_year = tax_year, profile = fprofile })
+                    user_id = user_id, tax_year = tax_year, period_end = self.params.period_end,
+                    profile = fprofile })
             else
                 result, err = Aggregator.build_cumulative_body({
                     user_id = user_id,
                     tax_year = tax_year,
+                    period_end = self.params.period_end,
                 })
             end
             if not result then
@@ -398,7 +438,7 @@ return function(app)
                     table.insert(fields, (nf.field:gsub("Disallowable$", "")))
                 end
                 offending_transactions = Aggregator.credit_offenders(
-                    { user_id = user_id, tax_year = tax_year }, fields)
+                    { user_id = user_id, tax_year = tax_year, period_end = self.params.period_end }, fields)
             end
             if result.stats.excluded_unreviewed > 0 then
                 table.insert(warnings, string.format(
@@ -412,6 +452,14 @@ return function(app)
             end
             if result.empty then
                 table.insert(warnings, "No income or expenses to submit for this tax year")
+            end
+            if kind ~= "mixed" then
+                local unfiled = unfiledIncome(user_id, tax_year, kind)
+                if unfiled and #unfiled > 0 then
+                    table.insert(warnings, "Your " .. table.concat(unfiled, ", ") .. " can't be sent to HMRC "
+                        .. "from here yet, so the final return for the year has to go through \"Our accountant "
+                        .. "files it\". Quarterly updates are fine.")
+                end
             end
 
             return {
@@ -444,8 +492,10 @@ return function(app)
                 return { status = 500, json = { error = "HMRC modules not available" } }
             end
 
-            -- Resolve + submit the cumulative period (shared with final declaration).
-            local ctx, errResp = buildAndSubmitCumulative(self, HMRC, Client, Aggregator)
+            -- Resolve + submit the cumulative period (shared with final declaration), up to
+            -- the end of the quarter being filed (HMRC's obligation), or the whole year.
+            local ctx, errResp = buildAndSubmitCumulative(self, HMRC, Client, Aggregator,
+                { period_end = self.params.period_end })
             if not ctx then return errResp end
 
             -- Trigger an in-year (non-binding) calculation, then poll until it's ready.
@@ -563,7 +613,33 @@ return function(app)
                         .. "refresh to see whether it went through." } }
             end
 
-            -- Resolve + submit the cumulative period (shared with calculate-preview).
+            -- The final return is for a finished tax year (live HMRC: RULE_TAX_YEAR_NOT_ENDED).
+            local _, year_end = Aggregator.tax_year_bounds(guard_year)
+            if year_end and not Client.is_sandbox() and today() <= year_end then
+                return { status = 422, json = { code = "TAX_YEAR_NOT_ENDED",
+                    error = "You can file the final return for " .. guard_year .. " once the tax year ends ("
+                        .. year_end .. ")." } }
+            end
+
+            -- A binding return must hold all the year's income. File My Tax only sends
+            -- self-employment or UK property, so anything else goes via the accountant.
+            local guard_kind = guard_uid and filingKind(guard_uid, guard_year)
+            if not directFilingOff() and guard_uid and guard_kind ~= "mixed" then
+                local unfiled = unfiledIncome(guard_uid, guard_year, guard_kind)
+                if not unfiled then
+                    return { status = 503, json = { code = "INCOME_CHECK_FAILED", error = "We couldn't check "
+                        .. "the rest of your income for " .. guard_year .. ", so nothing was sent to HMRC. "
+                        .. "Please try again." } }
+                end
+                if #unfiled > 0 then
+                    return { status = 422, json = { code = "OTHER_INCOME_NOT_FILED", income = unfiled,
+                        error = "Your " .. table.concat(unfiled, ", ") .. " for " .. guard_year .. " can't be "
+                            .. "sent to HMRC from here yet, and a final return must include all your income. "
+                            .. "Choose \"Our accountant files it\" instead." } }
+                end
+            end
+
+            -- Resolve + submit the cumulative period (shared with calculate-preview): the whole year.
             local ctx, errResp = buildAndSubmitCumulative(self, HMRC, Client, Aggregator,
                 { require_reviewed = true })
             if not ctx then return errResp end

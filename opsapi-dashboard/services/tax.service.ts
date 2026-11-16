@@ -709,9 +709,10 @@ export const taxService = {
 
   // ── HMRC filing preview (Phase 1) ────────────────────────────────────────────
   // Aggregate classified transactions into the HMRC MTD body for review. No HMRC call.
-  async getHmrcAggregatePreview(taxYear: string): Promise<HmrcAggregatePreview> {
+  // periodEnd: the end of the quarter being filed (HMRC obligation); omitted = whole year.
+  async getHmrcAggregatePreview(taxYear: string, periodEnd?: string): Promise<HmrcAggregatePreview> {
     const response = await apiClient.get(`${TAX_BASE}/hmrc/aggregate-preview`, {
-      params: { tax_year: taxYear },
+      params: periodEnd ? { tax_year: taxYear, period_end: periodEnd } : { tax_year: taxYear },
     });
     return response.data?.data || response.data;
   },
@@ -740,7 +741,7 @@ export const taxService = {
 
   // Submit the cumulative period + trigger/retrieve an in-year calculation (preview, not
   // a filing). Slow (HMRC submit + calc polling), so allow a long timeout.
-  async calculateHmrcPreview(taxYear: string): Promise<{
+  async calculateHmrcPreview(taxYear: string, periodEnd?: string): Promise<{
     tax_year: string;
     business_id: string;
     calculation_id: string;
@@ -762,6 +763,7 @@ export const taxService = {
   }> {
     const params = new URLSearchParams();
     params.append('tax_year', taxYear);
+    if (periodEnd) params.append('period_end', periodEnd);
     const response = await apiClient.post(`${TAX_BASE}/hmrc/calculate-preview`, params.toString(), {
       timeout: 180000,
     });
