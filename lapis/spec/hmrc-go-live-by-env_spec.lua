@@ -113,6 +113,10 @@ check("filing asks HMRC for it and re-aggregates from it", build and build:find(
     and build:find("Aggregator.starts_inside(commenced", 1, true)
     and build:find("agg, aerr = aggregate(commenced)", 1, true))
 
+check("sandbox: a test business made for a later year is replaced for this year and retried",
+    build and build:find('Client.is_sandbox() and sbody and (sbody.code == "MATCHING_RESOURCE_NOT_FOUND"\n'
+        .. '        or sbody.code == "RULE_START_DATE_NOT_ALIGNED_TO_COMMENCEMENT_DATE")', 1, true) ~= nil)
+
 print("== VAT")
 package.loaded["helper.hmrc"] = {}
 package.loaded["lib.hmrc-vat-client"] = { is_sandbox = function() return true end }
