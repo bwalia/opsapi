@@ -52,20 +52,31 @@ end
 -- year (the final return). Live HMRC refuses an update that runs past the period HMRC
 -- has open (RULE_EARLY_DATA_SUBMISSION_NOT_ACCEPTED), so mid-year updates must stop at
 -- the quarter end. Calendar quarters (an end that isn't the 5th) start on 1 April.
+-- A business that started inside the period (commencement, from HMRC's Business
+-- Details commencementDate) starts on that date instead: live HMRC refuses anything
+-- else (RULE_START_DATE_NOT_ALIGNED_TO_COMMENCEMENT_DATE).
 -- @return start, end or nil, nil, err
-function Aggregator.period_bounds(tax_year, period_end)
+function Aggregator.period_bounds(tax_year, period_end, commencement)
     local start_date, end_date, err = Aggregator.tax_year_bounds(tax_year)
     if not start_date then return nil, nil, err end
-    if period_end == nil or period_end == "" or (ngx and period_end == ngx.null) then return start_date, end_date end
-    period_end = tostring(period_end)
-    if not period_end:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        return nil, nil, "period_end must be a date like 2025-07-05"
+    if period_end ~= nil and period_end ~= "" and not (ngx and period_end == ngx.null) then
+        period_end = tostring(period_end)
+        if not period_end:match("^%d%d%d%d%-%d%d%-%d%d$") then
+            return nil, nil, "period_end must be a date like 2025-07-05"
+        end
+        if period_end:sub(9, 10) ~= "05" then start_date = start_date:sub(1, 5) .. "04-01" end
+        if period_end <= start_date or period_end > end_date then
+            return nil, nil, "period_end must fall inside the " .. tax_year .. " tax year"
+        end
+        end_date = period_end
     end
-    if period_end:sub(9, 10) ~= "05" then start_date = start_date:sub(1, 5) .. "04-01" end
-    if period_end <= start_date or period_end > end_date then
-        return nil, nil, "period_end must fall inside the " .. tax_year .. " tax year"
-    end
-    return start_date, period_end
+    if Aggregator.starts_inside(commencement, start_date, end_date) then start_date = commencement end
+    return start_date, end_date
+end
+
+--- Did a business that commenced on `date` (YYYY-MM-DD) start after `from`, on or before `to`?
+function Aggregator.starts_inside(date, from, to)
+    return type(date) == "string" and date:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil and date > from and date <= to
 end
 
 --- Live HMRC takes an update no more than 10 days before its period ends
@@ -116,6 +127,7 @@ end
 --- Build the cumulative MTD body for a user + tax year from their classified transactions.
 -- @param opts table { user_id (required), tax_year (required, "YYYY-YY"),
 --                     period_end (optional: the quarter end; default the tax year end),
+--                     commencement_date (optional: the business's start; see period_bounds),
 --                     statuses (optional list, default {CLASSIFIED, CONFIRMED}) }
 -- @return table {
 --   body = { periodIncome=?, periodExpenses=?, periodDisallowableExpenses=? },  -- trimmed
@@ -127,7 +139,7 @@ function Aggregator.build_cumulative_body(opts)
     opts = opts or {}
     if not opts.user_id then return nil, "user_id is required" end
 
-    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end)
+    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end, opts.commencement_date)
     if not start_date then return nil, err end
 
     local statuses = opts.statuses or DEFAULT_STATUSES
@@ -261,7 +273,7 @@ end
 function Aggregator.credit_offenders(opts, fields)
     opts = opts or {}
     if not opts.user_id or type(fields) ~= "table" or #fields == 0 then return {} end
-    local start_date, end_date = Aggregator.period_bounds(opts.tax_year, opts.period_end)
+    local start_date, end_date = Aggregator.period_bounds(opts.tax_year, opts.period_end, opts.commencement_date)
     if not start_date then return {} end
 
     local field_list = {}

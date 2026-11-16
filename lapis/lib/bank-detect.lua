@@ -859,12 +859,15 @@ end
 -- LLM fallback (OpenResty runtime only)
 -- ---------------------------------------------------------------------------
 
-local LLM_SYSTEM = [[You read UK bank statements. Identify the ISSUING bank of THIS statement and its account details.
-Return ONLY a JSON object: {"bank_name": string|null, "sort_code": "NN-NN-NN"|null, "account_number": string|null}
+-- The model is only asked for the bank's name, and never sees the statement's digits
+-- (llm_snippet masks them): AI_PROVIDER can be an external service, and sort codes and
+-- account numbers must not leave the platform. The rules read the numbers.
+local LLM_SYSTEM = [[You read UK bank statements. Identify the ISSUING bank of THIS statement.
+Return ONLY a JSON object: {"bank_name": string|null}
 Rules:
 - The issuing bank is in the statement title, letterhead, header block or legal footer.
 - Transaction descriptions often name OTHER banks (mortgage lenders, transfers, card payments). Never use those.
-- sort_code and account_number must be copied exactly from the text. If absent, use null. Never guess.]]
+- Digits in the text are masked as #. If the bank is not named, use null. Never guess.]]
 
 --- Parse and validate an LLM reply. Numbers are only accepted when they
 -- actually occur in the source text (no hallucinated account numbers).
@@ -926,10 +929,10 @@ function BankDetect.llm_fallback(snippet, opts)
     return BankDetect.parse_llm_reply(res.content, snippet), nil
 end
 
---- Head of the text the LLM sees: the header plus a little of what follows.
 --- What the LLM sees: the statement header only (the lines above the first
 -- transaction, plus legal footer lines). Transaction lines are left out so the
 -- model can't "find" a payee bank. Empty when there is no header to read.
+-- detect() masks its digits before it goes anywhere.
 local function llm_snippet(text, is_csv)
     local lines = split_lines(normalise_text(text))
     local out = {}
@@ -966,17 +969,12 @@ function BankDetect.detect(content, kind, opts)
     local is_csv = kind == "csv"
     local r = is_csv and BankDetect.from_csv(content) or BankDetect.from_text(content)
     if opts.llm == false or not content or content == "" then return r end
-    -- Ask the model only for what the rules could not read: the bank, or (PDF
-    -- text) numbers when the header has an account label they didn't parse.
-    -- A CSV without numbers (Monzo, Starling exports) simply has none to find.
-    local need = not r.bank_name
-    if not need and not is_csv and not (r.sort_code or r.account_number) then
-        local head = table.concat(BankDetect.header_lines(split_lines(normalise_text(content))), "\n"):lower()
-        need = head:find("sort", 1, true) ~= nil or head:find("account n", 1, true) ~= nil
-    end
-    if not need then return r end
+    -- Ask the model only for the bank name, and only when the rules couldn't read it.
+    -- Numbers are never asked for: the model never sees digits (see LLM_SYSTEM).
+    if r.bank_name then return r end
 
-    local snippet = llm_snippet(content, is_csv)
+    -- Every digit masked: no sort code or account number reaches the model.
+    local snippet = llm_snippet(content, is_csv):gsub("%d", "#")
     if not snippet:find("%a%a%a") then return r end -- no header: nothing the model could read
     local fn = opts.llm_fn or function(s) return BankDetect.llm_fallback(s, opts) end
     local ok, got, err = pcall(fn, snippet)
@@ -985,12 +983,9 @@ function BankDetect.detect(content, kind, opts)
     elseif not got then
         r.llm_error = err
     else
-        -- Fill only what the rules missed; numbers re-validated against the text.
-        local filled = false
-        if not r.bank_name and got.bank_name then r.bank_name = got.bank_name; filled = true end
-        if not r.sort_code and got.sort_code then r.sort_code = got.sort_code; filled = true end
-        if not r.account_number and got.account_number then r.account_number = got.account_number; filled = true end
-        if filled then
+        -- Only the bank name is taken from the model.
+        if got.bank_name then
+            r.bank_name = got.bank_name
             r.source = r.source and (r.source .. "+llm") or "llm"
             r.confidence = r.confidence > 0 and math.min(r.confidence, 0.7) or 0.6
         end

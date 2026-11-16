@@ -94,5 +94,37 @@ for _ = 1, 40 do responses[#responses + 1] = { status = 429, headers = { ["Retry
 res = internal("POST", "/api/v2/tax/classify", "statement_id=x", job)
 check("returns the last 429 after 31 attempts", res.status == 429 and #calls == 31, #calls)
 
+-- /tax/classify and /tax/extract: the worker's calls all come from 127.0.0.1, and the
+-- per-IP count lives in Redis across pods, so every user's jobs shared one allowance
+-- ("classify:127.0.0.1", 5 a minute) and statements failed under concurrent uploads.
+print("worker calls are counted per user, clients per IP")
+local checked, ip_wrapped, allow = {}, 0, true
+package.loaded["middleware.rate-limit"] = {
+    wrap = function(_, h) return function(self) ip_wrapped = ip_wrapped + 1; return h(self) end end,
+    check = function(key) checked[#checked + 1] = key; return allow, 0, allow and 0 or 42 end,
+}
+ngx.header = {}
+local limited = require("routes.tax-process").limit({ rate = 5, window = 60, prefix = "classify" },
+    function() return { status = 200 } end)
+ngx.var.remote_addr = "127.0.0.1"
+local r1 = limited({ current_user = { uuid = "u-1" } })
+limited({ current_user = { uuid = "u-2" } })
+check("worker call counted against its user", checked[1] == "classify:user:u-1" and checked[2] == "classify:user:u-2",
+    checked[1])
+check("worker call isn't counted against 127.0.0.1", ip_wrapped == 0 and r1.status == 200)
+allow = false
+local r2 = limited({ current_user = { uuid = "u-1" } })
+check("a user over their limit gets 429 + Retry-After (the worker waits it out)",
+    r2.status == 429 and ngx.header["Retry-After"] == "42")
+ngx.var.remote_addr = "203.0.113.9"
+checked = {}
+limited({ current_user = { uuid = "u-1" } })
+check("a real client keeps the per-IP limit", ip_wrapped == 1 and #checked == 0)
+local function read(p) local f = io.open(p); local s = f:read("*a"); f:close(); return s end
+check("/tax/classify uses it", read("lapis/routes/tax-classify.lua")
+    :find('TaxProcess.limit({ rate = 5, window = 60, prefix = "classify" }', 1, true) ~= nil)
+check("/tax/extract uses it", read("lapis/routes/tax-extract.lua")
+    :find('TaxProcess.limit({ rate = 10, window = 60, prefix = "extract:txn" }', 1, true) ~= nil)
+
 print(failures == 0 and "\nall passed" or ("\n" .. failures .. " failed"))
 os.exit(failures == 0 and 0 or 1)

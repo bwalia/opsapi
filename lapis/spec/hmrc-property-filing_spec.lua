@@ -42,7 +42,7 @@ package.loaded["helper.hmrc"] = { build_fraud_headers = function() return {} end
 
 local TaxTools = require("lib.agent.tax-tools")
 local Property = require("lib.hmrc-property-aggregator")
-local ci = TaxTools._commercial_interest
+local ci = TaxTools._finance_split
 
 local function row(tt, cat, box, deductible, amount, income)
     return { transaction_type = tt, category = cat, hmrc_category = box, deductible = deductible,
@@ -95,11 +95,35 @@ local legacy = {
     row("DEBIT", "loan_interest", "interest_finance", true, 30000),
 }
 local o2 = Property.fold(legacy, { property_finance_costs = 20000, commercial_finance_costs = 8000 }, ci)
--- 30,000 classified: 20,000 is residential (moved out), the remaining 10,000 already
--- covers the 8,000 commercial, so nothing is added.
+-- 30,000 classified: 20,000 is the stated residential, 8,000 of the other 10,000 is the
+-- stated commercial (already an expense, so nothing added), the last 2,000 was never
+-- said to be commercial, so it is residential too.
 check("residential taken back out, commercial not double counted",
-    near(o2.expenses.financialCosts, 10000), o2.expenses.financialCosts)
-check("residential still claimed as the credit", near(o2.expenses.residentialFinancialCost, 20000))
+    near(o2.expenses.financialCosts, 8000), o2.expenses.financialCosts)
+check("residential claimed as the credit", near(o2.expenses.residentialFinancialCost, 22000),
+    o2.expenses.residentialFinancialCost)
+
+print("== Section 24 fallback: interest classified, no figure given")
+local btl = {
+    row("CREDIT", "rental_income", "other_income", false, 24000, true),
+    row("DEBIT", "loan_interest", "interest_finance", true, 6000),
+    row("DEBIT", "repairs_property", "repairs_maintenance", true, 1000),
+}
+for _, p in ipairs({ {}, { property_finance_costs = 0 } }) do
+    local o = Property.fold(btl, p, ci)
+    check("buy-to-let interest → residentialFinancialCost (20% credit), not financialCosts",
+        o.expenses.financialCosts == nil and near(o.expenses.residentialFinancialCost, 6000), o.expenses.financialCosts)
+end
+local oc = Property.fold(btl, { commercial_finance_costs = 6000 }, ci)
+check("said it's commercial → financialCosts",
+    near(oc.expenses.financialCosts, 6000) and oc.expenses.residentialFinancialCost == nil)
+check("fold finds the shared split without being handed it",
+    near(Property.fold(btl, {}).expenses.residentialFinancialCost, 6000))
+-- The estimate and the filed body must agree.
+local e = TaxTools.estimate(24000, 7000, "2025-26", { income_types = { "uk_property" } }, { finance_interest = 6000 })
+local of = Property.fold(btl, {}, ci)
+check("estimate and filed body agree", near(e.property_finance_costs, of.expenses.residentialFinancialCost)
+    and near(e.total_expenses, of.expenses.repairsAndMaintenance), e.total_expenses)
 
 print("== no stated interest")
 local o3 = Property.fold({ row("CREDIT", "rental_income", "other_income", false, 12000, true) }, {}, ci)

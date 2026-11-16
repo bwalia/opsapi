@@ -126,10 +126,30 @@ check("after: total due drops by the reduction",
 check("no NIC on property", after.nic_applied == false and near(after.class4_nic, 0))
 
 -- Interest the classifier already deducted is moved out (not deducted AND credited).
-local dbl = TaxTools.estimate(1698949, 762400, "2025-26", land, { finance_interest = 600000 })
+local dbl = TaxTools.estimate(1698949, 762400, "2025-26", land, { finance_interest = 512400 })
 check("classified interest moved out of expenses", near(dbl.finance_costs_moved_from_expenses, 512400))
 check("allowable expenses exclude residential interest", near(dbl.total_expenses, 250000))
 check("same tax as when it was never deducted", near(dbl.income_tax_due, 535750.05), dbl.income_tax_due)
+
+-- Section 24 fallback: the landlord never gave (or said 0 for) the residential figure,
+-- but the classifier tagged the buy-to-let interest. It is residential (20% credit),
+-- not a fully deductible expense, unless they said it's commercial.
+local unstated = TaxTools.estimate(1698949, 762400, "2025-26", { income_types = { "uk_property" } },
+    { finance_interest = 512400 })
+check("unstated: classified interest gets the 20% credit, not full relief",
+    near(unstated.finance_cost_reduction, 102480) and near(unstated.total_expenses, 250000),
+    unstated.finance_cost_reduction)
+check("unstated: same tax as when the figure was given", near(unstated.income_tax_due, 535750.05))
+local said0 = TaxTools.estimate(1698949, 762400, "2025-26",
+    { income_types = { "uk_property" }, property_finance_costs = 0 }, { finance_interest = 512400 })
+check("said 0: classified interest still residential", near(said0.property_finance_costs, 512400))
+local comm = TaxTools.estimate(1698949, 762400, "2025-26",
+    { income_types = { "uk_property" }, commercial_finance_costs = 512400 }, { finance_interest = 512400 })
+check("said it's commercial: stays a normal expense", near(comm.finance_cost_reduction, 0)
+    and near(comm.total_expenses, 762400))
+local beyond = TaxTools.estimate(1698949, 862400, "2025-26", land, { finance_interest = 612400 })
+check("classified beyond the stated residential figure is residential too",
+    near(beyond.property_finance_costs, 612400) and near(beyond.total_expenses, 250000))
 
 -- compute_estimate in the same turn sees the figure saved by the tool.
 year_row = { gross_income = 1698949, total_expenses = 250000, finance_interest = 0, unreviewed = 0 }

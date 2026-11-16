@@ -104,8 +104,12 @@ return {
         print("[My Income] created tax_income_records")
     end,
 
+    -- Also registered as zz_tax_my_income_7_seed_shared_catalogue: it first ran with
+    -- "namespace_id NULL/0" as the test, which matched nothing where Config-as-Code keeps
+    -- the catalogue in the tax-copilot namespace, so those types had no forms.
     [4] = function()
         local seeds = require("lib.income-types-seed")
+        local system = require("lib.income-types").system_sql()
         local applied = 0
         for _, s in ipairs(seeds) do
             local res = db.query([[
@@ -119,7 +123,7 @@ return {
                        estimate_note = COALESCE(estimate_note, ?),
                        updated_at    = NOW()
                  WHERE income_type_key = ?
-                   AND COALESCE(namespace_id, 0) = 0
+                   AND ]] .. system .. [[
                    AND (field_schema IS NULL OR field_schema = '{}'::jsonb)
             ]], jsonb(s.field_schema, false), jsonb(s.estimator_mapping, true),
                 s.icon or db.NULL, s.help_text or db.NULL, s.entity_type or db.NULL,

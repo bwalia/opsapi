@@ -329,11 +329,15 @@ function IncomeTypes.validate_definition(body, opts)
         if not nonempty(body.display_name) then err("Name is required.")
         elseif #body.display_name > 120 then err("Name must be 120 characters or fewer.") end
     end
-    for _, col in ipairs({ "description", "help_text", "estimate_note" }) do
+    for _, col in ipairs({ "description", "help_text", "estimate_note", "linked_form_description" }) do
         local v = body[col]
         if v ~= nil and not is_null(v) and (type(v) ~= "string" or #v > 4000) then
             err(col .. " must be text up to 4000 characters.")
         end
+    end
+    if body.linked_form_title ~= nil and not is_null(body.linked_form_title)
+        and (type(body.linked_form_title) ~= "string" or #body.linked_form_title > 200) then
+        err("Form name must be text up to 200 characters (e.g. SA105).")
     end
     if body.icon ~= nil and not is_null(body.icon)
         and (type(body.icon) ~= "string" or not body.icon:match("^[A-Za-z0-9]+$") or #body.icon > 60) then
@@ -349,7 +353,8 @@ function IncomeTypes.validate_definition(body, opts)
     end
     if body.linked_form_weblink ~= nil and not is_null(body.linked_form_weblink)
         and body.linked_form_weblink ~= ""
-        and (type(body.linked_form_weblink) ~= "string" or not body.linked_form_weblink:match("^https?://")) then
+        and (type(body.linked_form_weblink) ~= "string" or not body.linked_form_weblink:match("^https?://")
+            or #body.linked_form_weblink > 2000) then
         err("Reference link must start with https://")
     end
     if body.display_order ~= nil and not is_null(body.display_order) and to_number(body.display_order) == nil then
@@ -469,7 +474,7 @@ function IncomeTypes.resolve(rows, overrides, namespace_id, opts)
     local out = {}
     for _, r in ipairs(rows or {}) do
         local rns = tonumber(r.namespace_id)
-        local is_system = rns == nil or rns == 0
+        local is_system = IncomeTypes.is_system(r)
         if is_system or rns == ns then
             local row = {}
             for k, v in pairs(r) do row[k] = v end
@@ -501,6 +506,24 @@ end
 -- prefixed: no clash with system keys or with another namespace's types.
 function IncomeTypes.custom_key(namespace_id, slug)
     return "ns" .. tostring(tonumber(namespace_id) or 0) .. "_" .. slug
+end
+
+--- Is this income_types row the shared (built-in) catalogue? A namespace's own type
+-- carries its namespace in its key (custom_key); every other row is shared, whatever
+-- its namespace_id: NULL/0 on most installs, the tax-copilot namespace where
+-- Config-as-Code owns the catalogue (config/registry.lua imports it there and refuses
+-- NULL rows; migration 994_cmi_ns_cleanup_to_tax_copilot moved it there).
+function IncomeTypes.is_system(row)
+    local ns = tonumber(row.namespace_id) or 0
+    local prefix = "ns" .. ns .. "_"
+    return ns == 0 or tostring(row.income_type_key or ""):sub(1, #prefix) ~= prefix
+end
+
+--- The same test in SQL, for a WHERE clause. alias: optional table alias.
+function IncomeTypes.system_sql(alias)
+    local p = alias and (alias .. ".") or ""
+    return ("(COALESCE(%snamespace_id, 0) = 0 OR NOT starts_with(%sincome_type_key, 'ns' || %snamespace_id || '_'))")
+        :format(p, p, p)
 end
 
 -- ---------------------------------------------------------------------------

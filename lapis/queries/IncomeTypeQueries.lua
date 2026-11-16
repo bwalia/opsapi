@@ -16,6 +16,7 @@
 local db = require("lapis.db")
 local cjson = require("cjson")
 local Global = require("helper.global")
+local IncomeTypes = require("lib.income-types")
 
 local IncomeTypeQueries = {}
 
@@ -24,10 +25,27 @@ local IncomeTypeQueries = {}
 local JSON_COLS = { "required_documents", "keyword_rules", "category_affinity", "hmrc_mapping",
     "field_schema", "estimator_mapping" }
 
--- System (platform-wide) rows only. A workspace's own income types (namespace_id set,
+-- System (platform-wide) rows only. A workspace's own income types (key "ns<id>_…",
 -- created from the dashboard — routes/tax-my-income.lua) must never appear in this
--- shared, non-namespaced catalogue or pass its validation.
-local SYSTEM_ONLY = "COALESCE(namespace_id, 0) = 0"
+-- shared, non-namespaced catalogue or pass its validation. Not "namespace_id is
+-- NULL/0": on installs where Config-as-Code owns the catalogue it sits in the
+-- tax-copilot namespace (see IncomeTypes.is_system).
+local SYSTEM_ONLY = IncomeTypes.system_sql()
+
+-- Linked-form metadata is shown to every taxpayer as a reference card, the link as an
+-- <a href>: text of a sane length, and only http(s) links. @return error message | nil
+local function linked_form_error(body)
+    for col, max in pairs({ linked_form_title = 200, linked_form_description = 4000, linked_form_weblink = 2000 }) do
+        local v = body[col]
+        if v ~= nil and (type(v) ~= "string" or #v > max) then
+            return col .. " must be text up to " .. max .. " characters"
+        end
+    end
+    local link = body.linked_form_weblink
+    if link and link ~= "" and not link:match("^https?://") then
+        return "linked_form_weblink must start with https://"
+    end
+end
 local function decode_row(row)
     if not row then return row end
     for _, c in ipairs(JSON_COLS) do
@@ -103,7 +121,7 @@ end
 -- params: { include_inactive? = "false" }. Each row carries usage_count.
 function IncomeTypeQueries.admin_list(params)
     params = params or {}
-    local where = "WHERE COALESCE(it.namespace_id, 0) = 0"
+    local where = "WHERE " .. IncomeTypes.system_sql("it")
     if params.include_inactive ~= "true" and params.include_inactive ~= true then
         where = where .. " AND it.is_active = true"
     end
@@ -134,6 +152,8 @@ function IncomeTypeQueries.create(body)
         or not body.display_name or body.display_name == "" then
         return nil, "income_type_key and display_name are required", 400
     end
+    local bad = linked_form_error(body)
+    if bad then return nil, bad, 400 end
 
     local existing = db.query("SELECT id FROM income_types WHERE income_type_key = ?", body.income_type_key)
     if existing and #existing > 0 then
@@ -183,6 +203,8 @@ function IncomeTypeQueries.update(uuid, body)
     if not existing or #existing == 0 then
         return nil, "Income type not found", 404
     end
+    local bad = linked_form_error(body)
+    if bad then return nil, bad, 400 end
 
     local sets = {}
     local function add(col, val, kind)

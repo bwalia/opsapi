@@ -2,9 +2,9 @@
     My Income queries — definition-driven income types + the user's records.
 
     Tables
-      income_types                       catalogue (system rows: namespace_id NULL/0;
-                                         a namespace's own types: namespace_id = ns,
-                                         key "ns<id>_<slug>")
+      income_types                       catalogue (a namespace's own types: namespace_id
+                                         = ns, key "ns<id>_<slug>"; every other row is a
+                                         system row — IncomeTypes.is_system)
       income_type_namespace_overrides    per-namespace edits of a SYSTEM type
       user_profile_entities              the user's properties / jobs / businesses
                                          (shared with diy-tax-return-uk's hubs)
@@ -66,10 +66,8 @@ end
 --- Resolved income types a namespace sees (system + its own + its overrides).
 -- opts.include_inactive for the admin list.
 function Q.types_for(namespace_id, opts)
-    local rows = db.query([[
-        SELECT * FROM income_types
-        WHERE COALESCE(namespace_id, 0) = 0 OR namespace_id = ?
-    ]], namespace_id)
+    local rows = db.query("SELECT * FROM income_types WHERE " .. IncomeTypes.system_sql() .. " OR namespace_id = ?",
+        namespace_id)
     local overrides = db.query("SELECT * FROM income_type_namespace_overrides WHERE namespace_id = ?",
         namespace_id)
     local resolved = IncomeTypes.resolve(decode_rows(rows), decode_rows(overrides), namespace_id, opts)
@@ -270,7 +268,16 @@ function Q.estimator_inputs(user_id, tax_year, namespace_id)
     -- include hidden types: hiding a type stops new entries, it doesn't drop figures
     -- the user already gave from their tax
     local types = Q.by_key(Q.types_for(namespace_id, { include_inactive = true }))
-    return IncomeTypes.estimator_inputs(types, Q.records(namespace_id, user_id, tax_year))
+    -- A removed property / job / business no longer counts (as on the My Income overview).
+    local live = {}
+    for _, list in pairs(Q.entities_by_type(namespace_id, user_id)) do
+        for _, e in ipairs(list) do live[e.uuid] = true end
+    end
+    local records = {}
+    for _, r in ipairs(Q.records(namespace_id, user_id, tax_year)) do
+        if type(r.entity_uuid) ~= "string" or live[r.entity_uuid] then records[#records + 1] = r end
+    end
+    return IncomeTypes.estimator_inputs(types, records)
 end
 
 -- ---------------------------------------------------------------------------
@@ -301,10 +308,11 @@ function Q.create_custom(namespace_id, body)
     local order = tonumber(body.display_order)
     if not order then
         local m = db.query([[SELECT COALESCE(MAX(display_order), 0) + 10 AS n FROM income_types
-            WHERE COALESCE(namespace_id, 0) = 0 OR namespace_id = ?]], namespace_id)[1]
+            WHERE ]] .. IncomeTypes.system_sql() .. " OR namespace_id = ?", namespace_id)[1]
         order = tonumber(m and m.n) or 100
     end
-    db.query([[
+    -- ON CONFLICT: two creates of the same key at once get a 409, not a 500.
+    local inserted = db.query([[
         INSERT INTO income_types
             (uuid, income_type_key, display_name, description, required_documents, allows_manual_entry,
              keyword_rules, category_affinity, rules_markdown, hmrc_mapping, display_order, is_active,
@@ -313,6 +321,7 @@ function Q.create_custom(namespace_id, body)
              created_at, updated_at)
         VALUES (?, ?, ?, ?, '[]'::jsonb, true, '[]'::jsonb, '{}'::jsonb, NULL, '{}'::jsonb, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, NOW(), NOW())
+        ON CONFLICT (income_type_key) DO NOTHING RETURNING id
     ]], uuid(), key, body.display_name, body.description or db.NULL, order, body.is_active ~= false,
         namespace_id,
         body.linked_form_title or db.NULL, body.linked_form_description or db.NULL,
@@ -320,6 +329,9 @@ function Q.create_custom(namespace_id, body)
         body.icon or db.NULL, body.help_text or db.NULL,
         body.entity_type or db.NULL, body.entity_label or db.NULL,
         jsonb(body.field_schema, false), jsonb(body.estimator_mapping, true), body.estimate_note or db.NULL)
+    if not (inserted and inserted[1]) then
+        return nil, "You already have an income type with that key.", 409
+    end
     return Q.type_for(namespace_id, key, { include_inactive = true })
 end
 
@@ -329,9 +341,9 @@ end
 --   system type otherwise → the namespace's override row (created on first edit).
 function Q.update_type(namespace_id, key, body, scope)
     local raw = db.query([[SELECT * FROM income_types WHERE income_type_key = ?
-        AND (COALESCE(namespace_id, 0) = 0 OR namespace_id = ?) LIMIT 1]], key, namespace_id)[1]
+        AND (]] .. IncomeTypes.system_sql() .. [[ OR namespace_id = ?) LIMIT 1]], key, namespace_id)[1]
     if not raw then return nil, "Income type not found", 404 end
-    local is_system = (tonumber(raw.namespace_id) or 0) == 0
+    local is_system = IncomeTypes.is_system(raw)
 
     if not is_system or scope == "global" then
         local sets = {}
@@ -395,8 +407,8 @@ end
 
 --- Drop a namespace's override of a system type (back to the platform default).
 function Q.reset_override(namespace_id, key)
-    local raw = db.query([[SELECT id FROM income_types WHERE income_type_key = ?
-        AND COALESCE(namespace_id, 0) = 0 LIMIT 1]], key)[1]
+    local raw = db.query("SELECT id FROM income_types WHERE income_type_key = ? AND "
+        .. IncomeTypes.system_sql() .. " LIMIT 1", key)[1]
     if not raw then return nil, "Only a built-in income type can be reset.", 400 end
     db.query("DELETE FROM income_type_namespace_overrides WHERE namespace_id = ? AND income_type_id = ?",
         namespace_id, raw.id)

@@ -472,16 +472,24 @@ register({
     end,
 })
 
--- Commercial property interest the landlord stated, as an expense. Interest already
--- classified from the statements beyond the residential figure (the old way, kept for
--- years classified before mortgage payments stopped being claimed) already counts as
--- an expense, so only the part of the stated figure not already in `expenses` is added.
-local function commercial_interest(profile, opts, fin)
-    local stated = math.max(0, tonumber(profile.commercial_finance_costs) or 0)
-    local already = math.max(0, (tonumber(opts.finance_interest) or 0) - fin)
-    return math.max(0, stated - already)
+--- Section 24 for a property-only landlord: how the interest splits. `classified` is
+-- the interest classified from the statements (interest_finance), already inside the
+-- expenses. It is residential unless the landlord said it's commercial: their stated
+-- residential figure is taken to include it, their stated commercial figure covers what
+-- is left, and anything still left is residential too (buy-to-let interest must never
+-- get full relief just because the figure wasn't given). Shared by the estimate and the
+-- filed UK property body (lib/hmrc-property-aggregator) so they always agree.
+-- @return residential (the 20% credit), moved (taken out of expenses),
+--         added (stated commercial interest not already in expenses)
+local function finance_split(profile, classified)
+    local fin = math.max(0, tonumber(profile.property_finance_costs) or 0)
+    local commercial = math.max(0, tonumber(profile.commercial_finance_costs) or 0)
+    classified = math.max(0, tonumber(classified) or 0)
+    local left = math.max(0, classified - fin)
+    local more_residential = math.max(0, left - commercial)
+    return fin + more_residential, math.min(fin, classified) + more_residential, math.max(0, commercial - left)
 end
-TaxTools._commercial_interest = commercial_interest
+TaxTools._finance_split = finance_split
 
 -- ======================= shared year estimate =======================
 -- The chat estimate, the Calculate screens (routes/tax-calculate), the reports
@@ -614,20 +622,18 @@ function TaxTools.estimate(income, expenses, tax_year, profile, opts)
         gift_aid_net = tonumber(profile.gift_aid_net) or 0,
     }
     -- Section 24: residential finance costs are NOT a deductible expense; they earn a
-    -- 20% tax reduction (lib/tax-calc compute_full step 8). If the bank-statement
-    -- expenses already deducted interest (classified Loan Interest / interest_finance),
-    -- take the user's stated residential interest back out — up to the amount actually
-    -- classified — so it isn't deducted AND credited. Any classified interest beyond
-    -- the stated residential figure stays deductible (treated as commercial/other).
+    -- 20% tax reduction (lib/tax-calc compute_full step 8). Interest the bank-statement
+    -- expenses already deducted (classified Loan Interest / interest_finance) is taken
+    -- back out and credited instead, unless the landlord said it's commercial — see
+    -- finance_split (the filed property body uses the same split).
     local has_property = false
     for _, t in ipairs(types) do if t == "uk_property" then has_property = true end end
     local fin = math.max(0, tonumber(profile.property_finance_costs) or 0)
     local notes = {}
     local moved, added = 0, 0
     if only_property and not has_se then
-        moved = math.min(fin, math.max(0, tonumber(opts.finance_interest) or 0))
+        fin, moved, added = finance_split(profile, opts.finance_interest)
         inp.property_rents = income
-        added = commercial_interest(profile, opts, fin)
         inp.property_expenses = expenses - moved + added
         inp.property_finance_costs = fin
     elseif has_se and has_property and tonumber(profile.property_rents) then

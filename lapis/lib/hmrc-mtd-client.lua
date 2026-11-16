@@ -83,6 +83,22 @@ function Client.list_businesses(token, nino, opts)
     return decode(res.body), nil
 end
 
+-- One business's details (v2, Retrieve Business Details). Unlike the list, it carries
+-- commencementDate (YYYY-MM-DD), which a cumulative update must not start before.
+-- opts.test_scenario = "STATEFUL" (sandbox) reads a test-support business.
+function Client.get_business(token, nino, business_id, opts)
+    opts = opts or {}
+    local httpc, err = http_client()
+    if not httpc then return nil, err end
+    local res, rerr = httpc:request_uri(
+        base_url() .. "/individuals/business/details/" .. nino .. "/" .. business_id,
+        { method = "GET", headers = headers(token, "2.0", { test_scenario = opts.test_scenario }),
+          ssl_verify = true })
+    if not res then return nil, "get_business request failed: " .. tostring(rerr) end
+    if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
+    return decode(res.body), nil
+end
+
 -- Find the first self-employment business id from a list response.
 function Client.first_self_employment(list_data)
     local list = list_data and (list_data.listOfBusinesses or list_data.businesses)

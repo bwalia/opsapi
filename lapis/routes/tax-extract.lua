@@ -15,6 +15,7 @@ local AuthMiddleware = require("middleware.auth")
 local RateLimit = require("middleware.rate-limit")
 local MinioClient = require("helper.minio")
 local Global = require("helper.global")
+local TaxProcess = require("routes.tax-process")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -79,9 +80,22 @@ local function detectKind(filename, content)
     return nil
 end
 
-local function tmpPath(user_id)
-    return string.format("/tmp/opsapi-bankdetect-%s-%s-%d.pdf", tostring(user_id),
+-- Bank details from a PDF's bytes. pdftotext needs a file; it is removed whatever
+-- happens, including when detection throws. @return details | nil
+local function detectPdf(Extraction, bytes, user_id)
+    local path = string.format("/tmp/opsapi-bankdetect-%s-%s-%d.pdf", tostring(user_id),
         (tostring(ngx.now()):gsub("%.", "")), math.random(100000, 999999))
+    local f = io.open(path, "wb")
+    if not f then return nil end
+    f:write(bytes)
+    f:close()
+    local ok, details = pcall(Extraction.detect_bank_details, path, "pdf")
+    os.remove(path)
+    if not ok then
+        ngx.log(ngx.ERR, "[bank-details] detection failed: ", tostring(details))
+        return nil
+    end
+    return details
 end
 
 return function(app)
@@ -123,15 +137,10 @@ return function(app)
                     end
                     local kind = detectKind(upload.filename, upload.content)
                     if kind == "pdf" then
-                        local tmp_path = tmpPath(user_id)
-                        local f = io.open(tmp_path, "wb")
-                        if not f then
+                        details = detectPdf(Extraction, upload.content, user_id)
+                        if not details then
                             return { status = 500, json = { error = "Could not read the file" } }
                         end
-                        f:write(upload.content)
-                        f:close()
-                        details = Extraction.detect_bank_details(tmp_path, "pdf")
-                        os.remove(tmp_path)
                     elseif kind == "csv" or kind == "text" then
                         details = Extraction.detect_bank_details(upload.content, kind)
                     elseif kind == "image" then
@@ -185,14 +194,10 @@ return function(app)
                     if file_type == "csv" then
                         details = Extraction.detect_bank_details(res.body, "csv")
                     elseif file_type == "pdf" then
-                        local tmp_path = tmpPath(user_id)
-                        local f = io.open(tmp_path, "wb")
-                        if f then
-                            f:write(res.body)
-                            f:close()
+                        details = detectPdf(Extraction, res.body, user_id)
+                        if not details then
+                            return { status = 500, json = { error = "Could not read the file" } }
                         end
-                        details = Extraction.detect_bank_details(tmp_path, "pdf")
-                        os.remove(tmp_path)
                     else
                         details = BankDetect.detect("", "text", { llm = false })
                         details.reason = "image"
@@ -249,9 +254,10 @@ return function(app)
     )
 
     -- POST /api/v2/tax/extract — extract transactions from a statement
+    -- Limited per IP for clients, per user for the background worker (TaxProcess.limit).
     app:post("/api/v2/tax/extract",
-        RateLimit.wrap({ rate = 10, window = 60, prefix = "extract:txn" },
-            AuthMiddleware.requireAuth(function(self)
+        TaxProcess.limit({ rate = 10, window = 60, prefix = "extract:txn" },
+            function(self)
                 local statement_id = self.params.statement_id
                 if not statement_id then
                     return { status = 400, json = { error = "statement_id is required" } }
@@ -335,13 +341,20 @@ return function(app)
                 local langfuse = pcall(require, "lib.langfuse") and require("lib.langfuse") or nil
                 local trace_id = langfuse and langfuse.trace_start("extract_statement", { statement_id = statement_id })
 
-                local result, err = Extraction.extract(tmp_path, file_type, {
+                -- Heartbeat while it runs so a status poll doesn't restart it as an orphan;
+                -- pcall so a throw can't leave the statement PROCESSING (or the file) behind.
+                local stop = TaxProcess.keep_alive(statement_id)
+                local ok_run, result, err = pcall(Extraction.extract, tmp_path, file_type, {
                     content = (file_type == "csv") and res.body or nil,
                     bank_hint = stmt.bank_name,
                     trace_id = trace_id,
                 })
-
+                stop()
                 os.remove(tmp_path)
+                if not ok_run then
+                    ngx.log(ngx.ERR, "[tax-extract] statement ", statement_id, " failed: ", tostring(result))
+                    result, err = nil, "the file could not be read"
+                end
 
                 if not result then
                     db.update("tax_statements", {
@@ -486,7 +499,7 @@ return function(app)
                         statement_id = statement_id,
                     }
                 }
-            end)
+            end
         )
     )
 
