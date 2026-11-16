@@ -178,20 +178,11 @@ return function(app)
 
                 -- Heartbeat while it runs so a status poll doesn't restart it as an orphan.
                 local stop = TaxProcess.keep_alive(statement_id)
-                local ok_run, run_err = pcall(function()
-                    local results = Classifier.classify_batch(transactions, {
-                        profile_type = profile_type,
-                        llm_provider = llm_provider,
-                        trace_id = trace_id,
-                        -- Learn from this user's confirmed past transactions; look up
-                        -- similar examples only inside the statement's own namespace.
-                        user_id = user_id,
-                        exclude_statement_id = statement_id,
-                        namespace_id = stmt.namespace_id,
-                    })
-
-                    -- Update transactions with classification results
-                    for i, txn in ipairs(transactions) do
+                -- Save one finished batch of results (called by classify_batch as each lands,
+                -- so the statement's progress shows and a crash keeps what was done).
+                local function save(results, from, to)
+                    for i = from, to do
+                        local txn = transactions[i]
                         local cls = results[i]
                         if cls then
                             local updates = {
@@ -221,7 +212,19 @@ return function(app)
                             classified_count = classified_count + 1
                         end
                     end
-                end)
+                end
+
+                local ok_run, run_err = pcall(Classifier.classify_batch, transactions, {
+                    profile_type = profile_type,
+                    llm_provider = llm_provider,
+                    trace_id = trace_id,
+                    -- Learn from this user's confirmed past transactions; look up
+                    -- similar examples only inside the statement's own namespace.
+                    user_id = user_id,
+                    exclude_statement_id = statement_id,
+                    namespace_id = stmt.namespace_id,
+                    on_batch = save,
+                })
                 stop()
 
                 if not ok_run then
