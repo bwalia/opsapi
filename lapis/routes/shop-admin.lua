@@ -8,6 +8,10 @@
 
       GET/POST          /categories            PUT/DELETE /categories/:uuid
       GET/POST          /products              GET/PUT/DELETE /products/:uuid
+                                               (cost_minor on the product and its options: manual cost, pence ex
+                                               VAT, null clears; a price below known cost → 422 BELOW_COST)
+      GET               /pricing/below-cost    products/options priced below known cost, counts with no cost,
+                                               ?include_quotes=true: draft/sent quotes with a line below cost
       POST              /products/:uuid/stock  POST /options/:uuid/stock
       GET               /stock                 GET /stock/movements
       POST              /import                   (existing products keep their prices; body overwrite_prices: true resets them)
@@ -59,7 +63,7 @@
       GET               /suppliers/:uuid/purchase-orders   POs raised with this supplier
       GET               /supplier-items/:uuid/history   daily cost (12 months)
       POST              /supplier-items/:uuid/link      { product_uuid|null, pricing_source, margin_pct? }
-      GET               /price-changes          (?status=pending|applied|approved|rejected|superseded)
+      GET               /price-changes          (?status=pending|applied|approved|rejected|superseded|blocked_below_cost)
       POST              /price-changes/:uuid/approve | /reject
       POST              /reconcile
       GET               /legal/acceptances     legal confirmations customers ticked (?q=email&document_key=
@@ -222,6 +226,11 @@ return function(app)
             end,
         }))(self)
     end)
+
+    -- Never price below cost: what is below its known cost now, and what has no cost yet.
+    app:get(BASE .. "/pricing/below-cost", guard("read", function(self, ns_id)
+        return U.ok(require("queries.ShopCostQueries").report(ns_id, self.params))
+    end))
 
     app:post(BASE .. "/products/:uuid/stock", guard("update", function(self, ns_id)
         local body, bad = body_or_400()

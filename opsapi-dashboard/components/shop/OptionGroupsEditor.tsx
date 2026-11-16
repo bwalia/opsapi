@@ -16,6 +16,7 @@ import {
   parseJsonObject,
   prettyJson,
 } from './editor-fields';
+import { MarginHint } from './shared';
 
 // ============================================================
 // Form model
@@ -28,6 +29,11 @@ export interface OptionForm {
   name: string;
   description: string;
   price_delta: string; // pounds
+  /** Manual cost (pounds ex VAT) of one unit of the price delta; '' = unknown. */
+  cost: string;
+  /** Read-only, as last saved: the component product's cost and the value it was linked to. */
+  saved_component_cost: number | null;
+  saved_component: string;
   stock_qty: string; // '' = untracked
   /** '' = none; '<id>' or 'uuid:<uuid>' when the API omits numeric ids. */
   component_product: string;
@@ -64,6 +70,14 @@ export const STANDARD_GROUP_CODES = [
 ];
 
 export function optionToForm(o: ShopOption): OptionForm {
+  // Backend returns the link as `component_product: {uuid, name, sku}`.
+  const component = o.component_product?.uuid
+    ? `uuid:${o.component_product.uuid}`
+    : o.component_product_uuid
+      ? `uuid:${o.component_product_uuid}`
+      : o.component_product_id
+        ? String(o.component_product_id)
+        : '';
   return {
     key: newKey(),
     uuid: o.uuid,
@@ -71,15 +85,11 @@ export function optionToForm(o: ShopOption): OptionForm {
     name: o.name,
     description: o.description ?? '',
     price_delta: minorToPounds(o.price_delta_minor ?? 0),
+    cost: minorToPounds(o.cost_minor),
+    saved_component_cost: o.cost_source === 'component' ? o.effective_cost_minor ?? null : null,
+    saved_component: component,
     stock_qty: o.stock_qty === null || o.stock_qty === undefined ? '' : String(o.stock_qty),
-    // Backend returns the link as `component_product: {uuid, name, sku}`.
-    component_product: o.component_product?.uuid
-      ? `uuid:${o.component_product.uuid}`
-      : o.component_product_uuid
-        ? `uuid:${o.component_product_uuid}`
-        : o.component_product_id
-          ? String(o.component_product_id)
-          : '',
+    component_product: component,
     max_qty: String(o.max_qty ?? 1),
     is_default: !!o.is_default,
     is_active: o.is_active !== false,
@@ -108,6 +118,9 @@ const emptyOption = (): OptionForm => ({
   name: '',
   description: '',
   price_delta: '0.00',
+  cost: '',
+  saved_component_cost: null,
+  saved_component: '',
   stock_qty: '',
   component_product: '',
   max_qty: '1',
@@ -155,6 +168,8 @@ export function groupsToPayload(groups: GroupForm[]): { groups: Omit<ShopOptionG
       optCodes.add(o.code.trim());
       const delta = poundsToMinor(o.price_delta);
       if (delta === null && o.price_delta.trim() !== '') errors.push(`${oLabel}: invalid price delta`);
+      const cost = o.cost.trim() === '' ? null : poundsToMinor(o.cost);
+      if (o.cost.trim() !== '' && (cost === null || cost < 0)) errors.push(`${oLabel}: cost must be a valid amount ≥ 0`);
       const [attrs, attrErr] = parseJsonObject(o.attributes);
       if (attrErr) errors.push(`${oLabel}: attributes — ${attrErr}`);
       const stock = o.stock_qty.trim() === '' ? null : toInt(o.stock_qty, 0);
@@ -164,6 +179,7 @@ export function groupsToPayload(groups: GroupForm[]): { groups: Omit<ShopOptionG
         name: o.name.trim(),
         description: o.description.trim() || null,
         price_delta_minor: delta ?? 0,
+        cost_minor: cost !== null && cost >= 0 ? cost : null,
         component_product_id:
           o.component_product && !o.component_product.startsWith('uuid:') ? Number(o.component_product) : null,
         component_product_uuid: o.component_product.startsWith('uuid:') ? o.component_product.slice(5) : null,
@@ -371,6 +387,14 @@ function OptionRow({
     component && component.price_mode !== 'quote_only' && (component.base_price_minor ?? 0) > 0
       ? component.base_price_minor
       : null;
+  const cost = o.cost.trim() === '' ? null : poundsToMinor(o.cost);
+  const costInvalid = o.cost.trim() !== '' && (cost === null || cost < 0);
+  // Same precedence as OpsAPI: a component product's own cost wins over the option's manual cost.
+  const componentCost = component
+    ? component.effective_cost_minor ?? (o.component_product === o.saved_component ? o.saved_component_cost : null)
+    : null;
+  const effectiveCost = componentCost ?? (costInvalid ? null : cost);
+  const effectivePrice = componentPrice ?? delta;
   return (
     <div className={cn('rounded-lg border p-3', o.is_active ? 'border-secondary-200' : 'border-dashed border-secondary-300 opacity-70')}>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
@@ -402,6 +426,19 @@ function OptionRow({
         </div>
         <div className="md:col-span-2">
           <Input
+            label="Cost (£ ex VAT)"
+            id={`o-${o.key}-cost`}
+            value={o.cost}
+            onChange={(e) => onChange({ cost: e.target.value })}
+            onBlur={() => cost !== null && cost >= 0 && onChange({ cost: minorToPounds(cost) })}
+            inputMode="decimal"
+            placeholder="unknown"
+            error={costInvalid ? 'Invalid' : undefined}
+            helperText={componentCost !== null && component ? `${component.name} cost ${formatMoney(componentCost)} wins` : undefined}
+          />
+        </div>
+        <div className="md:col-span-1">
+          <Input
             label="Stock"
             id={`o-${o.key}-stock`}
             value={component ? '' : o.stock_qty}
@@ -414,7 +451,7 @@ function OptionRow({
         <div className="md:col-span-1">
           <Input label="Max qty" id={`o-${o.key}-maxq`} value={o.max_qty} onChange={(e) => onChange({ max_qty: e.target.value })} inputMode="numeric" />
         </div>
-        <div className="flex items-center justify-end gap-0.5 md:col-span-2 md:pb-1.5">
+        <div className="flex items-center justify-end gap-0.5 md:col-span-1 md:pb-1.5">
           <ReorderButtons index={index} count={count} onMove={onMove} />
           <IconButton label="Remove option" danger onClick={onRemove}>
             <Trash2 className="h-4 w-4" />
@@ -430,6 +467,10 @@ function OptionRow({
             {delta > 0 ? '+' : ''}
             {formatMoney(delta)} ex VAT
           </span>
+        )}
+        <MarginHint priceMinor={effectivePrice} costMinor={effectiveCost} />
+        {componentPrice !== null && effectiveCost !== null && (
+          <span className="text-xs text-secondary-500">(price follows the component; its own product check covers it)</span>
         )}
         {component && (
           <span className="inline-flex items-center gap-1 text-xs text-secondary-500">

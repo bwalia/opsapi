@@ -23,6 +23,7 @@ local Stock = require("queries.ShopStockQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
 local Rules = require("lib.shop-quote-rules")
+local Cost = require("queries.ShopCostQueries")
 
 local ShopOrderQueries = {}
 
@@ -283,6 +284,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if not cart then return nil, U.err(404, "CART_NOT_FOUND", "Cart not found") end
         local view = Cart.view(ns_id, cart)
         if #view.lines == 0 then return nil, U.err(400, "EMPTY_CART", "The cart is empty") end
+        -- Never sold below cost (hard rule): refuse, alert staff; the customer is not told the cost.
+        local below = Cost.checkLines(ns_id, view.lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "checkout") end
         local reasons = {}
         for _, l in ipairs(view.lines) do
             if l.price_mode == "quote_only" then
@@ -318,6 +322,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             return nil, U.err(409, "QUOTE_PRICING_PENDING", "We still need to price " .. table.concat(unpriced, ", ")
                 .. ". We'll send you the updated quote to pay.", { products = U.arr(unpriced) })
         end
+        -- A quoted price that has fallen below the item's current cost is not sold either.
+        local below = Cost.checkLines(ns_id, lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "order", quote.quote_number) end
         customer = U.dec(quote.customer, {})
         email = email or U.nz(customer.email)
     else
@@ -749,6 +756,12 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
     local quote = Quote.getWithToken(ns_id, uuid, token)
     if not quote then return nil, U.err(404, "QUOTE_NOT_FOUND", "Quote not found") end
     Quote.maybeExpire(quote)
+    -- Never sold below cost. Checked before the transaction so the staff alert isn't rolled back with it;
+    -- a quote that already has its order (a repeat click) just gets that order back below.
+    if not nz(quote.order_id) then
+        local below = Cost.checkLines(ns_id, U.dec(quote.lines, {}))
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "order", quote.quote_number) end
+    end
     return U.tx(function()
         -- Lock the quote so two clicks can't create two orders.
         local q = db.query("SELECT id, order_id, status FROM shop_quotes WHERE id = ? FOR UPDATE", quote.id)[1]

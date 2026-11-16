@@ -138,7 +138,19 @@ export interface ShopOption {
   held?: number;
   /** Admin document: available units (own stock or component product's). */
   available?: number | null;
+  /** Admin document: the option's own stored delta (price_delta_minor is the effective one). */
+  stored_price_delta_minor?: number;
+  /** Admin document: true when a priced component product sets this option's price. */
+  price_follows_component?: boolean;
+  /** Manual cost (pence ex VAT) of one unit of the price delta. Editable; null = unknown. */
+  cost_minor?: number | null;
+  /** Read-only: the component product's cost when linked, else cost_minor. */
+  effective_cost_minor?: number | null;
+  cost_source?: ShopOptionCostSource;
 }
+
+export type ShopOptionCostSource = 'component' | 'option' | null;
+export type ShopProductCostSource = 'supplier' | 'manual' | null;
 
 export interface ShopOptionGroup {
   id?: number;
@@ -242,6 +254,13 @@ export interface ShopProduct {
   rules: ShopRule[];
   default_selections?: ShopSelections;
   has_embedding?: boolean;
+  /** Manual cost (pence ex VAT). Editable; null = unknown. */
+  cost_minor?: number | null;
+  /** Read-only: the linked supplier item's cost. */
+  supplier_cost_minor?: number | null;
+  /** Read-only: supplier cost if linked, else manual cost, else null. */
+  effective_cost_minor?: number | null;
+  cost_source?: ShopProductCostSource;
   created_at?: string;
   updated_at?: string;
 }
@@ -265,6 +284,8 @@ export interface ShopProductInput {
   images: string[];
   tags: string[];
   base_price_minor: number;
+  /** Manual cost in pence ex VAT; null clears it, omitted leaves it unchanged. */
+  cost_minor?: number | null;
   currency: string;
   vat_rate: number;
   stock_qty?: number;
@@ -976,8 +997,16 @@ export interface ShopSupplierItem {
   product_margin_pct: number | null;
 }
 
-export type ShopPriceChangeStatus = 'pending' | 'applied' | 'approved' | 'rejected' | 'superseded';
-export const SHOP_PRICE_CHANGE_STATUSES: ShopPriceChangeStatus[] = ['pending', 'applied', 'approved', 'rejected', 'superseded'];
+/** blocked_below_cost: a supplier price (or an approval) that would sell below cost; never applied. */
+export type ShopPriceChangeStatus = 'pending' | 'applied' | 'approved' | 'rejected' | 'superseded' | 'blocked_below_cost';
+export const SHOP_PRICE_CHANGE_STATUSES: ShopPriceChangeStatus[] = [
+  'pending',
+  'applied',
+  'approved',
+  'rejected',
+  'superseded',
+  'blocked_below_cost',
+];
 
 export interface ShopPriceChange {
   uuid: string;
@@ -996,6 +1025,62 @@ export interface ShopPriceChange {
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
+}
+
+/** One item in a 422 BELOW_COST save refusal. */
+export interface ShopBelowCostItem {
+  kind: 'product' | 'option';
+  name: string;
+  product_name?: string;
+  group_code?: string;
+  option_code?: string;
+  price_minor: number;
+  cost_minor: number;
+  message: string;
+}
+
+/** GET /pricing/below-cost */
+export interface ShopBelowCostProduct {
+  uuid: string;
+  sku: string;
+  name: string;
+  status: ShopProductStatus;
+  price_mode: ShopPriceMode;
+  price_minor: number;
+  cost_minor: number;
+  cost_source: ShopProductCostSource;
+  margin_minor: number;
+}
+
+export interface ShopBelowCostOption {
+  product_uuid: string;
+  product_sku: string;
+  product_name: string;
+  group_code: string;
+  group_name: string;
+  option_code: string;
+  option_name: string;
+  price_minor: number;
+  cost_minor: number;
+  cost_source: ShopOptionCostSource;
+  margin_minor: number;
+}
+
+export interface ShopBelowCostQuote {
+  uuid: string;
+  quote_number: string;
+  status: string;
+  kind: string;
+  customer_name: string | null;
+  lines: { line_uuid: string; product_name: string; qty: number; unit_price_minor: number; unit_cost_minor: number }[];
+}
+
+export interface ShopBelowCostReport {
+  products: ShopBelowCostProduct[];
+  options: ShopBelowCostOption[];
+  missing_cost: { products: number; options: number };
+  missing_cost_products: { uuid: string; sku: string; name: string }[];
+  quotes?: ShopBelowCostQuote[];
 }
 
 export interface ShopChatSession {
