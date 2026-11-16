@@ -36,6 +36,17 @@ end
 
 -- Build a globally-unique key (the column is UNIQUE) from the label, scoped by
 -- namespace and de-duplicated with a numeric suffix when needed.
+-- A workspace's own category always carries its namespace in its key (unique_key below).
+-- Every other row is the shared catalogue, whatever its namespace_id: NULL on most
+-- installs, the tax-copilot namespace where Config-as-Code owns it (migration
+-- 994_cmi_ns_cleanup_to_tax_copilot), same rule as lib/income-types.lua is_system.
+local function own_key(r)
+    local ns = tonumber(r.namespace_id)
+    if not ns or ns == 0 then return false end
+    local prefix = "ns" .. ns .. "_"
+    return tostring(r.key or ""):sub(1, #prefix) == prefix
+end
+
 local function unique_key(namespace_id, label)
     local base = "ns" .. tostring(namespace_id) .. "_" ..
         (label:lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", ""))
@@ -60,7 +71,7 @@ local function map_row(r)
         -- No HMRC box (transfer, loan, drawings, personal) → never on the return.
         non_business = r.hmrc_category_id == nil,
         description = r.description,
-        is_global = (r.namespace_id == nil or r.namespace_id == db.NULL),
+        is_global = not own_key(r),
     }
 end
 
@@ -74,7 +85,8 @@ return function(app)
                 local ok, rows = pcall(db.query, [[
                     SELECT id, uuid, key, label, type, is_tax_deductible, description, namespace_id, hmrc_category_id
                     FROM tax_categories
-                    WHERE is_active = true AND (namespace_id IS NULL OR namespace_id = ?)
+                    WHERE is_active = true AND (namespace_id IS NULL OR namespace_id = ?
+                        OR NOT starts_with(key, 'ns' || namespace_id || '_'))
                     ORDER BY type, label
                 ]], ns_id)
                 if not ok then
@@ -132,7 +144,8 @@ return function(app)
             function(self)
                 local ns_id = self.namespace.id
                 local found = db.select(
-                    "* FROM tax_categories WHERE uuid = ? AND namespace_id = ? LIMIT 1",
+                    "* FROM tax_categories WHERE uuid = ? AND namespace_id = ? "
+                    .. "AND starts_with(key, 'ns' || namespace_id || '_') LIMIT 1",
                     self.params.uuid, ns_id)
                 if #found == 0 then
                     return { status = 404, json = { error = "Category not found (or it is a read-only global category)" } }
@@ -173,7 +186,8 @@ return function(app)
             function(self)
                 local ns_id = self.namespace.id
                 local found = db.select(
-                    "* FROM tax_categories WHERE uuid = ? AND namespace_id = ? LIMIT 1",
+                    "* FROM tax_categories WHERE uuid = ? AND namespace_id = ? "
+                    .. "AND starts_with(key, 'ns' || namespace_id || '_') LIMIT 1",
                     self.params.uuid, ns_id)
                 if #found == 0 then
                     return { status = 404, json = { error = "Category not found (or it is a read-only global category)" } }
