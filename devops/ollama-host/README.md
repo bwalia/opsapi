@@ -17,16 +17,18 @@ non-stop left OpsAPI's `qwen3.8` without a turn, or wedged it, and every environ
 separate `ollama serve` has its own queue, slots and scheduler. It reads the same model files (`~/.ollama/models`),
 so nothing is downloaded twice; it does share the machine's GPU and memory.
 
-**Why two copies, and not more.** The gateway sends OpsAPI's requests to copy A, B, or the shared :11434 as a last
-resort (wslproxy `failover`, see below), so one copy freezing doesn't stop the assistant. Each copy keeps `qwen3.8`
+**Why two copies, and not more.** The gateway shares OpsAPI's requests between copy A and copy B, with the shared
+:11434 as a last resort (wslproxy `weighted`, see below), so one copy freezing doesn't stop the assistant and a busy
+copy doesn't queue chats while the other sits idle (each answers 4 at a time, `OLLAMA_NUM_PARALLEL`). Each copy keeps `qwen3.8`
 (~17.5 GB) in memory, and all of them share one GPU: more copies add no speed and would push the machine into swap,
 which stalls every product. For more than this, add a second machine as another backend.
 
 **How OpsAPI reaches them.** `OLLAMA_URL=https://ollama.workstation.co.uk/opsapi`. The edge rule for `/opsapi` checks
-the same signed key as the rest of `ollama.workstation.co.uk`, drops the prefix, and uses wslproxy's `failover` mode
-over the home router's forwards: `vpnhh.workstation.co.uk:31439` → :11439 (A), `:31440` → :11440 (B), then `:31434` →
-:11434 (shared). A backend that errors or times out is retried on the next one at once, and skipped for 30 s after
-3 failures in a row.
+the same signed key as the rest of `ollama.workstation.co.uk`, drops the prefix, and uses wslproxy's `weighted` mode
+over the home router's forwards: `vpnhh.workstation.co.uk:31439` → :11439 (A, weight 100), `:31440` → :11440 (B, 100)
+and `:31434` → :11434 (shared, 1: about 1 request in 200). A backend that errors or times out is retried on another
+at once, and skipped for 30 s after 3 failures in a row. (Until 16 Nov it was `failover`, which sent everything to A
+while it was up: on a busy day A queued chats for up to 5 minutes while B sat idle.)
 
 ```bash
 bash devops/ollama-host/install.sh        # on hh193: install or update both copies + watchdog (safe to repeat)
