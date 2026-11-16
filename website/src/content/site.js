@@ -9,6 +9,7 @@ export const SITE = {
         { href: '/features/', label: 'Features' },
         { href: '/architecture/', label: 'Architecture' },
         { href: '/demo/', label: 'Live demo' },
+        { href: '/ai-tax-filing/', label: 'AI tax filing' },
         { href: '/technotes/', label: 'Technotes' },
         { href: '/blog/', label: 'Blog' },
     ],
