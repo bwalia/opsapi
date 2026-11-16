@@ -61,7 +61,11 @@ check("superseded refused", ok4 == false and c4 == "QUOTE_SUPERSEDED", c4)
 
 print("staff edits and the customer lock")
 check("draft editable", R.can_edit_content({ status = "draft" }) == true)
-check("accepted, no order: editable", R.can_edit_content({ status = "accepted" }) == true)
+local okA, cA = R.can_edit_content({ status = "accepted" })
+check("accepted (authorised), no order: not editable, revise instead", okA == false and cA == "QUOTE_AUTHORISED", cA)
+check("authorised then set back to sent: still not editable",
+    R.can_edit_content({ status = "sent", authorised_at = "2026-11-10 10:00:00" }) == false)
+check("accepted, no order: can still be revised", R.can_revise({ status = "accepted" }) == true)
 check("order: not editable", R.can_edit_content({ status = "accepted", order_uuid = "u" }) == false)
 check("superseded: not editable", R.can_edit_content({ status = "cancelled", superseded_by_id = 2 }) == false)
 check("PO number editable on a sent quote", R.can_edit_po_number({ status = "sent" }) == true)

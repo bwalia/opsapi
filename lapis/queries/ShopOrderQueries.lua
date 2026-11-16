@@ -326,7 +326,8 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
     local bc = type(body.customer) == "table" and body.customer or {}
     for _, k in ipairs({ "name", "company", "phone", "vat_number" }) do
         local v = U.nz(bc[k]) or U.nz(body[k])
-        if v then customer[k] = tostring(v):sub(1, 255) end
+        -- One line each: a name goes into staff email subjects.
+        if v then customer[k] = U.cut((tostring(v):gsub("%c", " ")), 255) end
     end
     if not email and U.nz(bc.email) and tostring(bc.email):match("^[^@%s]+@[^@%s]+%.[^@%s]+$") then
         email = bc.email
@@ -594,6 +595,21 @@ function ShopOrderQueries.applyQuoteFields(order_id, quote, opts)
         ((opts and opts.only_missing) and " AND customer_po_number IS NULL" or ""), f.customer_po_number, order_id)
 end
 
+--- Expire a Stripe Checkout that can no longer be paid, after the transaction commits (best effort; if the
+-- customer still pays it, applyPaid flags the payment as paid twice). Stripe then sends
+-- checkout.session.expired, which only releases what is already released.
+local function expire_checkout(session_id)
+    U.afterCommit(function()
+        local ok, err = pcall(function()
+            local stripe = require("lib.payment-provider").get_stripe()
+            if not stripe then return end
+            local _, serr = stripe:_request("POST", "/checkout/sessions/" .. session_id .. "/expire")
+            if serr then error(serr) end
+        end)
+        if not ok then ngx.log(ngx.WARN, "[shop-orders] could not expire checkout ", session_id, ": ", tostring(err)) end
+    end)
+end
+
 --- Mark an order paid from a Stripe checkout session object. Idempotent.
 -- Must run inside a transaction.
 --- opts.staff = true: staff recorded the payment themselves (no "new order" alert).
@@ -603,6 +619,29 @@ function ShopOrderQueries.applyPaid(order, session, opts)
         return false
     end
     session = session or {}
+    local pi = session.payment_intent
+    if type(pi) == "table" then pi = pi.id end
+    if nz(order.quote_id) then
+        -- Paid twice: another order for the same Order Authorisation is already paid (staff marked the bank
+        -- transfer paid, then the customer finished a card checkout that was still open). Don't fulfil it
+        -- again: cancel this one, keep the payment id and tell staff to refund it.
+        db.query("SELECT 1 FROM shop_quotes WHERE id = ? FOR UPDATE", order.quote_id) -- one payment at a time
+        local other = db.query([[SELECT order_number FROM shop_orders WHERE quote_id = ? AND id <> ?
+                                  AND status IN ('paid', 'processing', 'shipped', 'delivered') LIMIT 1]],
+            order.quote_id, order.id)[1]
+        if other then
+            db.query([[UPDATE shop_orders SET status = 'cancelled', updated_at = NOW(),
+                       stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
+                       internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],
+                nz(pi) or db.NULL, string.format("[%s] PAID TWICE: %s for the same Order Authorisation was already "
+                    .. "paid. Refund this payment%s.", os.date("!%Y-%m-%d %H:%M UTC"), tostring(other.order_number),
+                    nz(pi) and (" in Stripe (" .. pi .. ")") or ""), order.id)
+            Stock.release(order.id)
+            require("queries.ShopMembershipQueries").releaseCredits(order.id)
+            ShopOrderQueries.staffAlert(order.id, "paid_twice")
+            return false
+        end
+    end
     local cd = type(session.customer_details) == "table" and session.customer_details or {}
     local customer = U.dec(order.customer, {})
     if nz(cd.name) then customer.name = customer.name or cd.name end
@@ -617,8 +656,6 @@ function ShopOrderQueries.applyPaid(order, session, opts)
         shipping = session.collected_information.shipping_details
     end
     local billing = type(cd.address) == "table" and { name = cd.name, address = cd.address } or nil
-    local pi = session.payment_intent
-    if type(pi) == "table" then pi = pi.id end
 
     db.query([[
         UPDATE shop_orders SET status = 'paid', paid_at = COALESCE(paid_at, NOW()),
@@ -636,16 +673,21 @@ function ShopOrderQueries.applyPaid(order, session, opts)
     Stock.commit(order.namespace_id, order.id, order.order_number)
     Cart.markConverted(order.cart_id)
     if nz(order.quote_id) then
-        -- An earlier bank-transfer order for the same Order Authorisation that the customer then paid another
-        -- way (card): cancel it and give its stock back, so only the paid order goes ahead.
-        local stale = db.query([[SELECT id FROM shop_orders WHERE quote_id = ? AND id <> ? AND status = 'pending_payment'
-                                  AND payment_method = 'bank_transfer']], order.quote_id, order.id)
+        -- Any other order for the same Order Authorisation still awaiting payment (a bank transfer the customer
+        -- then paid by card, or a card checkout still open when staff marked the bank transfer paid): cancel
+        -- it, give its stock and credit back and close its checkout, so only the paid order goes ahead.
+        local stale = db.query([[SELECT id, stripe_session_id, payment_method FROM shop_orders WHERE quote_id = ?
+                                  AND id <> ? AND status = 'pending_payment']], order.quote_id, order.id)
         for _, st in ipairs(stale) do
             db.query([[UPDATE shop_orders SET status = 'cancelled', updated_at = NOW(),
                        internal_notes = COALESCE(internal_notes || E'\n', '') || ? WHERE id = ?]],
-                "Cancelled: the customer paid " .. tostring(order.order_number) .. " instead of paying by bank transfer",
+                "Cancelled: " .. tostring(order.order_number) .. " for the same Order Authorisation was paid instead",
                 st.id)
             Stock.release(st.id)
+            require("queries.ShopMembershipQueries").releaseCredits(st.id)
+            if st.payment_method ~= "bank_transfer" and nz(st.stripe_session_id) then
+                expire_checkout(st.stripe_session_id)
+            end
         end
         db.query("UPDATE shop_quotes SET status = 'converted', order_id = ?, updated_at = NOW() WHERE id = ?",
             order.id, order.quote_id)
@@ -767,29 +809,25 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
         Stock.hold(ns_id, row.id, demand, BANK_TRANSFER_HOLD_MINUTES)
         db.query("UPDATE shop_quotes SET order_id = ?, updated_at = NOW() WHERE id = ?", row.id, quote.id)
         if quote.crm_lead_id then
-            pcall(require("queries.ShopLeadQueries").safeUpsert, ns_id, { email = email, source = "shop_quote",
-                note = "Order " .. quote.quote_number .. ": customer chose to pay by bank transfer" })
+            -- After commit: the lead is saved in a transaction of its own.
+            U.afterCommit(function()
+                pcall(require("queries.ShopLeadQueries").safeUpsert, ns_id, { email = email, source = "shop_quote",
+                    note = "Order " .. quote.quote_number .. ": customer chose to pay by bank transfer" })
+            end)
         end
         ShopOrderQueries.staffAlert(row.id, "bank_transfer")
         return ShopOrderQueries.shape(ShopOrderQueries.getById(row.id))
     end)
 end
 
-local function valid_date(v)
-    v = U.nz(v)
-    if type(v) ~= "string" then return nil end
-    local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
-    if not y then return nil end
-    y, m, d = tonumber(y), tonumber(m), tonumber(d)
-    if m < 1 or m > 12 or d < 1 or d > 31 or y < 2000 or y > 2100 then return nil end
-    return v:sub(1, 10)
-end
+local MAX_MINOR = 2147483647 -- integer columns
 
 --- POST /orders/:uuid/mark-paid — staff record a payment that arrived outside Stripe (bank transfer, cheque,
 -- other) and the order goes through the same paid path as a card payment (status paid, stock committed,
 -- quote converted, credits used). Only for orders awaiting payment that Stripe isn't collecting.
 -- body: { method = bank_transfer|cheque|other (default bank_transfer), reference?, paid_at? (YYYY-MM-DD),
---         amount_minor? (what arrived; defaults to the order total) }
+--         amount_minor? (what arrived; defaults to the order total; less than the total is refused: there is no
+--         part-paid order, so record it once the rest has arrived) }
 function ShopOrderQueries.markPaid(ns_id, uuid, body, actor)
     body = type(body) == "table" and body or {}
     local method = U.nz(body.method) or "bank_transfer"
@@ -797,14 +835,16 @@ function ShopOrderQueries.markPaid(ns_id, uuid, body, actor)
         return nil, U.err(400, "VALIDATION_ERROR", "method must be bank_transfer, cheque or other")
     end
     local reference = U.nz(body.reference) and tostring(body.reference):gsub("%c", " "):sub(1, 120) or nil
-    local paid_at = U.nz(body.paid_at) and valid_date(body.paid_at) or nil
+    local paid_at = U.nz(body.paid_at) and U.date(body.paid_at) or nil
     if U.nz(body.paid_at) and not paid_at then
         return nil, U.err(400, "VALIDATION_ERROR", "paid_at must be a date (YYYY-MM-DD)")
     end
     local amount
     if body.amount_minor ~= nil and body.amount_minor ~= U.null then
         amount = math.floor(tonumber(body.amount_minor) or -1)
-        if amount < 0 then return nil, U.err(400, "VALIDATION_ERROR", "amount_minor must be 0 or more (pence)") end
+        if amount < 0 or amount > MAX_MINOR then
+            return nil, U.err(400, "VALIDATION_ERROR", "amount_minor must be a whole number of pence, 0 or more")
+        end
     end
     local _, err = U.tx(function()
         local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
@@ -818,6 +858,10 @@ function ShopOrderQueries.markPaid(ns_id, uuid, body, actor)
                 "This order is being paid by card through Stripe — wait for it, or cancel it first")
         end
         amount = amount or tonumber(o.total_minor) or 0
+        if amount < (tonumber(o.total_minor) or 0) then
+            return nil, U.err(400, "PART_PAYMENT", "That is less than the order total of " .. U.money(o.total_minor)
+                .. ". Mark it paid once the full amount has arrived", { field = "amount_minor" })
+        end
         local note = string.format("[%s] Marked paid by %s: %s received%s%s%s",
             os.date("!%Y-%m-%d %H:%M UTC"), actor or "staff", U.money(amount),
             " (" .. method:gsub("_", " ") .. ")",
@@ -849,6 +893,13 @@ function ShopOrderQueries.createInvoice(ns_id, uuid, body, user_uuid)
     end
     if U.nz(body.payment_method_uuid) and not PaymentMethods.getRow(ns_id, body.payment_method_uuid) then
         return nil, U.err(400, "VALIDATION_ERROR", "payment_method_uuid is not one of this workspace's payment methods")
+    end
+    if U.nz(body.due_date) and not U.date(body.due_date) then
+        return nil, U.err(400, "VALIDATION_ERROR", "due_date must be a date (YYYY-MM-DD)")
+    end
+    local terms = U.nz(body.payment_terms_days) and tonumber(body.payment_terms_days)
+    if U.nz(body.payment_terms_days) and not (terms and terms >= 0 and terms <= 3650 and terms == math.floor(terms)) then
+        return nil, U.err(400, "VALIDATION_ERROR", "payment_terms_days must be a whole number of days (0-3650)")
     end
     return U.tx(function()
         local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
@@ -897,7 +948,7 @@ function ShopOrderQueries.createInvoice(ns_id, uuid, body, user_uuid)
             customer_name = tostring(name):sub(1, 255), customer_email = U.nz(customer.email) or U.nz(o.email),
             customer_address = address and U.enc(address) or nil,
             currency = o.currency or "GBP", notes = notes,
-            due_date = valid_date(body.due_date), payment_terms_days = tonumber(body.payment_terms_days),
+            due_date = U.date(body.due_date), payment_terms_days = terms or nil,
             po_number = po_number, payment_method_uuid = U.nz(body.payment_method_uuid),
             line_items = items,
         })
@@ -1387,13 +1438,20 @@ local ALERT_KIND = {
     paid = { subject = "New order paid", headline = "New order paid online", emoji = "🛒" },
     bank_transfer = { subject = "New order (bank transfer)", headline = "New order: paying by bank transfer",
                       emoji = "🏦" },
+    paid_twice = { subject = "Refund needed: paid twice", headline = "Paid twice: refund this payment", emoji = "⚠️",
+                   intro = "The customer paid order %s, but another order for the same Order Authorisation was "
+                       .. "already paid. It has been cancelled and won't be sent: refund the payment (see the "
+                       .. "order's internal notes). The customer has not been emailed." },
 }
 
 --- Tell staff about an order placed online: email to Shop settings → order alert email (else the Leads →
 -- Notifications admin email, else the workspace owner) plus the Telegram alert when that is on. Staff only:
 -- the customer gets nothing. Best effort, never fails the caller; the sends run after the response.
--- kind: "paid" (paid by card online) | "bank_transfer" (customer chose bank transfer, awaiting payment).
-function ShopOrderQueries.staffAlert(order_id, kind)
+-- kind: "paid" (paid by card online) | "bank_transfer" (customer chose bank transfer, awaiting payment)
+--       | "paid_twice" (paid again after another order for the same Order Authorisation was paid).
+-- Runs after the payment's transaction commits: it reads settings that may not exist in this deployment
+-- (Leads → Notifications needs CRM), and a failed read inside the transaction would undo the payment.
+local function staff_alert_now(order_id, kind)
     local ok, err = pcall(function()
         local k = ALERT_KIND[kind] or ALERT_KIND.paid
         local o = db.query("SELECT " .. ORDER_COLS .. " FROM shop_orders o WHERE o.id = ?", order_id)[1]
@@ -1410,7 +1468,7 @@ function ShopOrderQueries.staffAlert(order_id, kind)
             lines[#lines + 1] = qty .. " × " .. (po_line_description(l):gsub("\n", ", "))
         end
         local base = (U.env("FRONTEND_URL") or ""):gsub("/+$", "")
-        local notes = table.concat({
+        local notes = U.join("\n",
             "Order " .. o.order_number .. ": " .. U.money(tonumber(o.total_minor) or 0) .. " inc VAT",
             kind == "bank_transfer" and "Payment: bank transfer, awaiting payment (reference " .. o.order_number .. ")"
                 or "Payment: paid online",
@@ -1420,8 +1478,7 @@ function ShopOrderQueries.staffAlert(order_id, kind)
             "",
             "Delivery: " .. (U.nz(o.delivery_method) or "not set"),
             address_text(ship) and ("Deliver to:\n" .. address_text(ship)) or nil,
-            base ~= "" and ("\nOpen the order: " .. base .. "/dashboard/shop/orders/" .. o.uuid) or nil,
-        }, "\n")
+            base ~= "" and ("\nOpen the order: " .. base .. "/dashboard/shop/orders/" .. o.uuid) or nil)
         require("queries.CrmLeadNotificationQueries").notify(ns, {
             first_name = first or name, last_name = last ~= "" and last or nil,
             email = U.nz(customer.email) or o.email, phone = U.nz(customer.phone) or U.nz(ship.phone),
@@ -1432,13 +1489,18 @@ function ShopOrderQueries.staffAlert(order_id, kind)
                 subject = k.subject .. ": " .. o.order_number .. " " .. U.money(tonumber(o.total_minor) or 0)
                     .. " (" .. tostring(name) .. ")",
                 headline = k.headline,
-                intro = "Order " .. o.order_number .. " has just come in through the shop. The details are below; "
-                    .. "open Shop → Orders in your dashboard to process it. The customer has not been emailed.",
+                intro = k.intro and k.intro:format(o.order_number)
+                    or ("Order " .. o.order_number .. " has just come in through the shop. The details are below; "
+                    .. "open Shop → Orders in your dashboard to process it. The customer has not been emailed."),
                 telegram_title = k.emoji .. " <b>" .. k.headline .. "</b> " .. o.order_number,
             },
         })
     end)
     if not ok then ngx.log(ngx.WARN, "[shop-orders] staff alert for order ", tostring(order_id), " failed: ", tostring(err)) end
+end
+
+function ShopOrderQueries.staffAlert(order_id, kind)
+    U.afterCommit(function() staff_alert_now(order_id, kind) end)
 end
 
 return ShopOrderQueries

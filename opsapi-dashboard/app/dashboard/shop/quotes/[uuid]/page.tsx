@@ -102,11 +102,14 @@ function QuoteDetail() {
 
   const cur = quote.currency || 'GBP';
   const pdfUrl = quotePdfUrl(quote.public_url);
-  // Turned into an order or replaced by a revision: lines, prices, customer and delivery stay as agreed.
+  // Confirmed by the customer, turned into an order or replaced by a revision: lines, prices, customer and
+  // delivery stay as agreed.
   const locked = quote.status === 'converted' || quote.can_edit === false;
   const lockedWhy = quote.superseded_by
     ? `Replaced by ${quote.superseded_by.quote_number}: make changes there.`
-    : 'This has turned into an order, so what the customer agreed stays as it is. Raise a new quote for changes.';
+    : quote.has_order || quote.status === 'converted'
+      ? 'This has turned into an order, so what the customer agreed stays as it is. Raise a new quote for changes.'
+      : 'The customer has confirmed this, so what they agreed stays as it is. Revise it to send them a corrected version to confirm.';
   const orderUuid = quote.order?.uuid ?? quote.order_uuid;
   const orderNumber = quote.order_number ?? quote.order?.order_number ?? quote.order?.number ?? '';
 
@@ -259,7 +262,8 @@ function QuoteDetail() {
 
   const canRevise = editable && mayCreate && quote.can_revise === true;
   const step = quoteNextStep(quote);
-  const sendable = editable && !locked && ['draft', 'sent', 'accepted'].includes(quote.status);
+  // A confirmed one (no order yet) is locked for edits but can still be sent again: it carries the link to pay.
+  const sendable = editable && !quote.has_order && !quote.superseded_by && ['draft', 'sent', 'accepted'].includes(quote.status);
   const reviseAction: PanelAction = { label: 'Revise', icon: <GitBranch className="h-4 w-4" />, onClick: () => setReviseOpen(true) };
   let primary: PanelAction | null = null;
   if (step.key === 'superseded' && quote.superseded_by) {

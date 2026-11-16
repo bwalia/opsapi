@@ -17,7 +17,10 @@
         on (409 CUSTOMER_EMAILS_OFF otherwise), an order email (409 NO_CUSTOMER_EMAIL), no "[NEW DATE]"
         marker left in the text (400), and at most MAX_PER_DAY real sends per order in 24 hours (429).
       - A real send appends a line to the order's internal notes; every send (tests too) is logged in
-        shop_order_emails (migration zzs53).
+        shop_order_emails (migration zzs53). The log row is written first, under the order's lock, so the daily
+        limits hold when two sends race; a send that fails removes its row again.
+      - The email goes out under the workspace's name (Settings.brandName); the phone line only when
+        SHOP_CALL_PHONE is set.
 ]]
 
 local db = require("lapis.db")
@@ -29,8 +32,6 @@ local Settings = require("queries.ShopSettingsQueries")
 
 local Q = {}
 
-local APP_NAME = "Workstation"
-local DEFAULT_CALL_PHONE = "+44 7515 356 146" -- as ShopQuoteQueries (Order Authorisation emails)
 local EMAIL = "^[^@%s]+@[^@%s]+%.[^@%s]+$"
 
 local function valid_email(e)
@@ -85,10 +86,10 @@ local function preset_vars(o)
 end
 
 --- Template data for the email.
-local function template_data(o, upd, me, opts)
+local function template_data(o, upd, me, brand, opts)
     local name = customer_name(o)
     return {
-        app_name = APP_NAME,
+        app_name = brand,
         customer_name = name,
         first_name = Upd.first_name(name),
         order_number = o.order_number,
@@ -96,9 +97,9 @@ local function template_data(o, upd, me, opts)
         message = upd.message,
         order_link = order_link(o),
         delivery_summary = delivery_summary(o),
-        signature = me.name or Upd.DEFAULT_SIGNATURE,
+        signature = me.name or Upd.team_signature(brand),
         signature_is_person = me.name ~= nil,
-        call_phone = U.env("SHOP_CALL_PHONE") or DEFAULT_CALL_PHONE,
+        call_phone = U.env("SHOP_CALL_PHONE"),
         test = opts and opts.test == true or nil,
         test_customer = opts and opts.test and recipient(o) or nil,
     }
@@ -177,7 +178,7 @@ function Q.presets(ns_id, uuid, user_id)
         customer_emails_enabled = Settings.customerDeliveryNotifications(ns_id),
         email_configured = email_configured(ns_id),
         test_to = me.email or U.null,
-        signature = me.name or Upd.DEFAULT_SIGNATURE,
+        signature = me.name or Upd.team_signature(Settings.brandName(ns_id)),
         limits = { headline_max = Upd.HEADLINE_MAX, message_max = Upd.MESSAGE_MAX, per_day = Upd.MAX_PER_DAY,
                    sent_last_24h = recent_count(o.id, false) },
         history = Q.history(o.id),
@@ -190,8 +191,12 @@ function Q.preview(ns_id, uuid, body, user_id)
     local upd, verr = resolve(o, body)
     if not upd then return nil, verr end
     local NamespaceMail = require("helper.namespace-mail")
-    local r, rerr = NamespaceMail.render(ns_id, Upd.TEMPLATE_KEY, template_data(o, upd, staff(user_id)), { app_name = APP_NAME })
-    if not r then return nil, U.err(500, "PREVIEW_FAILED", "Could not render the email: " .. tostring(rerr)) end
+    local brand = Settings.brandName(ns_id)
+    local r, rerr = NamespaceMail.render(ns_id, Upd.TEMPLATE_KEY, template_data(o, upd, staff(user_id), brand), { app_name = brand })
+    if not r then
+        ngx.log(ngx.ERR, "[shop-order-update] preview for ", o.order_number, " failed: ", tostring(rerr))
+        return nil, U.err(500, "PREVIEW_FAILED", "Could not show the email. Check the workspace's email template")
+    end
     return { subject = r.subject, html = r.html, customised = r.customised, to = recipient(o) or U.null,
              headline = upd.headline, message = upd.message, kind = upd.kind, warnings = U.arr(warnings_for(o, upd)) }
 end
@@ -209,9 +214,6 @@ function Q.send(ns_id, uuid, body, user_id)
     if test then
         to = valid_email(me.email) and me.email or nil
         if not to then return nil, U.err(400, "VALIDATION_ERROR", "Your account has no email address to send the test to") end
-        if recent_count(o.id, true) >= Upd.TEST_MAX_PER_DAY then
-            return nil, U.err(429, "RATE_LIMITED", "Too many test emails for this order today. Try again tomorrow.")
-        end
     else
         if not Settings.customerDeliveryNotifications(ns_id) then
             return nil, U.err(409, "CUSTOMER_EMAILS_OFF", "Customer emails from the shop are turned off. Turn on "
@@ -223,49 +225,60 @@ function Q.send(ns_id, uuid, body, user_id)
         if marker then
             return nil, U.err(400, "VALIDATION_ERROR", "Replace " .. marker .. " in the message before sending it", { field = "message" })
         end
-        if recent_count(o.id, false) >= Upd.MAX_PER_DAY then
-            return nil, U.err(429, "RATE_LIMITED", "This order has had " .. Upd.MAX_PER_DAY
-                .. " update emails in the last 24 hours. Call the customer, or try again later.")
-        end
-        if duplicate(o.id, upd) then
-            return nil, U.err(409, "DUPLICATE_SEND", "This update was already emailed to the customer a few minutes ago")
-        end
     end
 
     if not email_configured(ns_id) then
         return nil, U.err(503, "EMAIL_NOT_CONFIGURED", "No email server is set up for this workspace")
     end
     local NamespaceMail = require("helper.namespace-mail")
-    local data = template_data(o, upd, me, { test = test })
-    local rendered = NamespaceMail.render(ns_id, Upd.TEMPLATE_KEY, data, { app_name = APP_NAME })
+    local brand = Settings.brandName(ns_id)
+    local data = template_data(o, upd, me, brand, { test = test })
+    local rendered = NamespaceMail.render(ns_id, Upd.TEMPLATE_KEY, data, { app_name = brand })
     local subject = (test and "[TEST] " or "") .. (rendered and rendered.subject or upd.headline)
-    local sent, merr = NamespaceMail.send(ns_id, Upd.TEMPLATE_KEY, to, template_data(o, upd, me, { test = test }),
-        { app_name = APP_NAME }, { subject_prefix = test and "[TEST] " or nil })
-    if not sent then
-        ngx.log(ngx.ERR, "[shop-order-update] email for ", o.order_number, " failed: ", tostring(merr))
-        return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent: " .. tostring(merr):sub(1, 200))
-    end
-
     local by = me.name or me.email or "staff"
-    local tok, tres, terr = pcall(U.tx, function()
+
+    -- Log the send first, under the order's lock: the limits are checked and the row written in one step, so
+    -- two sends at once can't both pass the check.
+    local log_uuid = Global.generateUUID()
+    local reserved, rerr = U.tx(function()
+        db.query("SELECT 1 FROM shop_orders WHERE id = ? FOR UPDATE", o.id)
+        if test and recent_count(o.id, true) >= Upd.TEST_MAX_PER_DAY then
+            return nil, U.err(429, "RATE_LIMITED", "Too many test emails for this order today. Try again tomorrow.")
+        end
+        if not test and recent_count(o.id, false) >= Upd.MAX_PER_DAY then
+            return nil, U.err(429, "RATE_LIMITED", "This order has had " .. Upd.MAX_PER_DAY
+                .. " update emails in the last 24 hours. Call the customer, or try again later.")
+        end
+        if not test and duplicate(o.id, upd) then
+            return nil, U.err(409, "DUPLICATE_SEND", "This update was already emailed to the customer a few minutes ago")
+        end
         db.query([[INSERT INTO shop_order_emails (uuid, namespace_id, order_id, kind, headline, body, subject, to_email,
                                                   sent_by, sent_by_user_id, test)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]],
-            Global.generateUUID(), ns_id, o.id, upd.kind, upd.headline, upd.message, subject:sub(1, 255), to,
-            tostring(by):sub(1, 254), user_id or db.NULL, test)
-        if not test then
+            log_uuid, ns_id, o.id, upd.kind, upd.headline, upd.message, U.cut(subject, 255), to,
+            U.cut(by, 254), user_id or db.NULL, test)
+        return true
+    end)
+    if not reserved then return nil, rerr end
+
+    local sent, merr = NamespaceMail.send(ns_id, Upd.TEMPLATE_KEY, to, data, { app_name = brand },
+        { subject_prefix = test and "[TEST] " or nil })
+    if not sent then
+        ngx.log(ngx.ERR, "[shop-order-update] email for ", o.order_number, " failed: ", tostring(merr))
+        pcall(db.query, "DELETE FROM shop_order_emails WHERE uuid = ?", log_uuid)
+        return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent. Check the workspace's email settings "
+            .. "(Workspace → Email) and try again")
+    end
+
+    if not test then
+        local ok, nerr = pcall(function()
             local stamp = db.query("SELECT to_char(NOW() AT TIME ZONE 'Europe/London', 'YYYY-MM-DD HH24:MI') AS t")[1].t
             db.query([[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
                        WHERE id = ?]], Upd.note_line(stamp, to, by, upd.headline), o.id)
-        end
-        return true
-    end)
-    if not tok then terr = tres end
-    if terr then
-        -- The email went; only the log failed. Say so rather than inviting a second send.
-        ngx.log(ngx.ERR, "[shop-order-update] sent but not logged for ", o.order_number, ": ", tostring(terr))
+        end)
+        if not ok then ngx.log(ngx.ERR, "[shop-order-update] sent but no order note for ", o.order_number, ": ", tostring(nerr)) end
     end
-    return { sent = true, test = test, to = to, subject = subject, logged = terr == nil,
+    return { sent = true, test = test, to = to, subject = subject, logged = true,
              history = Q.history(o.id), order = Orders.adminGet(ns_id, uuid) }
 end
 

@@ -480,12 +480,30 @@ end
 -- SMTP Sending (non-blocking via lua-resty-mail)
 -- ============================================================================
 
+--- A header value on one line: lua-resty-mail writes headers as given, so a CR/LF in a subject or a name
+--- (a shop customer's name, say) would add headers (Bcc:, Reply-To:) or a fake body. Lists: each entry.
+local function one_line(v)
+    if type(v) == "table" then
+        local out = {}
+        for i, x in ipairs(v) do out[i] = one_line(x) end
+        return out
+    end
+    return type(v) == "string" and (v:gsub("%c+", " ")) or v
+end
+Mail.oneLine = one_line
+
 --- Low-level send via lua-resty-mail. Must be called from a cosocket context
 --- (request handler or ngx.timer callback).
 -- @param opts table { to, subject, html, text, from_email, from_name, cc, bcc, reply_to }
 -- @return boolean success
 -- @return string|nil error message
 local function smtp_send(opts)
+    for _, k in ipairs({ "to", "cc", "bcc", "subject", "reply_to" }) do
+        opts[k] = one_line(opts[k])
+    end
+    if type(opts.headers) == "table" then
+        for k, v in pairs(opts.headers) do opts.headers[k] = one_line(v) end
+    end
     local mail = require("resty.mail")
     -- opts.smtp: a workspace's own server (helper/namespace-mail.lua).
     local cfg = opts.smtp or get_config()
@@ -512,8 +530,8 @@ local function smtp_send(opts)
         to_list = { to_list }
     end
 
-    local from_name = opts.from_name or cfg.from_name
-    local from_email = opts.from_email or cfg.from_email
+    local from_name = one_line(opts.from_name or cfg.from_name)
+    local from_email = one_line(opts.from_email or cfg.from_email)
     -- A workspace's own server may have no display name: send from the bare address.
     local from = (from_name and from_name ~= "") and (from_name .. " <" .. from_email .. ">") or from_email
 

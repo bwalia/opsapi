@@ -15,6 +15,7 @@
                                                transfer, oldest first; ?payment_method=; meta.bank_transfer_due_count;
                                                ?filter=needs_supplier_po; PUT customer_po_number: editable on the order)
       POST              /orders/:uuid/mark-paid { method?: bank_transfer|cheque|other, reference?, paid_at?, amount_minor? }
+                                               (shop.manage; amount_minor below the total → 400 PART_PAYMENT)
       POST              /orders/:uuid/invoice   accounting invoice from the order (idempotent; 501 without invoicing)
       GET               /orders/:uuid/purchase-order/preview  (?supplier_uuid=) the supplier PO before it is raised
       POST              /orders/:uuid/purchase-order          { supplier_uuid?, supplier_name?, costs?, … }
@@ -290,8 +291,10 @@ return function(app)
 
     -- Record a payment that arrived outside Stripe (bank transfer, cheque, other): same paid path as a card.
     -- Body { method?: bank_transfer|cheque|other, reference?, paid_at?: YYYY-MM-DD, amount_minor? }.
-    app:post(BASE .. "/orders/:uuid/mark-paid", guard("update", function(self, ns_id)
-        local body = body_or_400() or {}
+    -- shop.manage: saying money arrived releases the goods, so it is not for every member who edits orders.
+    app:post(BASE .. "/orders/:uuid/mark-paid", guard("manage", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
         local u = self.current_user or {}
         return result(Orders.markPaid(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
@@ -303,7 +306,8 @@ return function(app)
         if not NS.hasPermission(self, "invoices", "create") then
             return U.fail(403, "FORBIDDEN", "You need permission to create invoices")
         end
-        local body = body_or_400() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local u = self.current_user or {}
         local res, err = Orders.createInvoice(ns_id, self.params.uuid, body, u.uuid)
         if not res then return U.from_err(err) end
@@ -331,14 +335,16 @@ return function(app)
     end))
 
     app:post(BASE .. "/orders/:uuid/delivery-changes/:request_uuid/approve", guard("update", function(self, ns_id)
-        local body = U.read_json() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local u = self.current_user or {}
         return result(DeliveryChange.approve(ns_id, self.params.uuid, self.params.request_uuid, body,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
 
     app:post(BASE .. "/orders/:uuid/delivery-changes/:request_uuid/decline", guard("update", function(self, ns_id)
-        local body = U.read_json() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local u = self.current_user or {}
         return result(DeliveryChange.decline(ns_id, self.params.uuid, self.params.request_uuid, body,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
@@ -377,7 +383,8 @@ return function(app)
     -- Email the customer the Order Authorisation / quote: PDF attached, link to confirm and pay.
     -- Body { to? } (defaults to the customer's email).
     app:post(BASE .. "/quotes/:uuid/send", guard("update", function(self, ns_id)
-        local body = body_or_400() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local res, err = Quote.sendToCustomer(ns_id, self.params.uuid, { to = body.to,
             test = body.test == true, user_id = body.test == true and user_id(self) or nil })
         if not res then return U.from_err(err) end
@@ -386,7 +393,8 @@ return function(app)
 
     -- New Order Authorisation from a quote (same lines and prices, VIP discount, delivery address).
     app:post(BASE .. "/quotes/:uuid/order-authorisation", guard("create", function(self, ns_id)
-        local body = body_or_400() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local q, err = Quote.orderFromQuote(ns_id, self.params.uuid, body, user_id(self))
         if not q then return U.from_err(err) end
         return U.ok(q, 201)
@@ -579,7 +587,8 @@ return function(app)
     end)
 
     app:post(BASE .. "/credits/:uuid/void", guard("update", function(self, ns_id)
-        local body = U.read_json() or {}
+        local body, bad = body_or_400()
+        if not body then return bad end
         local res, err = Membership.voidCredit(ns_id, self.params.uuid, body, actor(self))
         if not res then return U.from_err(err) end
         return U.ok(res)

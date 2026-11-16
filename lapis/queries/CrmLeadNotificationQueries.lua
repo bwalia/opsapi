@@ -27,8 +27,19 @@ local DEFAULTS = {
     telegram_chat_id = nil,
 }
 
---- Raw settings row for a namespace, or nil.
+-- The table comes with the CRM feature; the shop (its order alerts) runs without it (the ecommerce preset).
+local has_table = false
+local function settings_table_exists()
+    if not has_table then
+        local rows = db.query("SELECT to_regclass('crm_lead_notification_settings') IS NOT NULL AS ok")
+        has_table = rows and rows[1] and rows[1].ok == true or false
+    end
+    return has_table
+end
+
+--- Raw settings row for a namespace, or nil (also without the CRM feature: defaults then apply).
 function CrmLeadNotificationQueries.get(namespace_id)
+    if not settings_table_exists() then return nil end
     local rows = db.select("* FROM crm_lead_notification_settings WHERE namespace_id = ? LIMIT 1", namespace_id)
     return rows and rows[1] or nil
 end

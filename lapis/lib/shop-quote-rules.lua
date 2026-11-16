@@ -13,7 +13,8 @@
       can_revise(q)             revisions: draft, sent, expired, accepted without an order; never converted,
                                 cancelled or already superseded
       can_edit_content(q)       staff edits of lines, prices, customer or delivery: not once it has an order
-                                and not once it is superseded
+                                , not once the customer authorised it (revise it instead) and not once it
+                                is superseded
       locked_for_customer(q)    authorised (accepted), has an order, converted, cancelled or superseded: the
                                 customer can't change anything any more
       order_fields(q)           the quote fields every order made from it carries ({ customer_po_number })
@@ -94,6 +95,11 @@ function R.can_edit_content(q)
     end
     if R.is_superseded(q) then
         return false, "QUOTE_SUPERSEDED", "This quote has been replaced by a revision: edit the latest revision"
+    end
+    -- What the customer authorised is what they pay: a change needs a revision they authorise again.
+    if q.status == "accepted" or set(q.authorised_at) then
+        return false, "QUOTE_AUTHORISED", "The customer has confirmed this, so its lines, prices, customer and "
+            .. "delivery can't change. Revise it to send them a corrected version to confirm"
     end
     return true
 end

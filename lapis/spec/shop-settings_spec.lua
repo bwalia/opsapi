@@ -3,18 +3,21 @@
     Plain-Lua unit test for queries/ShopSettingsQueries.lua (no nginx, no DB, no busted):
     lapis.db is faked as one in-memory shop_settings row.
 
-    Run in the openresty image from lapis/:
+    Run from the repo root (as CI does) or from lapis/:
         docker run --rm -v "$PWD":/w -w /w openresty/openresty:alpine \
-            luajit spec/shop-settings-test.lua
+            /usr/local/openresty/luajit/bin/luajit lapis/spec/shop-settings_spec.lua
 ]]
 
-package.path = "./?.lua;./?/init.lua;" .. package.path
+package.path = "./?.lua;./?/init.lua;./lapis/?.lua;/usr/local/openresty/lualib/?.lua;" .. package.path
+package.cpath = "/usr/local/openresty/lualib/?.so;" .. package.cpath -- cjson
 
 local row -- the namespace's shop_settings row (nil = never saved)
+local ns_row = { id = 1, name = "Acme Ltd" } -- the namespaces row
 package.preload["lapis.db"] = function()
     return {
         NULL = setmetatable({}, { __tostring = function() return "NULL" end }),
         query = function(sql, a, b)
+            if sql:find("FROM namespaces", 1, true) then return { ns_row } end
             if sql:match("^%s*SELECT") then return row and { row } or {} end
             if sql:match("INSERT INTO shop_settings") then row = row or { checkout_enabled = false, updated_at = "now" } end
             local col = sql:match("UPDATE shop_settings SET ([%w_]+) = ")
@@ -81,6 +84,12 @@ check("customer notifications: true turns them on", res and res.customer_deliver
 check("customer notifications: checkout untouched", S.checkoutEnabled(1) == false)
 res = S.update(1, { customer_delivery_notifications = false })
 check("customer notifications: false turns them off", res and S.customerDeliveryNotifications(1) == false)
+
+check("brand: the workspace name", S.brandName(1) == "Acme Ltd", S.brandName(1))
+ns_row.email_name = "  Acme Shop "
+check("brand: its \"Name in emails\" wins (trimmed)", S.brandName(1) == "Acme Shop", S.brandName(1))
+ns_row.email_name = "   "
+check("brand: a blank email name falls back to the name", S.brandName(1) == "Acme Ltd", S.brandName(1))
 
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

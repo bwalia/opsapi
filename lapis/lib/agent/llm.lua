@@ -1161,7 +1161,12 @@ function Llm.chat(messages, tools, opts)
         end
         if #order == 1 then return nil, err, status end
         local cache, key = breaker(c)
-        if cache and not c.legacy and provider_down(status) then cache:set(key, true, BREAKER_SECONDS) end
+        -- A timeout only shows a provider is down when it had a fair part of the budget: a hop squeezed into
+        -- what the main provider left (e.g. 8s of 120s) may be healthy, just slower than its share.
+        local short_timeout = status == nil and tostring(err):find("timeout", 1, true) and share < budget / 2
+        if cache and not c.legacy and provider_down(status) and not short_timeout then
+            cache:set(key, true, BREAKER_SECONDS)
+        end
         if not first_err then
             first_err, first_status = err, status
         else
@@ -1181,6 +1186,7 @@ end
 function Llm.chain_status()
     local function row(c, role)
         local host = tostring(c.chat_url or c.url or ""):match("^%a+://([^/?#]+)")
+        host = host and host:gsub("^.*@", "") -- never a user:password@ from the URL
         return { name = c.name or role, provider = c.provider, label = c.label, model = c.model, host = host,
             configured = Llm.configured(c), reason = c.missing,
             enabled = c.enabled ~= false, tools = c.tools ~= false,

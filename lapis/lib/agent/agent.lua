@@ -28,16 +28,21 @@ local Agent = {}
 
 local STATUS_KEY, STATUS_LOCK = "ai:status", "ai:status:probe"
 local PROBE_TIMEOUT_MS = 20000
+-- The whole check (the main model, then the fallback hops one by one while it is down): a dashboard waits for
+-- it, so a hanging model must not hold it for minutes.
+local STATUS_BUDGET_MS = 30000
+Agent.STATUS_BUDGET_MS = STATUS_BUDGET_MS
 local SLOW_MS = 3000
 
 -- One real 1-token request to one model (never its fallback): the latency
 -- users of the agent actually get (gateway + queue + model). It also keeps the
 -- model loaded.
-local function probe(cfg)
+local function probe(cfg, timeout_ms)
+    timeout_ms = math.min(timeout_ms or PROBE_TIMEOUT_MS, PROBE_TIMEOUT_MS)
     ngx.update_time()
     local started = ngx.now()
     local msg, err, status = Llm.chat({ { role = "user", content = "ping" } }, nil, { cfg = cfg, no_fallback = true,
-        max_tokens = 1, timeout_ms = PROBE_TIMEOUT_MS, usage = { feature = "health_check", system = true } })
+        max_tokens = 1, timeout_ms = timeout_ms, usage = { feature = "health_check", system = true } })
     ngx.update_time()
     local ms = math.floor((ngx.now() - started) * 1000)
     if msg then
@@ -53,7 +58,7 @@ local function probe(cfg)
         return { status = "down", reason = "The model server answered HTTP " .. status }
     end
     return { status = "down", reason = tostring(err):find("timeout", 1, true)
-        and ("No answer within " .. PROBE_TIMEOUT_MS / 1000 .. "s: the model server is busy or unreachable")
+        and ("No answer within " .. math.floor(timeout_ms / 1000) .. "s: the model server is busy or unreachable")
         or ("Unreachable: " .. tostring(err)) }
 end
 
@@ -76,20 +81,25 @@ function Agent.status()
         and ngx.time() - (last.checked_at or 0) < (last.status == "down" and 30 or 60) then
         return last
     end
-    -- Long enough for the main probe plus a probe of each fallback hop.
-    if locks and not locks:add(STATUS_LOCK, true, (1 + #Llm.chain) * PROBE_TIMEOUT_MS / 1000 + 5) then
+    if locks and not locks:add(STATUS_LOCK, true, STATUS_BUDGET_MS / 1000 + 5) then
         if last then return last end
         base.status = "checking"
         return base
     end
+    ngx.update_time()
+    local deadline = ngx.now() + STATUS_BUDGET_MS / 1000
     local ok, result = pcall(probe, Llm.default)
     if not ok then result = { status = "down", reason = "Health check failed: " .. tostring(result) } end
     for k, v in pairs(base) do result[k] = v end
-    -- Main model down: the first fallback hop that answers (hops already marked down are skipped).
+    -- Main model down: the first fallback hop that answers (hops already marked down are skipped), in what
+    -- is left of the check's time.
     if result.status == "down" then
         for _, fb in ipairs(Llm.chain) do
+            ngx.update_time()
+            local left_ms = math.floor((deadline - ngx.now()) * 1000)
+            if left_ms < 1000 then break end
             if fb.legacy or not Llm.is_down(fb) then
-                local fok, fres = pcall(probe, fb)
+                local fok, fres = pcall(probe, fb, left_ms)
                 if fok and fres.status ~= "down" then
                     result = { status = "slow", fallback = true, provider = fb.provider, model = fb.model,
                         hop = fb.name, latency_ms = fres.latency_ms, reason = Llm.model .. " is unavailable ("

@@ -30,6 +30,7 @@ local S
 local function reset()
     S = {
         enabled = false, sends = {}, inserts = {}, notes = {}, real_count = 0, test_count = 0, dup = false,
+        events = {}, deleted = {}, send_ok = true, headline_subject = nil,
         user = { first_name = "Sam", last_name = "Taylor", email = "sam@ws.example" },
         order = { id = 7, uuid = "o-1", namespace_id = 3, order_number = "WS-10042", access_token = "tok", status = "paid",
                   email = "ann@example.com", customer = '{"name":"Ann Lee","email":"ann@example.com"}',
@@ -46,7 +47,13 @@ package.loaded["lapis.db"] = {
         if sql:find("FROM users", 1, true) then return { S.user } end
         if sql:find("COUNT(*)", 1, true) then return { { n = a[2] and S.test_count or S.real_count } } end
         if sql:find("SELECT 1 FROM shop_order_emails", 1, true) then return S.dup and { { ["?column?"] = 1 } } or {} end
-        if sql:find("INSERT INTO shop_order_emails", 1, true) then S.inserts[#S.inserts + 1] = a return {} end
+        if sql:find("INSERT INTO shop_order_emails", 1, true) then
+            S.inserts[#S.inserts + 1] = a
+            S.events[#S.events + 1] = "log"
+            return {}
+        end
+        if sql:find("DELETE FROM shop_order_emails", 1, true) then S.deleted[#S.deleted + 1] = a[1] return {} end
+        if sql:find("FOR UPDATE", 1, true) then S.events[#S.events + 1] = "lock" return {} end
         if sql:find("to_char", 1, true) then return { { t = "2026-11-15 10:30" } } end
         if sql:find("UPDATE shop_orders", 1, true) then S.notes[#S.notes + 1] = a[1] return {} end
         if sql:find("FROM shop_order_emails", 1, true) then return {} end
@@ -58,14 +65,17 @@ package.loaded["queries.ShopOrderQueries"] = {
     getByUuid = function(_, uuid) return uuid == S.order.uuid and S.order or nil end,
     adminGet = function() return { uuid = S.order.uuid } end,
 }
-package.loaded["queries.ShopSettingsQueries"] = { customerDeliveryNotifications = function() return S.enabled end }
+package.loaded["queries.ShopSettingsQueries"] = { customerDeliveryNotifications = function() return S.enabled end,
+                                                  brandName = function() return "Acme Ltd" end }
 package.loaded["helper.mail"] = { isConfigured = function() return true end }
 package.loaded["helper.namespace-mail"] = {
     smtp = function() return nil end,
-    render = function(_, key, data) return { subject = data.headline .. ": order " .. data.order_number, html = "<p>x</p>",
-                                             customised = false, key = key } end,
+    render = function(_, key, data) return { subject = S.headline_subject or (data.headline .. ": order " .. data.order_number),
+                                             html = "<p>x</p>", customised = false, key = key } end,
     send = function(ns, key, to, data, brand, extra)
         S.sends[#S.sends + 1] = { ns = ns, key = key, to = to, data = data, brand = brand, extra = extra }
+        S.events[#S.events + 1] = "send"
+        if not S.send_ok then return nil, "535 5.7.8 smtp.example.com: bad credentials for user@x" end
         return true
     end,
 }
@@ -158,8 +168,40 @@ reset()
 S.enabled = true
 S.user = nil
 local anon = Q.send(3, "o-1", { headline = "H", message = "M" }, nil)
-check("real: no staff name signs as the team", anon and S.sends[1].data.signature == "The Workstation team"
+check("real: no staff name signs as the workspace's team", anon and S.sends[1].data.signature == "The Acme Ltd team"
     and not S.sends[1].data.signature_is_person)
+
+-- the workspace's brand, no made-up phone number ------------------------------------------------------
+reset()
+S.enabled = true
+Q.send(3, "o-1", { headline = "H", message = "M" }, 11)
+check("brand: the workspace's name, never a hard-coded one", S.sends[1].data.app_name == "Acme Ltd"
+    and S.sends[1].brand.app_name == "Acme Ltd")
+check("brand: no phone line unless SHOP_CALL_PHONE is set", S.sends[1].data.call_phone == nil)
+
+-- the log row is the reservation: written (under the order's lock) before the email goes ------------------
+reset()
+S.enabled = true
+Q.send(3, "o-1", { headline = "H", message = "M" }, 11)
+check("cap: lock, then log, then send", table.concat(S.events, ",") == "lock,log,send", table.concat(S.events, ","))
+
+reset()
+S.enabled = true
+S.send_ok = false
+local _, fail = Q.send(3, "o-1", { headline = "H", message = "M" }, 11)
+check("failed send: 502 without the SMTP server's words", fail and fail.status == 502
+    and not fail.message:find("535", 1, true) and not fail.message:find("smtp.example.com", 1, true), fail and fail.message)
+check("failed send: its log row is removed again (it doesn't count)", #S.deleted == 1 and S.deleted[1] == S.inserts[1][1])
+check("failed send: no order note", #S.notes == 0)
+
+-- a subject longer than the column is cut on a character, not inside one ---------------------------------
+reset()
+S.enabled = true
+S.headline_subject = string.rep("é", 200) -- 400 bytes
+local long = Q.send(3, "o-1", { headline = "H", message = "M" }, 11)
+local logged = S.inserts[1] and S.inserts[1][7]
+check("subject: at most 255 bytes, whole characters", long and logged and #logged <= 255 and #logged == 254
+    and not logged:find("[\xC0-\xFF]$"), logged and #logged)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end

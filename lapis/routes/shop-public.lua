@@ -545,7 +545,8 @@ return function(app)
     app:post(BASE .. "/customer/orders/:uuid/delivery-changes/:request_uuid/cancel", public(function(self, ns_id)
         local m, bad = member_or_401()
         if not m then return bad end
-        local body = U.read_json() or {}
+        local body, jerr = U.read_json()
+        if not body then return U.fail(400, "INVALID_JSON", jerr) end
         local res, err = DeliveryChange.cancelForCustomer(ns_id, self.params.uuid, self.params.request_uuid, m.email,
             body.t or self.params.t)
         if not res then return U.from_err(err) end

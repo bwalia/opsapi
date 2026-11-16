@@ -11,6 +11,10 @@
       PaymentMethodQueries.remove(ns_id, uuid)                 -> { deleted | deactivated } | nil, message
       PaymentMethodQueries.forDocuments(ns_id)                 -> public shapes, default first ([] when none / no table)
       PaymentMethodQueries.resolve(ns_id, uuid?)               -> one public shape for an invoice (uuid, else default)
+
+    Every create / change / delete is written to the workspace audit log (namespace_audit_logs, before and
+    after) and emailed to the workspace owners: documents already sent show the current details, so a changed
+    account number must never go unnoticed.
 ]]
 
 local db = require("lapis.db")
@@ -101,11 +105,107 @@ local function write(ns_id, f, id)
     return Q.shape(db.query("SELECT " .. COLS .. " FROM namespace_payment_methods WHERE id = ?", id)[1])
 end
 
+-- ---------------------------------------------------------------------------
+-- audit trail + owner email
+-- ---------------------------------------------------------------------------
+
+local AUDITED = { "kind", "label", "account_name", "bank_name", "sort_code", "account_number", "iban", "swift_bic",
+    "currency", "instructions", "is_default", "show_on_documents", "is_active" }
+local LABELS = { kind = "Type", label = "Name", account_name = "Account name", bank_name = "Bank", sort_code = "Sort code",
+    account_number = "Account number", iban = "IBAN", swift_bic = "SWIFT/BIC", currency = "Currency",
+    instructions = "Instructions", is_default = "Default", show_on_documents = "Shown on documents", is_active = "Active" }
+local MASKED = { sort_code = true, account_number = true, iban = true }
+
+--- The audited fields that differ between two admin shapes (nil = none): (before, after).
+function Q.diff(old, new)
+    local before, after, any = {}, {}, false
+    for _, k in ipairs(AUDITED) do
+        local a, b = old and old[k], new and new[k]
+        if a == cjson.null then a = nil end
+        if b == cjson.null then b = nil end
+        if a ~= b then before[k], after[k], any = a, b, true end
+    end
+    if not any then return nil end
+    return before, after
+end
+
+local function esc(v)
+    return (tostring(v):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#39;" }))
+end
+
+local function shown(k, v)
+    if v == nil then return "(none)" end
+    if type(v) == "boolean" then return v and "yes" or "no" end
+    v = tostring(v)
+    if MASKED[k] and #v > 4 then return "••••" .. v:sub(-4) end
+    return v
+end
+
+--- The owners' email: what changed (bank numbers shown as their last digits only). Pure, for the spec.
+function Q.changeEmail(ws_name, action, label, who, before, after)
+    local verb = action == "created" and "added" or action == "deleted" and "deleted"
+        or action == "deactivated" and "turned off" or "changed"
+    local rows = {}
+    for _, k in ipairs(AUDITED) do
+        if (before and before[k] ~= nil) or (after and after[k] ~= nil) then
+            local text = action == "created" and shown(k, after[k])
+                or action == "updated" and (shown(k, before[k]) .. " → " .. shown(k, after[k]))
+                or shown(k, before[k])
+            rows[#rows + 1] = "<p><strong>" .. esc(LABELS[k]) .. ":</strong> " .. esc(text) .. "</p>"
+        end
+    end
+    return {
+        subject = "Bank details " .. verb .. " in " .. tostring(ws_name),
+        title = "Payment details " .. verb .. ": " .. tostring(label),
+        message = "The payment method \"" .. tostring(label) .. "\" in " .. tostring(ws_name) .. " was " .. verb .. " by "
+            .. tostring(who) .. ". Invoices, Order Authorisations and bank-transfer orders that haven't been paid "
+            .. "yet show the current details. If you didn't expect this, check it now in Workspace → Getting paid "
+            .. "and change your password.",
+        details = table.concat(rows, ""),
+    }
+end
+
+-- Never fails the change itself.
+local function record(ns_id, action, old, new)
+    local ok, err = pcall(function()
+        local before, after = Q.diff(old, new)
+        if not before then return end
+        local u = ngx.ctx and ngx.ctx.user
+        local me = type(u) == "table" and u.uuid and db.query("SELECT id, email FROM users WHERE uuid = ?", u.uuid)[1]
+        local okip, ip = pcall(function() return require("helper.client-ip").get() end)
+        local subject = new or old
+        require("queries.NamespaceAuditLogQueries").log({
+            namespace_id = ns_id, user_id = me and me.id or nil, action = "payment_method." .. action,
+            entity_type = "payment_method", entity_id = subject.uuid, old_values = before, new_values = after,
+            ip_address = okip and type(ip) == "string" and ip or nil,
+            user_agent = ngx.var and ngx.var.http_user_agent and ngx.var.http_user_agent:sub(1, 500) or nil,
+        })
+        local Mail = require("helper.mail")
+        if not Mail.isConfigured() then return end
+        local ws = db.query("SELECT name FROM namespaces WHERE id = ?", ns_id)[1]
+        local owners = {}
+        for _, r in ipairs(db.query([[
+            SELECT DISTINCT u.email FROM users u
+             WHERE u.email IS NOT NULL AND u.id IN (SELECT owner_user_id FROM namespaces WHERE id = ?
+                                                   UNION SELECT user_id FROM namespace_members
+                                                          WHERE namespace_id = ? AND is_owner AND status = 'active')
+        ]], ns_id, ns_id)) do owners[#owners + 1] = r.email end
+        if #owners == 0 then return end
+        local e = Q.changeEmail(ws and ws.name or "your workspace", action, subject.label,
+            me and me.email or "an API key", before, after)
+        Mail.send({ to = owners, subject = e.subject, template = "notification",
+            data = { title = e.title, message = e.message, details = e.details, app_name = ws and ws.name or nil } })
+    end)
+    if not ok then ngx.log(ngx.ERR, "[payment-methods] audit/notify failed: ", tostring(err)) end
+end
+
 function Q.create(ns_id, body, actor)
     local f, err = PM.clean(body)
     if not f then return nil, err end
     f.created_by = actor
-    return write(ns_id, f)
+    local saved, werr = write(ns_id, f)
+    if saved then record(ns_id, "created", nil, saved) end
+    return saved, werr
 end
 
 function Q.update(ns_id, uuid, body)
@@ -113,7 +213,9 @@ function Q.update(ns_id, uuid, body)
     if not row then return nil, "Payment method not found" end
     local f, err = PM.clean(body, row)
     if not f then return nil, err end
-    return write(ns_id, f, row.id)
+    local saved, werr = write(ns_id, f, row.id)
+    if saved then record(ns_id, "updated", Q.shape(row), saved) end
+    return saved, werr
 end
 
 --- Referenced by an invoice → deactivated (kept for that invoice's history); otherwise deleted.
@@ -135,6 +237,7 @@ function Q.remove(ns_id, uuid)
                      SELECT id FROM namespace_payment_methods WHERE namespace_id = ? AND is_active
                       ORDER BY (kind = 'bank_transfer') DESC, sort_order, id LIMIT 1)]], ns_id)
     end
+    record(ns_id, referenced and "deactivated" or "deleted", Q.shape(row), nil)
     return referenced and { deactivated = true, uuid = uuid } or { deleted = true, uuid = uuid }
 end
 
