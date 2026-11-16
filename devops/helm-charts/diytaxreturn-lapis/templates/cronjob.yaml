@@ -1,5 +1,20 @@
 {{- /* DB backups to MinIO. On unless backup.enabled is explicitly false
        (a release with no MinIO, e.g. values-opsapi-demo.yaml). */}}
+{{- /* Backup retention. Each run first deletes THIS release's old dumps (before the
+       upload, so a full MinIO frees space first). Names say hourly/daily so each kind
+       keeps its own window: backup.keepHourly (default 2d); backup.keepDaily (empty =
+       keep daily dumps forever) also covers names from before the split
+       (backup_<app>-<ns>_<date>...). mc matches by name prefix; namespaces can't
+       contain "_", so one release never matches another's files. */}}
+{{- define "opsapi.backupPrune" -}}
+{{- $b := .Values.backup | default dict -}}
+P="myminio/opsapi-test-pg/backup_{{ .Values.app }}-{{ .Release.Namespace }}_"
+mc rm --recursive --force --older-than {{ $b.keepHourly | default "2d" }} "${P}hourly_" || echo "Old hourly backups not removed"
+{{- if $b.keepDaily }}
+mc rm --recursive --force --older-than {{ $b.keepDaily }} "${P}daily_" || echo "Old daily backups not removed"
+mc rm --recursive --force --older-than {{ $b.keepDaily }} "${P}20" || echo "Old-style backups not removed"
+{{- end }}
+{{- end }}
 {{- if not (and .Values.backup (eq (toString .Values.backup.enabled) "false")) }}
 ---
 # Source: opsapi/templates/cronjob.yaml
@@ -45,7 +60,7 @@ spec:
                   pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
-                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_hourly_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
 
                   echo "Starting PostgreSQL backup..."
 
@@ -57,9 +72,8 @@ spec:
                     echo "Error: Backup file was not created!"
                     exit 1
                   fi
-                  # Install MinIO Client
-                  curl -fSL --retry 3 -o mc https://dl.min.io/client/mc/release/linux-amd64/mc
-                  chmod +x mc && mv mc /usr/local/bin/
+                  # MinIO client: the image ships it (dl.min.io now answers 410 Gone).
+                  command -v mc >/dev/null || { echo "Error: mc (MinIO client) not found in the image"; exit 1; }
 
                   # Debugging: Ensure MinIO variables are set
                   echo "MinIO Endpoint: $MINIO_ENDPOINT"
@@ -79,6 +93,7 @@ spec:
                   # ✅ Ensure the backups bucket exists (a fresh MinIO — e.g. this
                   # release's own workstation-minio — won't have it yet), then upload.
                   mc mb --ignore-existing myminio/"opsapi-test-pg"
+                  {{- include "opsapi.backupPrune" . | nindent 18 }}
                   echo "Uploading backup to MinIO..."
                   mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
 
@@ -229,7 +244,7 @@ spec:
                   pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
-                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+                  BACKUP_FILE="/tmp/backup_{{ .Values.app }}-{{ .Release.Namespace }}_daily_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
 
                   echo "Starting PostgreSQL backup..."
 
@@ -241,9 +256,8 @@ spec:
                     echo "Error: Backup file was not created!"
                     exit 1
                   fi
-                  # Install MinIO Client
-                  curl -fSL --retry 3 -o mc https://dl.min.io/client/mc/release/linux-amd64/mc
-                  chmod +x mc && mv mc /usr/local/bin/
+                  # MinIO client: the image ships it (dl.min.io now answers 410 Gone).
+                  command -v mc >/dev/null || { echo "Error: mc (MinIO client) not found in the image"; exit 1; }
 
                   # Debugging: Ensure MinIO variables are set
                   echo "MinIO Endpoint: $MINIO_ENDPOINT"
@@ -263,6 +277,7 @@ spec:
                   # ✅ Ensure the backups bucket exists (a fresh MinIO — e.g. this
                   # release's own workstation-minio — won't have it yet), then upload.
                   mc mb --ignore-existing myminio/"opsapi-test-pg"
+                  {{- include "opsapi.backupPrune" . | nindent 18 }}
                   echo "Uploading backup to MinIO..."
                   mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
 
