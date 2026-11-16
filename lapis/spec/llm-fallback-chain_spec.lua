@@ -238,7 +238,7 @@ msg = Llm.chat(HELLO, nil, {})
 check("...without opening the breaker", msg.content == "from ollama" and #reqs == 1)
 
 Llm = load(FULL)
-route({ ollama = "timeout", bedrock = "timeout", azure = DOWN, vertex = DOWN, vast1 = DOWN, vast2 = DOWN,
+route({ ollama = "timeout", bedrock = DOWN, azure = DOWN, vertex = DOWN, vast1 = DOWN, vast2 = DOWN,
     anthropic = DOWN })
 local _, err, status = Llm.chat(HELLO, nil, {})
 check("all down: one error naming every hop, the main status", err and err:find("timeout", 1, true)
@@ -291,6 +291,24 @@ do
     check("main gets 2/3, each hop an equal share of the rest, the last all of it",
         #rel == 4 and rel[1] == 60 and rel[2] == 70 and rel[3] == 80 and rel[4] == 90, table.concat(rel, ","))
     check("never past the total budget", clock - start <= 90)
+    check("the main model timing out in its 2/3 is marked down", Llm.is_down(Llm.default))
+    check("a hop timing out in its short share (10s of 90s) is not: it may just be slow",
+        not Llm.is_down(Llm.hops.vast1) and not Llm.is_down(Llm.hops.vast2) and not Llm.is_down(Llm.hops.anthropic))
+    Webhooks.fetch = function(target, _, o)
+        deadlines[#deadlines + 1] = { host = target.host, at = o.deadline }
+        clock = math.max(clock, o.deadline)
+        return nil, "could not read the response: timeout"
+    end
+    -- One hanging model must not make the status endpoint hang for a probe per hop (6 x 20s before).
+    load(merged(FULL, { AI_FALLBACK_CHAIN = "bedrock,azure,vertex,vast1,vast2" }))
+    package.loaded["lib.agent.agent"] = nil
+    local Agent = require("lib.agent.agent")
+    route({ token = OK.token })
+    start = clock
+    local st = Agent.status()
+    Webhooks.fetch = real_fetch
+    check("status: every model hanging is answered within the status budget", st.status == "down"
+        and clock - start <= Agent.STATUS_BUDGET_MS / 1000, clock - start)
 end
 
 -- ---------------------------------------------------------------------------
@@ -531,6 +549,10 @@ check("main + every named hop, with why a hop is off", st.main.provider == "olla
     and st.hops[1].configured == false and st.hops[1].reason:find("no region", 1, true) and st.hops[1].active == false
     and st.hops[2].active == true and st.hops[2].host == "res.openai.azure.com" and st.hops[5].tools == false,
     text)
+st = load(merged(FULL, { AI_FALLBACK_CHAIN = "vast1",
+    AI_HOP_VAST1_BASE_URL = "https://bob:hunter2@vast1.example:8000/v1" })).chain_status()
+check("a user:password@ in a hop URL is never shown", st.hops[1].host == "vast1.example:8000"
+    and not cjson.encode(st):find("hunter2", 1, true), st.hops[1].host)
 
 print(failures == 0 and "\nAll checks passed." or ("\n" .. failures .. " check(s) FAILED."))
 os.exit(failures == 0 and 0 or 1)
