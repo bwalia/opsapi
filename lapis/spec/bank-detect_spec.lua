@@ -360,6 +360,43 @@ describe("bank-detect", function()
             assert.is_nil(seen:find("LLOYDS", 1, true))
         end)
 
+        -- #882: the header went to the platform model (possibly an external provider)
+        -- with the sort code and account number in it.
+        it("never sees a sort code or account number (digits are masked)", function()
+            local seen
+            local text = "Statement of account\nCustomer reference TEST-REF-1\n"
+                .. "Sort code 55-11-22  Account number 99887766\n"
+                .. "Period 01/03/2026 to 31/03/2026\n\nDate Description Money out Money in Balance\n"
+                .. "01/03/2026 RENT 900.00 1,100.00\n"
+            local r = BankDetect.detect(text, "text", {
+                llm_fn = function(snippet) seen = snippet return { bank_name = "Tide", sort_code = "55-11-22" } end,
+            })
+            assert.truthy(seen)
+            assert.is_nil(seen:find("%d"))
+            assert.truthy(seen:find("Statement of account", 1, true))
+            assert.are.equal("Tide", r.bank_name)
+            -- the rules still read the numbers themselves; nothing numeric comes from the model
+            assert.are.equal("55-11-22", r.sort_code)
+            assert.are.equal("99887766", r.account_number)
+        end)
+
+        it("the route removes the temp PDF even when detection throws", function()
+            local f = assert(io.open("lapis/routes/tax-extract.lua"))
+            local src = f:read("*a")
+            f:close()
+            local at = src:find('pcall(Extraction.detect_bank_details, path, "pdf")', 1, true)
+            assert.truthy(at)
+            assert.truthy(src:find("os.remove(path)", at, true))
+        end)
+
+        it("is not asked when the rules found the bank, even without numbers", function()
+            local called = false
+            BankDetect.detect("LLOYDS BANK\nStatement of account\nSort code: see letter\n", "text", {
+                llm_fn = function() called = true return {} end,
+            })
+            assert.is_false(called)
+        end)
+
         it("is not asked for numbers a CSV export doesn't carry (Monzo)", function()
             local called = false
             BankDetect.detect(fixture("monzo.csv"), "csv", {
