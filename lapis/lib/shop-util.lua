@@ -120,6 +120,38 @@ function ShopUtil.int(v, default)
     return math.floor(n)
 end
 
+--- s cut to at most n bytes without splitting a UTF-8 character (a split one makes Postgres reject the row).
+function ShopUtil.cut(s, n)
+    s = tostring(s or "")
+    if #s <= n then return s end
+    local b = s:byte(n + 1)
+    while n > 0 and b >= 0x80 and b < 0xC0 do -- byte n+1 continues a character: start it in the next part
+        n = n - 1
+        b = s:byte(n + 1)
+    end
+    return s:sub(1, n)
+end
+
+--- The given parts joined with sep, skipping nil/false ones (table.concat fails on a nil in the middle).
+function ShopUtil.join(sep, ...)
+    local out = {}
+    for i = 1, select("#", ...) do
+        local v = select(i, ...)
+        if v then out[#out + 1] = v end
+    end
+    return table.concat(out, sep)
+end
+
+--- "YYYY-MM-DD" when v starts with a real calendar date (2026-02-30 is not), else nil.
+function ShopUtil.date(v)
+    if type(v) ~= "string" then return nil end
+    local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if not y or y < 2000 or y > 2100 or m < 1 or m > 12 or d < 1 then return nil end
+    if d > os.date("*t", os.time({ year = y, month = m + 1, day = 0, hour = 12 })).day then return nil end
+    return v:sub(1, 10)
+end
+
 function ShopUtil.clamp(n, lo, hi)
     if n < lo then return lo end
     if n > hi then return hi end
@@ -222,12 +254,21 @@ end
 -- DB transactions
 -- ---------------------------------------------------------------------------
 
+local no_ngx_ctx = {}
+local function ctx() return ngx and ngx.ctx or no_ngx_ctx end
+
 --- Run fn() inside BEGIN/COMMIT. fn returns (result, err); a returned err or a
--- raised error rolls back. Returns (result, err).
+-- raised error rolls back. Returns (result, err). Work queued with afterCommit
+-- runs once the outermost tx has committed (and is dropped on a rollback).
 function ShopUtil.tx(fn)
     local db = require("lapis.db")
+    local c = ctx()
     db.query("BEGIN")
+    local outer = c.shop_after_commit == nil
+    if outer then c.shop_after_commit = {} end
     local ok, res, err = pcall(fn)
+    local queued = outer and c.shop_after_commit or {}
+    if outer then c.shop_after_commit = nil end
     if not ok then
         pcall(db.query, "ROLLBACK")
         error(res, 0)
@@ -237,7 +278,23 @@ function ShopUtil.tx(fn)
         return nil, err
     end
     db.query("COMMIT")
+    for _, f in ipairs(queued) do
+        local fok, ferr = pcall(f)
+        if not fok then ngx.log(ngx.WARN, "[shop] after-commit work failed: ", tostring(ferr)) end
+    end
     return res
+end
+
+--- Run f after the current U.tx commits (now when none is open). For side work that must never take the
+-- transaction down with it: a failed query inside a transaction aborts it, and its COMMIT then silently
+-- rolls back (an order "paid" in the response but not in the database).
+function ShopUtil.afterCommit(f)
+    local q = ctx().shop_after_commit
+    if q then
+        q[#q + 1] = f
+    else
+        f()
+    end
 end
 
 -- ---------------------------------------------------------------------------

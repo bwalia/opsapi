@@ -387,9 +387,13 @@ end
 
 local function reload(id) return db.query("SELECT * FROM shop_memberships WHERE id = ?", id)[1] end
 
+-- After the caller's transaction commits: the lead is saved in a transaction of its own, and a failed CRM
+-- query inside a payment's transaction would undo the payment.
 local function record_lead(m, note)
-    pcall(function()
-        require("queries.ShopLeadQueries").safeUpsert(m.namespace_id, { email = m.email, source = "shop_vip", note = note })
+    U.afterCommit(function()
+        pcall(function()
+            require("queries.ShopLeadQueries").safeUpsert(m.namespace_id, { email = m.email, source = "shop_vip", note = note })
+        end)
     end)
 end
 
@@ -432,9 +436,10 @@ end
 
 --- Tell staff a VIP joined (owner email + Telegram, per Leads → Notifications), every time, even when
 -- the customer was already a lead: record_lead only notifies when it creates one, so a survey lead who
--- later paid for membership used to arrive silently. Best effort, never fails the activation.
+-- later paid for membership used to arrive silently. Best effort, never fails the activation (it runs after
+-- the activation commits: it reads crm_leads, which a shop without CRM doesn't have).
 local function vip_alert(m)
-    pcall(function()
+    U.afterCommit(function() pcall(function()
         local ns = db.query("SELECT id, name FROM namespaces WHERE id = ?", m.namespace_id)[1]
         if not ns then return end
         local lead = db.query([[
@@ -457,7 +462,7 @@ local function vip_alert(m)
                 .. "). Their Trade discount applies from now. Open Shop → Members in your dashboard.",
             telegram_title = "⭐ <b>New VIP member</b>",
         } })
-    end)
+    end) end)
 end
 
 --- Make a membership active (first payment). Idempotent.

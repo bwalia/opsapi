@@ -3,7 +3,8 @@
 /**
  * Shop order "next step" for getting paid:
  *   - a pending bank-transfer order → "Mark paid" (one dialog: amount prefilled against the total, method
- *     bank transfer, reference = order number, date today)
+ *     bank transfer, reference = order number, date today). Needs shop "manage": saying the money arrived
+ *     releases the goods. Less than the total can't be marked paid (there is no part-paid order).
  *   - a paid order without an invoice → "Create invoice" (one click, then open it or download its PDF)
  *   - an order with an invoice → links to it
  * Self-contained so it can sit in the order page's next-step panel (OrderPaymentNextStep) or anywhere else.
@@ -62,6 +63,7 @@ export function MarkPaidDialog({
 
   const minor = toMinor(amount);
   const diff = minor === null ? null : minor - total;
+  const short = diff !== null && diff < 0;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,7 +101,13 @@ export function MarkPaidDialog({
             onChange={(e) => setAmount(e.target.value)}
             inputMode="decimal"
             autoFocus
-            error={minor === null ? 'Enter an amount, e.g. 1234.56' : undefined}
+            error={
+              minor === null
+                ? 'Enter an amount, e.g. 1234.56'
+                : short
+                  ? 'Less than the total: mark it paid once the rest has arrived.'
+                  : undefined
+            }
           />
           <p className="mt-1 text-sm text-secondary-600">
             Expected <span className="font-medium tabular-nums">{formatMoney(total, order.currency)}</span>
@@ -122,7 +130,7 @@ export function MarkPaidDialog({
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" isLoading={saving} disabled={minor === null} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
+          <Button type="submit" isLoading={saving} disabled={minor === null || short} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
             Mark paid
           </Button>
         </div>
@@ -179,8 +187,9 @@ export function OrderPaymentNextStep({
   editable: boolean;
   onChanged: (o?: ShopOrder) => void;
 }) {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, canManage } = usePermissions();
   const canInvoice = hasPermission('invoices', 'create');
+  const canMarkPaid = canManage('shop');
   const [markOpen, setMarkOpen] = useState(false);
   const inv = useOrderInvoice(order, () => onChanged());
   const invoiceUuid = inv.created?.invoice_uuid || order.invoice_uuid || null;
@@ -204,10 +213,13 @@ export function OrderPaymentNextStep({
               for 14 days.
             </p>
           </div>
-          {editable && (
+          {editable && canMarkPaid && (
             <Button onClick={() => setMarkOpen(true)} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
               Mark paid
             </Button>
+          )}
+          {editable && !canMarkPaid && (
+            <p className="text-sm text-secondary-600">Someone who manages the shop marks it paid when the money arrives.</p>
           )}
         </div>
         {(order.payment_methods?.length ?? 0) > 0 && (
