@@ -23,7 +23,7 @@ import { ShopPanel } from '@/components/leads/ShopPanel';
 import { VipBadge } from '@/components/shop/VipBadge';
 import { useVipFor } from '@/hooks/useVipStatus';
 import {
-  ConvertDialog, LogCallDialog, MeetingDialog, MeetingOutcomeDialog, PlanStepDialog, QualifyDialog, ReferDialog,
+  ConvertDialog, EmailLeadDialog, LogCallDialog, MeetingDialog, MeetingOutcomeDialog, PlanStepDialog, QualifyDialog, ReferDialog,
 } from '@/components/leads/LeadDialogs';
 import { StageModal } from '@/components/leads/StageModal';
 import {
@@ -37,7 +37,7 @@ import {
 } from '@/services/leads.service';
 
 type Dialog =
-  | { kind: 'call' } | { kind: 'step' } | { kind: 'meeting'; meeting?: Meeting } | { kind: 'outcome'; meeting: Meeting }
+  | { kind: 'call' } | { kind: 'email'; subject?: string; body?: string } | { kind: 'step' } | { kind: 'meeting'; meeting?: Meeting } | { kind: 'outcome'; meeting: Meeting }
   | { kind: 'qualify' } | { kind: 'convert' } | { kind: 'refer'; partner?: string | null }
   | { kind: 'stage'; target: LeadStage } | null;
 
@@ -142,7 +142,7 @@ function LeadContent() {
         setDialog({ kind: 'call' }); break;
       case 'email': {
         const r = lead.analysis?.result?.first_reply;
-        if (lead.email) window.location.href = `mailto:${lead.email}?subject=${encodeURIComponent(r?.subject ?? '')}&body=${encodeURIComponent(r?.body ?? '')}`;
+        if (lead.email) setDialog({ kind: 'email', subject: r?.subject ?? undefined, body: r?.body ?? undefined });
         else toast.error('This lead has no email address');
         break;
       }
@@ -266,8 +266,7 @@ function LeadContent() {
           {lead.stage !== 'converted' && (
             <Button variant={lead.phone ? 'ghost' : 'primary'} onClick={() => setDialog({ kind: 'call' })} leftIcon={<PhoneCall className="h-4 w-4" />}>Log a call</Button>
           )}
-          {lead.email && <a href={`mailto:${lead.email}`} className="inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-secondary-700 hover:bg-secondary-100">
-            <Mail className="h-4 w-4" aria-hidden="true" />Email</a>}
+          {lead.email && <Button variant="ghost" onClick={() => setDialog({ kind: 'email' })} leftIcon={<Mail className="h-4 w-4" />}>Email</Button>}
           {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-secondary-700 hover:bg-secondary-100">
             <MessageCircle className="h-4 w-4" aria-hidden="true" />WhatsApp</a>}
           {open && <Button variant="ghost" onClick={() => setDialog({ kind: 'meeting' })} leftIcon={<CalendarPlus className="h-4 w-4" />}>Book meeting</Button>}
@@ -476,6 +475,8 @@ function LeadContent() {
         </div>
       </div>
 
+      {dialog?.kind === 'email' && <EmailLeadDialog lead={lead} subject={dialog.subject} body={dialog.body}
+        onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === 'call' && <LogCallDialog lead={lead} outcomes={outcomes} onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === 'step' && <PlanStepDialog lead={lead} onClose={() => setDialog(null)} onDone={(l) => done(l)} />}
       {dialog?.kind === 'meeting' && <MeetingDialog lead={lead} meeting={dialog.meeting} settings={settings} onClose={() => setDialog(null)} onDone={() => done()} />}

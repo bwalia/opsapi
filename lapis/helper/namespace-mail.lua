@@ -1,10 +1,11 @@
 --[[
     Workspace email (core) — docs/BILLING_ENTITLEMENTS.md §10
     ========================================================
-    Each workspace can send through its own SMTP server (namespace_mail_settings;
-    the password is stored encrypted) and override the subject and body of any
-    built-in template (namespace_email_templates). Without its own server the
-    deployment's SMTP (SMTP_* env) is used.
+    Each workspace can send through its own SMTP accounts (namespace_smtp_accounts;
+    passwords stored encrypted), choose which account sends which kind of email
+    (namespace_smtp_routes: leads, lead follow-up, shop, invoices...), and override
+    the subject and body of any built-in template (namespace_email_templates).
+    Without an account of its own the deployment's SMTP (SMTP_* env) is used.
 
     Built-in templates are etlua files in views/emails (trusted code). A
     workspace's override uses {{placeholder}} substitution with HTML escaping,
@@ -134,8 +135,57 @@ NamespaceMail.TEMPLATES = {
 }
 
 -- ---------------------------------------------------------------------------
--- SMTP settings
+-- SMTP accounts and routing
 -- ---------------------------------------------------------------------------
+-- A workspace can keep several named SMTP accounts (namespace_smtp_accounts) and
+-- choose which one sends each kind of email (namespace_smtp_routes). A purpose
+-- with no route uses the default account; with no default account (or when the
+-- chosen one is switched off) the deployment's server (SMTP_* env) sends it.
+
+--- The kinds of email a workspace can route, in the order the settings page
+-- shows them. `feature`: hidden where that feature isn't deployed.
+NamespaceMail.PURPOSES = {
+    { key = "default", name = "Default",
+        description = "Every email that isn't sent through a different account below." },
+    { key = "leads", name = "New enquiries",
+        description = "The thank-you email to someone who sends an enquiry, and the new-lead alert to your team." },
+    { key = "lead_followup", name = "Questions and follow-up",
+        description = "Emails your team sends to a lead or customer: questions, follow-ups, meeting invitations, "
+            .. "reminders and partner referrals." },
+    { key = "team", name = "Team notifications",
+        description = "Lead assignments and reminders to your staff, and workspace invitations." },
+    { key = "shop_orders", name = "Shop orders", feature = "shop",
+        description = "Quotes, order updates and delivery changes sent to shop customers." },
+    { key = "shop_members", name = "Shop members", feature = "shop",
+        description = "Members' sign-in links and store credit notices." },
+    { key = "invoices", name = "Invoices and purchase orders", feature = "invoicing",
+        description = "Invoices to customers and purchase orders to suppliers." },
+    { key = "field_service", name = "Field service", feature = "field_service",
+        description = "Quotations sent from jobs." },
+    { key = "forms", name = "Forms and feedback", feature = "forms",
+        description = "Contact, feedback and survey forms: new responses to your team, and the automatic reply to "
+            .. "the person who answered." },
+    { key = "billing", name = "Billing", feature = "billing",
+        description = "Account links and licence keys for your customers." },
+}
+
+local PURPOSE_BY_KEY = {}
+for _, p in ipairs(NamespaceMail.PURPOSES) do PURPOSE_BY_KEY[p.key] = p end
+
+local function purpose_available(key)
+    local p = PURPOSE_BY_KEY[key]
+    return p ~= nil and (not p.feature or ProjectConfig.isFeatureEnabled(p.feature))
+end
+
+--- Which purpose a built-in template is sent under.
+local TEMPLATE_PURPOSE = { ["namespace.invitation"] = "team", ["shop.order_update"] = "shop_orders" }
+local TEMPLATE_PREFIX_PURPOSE = { billing = "billing", forms = "forms", crm = "lead_followup" }
+
+function NamespaceMail.templatePurpose(key)
+    if TEMPLATE_PURPOSE[key] then return TEMPLATE_PURPOSE[key] end
+    local prefix = tostring(key):match("^([%w_]+)%.")
+    return prefix and TEMPLATE_PREFIX_PURPOSE[prefix] or "default"
+end
 
 local function allow_private()
     return os.getenv("OPSAPI_MAIL_ALLOW_PRIVATE") == "true" or os.getenv("OPSAPI_WEBHOOKS_ALLOW_PRIVATE") == "true"
@@ -160,25 +210,71 @@ end
 
 NamespaceMail.hostOk = host_ok
 
-function NamespaceMail.settings(namespace_id)
-    return db.query("SELECT * FROM namespace_mail_settings WHERE namespace_id = ?", namespace_id)[1]
+local function nn(v)
+    if v == nil or v == db.NULL then return nil end
+    return v
 end
 
---- The settings as the API shows them (never the password).
-function NamespaceMail.present(row)
-    if not row then return { configured = false } end
+local function account_by_uuid(namespace_id, uuid)
+    if type(uuid) ~= "string" or uuid == "" then return nil end
+    return db.query("SELECT * FROM namespace_smtp_accounts WHERE namespace_id = ? AND uuid = ?", namespace_id, uuid)[1]
+end
+
+local function default_account(namespace_id)
+    return db.query("SELECT * FROM namespace_smtp_accounts WHERE namespace_id = ? AND is_default", namespace_id)[1]
+end
+
+--- An account as the API shows it (never the password).
+function NamespaceMail.presentAccount(row)
     return {
-        configured = true, enabled = row.enabled, host = row.host, port = row.port, security = row.security,
-        username = row.username, has_password = row.password_encrypted ~= nil and row.password_encrypted ~= db.NULL,
-        from_email = row.from_email, from_name = row.from_name, reply_to = row.reply_to,
-        last_tested_at = row.last_tested_at, last_error = row.last_error, updated_at = row.updated_at,
+        uuid = row.uuid, name = row.name, is_default = row.is_default == true, enabled = row.enabled == true,
+        host = row.host, port = tonumber(row.port), security = row.security, username = nn(row.username),
+        has_password = nn(row.password_encrypted) ~= nil,
+        from_email = row.from_email, from_name = nn(row.from_name), reply_to = nn(row.reply_to),
+        last_tested_at = nn(row.last_tested_at), last_error = nn(row.last_error),
+        created_at = row.created_at, updated_at = row.updated_at,
     }
+end
+
+function NamespaceMail.listAccounts(namespace_id)
+    local out = {}
+    for _, r in ipairs(db.query([[SELECT * FROM namespace_smtp_accounts WHERE namespace_id = ?
+        ORDER BY is_default DESC, lower(name), id]], namespace_id)) do
+        out[#out + 1] = NamespaceMail.presentAccount(r)
+    end
+    return out
+end
+
+function NamespaceMail.getAccount(namespace_id, uuid)
+    local row = account_by_uuid(namespace_id, uuid)
+    if not row then return nil, "Email account not found" end
+    return NamespaceMail.presentAccount(row)
 end
 
 local EMAIL = "^[^%s@]+@[^%s@]+%.[^%s@]+$"
 
-function NamespaceMail.save(namespace_id, actor, b)
-    local current = NamespaceMail.settings(namespace_id)
+local function clear_other_defaults(namespace_id, keep_id)
+    db.query("UPDATE namespace_smtp_accounts SET is_default = FALSE WHERE namespace_id = ? AND is_default AND id <> ?",
+        namespace_id, keep_id)
+end
+
+--- Create (uuid = nil) or update an account. The first account becomes the default.
+-- @return presented account | nil, err
+function NamespaceMail.saveAccount(namespace_id, uuid, actor, b)
+    local current
+    if uuid then
+        current = account_by_uuid(namespace_id, uuid)
+        if not current then return nil, "Email account not found" end
+    end
+    local name = b.name
+    if name == nil then name = current and current.name end
+    if type(name) ~= "string" or name:match("^%s*$") then return nil, "name is required (e.g. Sales, Support)" end
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    if #name > 80 then return nil, "name must be 80 characters or fewer" end
+    local clash = db.query("SELECT 1 FROM namespace_smtp_accounts WHERE namespace_id = ? AND lower(name) = lower(?) AND id <> ?",
+        namespace_id, name, current and current.id or 0)[1]
+    if clash then return nil, "Another email account is already called " .. name end
+
     local host = b.host or (current and current.host)
     if type(host) ~= "string" or not host:match("^[%w%-%.]+$") or #host > 253 then
         return nil, "host must be a hostname like smtp.example.com"
@@ -191,55 +287,261 @@ function NamespaceMail.save(namespace_id, actor, b)
     end
     local from_email = b.from_email or (current and current.from_email)
     if type(from_email) ~= "string" or not from_email:match(EMAIL) then return nil, "from_email must be an email address" end
-    for _, k in ipairs({ "reply_to" }) do
-        if b[k] ~= nil and b[k] ~= "" and (type(b[k]) ~= "string" or not b[k]:match(EMAIL)) then
-            return nil, k .. " must be an email address"
-        end
+    if b.reply_to ~= nil and b.reply_to ~= "" and (type(b.reply_to) ~= "string" or not b.reply_to:match(EMAIL)) then
+        return nil, "reply_to must be an email address"
+    end
+    for _, k in ipairs({ "username", "password", "from_name" }) do
+        if b[k] ~= nil and type(b[k]) ~= "string" then return nil, k .. " must be text" end
     end
     local ok, herr = host_ok(host)
     if not ok then return nil, herr end
+
     local f = {
-        host = host, port = port, security = security, from_email = from_email,
+        name = name, host = host, port = port, security = security, from_email = from_email,
         username = b.username ~= nil and (b.username ~= "" and b.username or db.NULL) or (current and current.username or db.NULL),
         from_name = b.from_name ~= nil and (b.from_name ~= "" and b.from_name:sub(1, 120) or db.NULL)
             or (current and current.from_name or db.NULL),
         reply_to = b.reply_to ~= nil and (b.reply_to ~= "" and b.reply_to or db.NULL) or (current and current.reply_to or db.NULL),
         enabled = b.enabled == nil and (current == nil or current.enabled) or b.enabled == true,
-        updated_by = actor, updated_at = db.raw("NOW()"), last_error = db.NULL,
+        updated_by = actor or db.NULL, updated_at = db.raw("NOW()"),
     }
+    -- A changed server hasn't been tested yet.
+    if not current or current.host ~= host or tonumber(current.port) ~= port or b.password ~= nil then
+        f.last_error, f.last_tested_at = db.NULL, db.NULL
+    end
     -- The password is write-only: omitted = keep, "" = remove.
     if b.password ~= nil then
         f.password_encrypted = b.password ~= "" and Global.encryptSecret(b.password) or db.NULL
     end
-    if current then
-        db.update("namespace_mail_settings", f, { namespace_id = namespace_id })
-    else
-        f.namespace_id = namespace_id
-        db.insert("namespace_mail_settings", f)
+
+    local make_default = b.is_default == true
+        or (not current and default_account(namespace_id) == nil)
+    local id
+    db.query("BEGIN")
+    local tx_ok, tx_err = pcall(function()
+        if current then
+            if b.is_default == false and current.is_default then f.is_default = false end
+            db.update("namespace_smtp_accounts", f, { id = current.id })
+            id = current.id
+        else
+            f.uuid, f.namespace_id = Global.generateUUID(), namespace_id
+            id = db.query([[INSERT INTO namespace_smtp_accounts (uuid, namespace_id, name, host, port, security, username,
+                    password_encrypted, from_email, from_name, reply_to, enabled, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id]],
+                f.uuid, namespace_id, f.name, f.host, f.port, f.security, f.username, f.password_encrypted or db.NULL,
+                f.from_email, f.from_name, f.reply_to, f.enabled, f.updated_by)[1].id
+        end
+        if make_default then
+            clear_other_defaults(namespace_id, id)
+            db.query("UPDATE namespace_smtp_accounts SET is_default = TRUE WHERE id = ?", id)
+        end
+    end)
+    if not tx_ok then
+        db.query("ROLLBACK")
+        error(tx_err)
     end
-    return NamespaceMail.present(NamespaceMail.settings(namespace_id))
+    db.query("COMMIT")
+    return NamespaceMail.presentAccount(db.query("SELECT * FROM namespace_smtp_accounts WHERE id = ?", id)[1])
 end
 
-function NamespaceMail.remove(namespace_id)
-    db.query("DELETE FROM namespace_mail_settings WHERE namespace_id = ?", namespace_id)
+--- Make an account the default (the one every unrouted email uses).
+function NamespaceMail.setDefaultAccount(namespace_id, uuid)
+    local row = account_by_uuid(namespace_id, uuid)
+    if not row then return nil, "Email account not found" end
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        clear_other_defaults(namespace_id, row.id)
+        db.query("UPDATE namespace_smtp_accounts SET is_default = TRUE, updated_at = NOW() WHERE id = ?", row.id)
+    end)
+    if not ok then
+        db.query("ROLLBACK")
+        error(err)
+    end
+    db.query("COMMIT")
+    return NamespaceMail.presentAccount(account_by_uuid(namespace_id, uuid))
+end
+
+--- Delete an account. Emails routed to it go back to the default account; if it
+-- was the default, the deployment's server becomes the default.
+function NamespaceMail.deleteAccount(namespace_id, uuid)
+    local row = account_by_uuid(namespace_id, uuid)
+    if not row then return nil, "Email account not found" end
+    db.query("DELETE FROM namespace_smtp_accounts WHERE id = ?", row.id) -- routes cascade
     return true
 end
 
---- The SMTP config to send a workspace's mail with (nil = the deployment's).
-function NamespaceMail.smtp(namespace_id)
-    local row = namespace_id and NamespaceMail.settings(namespace_id)
-    if not row or not row.enabled then return nil end
+local function smtp_config(row)
     local password = ""
-    if row.password_encrypted and row.password_encrypted ~= db.NULL then
+    if nn(row.password_encrypted) then
         local ok, pw = pcall(Global.decryptSecret, row.password_encrypted)
-        if ok then password = pw end
+        if ok and pw then password = pw end
     end
     return {
         host = row.host, port = tonumber(row.port), security = row.security,
-        username = row.username ~= db.NULL and row.username or "", password = password,
-        from_email = row.from_email, from_name = row.from_name ~= db.NULL and row.from_name or nil,
-        reply_to = row.reply_to ~= db.NULL and row.reply_to or nil,
+        username = nn(row.username) or "", password = password,
+        from_email = row.from_email, from_name = nn(row.from_name), reply_to = nn(row.reply_to),
+        account_uuid = row.uuid, account_name = row.name,
     }
+end
+
+local function routed_account(namespace_id, purpose)
+    if purpose and purpose ~= "default" then
+        local r = db.query([[SELECT a.* FROM namespace_smtp_routes r
+            JOIN namespace_smtp_accounts a ON a.id = r.account_id
+            WHERE r.namespace_id = ? AND r.purpose = ? AND a.enabled]], namespace_id, purpose)[1]
+        if r then return r end
+    end
+    return db.query("SELECT * FROM namespace_smtp_accounts WHERE namespace_id = ? AND is_default AND enabled",
+        namespace_id)[1]
+end
+
+--- The SMTP config to send a workspace's `purpose` email with (nil = the deployment's).
+-- `purpose` is a key of NamespaceMail.PURPOSES; omitted = "default".
+-- The result carries account_uuid / account_name for logs.
+function NamespaceMail.smtp(namespace_id, purpose)
+    if not namespace_id then return nil end
+    local ok, row = pcall(routed_account, namespace_id, purpose)
+    if not ok then
+        -- Accounts table not migrated yet: behave as if the workspace has none.
+        ngx.log(ngx.WARN, "[namespace-mail] smtp lookup failed: ", tostring(row))
+        return nil
+    end
+    return row and smtp_config(row) or nil
+end
+
+--- Put the workspace's server for `purpose` on a Mail.send message: smtp, sender
+-- address, and the account's name / reply-to (the caller's from_name / reply_to
+-- stay when the account sets none).
+-- @return msg, smtp|nil  | nil, err (no server anywhere, or the account's host isn't allowed)
+function NamespaceMail.prepare(namespace_id, purpose, msg)
+    local smtp = NamespaceMail.smtp(namespace_id, purpose)
+    if smtp then
+        local ok, herr = host_ok(smtp.host)
+        if not ok then return nil, "email account " .. tostring(smtp.account_name) .. ": " .. tostring(herr) end
+        msg.smtp, msg.from_email = smtp, smtp.from_email
+        msg.from_name = smtp.from_name or msg.from_name
+        msg.reply_to = smtp.reply_to or msg.reply_to
+        return msg, smtp
+    end
+    if not Mail.isConfigured() then return nil, "No email server is set up (Workspace → Email)" end
+    return msg, nil
+end
+
+--- Can this workspace send `purpose` email at all (its own account or the deployment's)?
+function NamespaceMail.canSend(namespace_id, purpose)
+    return NamespaceMail.smtp(namespace_id, purpose) ~= nil or Mail.isConfigured()
+end
+
+--- Every routable purpose with the account it's sent through.
+function NamespaceMail.routing(namespace_id)
+    local routes = {}
+    for _, r in ipairs(db.query([[SELECT r.purpose, a.uuid FROM namespace_smtp_routes r
+        JOIN namespace_smtp_accounts a ON a.id = r.account_id WHERE r.namespace_id = ?]], namespace_id)) do
+        routes[r.purpose] = r.uuid
+    end
+    local def = default_account(namespace_id)
+    local out = {}
+    for _, p in ipairs(NamespaceMail.PURPOSES) do
+        if purpose_available(p.key) then
+            out[#out + 1] = { key = p.key, name = p.name, description = p.description,
+                account_uuid = (p.key == "default" and (def and def.uuid) or routes[p.key]) or require("cjson").null }
+        end
+    end
+    return out
+end
+
+--- Set routes: { [purpose] = account_uuid | "" | null }. "" / null = use the default.
+-- "default" sets the default account (null = the deployment's server).
+function NamespaceMail.saveRouting(namespace_id, actor, routes)
+    if type(routes) ~= "table" then return nil, "routes must be an object of purpose: account uuid" end
+    local plan = {}
+    for purpose, uuid in pairs(routes) do
+        if not purpose_available(purpose) then return nil, "unknown purpose " .. tostring(purpose) end
+        local row
+        if type(uuid) == "string" and uuid ~= "" then
+            row = account_by_uuid(namespace_id, uuid)
+            if not row then return nil, "Email account not found for " .. purpose end
+        elseif uuid ~= "" and uuid ~= db.NULL and uuid ~= require("cjson").null and uuid ~= false then
+            return nil, purpose .. " must be an account uuid or null"
+        end
+        plan[#plan + 1] = { purpose = purpose, row = row }
+    end
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        for _, p in ipairs(plan) do
+            if p.purpose == "default" then
+                db.query("UPDATE namespace_smtp_accounts SET is_default = FALSE WHERE namespace_id = ? AND is_default",
+                    namespace_id)
+                if p.row then db.query("UPDATE namespace_smtp_accounts SET is_default = TRUE WHERE id = ?", p.row.id) end
+            elseif p.row then
+                db.query([[INSERT INTO namespace_smtp_routes (namespace_id, purpose, account_id, updated_by)
+                    VALUES (?, ?, ?, ?) ON CONFLICT (namespace_id, purpose) DO UPDATE
+                    SET account_id = EXCLUDED.account_id, updated_by = EXCLUDED.updated_by, updated_at = NOW()]],
+                    namespace_id, p.purpose, p.row.id, actor or db.NULL)
+            else
+                db.query("DELETE FROM namespace_smtp_routes WHERE namespace_id = ? AND purpose = ?", namespace_id, p.purpose)
+            end
+        end
+    end)
+    if not ok then
+        db.query("ROLLBACK")
+        error(err)
+    end
+    db.query("COMMIT")
+    return NamespaceMail.routing(namespace_id)
+end
+
+--- Send a test message through one account and record the result on it.
+function NamespaceMail.testAccount(namespace_id, uuid, to)
+    if type(to) ~= "string" or not to:match(EMAIL) then return nil, "to must be an email address" end
+    local row = account_by_uuid(namespace_id, uuid)
+    if not row then return nil, "Email account not found" end
+    local smtp = smtp_config(row)
+    local ok, err = host_ok(smtp.host)
+    if ok then
+        ok, err = Mail.send({ to = to, subject = "Test email from " .. row.name, sync = true, smtp = smtp,
+            from_email = smtp.from_email, from_name = smtp.from_name, reply_to = smtp.reply_to,
+            html = "<p>The email account <strong>" .. (tostring(row.name):gsub("[&<>\"']", "")) ..
+                "</strong> works.</p>", wrap_in_layout = true, data = {} })
+    end
+    db.query("UPDATE namespace_smtp_accounts SET last_tested_at = NOW(), last_error = ? WHERE id = ?",
+        ok and db.NULL or tostring(err):sub(1, 500), row.id)
+    if not ok then return nil, tostring(err) end
+    return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Single-server API (older clients): acts on the default account.
+-- ---------------------------------------------------------------------------
+
+function NamespaceMail.settings(namespace_id)
+    return default_account(namespace_id)
+end
+
+--- The default account as the single-server API shows it (never the password).
+function NamespaceMail.present(row)
+    if not row then return { configured = false } end
+    local p = NamespaceMail.presentAccount(row)
+    p.configured = true
+    return p
+end
+
+function NamespaceMail.save(namespace_id, actor, b)
+    local current = default_account(namespace_id)
+    local body = {}
+    for k, v in pairs(b or {}) do body[k] = v end
+    body.is_default = true
+    if not current and (body.name == nil or body.name == "") then body.name = "Main" end
+    local saved, err = NamespaceMail.saveAccount(namespace_id, current and current.uuid or nil, actor, body)
+    if not saved then return nil, err end
+    saved.configured = true
+    return saved
+end
+
+function NamespaceMail.remove(namespace_id)
+    local current = default_account(namespace_id)
+    if current then NamespaceMail.deleteAccount(namespace_id, current.uuid) end
+    return true
 end
 
 -- ---------------------------------------------------------------------------
@@ -349,13 +651,15 @@ end
 --- Send a template now (call from a background job: the outbox retries on failure).
 -- @return true | nil, err
 -- `extra`: { attachments = { { filename, content_type, content_b64 } } } (e.g. a calendar invite),
---          subject_prefix (e.g. "[TEST] " for a test send to staff).
+--          subject_prefix (e.g. "[TEST] " for a test send to staff),
+--          purpose (which email account sends it; default: the template's own purpose).
 function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
     if not NamespaceMail.TEMPLATES[key] then return nil, "unknown template " .. tostring(key) end
-    local smtp = NamespaceMail.smtp(namespace_id)
+    local purpose = type(extra) == "table" and extra.purpose or NamespaceMail.templatePurpose(key)
+    local smtp = NamespaceMail.smtp(namespace_id, purpose)
     if smtp then
         local ok, herr = host_ok(smtp.host)
-        if not ok then return nil, "workspace SMTP: " .. herr end
+        if not ok then return nil, "email account " .. tostring(smtp.account_name) .. ": " .. herr end
     end
     local m = message(namespace_id, key, data, brand)
     if type(extra) == "table" and type(extra.subject_prefix) == "string" then
@@ -376,24 +680,11 @@ function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
     return Mail.send(m)
 end
 
---- Send a test message through the workspace's SMTP and record the result.
+--- Send a test message through the default account (single-server API).
 function NamespaceMail.test(namespace_id, to)
-    if type(to) ~= "string" or not to:match(EMAIL) then return nil, "to must be an email address" end
-    local smtp = NamespaceMail.smtp(namespace_id)
-    if not smtp then return nil, "Set up and enable this workspace's SMTP first" end
-    local ok, herr = host_ok(smtp.host)
-    local err
-    if ok then
-        ok, err = Mail.send({ to = to, subject = "Test email from OpsAPI", sync = true, smtp = smtp,
-            from_email = smtp.from_email, from_name = smtp.from_name, reply_to = smtp.reply_to,
-            html = "<p>Your workspace's email settings work.</p>", wrap_in_layout = true, data = {} })
-    else
-        err = herr
-    end
-    db.query("UPDATE namespace_mail_settings SET last_tested_at = NOW(), last_error = ? WHERE namespace_id = ?",
-        ok and db.NULL or tostring(err):sub(1, 500), namespace_id)
-    if not ok then return nil, tostring(err) end
-    return true
+    local current = default_account(namespace_id)
+    if not current then return nil, "Set up this workspace's email account first" end
+    return NamespaceMail.testAccount(namespace_id, current.uuid, to)
 end
 
 return NamespaceMail

@@ -1485,6 +1485,7 @@ local function staff_alert_now(order_id, kind)
             company_name = U.nz(customer.company) or U.nz(ship.company), source = "shop_order", notes = notes,
         }, {
             to = require("queries.ShopSettingsQueries").orderAlertEmail(o.namespace_id),
+            purpose = "shop_orders",
             staff = {
                 subject = k.subject .. ": " .. o.order_number .. " " .. U.money(tonumber(o.total_minor) or 0)
                     .. " (" .. tostring(name) .. ")",

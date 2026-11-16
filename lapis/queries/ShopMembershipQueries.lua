@@ -455,7 +455,7 @@ local function vip_alert(m)
             first_name = lead.first_name, last_name = lead.last_name, email = m.email, phone = lead.phone,
             company_name = lead.company_name, job_title = lead.job_title, source = "shop_vip",
             notes = tier .. ", " .. fee .. ". Trade terms " .. tostring(m.terms_version) .. ".",
-        }, { staff = {
+        }, { purpose = "shop_members", staff = {
             subject = "New VIP member: " .. who,
             headline = "New VIP member",
             intro = who .. " has just paid for VIP membership (" .. tier:lower() .. ", " .. fee
@@ -584,7 +584,7 @@ end
 local function send_mail(ns_id, to, subject, html)
     local Mail = require("helper.mail")
     local NamespaceMail = require("helper.namespace-mail")
-    local smtp = NamespaceMail.smtp(ns_id)
+    local smtp = NamespaceMail.smtp(ns_id, "shop_members")
     if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
     if not smtp and not Mail.isConfigured() then
         ngx.log(ngx.ERR, "[shop-vip] no SMTP configured (workspace or deployment) — email to ", to, " not sent")

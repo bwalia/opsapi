@@ -747,7 +747,7 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
 
     local Mail = require("helper.mail")
     local NamespaceMail = require("helper.namespace-mail")
-    local smtp = NamespaceMail.smtp(ns_id)
+    local smtp = NamespaceMail.smtp(ns_id, "shop_orders")
     if smtp and not NamespaceMail.hostOk(smtp.host) then smtp = nil end
     if not smtp and not Mail.isConfigured() then
         return nil, U.err(503, "EMAIL_NOT_CONFIGURED", "No email server is set up for this workspace")

@@ -711,7 +711,11 @@ function Mail.send(opts)
         cc          = opts.cc,
         bcc         = opts.bcc,
         reply_to    = opts.reply_to,
+        headers     = opts.headers,
         attachments = opts.attachments,  -- carries base64 content (ASCII-safe in JSON)
+        -- A workspace's own server (helper/namespace-mail.lua). Dropping it here used to send
+        -- the email through the deployment's server instead. The payload never leaves this worker.
+        smtp        = opts.smtp,
     })
 
     local ok, timer_err = ngx.timer.at(0, function(premature)

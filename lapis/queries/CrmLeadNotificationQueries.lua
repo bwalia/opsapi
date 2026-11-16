@@ -152,12 +152,28 @@ local function do_sends(p)
     -- "Thanks, The <app_name> Team" line. When the namespace has no name, leave
     -- it nil so render_template falls back to the global from_name.
     local brand = (p.namespace.name and p.namespace.name ~= "") and p.namespace.name or nil
+    -- The workspace's email account for new enquiries (Workspace → Email), resolved in request
+    -- context by notify(); nil = the deployment's server. Its host is re-checked here (DNS can change).
+    local smtp = p.smtp
+    if smtp and not require("helper.namespace-mail").hostOk(smtp.host) then
+        ngx.log(ngx.WARN, "[lead-notify] email account ", tostring(smtp.account_name), " host not allowed; using the platform server")
+        smtp = nil
+    end
+    local can_send = smtp ~= nil or Mail.isConfigured()
+    local function sender(msg)
+        if smtp then
+            msg.smtp, msg.from_email = smtp, smtp.from_email
+            msg.from_name = smtp.from_name or brand
+            msg.reply_to = smtp.reply_to
+        end
+        return msg
+    end
 
     -- 1) Confirmation to the submitter (never for a staff-only alert)
     if not p.staff and s.send_confirmation ~= false and lead.email and lead.email ~= "" then
         pcall(function()
-            if not Mail.isConfigured() then return end
-            Mail.send({
+            if not can_send then return end
+            Mail.send(sender({
                 to = lead.email,
                 subject = (p.confirmation and p.confirmation.subject) or "We got your enquiry — thanks for getting in touch",
                 template = "lead_confirmation",
@@ -166,15 +182,15 @@ local function do_sends(p)
                 -- notes (which carry the team's internal build sheet).
                 data = { first_name = lead.first_name, company_name = lead.company_name, notes = lead.notes,
                     confirmation = p.confirmation, app_name = brand },
-            })
+            }))
         end)
     end
 
     -- 2) "You got a lead" to the namespace owner/admin
     if s.notify_admin ~= false and p.admin_email and p.admin_email ~= "" then
         pcall(function()
-            if not Mail.isConfigured() then return end
-            Mail.send({
+            if not can_send then return end
+            Mail.send(sender({
                 to = p.admin_email,
                 subject = (p.staff and p.staff.subject)
                     or ("New lead: " .. ((lead.first_name or "") .. " " .. (lead.last_name or "")):gsub("%s+$", "")),
@@ -188,7 +204,7 @@ local function do_sends(p)
                     headline = p.staff and p.staff.headline or nil,
                     intro = p.staff and p.staff.intro or nil,
                 },
-            })
+            }))
         end)
     end
 
@@ -225,6 +241,8 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
         local payload = {
             namespace = { id = namespace.id, name = namespace.name },
             admin_email = admin_email,
+            -- Which email account sends these (opts.purpose, else "New enquiries").
+            smtp = require("helper.namespace-mail").smtp(namespace.id, opts and opts.purpose or "leads"),
             -- Validated extra content for the submitter's email (shop survey only), or nil.
             confirmation = opts and opts.confirmation or nil,
             -- Staff-only alert about an existing lead ({ subject, headline, intro, telegram_title }):

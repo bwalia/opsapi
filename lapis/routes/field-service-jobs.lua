@@ -397,14 +397,18 @@ return function(app)
         })
         local filename = (body.filename ~= nil and body.filename ~= "" and body.filename) or ("Quote-" .. number .. ".pdf")
 
-        local ok, mail_err = Mail.send({
+        -- Sent through the workspace's "Field service" email account when it has one.
+        local msg, perr = require("helper.namespace-mail").prepare(self.namespace.id, "field_service", {
             to = to,
             subject = subject,
             html = html,
+            from_name = company,
             attachments = {
                 { filename = filename, content_type = "application/pdf", content_b64 = pdf_b64 },
             },
         })
+        if not msg then return Http.fail(503, "Could not send email: " .. tostring(perr)) end
+        local ok, mail_err = Mail.send(msg)
         if not ok then return Http.fail(502, "Could not send email: " .. tostring(mail_err)) end
 
         local row = JobQueries.findJobRow(self.namespace.id, self.params.uuid)

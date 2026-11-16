@@ -74,13 +74,15 @@ function Notify.send(ns, user_uuids, n)
 
     if n.email ~= false then
         local Mail = require("helper.mail")
-        local smtp = require("helper.namespace-mail").smtp(ns)
+        -- Staff alerts go through the "Team notifications" email account (Workspace → Email).
+        local smtp = require("helper.namespace-mail").smtp(ns, "team")
         if smtp or Mail.isConfigured() then
             for _, p in ipairs(people) do
                 if p.email and p.email ~= db.NULL and p.email ~= "" then
                     local ok, err = pcall(Mail.send, {
                         to = p.email, subject = n.title, template = "notification", smtp = smtp,
                         from_email = smtp and smtp.from_email or nil, from_name = smtp and smtp.from_name or nil,
+                        reply_to = smtp and smtp.reply_to or nil,
                         data = { title = n.title, message = n.body, action_url = url,
                             action_label = n.action_label or "Open the lead", app_name = ns_row.name or "OpsAPI" },
                     })

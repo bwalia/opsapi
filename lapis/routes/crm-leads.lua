@@ -23,6 +23,7 @@
       POST   /api/v2/crm/leads/:uuid/stage         { stage, reason?, nurture_until? }
       POST   /api/v2/crm/leads/:uuid/assign        { owner_user_uuid | null }
       POST   /api/v2/crm/leads/:uuid/calls         { outcome, notes?, duration_minutes?, next_at?, lost_reason? }
+      POST   /api/v2/crm/leads/:uuid/email         { subject, message, cc_me? } via the "Questions and follow-up" email account
       POST   /api/v2/crm/leads/:uuid/steps         { type, due_at, note?, subject? }
       POST   /api/v2/crm/leads/:uuid/steps/:activity_uuid   { status: completed|cancelled, note? }
       POST   /api/v2/crm/leads/:uuid/qualify       { answers?, estimated_value?, currency?, expected_close_date?, move? }
@@ -476,6 +477,17 @@ return function(app)
         local lead, res = workable_lead(self)
         if not lead then return res end
         local result, err = Pipeline.log_call(self.namespace.id, lead.uuid, Access.me(self), self.body)
+        if not result then return Api.fail(err) end
+        result.lead = full(self, lead.uuid)
+        return Api.ok(result, 201)
+    end))
+
+    app:post("/api/v2/crm/leads/:uuid/email", H("crm_leads", "update", function(self)
+        local lead, res = workable_lead(self)
+        if not lead then return res end
+        local u = self.current_user or {}
+        local result, err = require("lib.crm.lead-email").send(self.namespace.id, lead,
+            { uuid = u.uuid, email = u.email }, self.body or {})
         if not result then return Api.fail(err) end
         result.lead = full(self, lead.uuid)
         return Api.ok(result, 201)
