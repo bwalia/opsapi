@@ -47,6 +47,61 @@ function Aggregator.tax_year_bounds(tax_year)
            string.format("%04d-04-05", start_year + 1), nil
 end
 
+--- The dates a cumulative update covers: from the start of the tax year to period_end
+-- (the end of the quarter being filed, from HMRC's obligation). No period_end = the whole
+-- year (the final return). Live HMRC refuses an update that runs past the period HMRC
+-- has open (RULE_EARLY_DATA_SUBMISSION_NOT_ACCEPTED), so mid-year updates must stop at
+-- the quarter end. Calendar quarters (an end that isn't the 5th) start on 1 April.
+-- @return start, end or nil, nil, err
+function Aggregator.period_bounds(tax_year, period_end)
+    local start_date, end_date, err = Aggregator.tax_year_bounds(tax_year)
+    if not start_date then return nil, nil, err end
+    if period_end == nil or period_end == "" or (ngx and period_end == ngx.null) then return start_date, end_date end
+    period_end = tostring(period_end)
+    if not period_end:match("^%d%d%d%d%-%d%d%-%d%d$") then
+        return nil, nil, "period_end must be a date like 2025-07-05"
+    end
+    if period_end:sub(9, 10) ~= "05" then start_date = start_date:sub(1, 5) .. "04-01" end
+    if period_end <= start_date or period_end > end_date then
+        return nil, nil, "period_end must fall inside the " .. tax_year .. " tax year"
+    end
+    return start_date, period_end
+end
+
+--- Live HMRC takes an update no more than 10 days before its period ends
+-- (RULE_EARLY_DATA_SUBMISSION_NOT_ACCEPTED). Returns the first day it can be sent if
+-- `today` (YYYY-MM-DD) is earlier, else nil.
+function Aggregator.too_early(period_end, today)
+    local y, m, d = tostring(period_end):match("^(%d+)%-(%d+)%-(%d+)$")
+    if not y then return nil end
+    local from = os.date("!%Y-%m-%d", os.time({ year = tonumber(y), month = tonumber(m),
+        day = tonumber(d) - 10, hour = 12 }))
+    if today < from then return from end
+    return nil
+end
+
+-- What each File My Tax filing sends HMRC; any other income in the year's estimate
+-- (lib/tax-calc schedules) would be left off a binding return.
+local FILED_SCHEDULE = { ["self-employment"] = "trading_profit", ["uk-property"] = "property_profit" }
+local SCHEDULE_NAMES = {
+    employment = "employment", trading_profit = "self-employment", property_profit = "UK property",
+    savings = "savings interest", dividends = "dividends", pension_income = "pensions",
+    other_income = "other income",
+}
+
+--- Income in the estimate that a `kind` filing doesn't send. schedules = estimate.schedules.
+-- @return list of names (empty = nothing left out)
+function Aggregator.unfiled_income(schedules, kind)
+    local out = {}
+    for _, key in ipairs({ "employment", "trading_profit", "property_profit", "savings", "dividends",
+        "pension_income", "other_income" }) do
+        if key ~= FILED_SCHEDULE[kind] and (tonumber((schedules or {})[key]) or 0) > 0 then
+            out[#out + 1] = SCHEDULE_NAMES[key]
+        end
+    end
+    return out
+end
+
 --- Load the MTD field catalogue (active income/expense fields) once. Returns:
 --   fields  = list of { field, section } (mtd_field_name, mtd_section)
 -- Used to pre-populate every field in a present section with 0.00, which HMRC requires
@@ -60,6 +115,7 @@ end
 
 --- Build the cumulative MTD body for a user + tax year from their classified transactions.
 -- @param opts table { user_id (required), tax_year (required, "YYYY-YY"),
+--                     period_end (optional: the quarter end; default the tax year end),
 --                     statuses (optional list, default {CLASSIFIED, CONFIRMED}) }
 -- @return table {
 --   body = { periodIncome=?, periodExpenses=?, periodDisallowableExpenses=? },  -- trimmed
@@ -71,7 +127,7 @@ function Aggregator.build_cumulative_body(opts)
     opts = opts or {}
     if not opts.user_id then return nil, "user_id is required" end
 
-    local start_date, end_date, err = Aggregator.tax_year_bounds(opts.tax_year)
+    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end)
     if not start_date then return nil, err end
 
     local statuses = opts.statuses or DEFAULT_STATUSES
@@ -205,7 +261,7 @@ end
 function Aggregator.credit_offenders(opts, fields)
     opts = opts or {}
     if not opts.user_id or type(fields) ~= "table" or #fields == 0 then return {} end
-    local start_date, end_date = Aggregator.tax_year_bounds(opts.tax_year)
+    local start_date, end_date = Aggregator.period_bounds(opts.tax_year, opts.period_end)
     if not start_date then return {} end
 
     local field_list = {}

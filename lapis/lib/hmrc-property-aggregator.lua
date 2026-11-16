@@ -95,13 +95,16 @@ function Property.fold(rows, profile, commercial_interest)
 end
 
 --- Build the UK property cumulative body for a user + tax year.
--- opts: { user_id, tax_year, profile (the File My Tax profile: finance costs) }
+-- opts: { user_id, tax_year, period_end? (quarter end; default year end), profile (finance costs) }
 -- Returns { body, stats, tax_year_start, tax_year_end, empty, negative_fields } or nil, err
 function Property.build_cumulative_body(opts)
     opts = opts or {}
     if not opts.user_id then return nil, "user_id is required" end
-    local start_date, end_date, err = Aggregator.tax_year_bounds(opts.tax_year)
+    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end)
     if not start_date then return nil, err end
+    -- A mid-year update counts transactions up to the quarter end only.
+    local upto = (opts.period_end and opts.period_end ~= "") and (" AND t.transaction_date <= "
+        .. db.escape_literal(end_date)) or ""
 
     -- A statement belongs to the year stamped on it, like the estimate.
     local rows = db.query([[
@@ -111,7 +114,7 @@ function Property.build_cumulative_body(opts)
         FROM tax_transactions t
         JOIN tax_statements s ON s.id = t.statement_id
         LEFT JOIN tax_hmrc_categories h ON h.key = t.hmrc_category
-        WHERE t.user_id = ? AND s.tax_year = ?
+        WHERE t.user_id = ? AND s.tax_year = ?]] .. upto .. [[
           AND t.classification_status IN ('CLASSIFIED', 'CONFIRMED')
         GROUP BY 1, 2, 3, 4, 5
     ]], opts.user_id, opts.tax_year) or {}
@@ -124,7 +127,7 @@ function Property.build_cumulative_body(opts)
                COUNT(*) FILTER (WHERE t.classification_status IN ('CLASSIFIED','CONFIRMED')) AS applied,
                COUNT(*) AS total
         FROM tax_transactions t JOIN tax_statements s ON s.id = t.statement_id
-        WHERE t.user_id = ? AND s.tax_year = ?]], opts.user_id, opts.tax_year)
+        WHERE t.user_id = ? AND s.tax_year = ?]] .. upto, opts.user_id, opts.tax_year)
     local c = (counts and counts[1]) or {}
 
     local uk = {}

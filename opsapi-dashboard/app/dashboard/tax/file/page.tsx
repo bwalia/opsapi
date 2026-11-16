@@ -35,7 +35,7 @@
  * figure, and the step-5 calculation (the one call that submits data to HMRC).
  */
 
-import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -788,28 +788,38 @@ function FileWizardContent() {
   }, [selectedBusiness, loadingObl, loadObligations]);
 
   // ── Step 4: figures ─────────────────────────────────────────────────────────
+  // The quarter being filed: the selected HMRC obligation's end date, when it's in the
+  // year being filed (none = the whole year). Live HMRC refuses an update that runs
+  // past the period it has open, so the figures and the update stop at that date.
+  const periodEnd = useMemo(() => {
+    if (!selectedObligation) return undefined;
+    const [start, end] = selectedObligation.split('|');
+    return taxYearOf(start) === taxYear ? end : undefined;
+  }, [selectedObligation, taxYear]);
+
   const loadPreview = useCallback(async () => {
     setLoadingPreview(true);
     setCalc(null); // a figures change invalidates any prior calculation
     try {
-      const p = await taxService.getHmrcAggregatePreview(taxYear);
+      const p = await taxService.getHmrcAggregatePreview(taxYear, periodEnd);
       setPreview(p);
     } catch (err: unknown) {
       toast.error(extractApiError(err, 'Failed to aggregate your figures'));
     } finally {
       setLoadingPreview(false);
     }
-  }, [taxYear]);
+  }, [taxYear, periodEnd]);
 
   // Auto-aggregate the figures once a business is chosen, re-running when the filing
   // tax year settles (it's derived from the selected obligation). Read-only — it only
   // tallies already-classified transactions; nothing is sent to HMRC here.
   useEffect(() => {
     if (!selectedBusiness || loadingPreview) return;
-    if (autoPreviewFor.current === taxYear) return;
-    autoPreviewFor.current = taxYear;
+    const key = `${taxYear}|${periodEnd || ''}`;
+    if (autoPreviewFor.current === key) return;
+    autoPreviewFor.current = key;
     loadPreview();
-  }, [selectedBusiness, taxYear, loadingPreview, loadPreview]);
+  }, [selectedBusiness, taxYear, periodEnd, loadingPreview, loadPreview]);
 
   const applyFix = async (tx: HmrcOffendingTransaction) => {
     const choiceKey = fixChoice[tx.uuid];
@@ -839,7 +849,7 @@ function FileWizardContent() {
     setCalculating(true);
     setCalc(null);
     try {
-      const res = await taxService.calculateHmrcPreview(taxYear);
+      const res = await taxService.calculateHmrcPreview(taxYear, periodEnd);
       setCalc(res);
       toast.success('Calculation retrieved from HMRC');
     } catch (err: unknown) {
