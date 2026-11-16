@@ -2151,6 +2151,7 @@ local _migrations = {
     ['zz_vat_ai_4_seed_rules'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 4),
     ['zz_vat_ai_5_job_claim'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_ai, 5),
     ['zz_vat_zmenu_1_item'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_menu, 1),
+    ['zz_vat_zmenu_2_rbac_modules'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_menu, 2),
     ['zz_vat_management_1_reminders'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_management, 1),
     ['zz_vat_management_2_agents'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_agents, 1),
     ['zz_vat_management_3_agent_clients'] = conditional_array(ProjectConfig.FEATURES.VAT, vat_agents, 2),

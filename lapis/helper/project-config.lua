@@ -198,14 +198,14 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.THEMES,
     },
 
-    -- Business/Professional Services
+    -- Business/Professional Services. No VAT (MTD) here: it needs tax_copilot (HMRC
+    -- sign-in, the Tax menu, people's bank lines); deploy "business,tax_copilot" for it.
     business = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.CRM,
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
-        ProjectConfig.FEATURES.VAT,
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
