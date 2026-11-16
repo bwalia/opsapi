@@ -27,8 +27,20 @@ function CrmLeadQueries.createLead(params)
     end
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
+    params.deal_code = nil -- assigned below, never taken from the caller
 
-    return CrmLeadModel:create(params, { returning = "*" })
+    local lead = CrmLeadModel:create(params, { returning = "*" })
+    -- With the shop deployed, a new lead is a new deal: give it a private deal code (best effort).
+    if lead and lead.id and lead.namespace_id then
+        local ok, Deal = pcall(require, "queries.ShopDealQueries")
+        if ok then
+            local dok, code = pcall(function()
+                return Deal.enabled() and Deal.forLead(lead.namespace_id, lead.id) or nil
+            end)
+            if dok and code then lead.deal_code = code end
+        end
+    end
+    return lead
 end
 
 --- List leads for a namespace with pagination and filters

@@ -98,10 +98,14 @@ export interface PurchaseOrderMetadata {
   /** Set when the order was closed short. */
   closed?: PurchaseOrderClosure;
   cancelled_reason?: string;
-  /** Raised from a paid shop order: drop-shipped to the customer. */
+  /** Raised from a paid shop order. */
   shop_order_uuid?: string;
   shop_order_number?: string;
+  /** The private deal code (the PO's reference; the supplier sees it instead of the customer). */
+  deal_code?: string | null;
+  /** Delivers straight to the customer. New POs only with drop_ship_confirmed (staff ticked the box). */
   drop_ship?: boolean;
+  drop_ship_confirmed?: boolean;
   delivery_method?: string | null;
   bill_to?: PurchaseOrderParty | null;
   ship_to?: PurchaseOrderParty | null;

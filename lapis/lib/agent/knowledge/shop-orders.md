@@ -1,7 +1,7 @@
 ---
 title: Shop orders & quotes
 pages: /dashboard/shop/orders, /dashboard/shop/quotes
-api: /api/v2/shop/admin/orders, /api/v2/shop/admin/quotes, /api/v2/shop/admin/products, /api/v2/namespace/payment-methods
+api: /api/v2/shop/admin/orders, /api/v2/shop/admin/quotes, /api/v2/shop/admin/products, /api/v2/namespace/payment-methods, /api/v2/shop/admin/deals, /api/v2/shop/admin/supplier-requests
 modules: shop
 tools:
 suggestions: Show paid orders awaiting fulfilment | Which bank transfers are we waiting for? | Mark this order as shipped | Create an invoice for this order
@@ -53,6 +53,7 @@ Orders come from Stripe Checkout (cart or paid quote) or from an authorised Orde
 - `PUT /api/v2/shop/admin/quotes/{uuid} {status, notes, internal_notes, valid_until, customer, lines, shipping_minor, customer_po_number}` — update (partial)
 - `POST /api/v2/shop/admin/quotes/{uuid}/revise {reason*, customer, delivery_address, delivery_method, customer_po_number, valid_until}` — revision (201, the new quote: revision_no, revision_of, revisions[])
 - `GET /api/v2/shop/admin/orders/{uuid}/purchase-order/preview?supplier_uuid` — the supplier PO before it is raised (supplier details, bill_to, ship_to, lines with cost from the price file, missing_costs, last_supplier_uuid)
-- `POST /api/v2/shop/admin/orders/{uuid}/purchase-order {supplier_uuid, supplier_name, supplier_email, supplier_phone, supplier_address, expected_date: YYYY-MM-DD, delivery_method, notes, costs: {line_uuid: "123.45" pounds ex VAT}, include_custom}` — draft the supplier PO (paid orders only)
+- `POST /api/v2/shop/admin/orders/{uuid}/purchase-order {supplier_uuid, supplier_name, supplier_email, supplier_phone, supplier_address, expected_date: YYYY-MM-DD, delivery_method, notes, costs: {line_uuid: "123.45" pounds ex VAT}, include_custom, drop_ship, confirm_drop_ship}` — draft the supplier PO (paid orders only). (drop_ship needs confirm_drop_ship)
+- Deal codes (never shown to customers): `GET /api/v2/shop/admin/deals/search?q=`, `GET /api/v2/shop/admin/deals/{code}`, `POST /api/v2/shop/admin/deals/{code}/supplier-requests`, `PUT /api/v2/shop/admin/supplier-requests/{uuid}`, `POST /api/v2/shop/admin/supplier-requests/{uuid}/email-draft` (never sends), `POST /api/v2/shop/admin/quotes/{uuid}/deal-code {deal_code | new: true}`
 - `GET /api/v2/shop/admin/products?q&status=active&limit` — find a product's slug/uuid
 - `GET /api/v2/shop/admin/products/{uuid}` — option group and option codes

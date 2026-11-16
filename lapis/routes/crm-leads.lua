@@ -340,7 +340,12 @@ return function(app)
             row.currency = U.nz(data.currency) and tostring(data.currency):upper():sub(1, 3) or db.NULL
             row.metadata = U.enc(meta)
             row.created_at, row.updated_at = db.raw("NOW()"), db.raw("NOW()")
-            local created = db.insert("crm_leads", row, { returning = { "uuid" } })[1]
+            local created = db.insert("crm_leads", row, { returning = { "id", "uuid" } })[1]
+            -- With the shop deployed, a new lead is a new deal: a private deal code (best effort).
+            pcall(function()
+                local Deal = require("queries.ShopDealQueries")
+                if Deal.enabled() then Deal.forLead(ns, created.id) end
+            end)
             return Api.ok(full(self, created.uuid), 201)
         end)
     end))

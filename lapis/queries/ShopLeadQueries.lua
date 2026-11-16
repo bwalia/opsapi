@@ -66,7 +66,12 @@ function ShopLeadQueries.upsert(ns_id, p)
             U.nz(p.company) or db.NULL, p.source or "shop", notes or db.NULL, U.enc(meta))[1]
     end)
     if not lead then return nil, U.err(500, "LEAD_FAILED", "Could not save the lead") end
-    if created then notify(ns_id, lead) end
+    if created then
+        notify(ns_id, lead)
+        -- A new lead is a new deal: give it a deal code (private; a quote made for it joins it).
+        local ok, err = pcall(require("queries.ShopDealQueries").forLead, ns_id, lead.id)
+        if not ok then ngx.log(ngx.WARN, "[shop-leads] no deal code for lead ", tostring(lead.id), ": ", tostring(err)) end
+    end
     return lead
 end
 
