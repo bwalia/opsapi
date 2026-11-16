@@ -83,7 +83,10 @@ check("started after this quarter: unchanged", A.period_bounds("2026-27", "2026-
 check("a malformed date is ignored", A.period_bounds("2026-27", nil, "01/08/2026") == "2026-04-06")
 local seen_sql = {}
 package.loaded["lapis.db"].select = function() return {} end
-package.loaded["lapis.db"].query = function(sql, ...) seen_sql[#seen_sql + 1] = { sql = sql, args = { ... } }; return {} end
+package.loaded["lapis.db"].query = function(sql, ...)
+    seen_sql[#seen_sql + 1] = { sql = sql, args = { ... } }
+    return {}
+end
 local body = A.build_cumulative_body({ user_id = 7, tax_year = "2026-27", commencement_date = "2026-08-01" })
 check("self-employment: counts transactions from that date", seen_sql[1] and seen_sql[1].args[2] == "2026-08-01"
     and body.tax_year_start == "2026-08-01")
@@ -107,7 +110,8 @@ check("reads Retrieve Business Details v2", called and called.url:find("/individ
     and called.accept == "application/vnd.hmrc.2.0+json", called and called.url)
 check("returns commencementDate", det and det.commencementDate == "2026-08-01")
 check("filing asks HMRC for it and re-aggregates from it", build and build:find("Client.get_business(", 1, true)
-    and build:find("Aggregator.starts_inside(commenced", 1, true) and build:find("agg, aerr = aggregate(commenced)", 1, true))
+    and build:find("Aggregator.starts_inside(commenced", 1, true)
+    and build:find("agg, aerr = aggregate(commenced)", 1, true))
 
 print("== VAT")
 package.loaded["helper.hmrc"] = {}

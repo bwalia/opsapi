@@ -396,7 +396,8 @@ function M.register(app)
                 statements[#statements + 1] = rows[1]
                 set_status(rows[1].id, "QUEUED")
                 -- What a resume needs after a restart (no credentials). Best-effort.
-                pcall(db.query, "UPDATE tax_statements SET processing_job = ?::jsonb, error_message = NULL WHERE id = ?",
+                pcall(db.query,
+                    "UPDATE tax_statements SET processing_job = ?::jsonb, error_message = NULL WHERE id = ?",
                     cjson.encode({ session_id = session and session.id or nil, profile_type = profile_type }),
                     rows[1].id)
                 if tax_year then
