@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { confirmDialog } from '@/components/ui';
 import { extractApiError, formatCurrency } from '@/lib/utils';
 import vatService, {
   type CapitalKind,
@@ -185,9 +186,20 @@ function VatGroup() {
   const load = useCallback(() => { vatService.group().then(setG).catch(() => undefined); }, []);
   useEffect(load, [load]);
   if (g?.member_of) {
-    return <p className="text-sm">This workspace is in the VAT group <strong>{g.member_of.group_name}</strong>
-      {g.member_of.group_vrn ? ` (VAT ${g.member_of.group_vrn})` : ''}. The group&apos;s representative files one return
-      for every member.</p>;
+    const leave = async () => {
+      if (!(await confirmDialog({ title: 'Leave this VAT group?', danger: true, confirmText: 'Leave group',
+        message: 'This workspace will file its own VAT returns again. Tell HMRC too (form VAT56).' }))) return;
+      vatService.leaveGroup().then(() => { toast.success('Left the VAT group'); load(); })
+        .catch((e) => toast.error(extractApiError(e, 'Could not leave the group')));
+    };
+    return (
+      <div className="space-y-2 text-sm">
+        <p>This workspace is in the VAT group <strong>{g.member_of.group_name}</strong>
+          {g.member_of.group_vrn ? ` (VAT ${g.member_of.group_vrn})` : ''}. The group&apos;s representative files one
+          return for every member.</p>
+        <button type="button" className={ghost} onClick={leave}>Leave this group</button>
+      </div>
+    );
   }
   return (
     <div className="space-y-3 text-sm">

@@ -105,6 +105,11 @@ export interface VatAgentClient {
   business_name?: string | null;
 }
 
+export interface VatAccountant {
+  uuid: string; arn: string; status: 'pending' | 'accepted' | 'active'; created_at?: string;
+  first_name?: string | null; last_name?: string | null; email?: string | null;
+}
+
 export interface VatObligation { periodKey: string; start: string; end: string; due: string; status: 'O' | 'F';
   received?: string }
 
@@ -293,6 +298,16 @@ export const vatService = {
   },
   async joinGroup(code: string) {
     return data<{ member_name: string; status: string }>(await apiClient.post(`${BASE}/group/join`, { code }));
+  },
+  async leaveGroup(): Promise<void> {
+    await apiClient.post(`${BASE}/group/leave`, {});
+  },
+  // The accountants linked to your VAT (you can stop them acting for you here)
+  async accountants(): Promise<VatAccountant[]> {
+    return data(await get(`${BASE}/accountants`)) || [];
+  },
+  async removeAccountant(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/accountants/${uuid}`, { params: withClient() });
   },
   async ecSalesList(period_start: string, period_end: string): Promise<VatEcSalesList> {
     return data(await get(`${BASE}/ec-sales-list`, { period_start, period_end }));

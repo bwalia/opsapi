@@ -133,7 +133,9 @@ function M.export_csv(by_ref, audit, adjustments)
     local function esc(v)
         if v == nil then return "" end
         local s = tostring(v)
-        if s:find('[,"\n]') then s = '"' .. s:gsub('"', '""') .. '"' end
+        -- A spreadsheet runs text starting = + - @ (or tab/CR) as a formula; numbers stay numbers.
+        if not tonumber(s) and s:find("^[=+%-@\t\r]") then s = "'" .. s end
+        if s:find('[,"\n\r]') then s = '"' .. s:gsub('"', '""') .. '"' end
         return s
     end
     local rows = { "reference,date,description,money,amount,vat_code,net,vat,notional_vat,reclaimable_pct,boxes" }

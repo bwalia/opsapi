@@ -69,7 +69,8 @@ and check each phase on int against HMRC's sandbox before starting the next.
 
   Copy the guards in `submit-final-declaration` (`routes/tax-hmrc-filing.lua`).
 - **Every row is namespace-scoped, and every route is feature-gated.** Use a new feature such as
-  `vat`, inside the `tax_copilot`, `business` and `all` presets.
+  `vat`, inside the `tax_copilot` and `all` presets (not `business`: VAT needs tax_copilot's HMRC
+  sign-in, Tax menu and bank lines; deploy `business,tax_copilot`).
 - **No secrets in code or commits**, including test fixtures: generate them at runtime, because
   GitGuardian blocks PRs that contain them.
 - **Write for a business owner, not a tax expert.** Use plain English in the UI. Show box

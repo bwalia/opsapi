@@ -52,12 +52,25 @@ VAT.SCHEMES = {
 }
 
 --- Round to the penny, half away from zero (HMRC rounds VAT to the penny).
+-- x * 100 carries binary noise (1.005 * 100 = 100.4999...); 15 significant digits
+-- drop it, so a half penny rounds up as it should.
 function VAT.round2(x)
     x = tonumber(x) or 0
-    if x >= 0 then return math.floor(x * 100 + 0.5) / 100 end
-    return -math.floor(-x * 100 + 0.5) / 100
+    local r = math.floor(tonumber(string.format("%.15g", math.abs(x) * 100)) + 0.5) / 100
+    return (x < 0 and r > 0) and -r or r
 end
 local round2 = VAT.round2
+
+--- Is this a real calendar date written YYYY-MM-DD (2026-02-30 is not)?
+function VAT.valid_date(s)
+    if type(s) ~= "string" then return false end
+    local y, m, d = s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return false end
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if y < 1 or m < 1 or m > 12 or d < 1 then return false end
+    local feb = (y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0)) and 29 or 28
+    return d <= ({ 31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 })[m]
+end
 
 --- Normalise a VAT registration number: drop a "GB" prefix, spaces and dashes.
 function VAT.normalise_vrn(vrn)

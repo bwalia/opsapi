@@ -409,7 +409,7 @@ function M.check(xml)
     end
     if d.profile_id ~= M.PROFILE_ID then e("PEPPOL-EN16931-R007", "ProfileID must be the Peppol billing process") end
     if not present(d.invoice_number) then e("BR-02", "The invoice needs a number") end
-    if not (d.issue_date and d.issue_date:match("^%d%d%d%d%-%d%d%-%d%d$")) then
+    if not VAT.valid_date(d.issue_date) then
         e("BR-03", "The invoice needs an issue date (YYYY-MM-DD)")
     end
     if not VALID_TYPES[d.type_code or ""] then e("BR-04", "InvoiceTypeCode must be an invoice type such as 380") end

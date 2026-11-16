@@ -18,7 +18,7 @@ local Q = {}
 
 local function null(v) return v == nil or v == db.NULL or (ngx and v == ngx.null) end
 
-local function valid_date(s) return type(s) == "string" and s:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil end
+local valid_date = VAT.valid_date
 
 --- Check a period. @return months (approx) or nil + message
 function Q.check_period(period_start, period_end)
@@ -64,31 +64,92 @@ local function in_list(ids)
     return "(" .. table.concat(out, ",") .. ")"
 end
 
---- The VAT-coded lines (and the count of uncoded ones) for a business and period.
-function Q.collect_lines(reg, period_start, period_end)
-    local rows
+local function has_table(name)
+    local r = db.query("SELECT to_regclass(?) IS NOT NULL AS ok", "public." .. name)[1]
+    return r and (r.ok == true or r.ok == "t")
+end
+
+local VAT_COLS = [[t.vat_code, t.net_amount, t.vat_amount, t.vat_notional, t.vat_reclaimable_pct,
+    t.vat_attribution, t.vat_source, t.vat_confidence, t.vat_reason, t.vat_review, t.vat_review_reasons,
+    t.vat_evidence, t.vat_registration_id, t.vat_decided_at]]
+
+--- A business's lines as one SQL source "(...) l", the same columns whatever the table:
+-- src (table), id, uuid, ref, date, dir ('CREDIT' = money in), amount (always positive),
+-- description, category, merchant, tax_year, statement_id and the vat_* fields.
+--   A person's VAT: their bank lines (tax_transactions).
+--   A workspace's VAT (user_id NULL): its accounting bank lines (money out is stored
+--   NEGATIVE there) and the approved expenses not paid through one, across a VAT group's
+--   members: exactly what the return reads.
+-- @return the SQL, or nil when none of those tables exist in this deployment
+function Q.lines_from(reg)
+    local parts = {}
     if not null(reg.user_id) then
-        rows = db.query([[SELECT 't' || t.id AS ref, t.transaction_date AS date, t.transaction_type AS dir,
-                t.amount, t.description, t.vat_code, t.net_amount, t.vat_amount, t.vat_notional,
-                t.vat_reclaimable_pct, t.vat_attribution
-            FROM tax_transactions t
-            WHERE t.namespace_id = ? AND t.user_id = ? AND t.transaction_date BETWEEN ? AND ?]],
-            reg.namespace_id, reg.user_id, period_start, period_end)
+        if has_table("tax_transactions") then
+            parts[1] = [[SELECT 'tax_transactions' AS src, t.id, t.uuid, 't' || t.id AS ref,
+                t.transaction_date AS date, t.transaction_type AS dir, t.amount, t.description, t.category,
+                t.cleaned_merchant_name AS merchant, s.tax_year::text AS tax_year,
+                t.statement_id::bigint AS statement_id,
+                ]] .. VAT_COLS .. [[ FROM tax_transactions t LEFT JOIN tax_statements s ON s.id = t.statement_id
+                WHERE t.user_id = ]] .. db.escape_literal(reg.user_id) .. " AND t.namespace_id = "
+                .. db.escape_literal(reg.namespace_id)
+        end
     else
         local ns = in_list((Q.group_namespaces(reg)))
-        rows = db.query([[SELECT 'b' || b.id AS ref, b.transaction_date AS date, upper(b.transaction_type) AS dir,
-                b.amount, b.description, b.vat_code, b.net_amount, b.vat_amount, b.vat_notional,
-                b.vat_reclaimable_pct, b.vat_attribution
-            FROM accounting_bank_transactions b
-            WHERE b.namespace_id IN ]] .. ns .. [[ AND b.deleted_at IS NULL AND b.transaction_date BETWEEN ? AND ?
-            UNION ALL
-            SELECT 'e' || e.id, e.expense_date, 'DEBIT', e.amount, e.description, e.vat_code, e.net_amount,
-                e.vat_amount, e.vat_notional, e.vat_reclaimable_pct, e.vat_attribution
-            FROM accounting_expenses e
-            WHERE e.namespace_id IN ]] .. ns .. [[ AND e.deleted_at IS NULL AND e.bank_transaction_id IS NULL
-              AND e.status IN ('approved', 'posted') AND e.expense_date BETWEEN ? AND ?]],
-            period_start, period_end, period_start, period_end)
+        if has_table("accounting_bank_transactions") then
+            parts[#parts + 1] = [[SELECT 'accounting_bank_transactions' AS src, t.id, t.uuid, 'b' || t.id AS ref,
+                t.transaction_date AS date, upper(t.transaction_type) AS dir, abs(t.amount) AS amount, t.description,
+                t.category, t.payee AS merchant, NULL::text AS tax_year, NULL::bigint AS statement_id,
+                ]] .. VAT_COLS .. [[ FROM accounting_bank_transactions t
+                WHERE t.namespace_id IN ]] .. ns .. " AND t.deleted_at IS NULL"
+        end
+        if has_table("accounting_expenses") then
+            parts[#parts + 1] = [[SELECT 'accounting_expenses' AS src, t.id, t.uuid, 'e' || t.id AS ref,
+                t.expense_date AS date, 'DEBIT' AS dir, abs(t.amount) AS amount, t.description, t.category,
+                t.vendor AS merchant, NULL::text AS tax_year, NULL::bigint AS statement_id,
+                ]] .. VAT_COLS .. [[ FROM accounting_expenses t
+                WHERE t.namespace_id IN ]] .. ns .. [[ AND t.deleted_at IS NULL AND t.bank_transaction_id IS NULL
+                  AND t.status IN ('approved', 'posted')]]
+        end
     end
+    if #parts == 0 then return nil end
+    return "(" .. table.concat(parts, " UNION ALL ") .. ") l"
+end
+
+--- WHERE pieces for the optional line filters { tax_year, statement_id, period_start,
+-- period_end }. Tax years and statements are a person's (tax_transactions) only.
+function Q.line_filters(reg, opts)
+    opts = opts or {}
+    local w = {}
+    if not null(reg.user_id) then
+        if opts.tax_year and opts.tax_year ~= "" then
+            w[#w + 1] = "l.tax_year = " .. db.escape_literal(opts.tax_year)
+        end
+        if tonumber(opts.statement_id) then
+            w[#w + 1] = "l.statement_id = " .. db.escape_literal(tonumber(opts.statement_id))
+        end
+    end
+    if valid_date(opts.period_start) and valid_date(opts.period_end) then
+        w[#w + 1] = "l.date BETWEEN " .. db.escape_literal(opts.period_start) .. " AND "
+            .. db.escape_literal(opts.period_end)
+    end
+    return w
+end
+
+--- Write VAT fields to one line of a lines_from() source (where_extra: "AND ..." with ? args).
+function Q.write_line(src, id, fields, where_extra, ...)
+    if src ~= "tax_transactions" then fields.is_vat_applicable = nil end -- only that table has it
+    if where_extra then
+        return db.update(src, fields, "id = ? " .. where_extra, id, ...)
+    end
+    return db.update(src, fields, { id = id })
+end
+
+--- The VAT-coded lines (and the count of uncoded ones) for a business and period.
+function Q.collect_lines(reg, period_start, period_end)
+    local from = Q.lines_from(reg)
+    local rows = from and db.query([[SELECT l.ref, l.date, l.dir, l.amount, l.description, l.vat_code,
+            l.net_amount, l.vat_amount, l.vat_notional, l.vat_reclaimable_pct, l.vat_attribution
+        FROM ]] .. from .. " WHERE l.date BETWEEN ? AND ?", period_start, period_end)
     rows = rows or {}
     local notes = {}
     local inv_lines = {}
@@ -396,7 +457,13 @@ function Q.create_adjustment(reg, f, actor_id)
         row.written_off = f.written_off == true or f.written_off == "true"
     elseif f.type == "cgs" or f.type == "pe_annual" then
         ok, err = money("vat", true); if not ok then return nil, err, 400 end
-        if f.capital_item_id then row.capital_item_id = tonumber(f.capital_item_id) end
+        if f.capital_item_id then
+            -- Only this business's own capital item (ids are sequential).
+            local item = db.query("SELECT id FROM vat_capital_items WHERE id = ? AND registration_id = ?",
+                tonumber(f.capital_item_id) or 0, reg.id)[1]
+            if not item then return nil, "Capital item not found", 404 end
+            row.capital_item_id = item.id
+        end
         if f.interval_no then row.interval_no = tonumber(f.interval_no) end
     elseif f.type == "correction" then
         ok, err = money("box1"); if not ok then return nil, err, 400 end

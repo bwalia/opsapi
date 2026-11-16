@@ -24,4 +24,28 @@ return {
         })
         print("[VAT] menu item: Tax -> VAT")
     end,
+
+    [2] = function()
+        -- RBAC modules "vat" (workspace VAT, VAT groups) and "vat_agent" (accountants), as in
+        -- helper/project-config.lua PROJECT_MODULES.vat. Granted to owner/admin roles on FIRST
+        -- insert only, so a permission an admin later takes away stays taken away.
+        for _, m in ipairs({
+            { "vat", "VAT", "VAT registration, VAT coding rules and VAT records" },
+            { "vat_agent", "VAT clients (accountants)",
+                "Act for clients' VAT once HMRC confirms the client authorised you" },
+        }) do
+            local inserted = db.query([[
+                INSERT INTO modules (uuid, machine_name, name, description, category, priority,
+                                     is_active, is_system, default_actions, created_at, updated_at)
+                VALUES (gen_random_uuid()::text, ?, ?, ?, 'Accounting', '0', true, false,
+                        'create,read,update,delete,manage', NOW(), NOW())
+                ON CONFLICT (machine_name) DO NOTHING
+                RETURNING id
+            ]], m[1], m[2], m[3])
+            if inserted[1] then
+                require("queries.ModuleQueries").propagateToNamespaceAdmins(m[1])
+                print("[VAT] Registered module " .. m[1] .. "; granted to owner/admin roles")
+            end
+        end
+    end,
 }

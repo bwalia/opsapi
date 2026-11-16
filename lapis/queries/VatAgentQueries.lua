@@ -41,10 +41,12 @@ local function token_for(user_uuid)
     return token
 end
 
+-- err is our own text (URLs, socket errors): logged, never sent.
 local function hmrc_fail(err, body, status)
     local msg, code = Client.explain(body)
+    ngx.log(ngx.WARN, "[vat-agent] ", tostring(err), " (HTTP ", tostring(status), ")")
     return { status = (status and status < 500) and 422 or 502,
-        json = { success = false, error = msg, code = code, detail = err, hmrc = body } }
+        json = { success = false, error = msg, code = code, hmrc = body } }
 end
 
 --- The accountant's clients with their status.
@@ -67,15 +69,22 @@ function Q.invite(namespace_id, agent_user_id, agent_uuid, body)
     if not vrn then
         return nil, { status = 400, json = { success = false, error = "Enter the client's VAT number" } }
     end
-    local reg = db.query([[SELECT * FROM vat_registrations WHERE namespace_id = ? AND vrn = ? AND status = 'active'
-        LIMIT 1]], namespace_id, vrn)[1]
+    -- VAT numbers aren't verified when saved, so two businesses here may both claim one:
+    -- never guess which is the client.
+    local regs = db.query([[SELECT * FROM vat_registrations WHERE namespace_id = ? AND vrn = ? AND status = 'active'
+        LIMIT 2]], namespace_id, vrn) or {}
+    local reg = regs[1]
     if not reg then
         return nil, { status = 404, json = { success = false,
             error = "No client in this workspace has registered that VAT number in OpsAPI yet." } }
     end
+    if regs[2] then
+        return nil, { status = 409, json = { success = false, error = "More than one business in this workspace "
+            .. "has entered that VAT number. Ask your client to check their VAT details first." } }
+    end
     local known = body.vat_registration_date
     if (not known or known == "") and not null(reg.effective_date) then known = tostring(reg.effective_date) end
-    if not (known and tostring(known):match("^%d%d%d%d%-%d%d%-%d%d$")) then
+    if not require("lib.vat").valid_date(known and tostring(known)) then
         return nil, { status = 400, json = { success = false,
             error = "Give the client's VAT registration date (it's on their VAT certificate)" } }
     end
@@ -133,13 +142,53 @@ function Q.cancel(namespace_id, agent_user_id, agent_uuid, uuid)
     return true
 end
 
+-- How long HMRC's "yes, you act for this client" is trusted before asking again.
+Q.RECHECK_HOURS = 24
+
 --- The client's registration, when this accountant is authorised (HMRC-confirmed).
-function Q.active_registration(namespace_id, agent_user_id, uuid)
-    local c = db.query([[SELECT registration_id FROM vat_agent_clients WHERE uuid = ? AND namespace_id = ?
-        AND agent_user_id = ? AND status = 'active' LIMIT 1]], uuid, namespace_id, agent_user_id)[1]
-    if not c then return nil end
+-- HMRC is asked again once the last check is older than RECHECK_HOURS: a client can end
+-- the authority at HMRC at any time.
+-- @return registration, or nil + message + http status
+function Q.active_registration(namespace_id, agent_user_id, uuid, agent_uuid)
+    local c = db.query([[SELECT id, registration_id, arn, client_vrn, known_fact,
+            (last_checked_at IS NULL OR last_checked_at < NOW() - make_interval(hours => ?)) AS stale
+        FROM vat_agent_clients WHERE uuid = ? AND namespace_id = ?
+        AND agent_user_id = ? AND status = 'active' LIMIT 1]], Q.RECHECK_HOURS, uuid, namespace_id, agent_user_id)[1]
+    if not c then return nil, "HMRC hasn't confirmed you can act for this client yet", 403 end
+    if c.stale == true or c.stale == "t" then
+        local token = token_for(agent_uuid)
+        local ok = token and Client.check_relationship(token, c.arn, c.client_vrn, tostring(c.known_fact))
+        if ok == false then
+            db.query("UPDATE vat_agent_clients SET status = 'revoked', last_checked_at = NOW(), updated_at = NOW() "
+                .. "WHERE id = ?", c.id)
+            return nil, "HMRC says you no longer act for this client.", 403
+        end
+        if ok ~= true then
+            return nil, "We couldn't check with HMRC that you still act for this client. Connect to HMRC with "
+                .. "your agent sign-in, then try again.", 409
+        end
+        db.query("UPDATE vat_agent_clients SET last_checked_at = NOW() WHERE id = ?", c.id)
+    end
     return db.query([[SELECT * FROM vat_registrations WHERE id = ? AND namespace_id = ? AND status = 'active'
         LIMIT 1]], c.registration_id, namespace_id)[1]
+end
+
+--- The accountants linked to a registration, for the client to see.
+function Q.for_registration(reg)
+    return db.query([[SELECT c.uuid, c.arn, c.status, c.created_at, c.last_checked_at,
+            u.first_name, u.last_name, u.email
+        FROM vat_agent_clients c LEFT JOIN users u ON u.id = c.agent_user_id
+        WHERE c.registration_id = ? AND c.namespace_id = ? AND c.status IN ('pending', 'accepted', 'active')
+        ORDER BY c.created_at DESC]], reg.id, reg.namespace_id) or {}
+end
+
+--- The client stops an accountant acting for them here (HMRC's authority is ended at HMRC).
+function Q.revoke_for_registration(reg, uuid)
+    local r = db.query([[UPDATE vat_agent_clients SET status = 'revoked', updated_at = NOW()
+        WHERE uuid = ? AND registration_id = ? AND namespace_id = ? AND status IN ('pending', 'accepted', 'active')
+        RETURNING id]], uuid, reg.id, reg.namespace_id)
+    if not r or #r == 0 then return nil, "Not found", 404 end
+    return true
 end
 
 return Q

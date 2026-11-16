@@ -12,6 +12,7 @@ local cjson = require("cjson")
 local VAT = require("lib.vat")
 local VC = require("lib.vat-classifier")
 local VatQueries = require("queries.VatQueries")
+local VatReturnQueries = require("queries.VatReturnQueries")
 
 local Q = {}
 
@@ -42,12 +43,13 @@ function Q.rules(reg)
         reg.id) or {}
 end
 
---- People's own past VAT decisions for this business (most recent first).
+--- People's own past VAT decisions for this business (most recent first), from its own lines.
 function Q.decisions(reg)
-    local rows = db.query([[SELECT description, cleaned_merchant_name AS merchant, transaction_type, vat_code,
-            vat_reclaimable_pct FROM tax_transactions
-        WHERE vat_registration_id = ? AND vat_source = 'user' AND vat_code IS NOT NULL
-        ORDER BY vat_decided_at DESC NULLS LAST LIMIT 500]], reg.id) or {}
+    local from = VatReturnQueries.lines_from(reg)
+    local rows = from and db.query([[SELECT l.description, l.merchant, l.dir AS transaction_type, l.vat_code,
+            l.vat_reclaimable_pct FROM ]] .. from .. [[
+        WHERE l.vat_registration_id = ? AND l.vat_source = 'user' AND l.vat_code IS NOT NULL
+        ORDER BY l.vat_decided_at DESC NULLS LAST LIMIT 500]], reg.id) or {}
     local out = {}
     for _, r in ipairs(rows) do
         out[#out + 1] = { key = VC.memory_key({ merchant = not null(r.merchant) and r.merchant or nil,
@@ -59,30 +61,23 @@ function Q.decisions(reg)
 end
 
 local function line_of(r)
-    return { id = r.id, description = r.description, merchant = not null(r.merchant) and r.merchant or nil,
+    return { src = r.src, id = r.id, description = r.description, merchant = not null(r.merchant) and r.merchant or nil,
         category = not null(r.category) and r.category or nil, amount = tonumber(r.amount),
         direction = r.transaction_type == "CREDIT" and "sale" or "purchase",
         evidence = decode(r.vat_evidence) or {} }
 end
 
---- The person's lines that still need a VAT code (or, with recode, also AI-coded ones).
-function Q.lines_to_code(reg, user_id, opts)
+--- The business's lines that still need a VAT code (or, with recode, also AI-coded ones).
+function Q.lines_to_code(reg, opts)
     opts = opts or {}
-    local where = { "t.user_id = " .. db.escape_literal(user_id),
-        "t.namespace_id = " .. db.escape_literal(reg.namespace_id) }
-    where[#where + 1] = opts.recode and "(t.vat_code IS NULL OR t.vat_source IN ('ai', 'memory'))"
-        or "t.vat_code IS NULL"
-    if opts.tax_year and opts.tax_year ~= "" then
-        where[#where + 1] = "s.tax_year = " .. db.escape_literal(opts.tax_year)
-    end
-    if opts.period_start and opts.period_end then
-        where[#where + 1] = "t.transaction_date BETWEEN " .. db.escape_literal(opts.period_start)
-            .. " AND " .. db.escape_literal(opts.period_end)
-    end
-    local rows = db.query([[SELECT t.id, t.description, t.cleaned_merchant_name AS merchant, t.category, t.amount,
-            t.transaction_type, t.vat_evidence
-        FROM tax_transactions t LEFT JOIN tax_statements s ON s.id = t.statement_id
-        WHERE ]] .. table.concat(where, " AND ") .. " ORDER BY t.transaction_date, t.id LIMIT "
+    local from = VatReturnQueries.lines_from(reg)
+    if not from then return {} end
+    local where = VatReturnQueries.line_filters(reg, opts)
+    where[#where + 1] = opts.recode and "(l.vat_code IS NULL OR l.vat_source IN ('ai', 'memory'))"
+        or "l.vat_code IS NULL"
+    local rows = db.query([[SELECT l.src, l.id, l.description, l.merchant, l.category, l.amount,
+            l.dir AS transaction_type, l.vat_evidence
+        FROM ]] .. from .. " WHERE " .. table.concat(where, " AND ") .. " ORDER BY l.date, l.id LIMIT "
         .. (tonumber(opts.limit) or 2000)) or {}
     local lines = {}
     for _, r in ipairs(rows) do lines[#lines + 1] = line_of(r) end
@@ -106,10 +101,10 @@ function Q.save_results(reg, lines, results)
                 vf.vat_decided_at = db.raw("NOW()")
                 vf.updated_at = db.raw("NOW()")
                 -- The person may have decided meanwhile: never overwrite their decision.
-                db.update("tax_transactions", vf, "id = ? AND COALESCE(vat_source, '') <> 'user'", l.id)
+                VatReturnQueries.write_line(l.src, l.id, vf, "AND COALESCE(vat_source, '') <> 'user'")
             end
         elseif s and s.error then
-            db.query([[UPDATE tax_transactions SET vat_review = true, vat_review_reasons = ?, updated_at = NOW()
+            db.query("UPDATE " .. l.src .. [[ SET vat_review = true, vat_review_reasons = ?, updated_at = NOW()
                 WHERE id = ? AND vat_code IS NULL]], cjson.encode({ s.error }), l.id)
         end
     end
@@ -122,8 +117,8 @@ end
 
 --- Code a business's lines now (rules, memory, model). Used by the background job.
 -- @return stats
-function Q.classify_now(reg, user_id, opts)
-    local lines = Q.lines_to_code(reg, user_id, opts)
+function Q.classify_now(reg, opts)
+    local lines = Q.lines_to_code(reg, opts)
     if #lines == 0 then return { lines = 0 } end
     local deps = {
         rules = Q.rules(reg), decisions = Q.decisions(reg),
@@ -173,54 +168,52 @@ end
 
 --- Start coding in the background; returns at once.
 -- @return { started = bool, pending = n }
-function Q.start(reg, user_id, opts)
-    local pending = #Q.lines_to_code(reg, user_id, opts)
+function Q.start(reg, opts)
+    local pending = #Q.lines_to_code(reg, opts)
     if pending == 0 then return { started = false, pending = 0 } end
     if not Q.claim_job(reg) then
         return { started = false, already_running = true, pending = pending }
     end
     local ok, err = ngx.timer.at(0, function(premature)
         if premature then Q.release_job(reg) return end
-        local ok2, res = pcall(Q.classify_now, reg, user_id, opts)
+        local ok2, res = pcall(Q.classify_now, reg, opts)
         if not ok2 then ngx.log(ngx.ERR, "[vat-ai] classify failed: ", tostring(res)) end
         Q.release_job(reg)
     end)
     if not ok then
         Q.release_job(reg)
-        return nil, "Couldn't start: " .. tostring(err)
+        ngx.log(ngx.ERR, "[vat-ai] couldn't start the coding job: ", tostring(err))
+        return nil, "Couldn't start VAT coding just now. Try again in a minute."
     end
     return { started = true, pending = pending }
 end
 
---- Where coding stands for this person.
-function Q.status(reg, user_id, opts)
-    opts = opts or {}
-    local extra = ""
-    if opts.tax_year and opts.tax_year ~= "" then
-        extra = " AND s.tax_year = " .. db.escape_literal(opts.tax_year)
-    end
-    local r = db.query([[SELECT COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE t.vat_code IS NULL) AS uncoded,
-            COUNT(*) FILTER (WHERE t.vat_source = 'rule') AS by_rule,
-            COUNT(*) FILTER (WHERE t.vat_source = 'ai') AS by_ai,
-            COUNT(*) FILTER (WHERE t.vat_source = 'user') AS by_you,
-            COUNT(*) FILTER (WHERE t.vat_review AND COALESCE(t.vat_source, '') <> 'user') AS to_check
-        FROM tax_transactions t LEFT JOIN tax_statements s ON s.id = t.statement_id
-        WHERE t.user_id = ? AND t.namespace_id = ?]] .. extra, user_id, reg.namespace_id)[1] or {}
+--- Where coding stands for this business.
+function Q.status(reg, opts)
+    local from = VatReturnQueries.lines_from(reg)
+    local where = VatReturnQueries.line_filters(reg, { tax_year = (opts or {}).tax_year })
+    local r = from and db.query([[SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE l.vat_code IS NULL) AS uncoded,
+            COUNT(*) FILTER (WHERE l.vat_source = 'rule') AS by_rule,
+            COUNT(*) FILTER (WHERE l.vat_source = 'ai') AS by_ai,
+            COUNT(*) FILTER (WHERE l.vat_source = 'user') AS by_you,
+            COUNT(*) FILTER (WHERE l.vat_review AND COALESCE(l.vat_source, '') <> 'user') AS to_check
+        FROM ]] .. from .. (#where > 0 and (" WHERE " .. table.concat(where, " AND ")) or ""))[1]
+    r = r or { total = 0, uncoded = 0, by_rule = 0, by_ai = 0, by_you = 0, to_check = 0 }
     r.running = job_running(reg)
     for k, v in pairs(r) do if k ~= "running" then r[k] = tonumber(v) or 0 end end
     return r
 end
 
 --- The lines a person should check, with the reasons.
-function Q.review_queue(reg, user_id, opts)
+function Q.review_queue(reg, opts)
     opts = opts or {}
-    local rows = db.query([[SELECT t.uuid, t.transaction_date, t.description, t.amount, t.transaction_type,
-            t.vat_code, t.net_amount, t.vat_amount, t.vat_reclaimable_pct, t.vat_source, t.vat_confidence,
-            t.vat_reason, t.vat_review_reasons, t.vat_evidence
-        FROM tax_transactions t
-        WHERE t.user_id = ? AND t.namespace_id = ? AND t.vat_review AND COALESCE(t.vat_source, '') <> 'user'
-        ORDER BY t.transaction_date, t.id LIMIT ?]], user_id, reg.namespace_id, tonumber(opts.limit) or 200) or {}
+    local from = VatReturnQueries.lines_from(reg)
+    local rows = from and db.query([[SELECT l.uuid, l.date AS transaction_date, l.description, l.amount,
+            l.dir AS transaction_type, l.vat_code, l.net_amount, l.vat_amount, l.vat_reclaimable_pct, l.vat_source,
+            l.vat_confidence, l.vat_reason, l.vat_review_reasons, l.vat_evidence
+        FROM ]] .. from .. [[ WHERE l.vat_review AND COALESCE(l.vat_source, '') <> 'user'
+        ORDER BY l.date, l.id LIMIT ?]], tonumber(opts.limit) or 200) or {}
     for _, r in ipairs(rows) do
         r.vat_review_reasons = decode(r.vat_review_reasons) or {}
         r.vat_evidence = decode(r.vat_evidence)
@@ -235,8 +228,9 @@ end
 --- After a person sets a line's VAT: learn a supplier rule once their decisions agree.
 -- @return the new rule (to show "We'll now treat X as ...") or nil
 function Q.learn(reg, transaction_uuid, actor_id)
-    local t = db.query([[SELECT description, cleaned_merchant_name AS merchant, vat_code, vat_reclaimable_pct
-        FROM tax_transactions WHERE uuid = ? AND vat_registration_id = ? AND vat_source = 'user']],
+    local from = VatReturnQueries.lines_from(reg)
+    local t = from and db.query([[SELECT l.description, l.merchant, l.vat_code, l.vat_reclaimable_pct
+        FROM ]] .. from .. [[ WHERE l.uuid = ? AND l.vat_registration_id = ? AND l.vat_source = 'user']],
         transaction_uuid, reg.id)[1]
     if not t then return nil end
     local key = VC.memory_key({ merchant = not null(t.merchant) and t.merchant or nil, description = t.description })
@@ -295,9 +289,9 @@ local RECEIPT_PROMPT = [[Read this UK receipt or invoice. Answer ONLY with JSON:
  "vat_rate": <20, 5 or 0>}
 Use the figures printed on the document; don't calculate anything that isn't shown.]]
 
---- Read a receipt for one of the person's lines and code it from the receipt.
+--- Read a receipt for one of the business's lines and code it from the receipt.
 -- body: { mime = "image/jpeg" | "image/png" | "application/pdf", data = <base64> }
-function Q.read_receipt(reg, user_id, uuid, body, actor_id)
+function Q.read_receipt(reg, uuid, body, actor_id)
     body = body or {}
     if type(body.data) ~= "string" or body.data == "" then return nil, "Attach the receipt (base64 data)", 400 end
     if #body.data > 14 * 1024 * 1024 then return nil, "The receipt is too large (max about 10 MB)", 413 end
@@ -305,15 +299,17 @@ function Q.read_receipt(reg, user_id, uuid, body, actor_id)
     if not (mime:match("^image/") or mime == "application/pdf") then
         return nil, "Upload an image or a PDF", 415
     end
-    local t = db.query([[SELECT id, amount, transaction_type, description, category FROM tax_transactions
-        WHERE uuid = ? AND user_id = ? AND namespace_id = ? LIMIT 1]], uuid, user_id, reg.namespace_id)[1]
+    local t = VatQueries.find_line(reg, uuid)
     if not t then return nil, "Transaction not found", 404 end
 
     local Llm = require("lib.agent.llm")
     local msg, err = Llm.chat({ { role = "user", content = RECEIPT_PROMPT,
             attachments = { { mime = mime, data = body.data } } } }, nil,
         { cfg = Llm.vision, json = true, temperature = 0, usage = { feature = "vat_receipt" } })
-    if not msg then return nil, "Couldn't read the receipt: " .. tostring(err), 502 end
+    if not msg then
+        ngx.log(ngx.ERR, "[vat-ai] receipt model call failed: ", tostring(err))
+        return nil, "Couldn't read the receipt just now. Try again, or set the VAT yourself.", 502
+    end
     local data = decode((msg.content or ""):match("%b{}") or msg.content)
     if not data then return nil, "Couldn't read the receipt's figures", 422 end
 
@@ -339,9 +335,10 @@ function Q.read_receipt(reg, user_id, uuid, body, actor_id)
     vf.vat_decided_by = actor_id
     vf.vat_decided_at = db.raw("NOW()")
     vf.updated_at = db.raw("NOW()")
-    db.update("tax_transactions", vf, { id = t.id })
-    return db.query([[SELECT uuid, amount, vat_code, net_amount, vat_amount, vat_reclaimable_pct, vat_source,
-        vat_reason, vat_evidence, vat_review, vat_review_reasons FROM tax_transactions WHERE id = ?]], t.id)[1]
+    VatReturnQueries.write_line(t.src, t.id, vf)
+    return db.query([[SELECT l.uuid, l.amount, l.vat_code, l.net_amount, l.vat_amount, l.vat_reclaimable_pct,
+        l.vat_source, l.vat_reason, l.vat_evidence, l.vat_review, l.vat_review_reasons
+        FROM ]] .. VatReturnQueries.lines_from(reg) .. " WHERE l.src = ? AND l.id = ?", t.src, t.id)[1]
 end
 
 -- ---------------------------------------------------------------------------
@@ -409,7 +406,10 @@ function Q.start_eval(actor_id)
                 finished_at = db.raw("NOW()") }, { id = run.id })
         end
     end)
-    if not ok then return nil, "Couldn't start: " .. tostring(err) end
+    if not ok then
+        ngx.log(ngx.ERR, "[vat-ai] couldn't start the eval: ", tostring(err))
+        return nil, "Couldn't start the evaluation just now. Try again in a minute."
+    end
     return { id = run.id, status = "running", lines = #lines }
 end
 

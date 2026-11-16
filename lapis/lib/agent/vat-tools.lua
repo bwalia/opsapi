@@ -44,7 +44,7 @@ function VatTools.install(register)
         parameters = { type = "object", properties = {} },
         handler = function(ctx)
             local reg, err = registration(ctx); if not reg then return nil, err end
-            local st = require("queries.VatAiQueries").status(reg, ctx.user_id, {})
+            local st = require("queries.VatAiQueries").status(reg, {})
             return { vrn = reg.vrn, scheme = reg.scheme, business_name = reg.business_name, coding = st,
                 note = "To code remaining lines call start_vat_coding; lines to check are in get_vat_review_queue." }
         end,
@@ -59,7 +59,7 @@ function VatTools.install(register)
             tax_year = { type = "string", description = "Optional UK tax year, e.g. 2025-26" } } },
         handler = function(ctx, args)
             local reg, err = registration(ctx); if not reg then return nil, err end
-            local res, serr = require("queries.VatAiQueries").start(reg, ctx.user_id, { tax_year = args.tax_year })
+            local res, serr = require("queries.VatAiQueries").start(reg, { tax_year = args.tax_year })
             if not res then return nil, serr end
             return res
         end,
@@ -73,7 +73,7 @@ function VatTools.install(register)
         parameters = { type = "object", properties = {} },
         handler = function(ctx)
             local reg, err = registration(ctx); if not reg then return nil, err end
-            local rows = require("queries.VatAiQueries").review_queue(reg, ctx.user_id, { limit = 15 })
+            local rows = require("queries.VatAiQueries").review_queue(reg, { limit = 15 })
             local out = {}
             for _, r in ipairs(rows) do
                 out[#out + 1] = { date = r.transaction_date, description = r.description, amount = r.amount,

@@ -51,7 +51,10 @@
     POST   /api/v2/vat/agent/clients            ask a client for authority at HMRC { vrn, vat_registration_date? }
     POST   /api/v2/vat/agent/clients/:uuid/refresh  check with HMRC (active once HMRC confirms)
     DELETE /api/v2/vat/agent/clients/:uuid      stop / cancel
-    Then any VAT route with ?client=<uuid> acts on that client's VAT.
+    Then any VAT route with ?client=<uuid> acts on that client's VAT (HMRC is asked again
+    when its last "yes" is over 24 hours old).
+    GET    /api/v2/vat/accountants              the business: accountants linked to its VAT
+    DELETE /api/v2/vat/accountants/:uuid        the business stops one acting for it here
 
     VAT on our own invoices (phase 9):
     GET    /api/v2/vat/invoices/:uuid/check     what a valid VAT invoice must show and this one is
@@ -73,6 +76,7 @@
     POST   /api/v2/vat/group/members            { member_name } -> invite_code for the member workspace
     DELETE /api/v2/vat/group/members/:uuid
     POST   /api/v2/vat/group/join               { code } this workspace joins a VAT group
+    POST   /api/v2/vat/group/leave              this workspace leaves its VAT group
     GET    /api/v2/vat/ec-sales-list            ?period_start&period_end&format=json|csv  (Northern Ireland)
     PUT    /api/v2/vat/invoices/:uuid/vat-details { customer_vat_number?, tax_point? }
     Margin scheme: code second-hand stock MARGIN (global accounting, Notice 718).
@@ -149,32 +153,40 @@ local function business_of(self, action)
     return actor, actor
 end
 
--- Whose VAT is this request about? Returns (registration, owner_user_id, actor_id)
--- or (nil, nil, nil, error_response).
+local function null(v) return v == nil or v == ngx.null end
+local function user_uuid(self) local u = self.current_user or {}; return u.uuid or u.id or u.sub end
+local function has_client(self) return self.params.client ~= nil and self.params.client ~= "" end
+
+-- Whose VAT is this request about? Returns (registration_or_nil, actor_id) or
+-- (nil, nil, error_response). The lines a registration codes and files are always its
+-- own (queries/VatReturnQueries.lua lines_from), never the signed-in person's.
 --   default             the signed-in person's own registration
 --   ?scope=namespace    the workspace's own (needs the "vat" permission)
 --   ?client=<link uuid> a client's, for an accountant (needs "vat_agent", a link of
 --                       theirs in this workspace that HMRC has confirmed: 'active')
-local function resolve(self, action)
+local function current_registration(self, action)
     local actor = user_pk(self)
-    if not actor then return nil, nil, nil, err(401, "User not found") end
-    local client = self.params.client
-    if client and client ~= "" then
+    if not actor then return nil, nil, err(401, "User not found") end
+    if has_client(self) then
         if not NamespaceMiddleware.hasPermission(self, "vat_agent", action) then
-            return nil, nil, nil, err(403, "You don't have permission to act for clients' VAT")
+            return nil, nil, err(403, "You don't have permission to act for clients' VAT")
         end
-        local reg = require("queries.VatAgentQueries").active_registration(self.namespace.id, actor, client)
+        local reg, msg, status = VatAgentQueries.active_registration(self.namespace.id, actor, self.params.client,
+            user_uuid(self))
         if not reg then
-            return nil, nil, nil, err(403, "HMRC hasn't confirmed you can act for this client yet")
+            return nil, nil, err(status or 403, msg or "HMRC hasn't confirmed you can act for this client")
         end
-        local owner = reg.user_id
-        if owner == nil or owner == ngx.null then owner = actor end
-        return reg, owner, actor
+        return reg, actor
     end
-    local uid, _, e = business_of(self, action); if e then return nil, nil, nil, e end
-    local reg = VatQueries.get_registration(self.namespace.id, uid)
-    if not reg then return nil, nil, nil, err(409, "Add your VAT registration first") end
-    return reg, uid or actor, actor
+    local uid, _, e = business_of(self, action); if e then return nil, nil, e end
+    return VatQueries.get_registration(self.namespace.id, uid), actor
+end
+
+-- The same, but a registration is required.
+local function resolve(self, action)
+    local reg, actor, e = current_registration(self, action); if e then return nil, nil, e end
+    if not reg then return nil, nil, err(409, "Add your VAT registration first") end
+    return reg, actor
 end
 
 local function registration_json(r)
@@ -184,7 +196,7 @@ local function registration_json(r)
         scheme = r.scheme, scheme_label = VAT.SCHEMES[r.scheme], stagger = r.stagger,
         flat_rate_pct = r.flat_rate_pct, flat_rate_first_year = r.flat_rate_first_year,
         limited_cost_trader = r.limited_cost_trader, partially_exempt = r.partially_exempt,
-        recovery_pct = r.recovery_pct, status = r.status, scope = r.user_id and "user" or "namespace",
+        recovery_pct = r.recovery_pct, status = r.status, scope = null(r.user_id) and "namespace" or "user",
         sales_from = r.sales_from, business_address = r.business_address,
     }
 end
@@ -202,19 +214,32 @@ return function(app)
     end))
 
     app:get("/api/v2/vat/registration", authed(function(self)
-        local uid, _, e = business_of(self, "read"); if e then return e end
-        local r = VatQueries.get_registration(self.namespace.id, uid)
+        local r, _, e = current_registration(self, "read"); if e then return e end
         return { status = 200, json = { success = true, data = registration_json(r) } }
     end))
 
     app:put("/api/v2/vat/registration", authed(function(self)
-        local uid, actor, e = business_of(self, "update"); if e then return e end
-        local r, msg, status = VatQueries.save_registration(self.namespace.id, uid, read_body(self), actor)
+        local body = read_body(self)
+        local ns, uid, actor = self.namespace.id
+        if has_client(self) then
+            local reg, a, e = resolve(self, "update"); if e then return e end
+            -- HMRC confirmed the accountant for this VAT number, not another one.
+            if body.vrn ~= nil and VAT.normalise_vrn(body.vrn) ~= reg.vrn then
+                return err(403, "Only your client can change their VAT number")
+            end
+            body.vrn = reg.vrn
+            ns, actor = reg.namespace_id, a
+            if not null(reg.user_id) then uid = reg.user_id end
+        else
+            local e; uid, actor, e = business_of(self, "update"); if e then return e end
+        end
+        local r, msg, status = VatQueries.save_registration(ns, uid, body, actor)
         if not r then return err(status or 400, msg) end
         return { status = 200, json = { success = true, data = registration_json(r) } }
     end))
 
     app:delete("/api/v2/vat/registration", authed(function(self)
+        if has_client(self) then return err(403, "Only your client can remove their VAT registration") end
         local uid, _, e = business_of(self, "update"); if e then return e end
         local r = VatQueries.get_registration(self.namespace.id, uid)
         if not r then return err(404, "No VAT registration") end
@@ -222,21 +247,10 @@ return function(app)
         return { status = 200, json = { success = true, data = { status = "deregistered" } } }
     end))
 
-    -- Rules need a registration: they belong to a business.
-    local function with_registration(self, action)
-        local reg, _, actor, e = resolve(self, action); if e then return nil, nil, e end
-        return reg, actor
-    end
-
-    -- Bank lines belong to the registration's owner (the client, for an accountant).
-    local function own_registration(self, action)
-        local reg, owner, _, e = resolve(self, action or "read"); if e then return nil, nil, e end
-        return reg, owner
-    end
+    local with_registration = resolve
 
     app:get("/api/v2/vat/rules", authed(function(self)
-        local uid, _, e = business_of(self, "read"); if e then return e end
-        local r = VatQueries.get_registration(self.namespace.id, uid)
+        local r, _, e = current_registration(self, "read"); if e then return e end
         return { status = 200, json = { success = true, data = VatQueries.list_rules(r and r.id) } }
     end))
 
@@ -261,11 +275,11 @@ return function(app)
         return { status = 200, json = { success = true } }
     end))
 
-    -- Bank lines are always the person's own (tax_transactions is per user).
+    -- The lines are the registration's own: a person's bank lines, or the workspace's accounts.
     app:post("/api/v2/vat/transactions/apply-rules", authed(function(self)
-        local reg, owner, _, e = resolve(self, "update"); if e then return e end
+        local reg, _, e = resolve(self, "update"); if e then return e end
         local body = read_body(self)
-        local res = VatQueries.apply_rules(reg, owner, {
+        local res = VatQueries.apply_rules(reg, {
             tax_year = body.tax_year, statement_id = body.statement_id,
             refresh = body.refresh == true or body.refresh == "true",
         })
@@ -273,8 +287,8 @@ return function(app)
     end))
 
     app:put("/api/v2/vat/transactions/:uuid", authed(function(self)
-        local reg, owner, actor, e = resolve(self, "update"); if e then return e end
-        local row, msg, status = VatQueries.set_transaction_vat(reg, owner, self.params.uuid, read_body(self), actor)
+        local reg, actor, e = resolve(self, "update"); if e then return e end
+        local row, msg, status = VatQueries.set_transaction_vat(reg, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
         -- Two agreeing decisions for a supplier teach the business a rule.
         local ok_l, learned = pcall(VatAiQueries.learn, reg, self.params.uuid, actor)
@@ -337,28 +351,32 @@ return function(app)
     -- ---------------------------------------------------------------- AI coding
 
     app:post("/api/v2/vat/transactions/classify", authed(function(self)
-        local reg, owner, _, e = resolve(self, "update"); if e then return e end
+        local reg, _, e = resolve(self, "update"); if e then return e end
         local b = read_body(self)
-        local res, msg = VatAiQueries.start(reg, owner, { tax_year = b.tax_year, period_start = b.period_start,
+        if b.period_start or b.period_end then
+            local ok, perr = VatReturnQueries.check_period(b.period_start, b.period_end)
+            if not ok then return err(400, perr) end
+        end
+        local res, msg = VatAiQueries.start(reg, { tax_year = b.tax_year, period_start = b.period_start,
             period_end = b.period_end, recode = b.recode == true or b.recode == "true" })
         if not res then return err(500, msg) end
         return { status = 202, json = { success = true, data = res } }
     end))
 
     app:get("/api/v2/vat/transactions/classify-status", authed(function(self)
-        local reg, owner, e = own_registration(self); if e then return e end
+        local reg, _, e = resolve(self, "read"); if e then return e end
         return { status = 200, json = { success = true,
-            data = VatAiQueries.status(reg, owner, { tax_year = self.params.tax_year }) } }
+            data = VatAiQueries.status(reg, { tax_year = self.params.tax_year }) } }
     end))
 
     app:get("/api/v2/vat/review", authed(function(self)
-        local reg, owner, e = own_registration(self); if e then return e end
-        return { status = 200, json = { success = true, data = VatAiQueries.review_queue(reg, owner) } }
+        local reg, _, e = resolve(self, "read"); if e then return e end
+        return { status = 200, json = { success = true, data = VatAiQueries.review_queue(reg) } }
     end))
 
     app:post("/api/v2/vat/transactions/:uuid/receipt", authed(function(self)
-        local reg, owner, actor, e = resolve(self, "update"); if e then return e end
-        local row, msg, status = VatAiQueries.read_receipt(reg, owner, self.params.uuid, read_body(self), actor)
+        local reg, actor, e = resolve(self, "update"); if e then return e end
+        local row, msg, status = VatAiQueries.read_receipt(reg, self.params.uuid, read_body(self), actor)
         if not row then return err(status or 400, msg) end
         return { status = 200, json = { success = true, data = row } }
     end))
@@ -433,12 +451,12 @@ return function(app)
     end))
 
     app:get("/api/v2/vat/reports", authed(function(self)
-        local reg, owner, e = own_registration(self); if e then return e end
+        local reg, _, e = resolve(self, "read"); if e then return e end
         local from, to = self.params.from, self.params.to
-        if not (from and to and from:match("^%d%d%d%d%-%d%d%-%d%d$") and to:match("^%d%d%d%d%-%d%d%-%d%d$")) then
+        if not (VAT.valid_date(from) and VAT.valid_date(to)) then
             return err(400, "Give from and to like 2026-01-01")
         end
-        return { status = 200, json = { success = true, data = VatManagementQueries.report(reg, owner, from, to) } }
+        return { status = 200, json = { success = true, data = VatManagementQueries.report(reg, from, to) } }
     end))
 
     app:get("/api/v2/vat/returns/:uuid/export", authed(function(self)
@@ -532,8 +550,8 @@ return function(app)
     end
 
     app:put("/api/v2/vat/attribution", authed(function(self)
-        local reg, owner, _, e = resolve(self, "update"); if e then return e end
-        return result(VatSchemeQueries.set_attribution(reg, owner, read_body(self)))
+        local reg, _, e = resolve(self, "update"); if e then return e end
+        return result(VatSchemeQueries.set_attribution(reg, read_body(self)))
     end))
 
     app:get("/api/v2/vat/partial-exemption/annual", authed(function(self)
@@ -596,6 +614,28 @@ return function(app)
         return result(VatSchemeQueries.remove_member(reg, self.params.uuid))
     end))
 
+    -- A member workspace leaves its group (the representative removes members above).
+    app:post("/api/v2/vat/group/leave", authed(function(self)
+        if not NamespaceMiddleware.hasPermission(self, "vat", "manage") then
+            return err(403, "You don't have permission to manage this workspace's VAT")
+        end
+        return result(VatSchemeQueries.leave(self.namespace.id))
+    end))
+
+    -- The accountants acting for this business, for the business to see and stop
+    -- (not for an accountant acting as the client: ?client= is refused).
+    app:get("/api/v2/vat/accountants", authed(function(self)
+        if has_client(self) then return err(403, "Only the business itself can see who acts for it") end
+        local reg, _, e = resolve(self, "read"); if e then return e end
+        return ok_json(VatAgentQueries.for_registration(reg))
+    end))
+
+    app:delete("/api/v2/vat/accountants/:uuid", authed(function(self)
+        if has_client(self) then return err(403, "Only the business itself can see who acts for it") end
+        local reg, _, e = resolve(self, "update"); if e then return e end
+        return result(VatAgentQueries.revoke_for_registration(reg, self.params.uuid))
+    end))
+
     app:post("/api/v2/vat/group/join", authed(function(self)
         if not NamespaceMiddleware.hasPermission(self, "vat", "manage") then
             return err(403, "You don't have permission to manage this workspace's VAT")
@@ -644,7 +684,7 @@ return function(app)
         if b.tax_point ~= nil then
             if b.tax_point == "" or b.tax_point == cjson.null then
                 upd.tax_point = db.NULL
-            elseif type(b.tax_point) == "string" and b.tax_point:match("^%d%d%d%d%-%d%d%-%d%d$") then
+            elseif VAT.valid_date(b.tax_point) then
                 upd.tax_point = b.tax_point
             else
                 return err(400, "tax_point must be a date (YYYY-MM-DD)")

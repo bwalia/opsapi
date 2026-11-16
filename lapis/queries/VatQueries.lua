@@ -78,7 +78,7 @@ function VatQueries.validate_registration(f)
         out.recovery_pct = db.NULL
     end
     if f.effective_date and f.effective_date ~= "" then
-        if not tostring(f.effective_date):match("^%d%d%d%d%-%d%d%-%d%d$") then
+        if not VAT.valid_date(f.effective_date) then
             return nil, "Effective date must look like 2025-04-01"
         end
         out.effective_date = f.effective_date
@@ -99,14 +99,9 @@ end
 function VatQueries.save_registration(namespace_id, user_id, fields, actor_id)
     local clean, err = VatQueries.validate_registration(fields)
     if not clean then return nil, err, 400 end
-
-    -- A VAT number belongs to one business.
-    local taken = db.query([[SELECT 1 FROM vat_registrations WHERE vrn = ? AND status = 'active'
-        AND NOT (namespace_id = ? AND COALESCE(user_id, 0) = COALESCE(?, 0)) LIMIT 1]],
-        clean.vrn, namespace_id, user_id or db.NULL)
-    if taken and #taken > 0 then
-        return nil, "This VAT number is already registered on another account.", 409
-    end
+    -- No platform-wide "VAT number already taken" check: the number isn't verified here,
+    -- so a claim would let anyone block (and probe) another business's number. HMRC only
+    -- lets the person who signed in file for a number they're authorised for.
 
     local existing = VatQueries.get_registration(namespace_id, user_id)
     clean.updated_at = db.raw("NOW()")
@@ -215,7 +210,7 @@ function VatQueries.delete_rule(registration, uuid)
 end
 
 -- ---------------------------------------------------------------------------
--- VAT on bank lines (tax_transactions)
+-- VAT on a business's lines (a person's tax_transactions; a workspace's accounting lines)
 -- ---------------------------------------------------------------------------
 
 --- Work out the VAT fields for a line and code (no write).
@@ -238,11 +233,21 @@ function VatQueries.vat_fields(amount, code, opts)
     }
 end
 
---- A person sets (or corrects) the VAT on one of their lines.
-function VatQueries.set_transaction_vat(registration, user_id, uuid, fields, actor_id)
+--- One line of this business (its own bank lines, or the workspace's accounting lines),
+-- by uuid. @return { src, id, amount (positive), transaction_type, description, category }
+function VatQueries.find_line(registration, uuid)
+    local L = require("queries.VatReturnQueries")
+    local from = L.lines_from(registration)
+    if not from or type(uuid) ~= "string" then return nil end
+    return db.query([[SELECT l.src, l.id, l.amount, l.dir AS transaction_type, l.description, l.category
+        FROM ]] .. from .. " WHERE l.uuid = ? LIMIT 1", uuid)[1]
+end
+
+--- A person sets (or corrects) the VAT on one of the business's lines.
+function VatQueries.set_transaction_vat(registration, uuid, fields, actor_id)
     fields = fields or {}
-    local t = db.query([[SELECT id, amount FROM tax_transactions
-        WHERE uuid = ? AND user_id = ? AND namespace_id = ? LIMIT 1]], uuid, user_id, registration.namespace_id)[1]
+    local L = require("queries.VatReturnQueries")
+    local t = VatQueries.find_line(registration, uuid)
     if not t then return nil, "Transaction not found", 404 end
     local pct = fields.reclaimable_pct
     if pct ~= nil and pct ~= "" then
@@ -274,39 +279,30 @@ function VatQueries.set_transaction_vat(registration, user_id, uuid, fields, act
         vf.vat_evidence = cjson.encode(ev)
     end
     vf.updated_at = db.raw("NOW()")
-    db.update("tax_transactions", vf, { id = t.id })
-    return db.query([[SELECT uuid, amount, transaction_type, vat_code, net_amount, vat_amount, vat_notional,
-        vat_reclaimable_pct, vat_source, vat_reason, vat_evidence FROM tax_transactions WHERE id = ?]], t.id)[1]
+    L.write_line(t.src, t.id, vf)
+    return db.query([[SELECT l.uuid, l.amount, l.dir AS transaction_type, l.vat_code, l.net_amount, l.vat_amount,
+        l.vat_notional, l.vat_reclaimable_pct, l.vat_source, l.vat_reason, l.vat_evidence
+        FROM ]] .. L.lines_from(registration) .. " WHERE l.src = ? AND l.id = ?", t.src, t.id)[1]
 end
 
 --- Code every un-coded line (or every rule-coded line, with refresh) by the rules.
 -- People's own decisions (vat_source = 'user') are never changed.
 -- opts: { tax_year?, statement_id?, refresh? }
 -- @return { matched, unmatched, by_code = { CODE = n } }
-function VatQueries.apply_rules(registration, user_id, opts)
+function VatQueries.apply_rules(registration, opts)
     opts = opts or {}
-    local where = { "t.user_id = " .. db.escape_literal(user_id),
-        "t.namespace_id = " .. db.escape_literal(registration.namespace_id) }
-    if opts.refresh then
-        where[#where + 1] = "(t.vat_code IS NULL OR t.vat_source = 'rule')"
-    else
-        where[#where + 1] = "t.vat_code IS NULL"
-    end
-    if opts.tax_year and opts.tax_year ~= "" then
-        where[#where + 1] = "s.tax_year = " .. db.escape_literal(opts.tax_year)
-    end
-    if opts.statement_id and tonumber(opts.statement_id) then
-        where[#where + 1] = "t.statement_id = " .. db.escape_literal(tonumber(opts.statement_id))
-    end
-    local lines = db.query([[SELECT t.id, t.amount, t.description, t.category,
-            t.cleaned_merchant_name AS merchant
-        FROM tax_transactions t LEFT JOIN tax_statements s ON s.id = t.statement_id
-        WHERE ]] .. table.concat(where, " AND ")) or {}
+    local L = require("queries.VatReturnQueries")
+    local out = { matched = 0, unmatched = 0, by_code = {} }
+    local from = L.lines_from(registration)
+    if not from then return out end
+    local where = L.line_filters(registration, opts)
+    where[#where + 1] = opts.refresh and "(l.vat_code IS NULL OR l.vat_source = 'rule')" or "l.vat_code IS NULL"
+    local lines = db.query("SELECT l.src, l.id, l.amount, l.description, l.category, l.merchant FROM " .. from
+        .. " WHERE " .. table.concat(where, " AND ")) or {}
     local rules = db.query([[SELECT id, registration_id, match_type, match_value, vat_code, reclaimable_pct,
             reason, is_active
         FROM vat_rules WHERE is_active AND (registration_id IS NULL OR registration_id = ?)]], registration.id)
 
-    local out = { matched = 0, unmatched = 0, by_code = {} }
     local hits = {}
     for _, l in ipairs(lines) do
         local r = VAT.match_rule(rules, l)
@@ -321,7 +317,7 @@ function VatQueries.apply_rules(registration, user_id, opts)
                 vf.vat_registration_id = registration.id
                 vf.vat_decided_at = db.raw("NOW()")
                 vf.updated_at = db.raw("NOW()")
-                db.update("tax_transactions", vf, { id = l.id })
+                L.write_line(l.src, l.id, vf)
                 out.matched = out.matched + 1
                 out.by_code[r.vat_code] = (out.by_code[r.vat_code] or 0) + 1
                 hits[r.id] = (hits[r.id] or 0) + 1
