@@ -20,6 +20,7 @@ import {
   Settings,
   ScrollText,
   Crown,
+  TrendingDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -32,6 +33,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/market', label: 'Market', icon: LineChart },
   { href: '/dashboard/shop/suppliers', label: 'Suppliers', icon: Truck },
   { href: '/dashboard/shop/price-changes', label: 'Price changes', icon: Scale },
+  { href: '/dashboard/shop/below-cost', label: 'Below cost', icon: TrendingDown },
   { href: '/dashboard/shop/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/shop/quotes', label: 'Quotes', icon: FileText },
   { href: '/dashboard/shop/members', label: 'VIP members', icon: Crown },

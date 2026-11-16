@@ -20,6 +20,7 @@ const VARIANT: Record<ShopPriceChangeStatus, 'warning' | 'success' | 'info' | 'e
   approved: 'success',
   rejected: 'error',
   superseded: 'secondary',
+  blocked_below_cost: 'error',
 };
 
 function ChangePct({ pct }: { pct: number | null }) {

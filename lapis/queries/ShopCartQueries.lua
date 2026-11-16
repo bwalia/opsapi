@@ -117,9 +117,18 @@ end
 --- Add a line. Returns (Cart, notices) or (nil, err) — err has `violations`
 -- (422) when the configuration is invalid. Identical configurations merge.
 function ShopCartQueries.addLine(ns_id, cart, body)
-    local priced, bundle_or_err = Catalog.priceRequest(ns_id, body)
+    local priced, bundle_or_err, _, cost = Catalog.priceRequest(ns_id, body)
     if not priced then return nil, bundle_or_err end
     local bundle = bundle_or_err
+    if cost and cost.below_cost then
+        -- Never sold below cost: the customer is told it needs a price check (no cost), staff are alerted.
+        local err = require("queries.ShopCostQueries").refuse(ns_id, { {
+            product_id = bundle.product.id, product_uuid = bundle.product.uuid, product_name = bundle.product.name,
+            sku = bundle.product.sku, unit_price_minor = priced.unit_price_minor, unit_cost_minor = cost.unit_cost_minor,
+        } }, "cart")
+        err.violations = priced.violations
+        return nil, err
+    end
     if not priced.valid then
         return nil, U.err(422, "INVALID_CONFIGURATION", "This configuration is not valid",
             { violations = priced.violations, data = priced })

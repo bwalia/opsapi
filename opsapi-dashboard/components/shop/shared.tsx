@@ -11,6 +11,7 @@ import { cn, extractApiError, formatDateTime } from '@/lib/utils';
 import {
   formatMoney,
   humanize,
+  margin,
   orderStatusVariant,
   productStatusVariant,
   quoteStatusVariant,
@@ -26,6 +27,19 @@ import type {
 } from '@/types/shop';
 
 export const SHOP_MODULE = 'shop';
+
+/** Margin £ and % of a price over its cost; red when below cost, nothing when the cost is unknown. */
+export function MarginHint({ priceMinor, costMinor, className }: { priceMinor: number | null; costMinor: number | null | undefined; className?: string }) {
+  const m = margin(priceMinor, costMinor);
+  if (!m) return null;
+  return (
+    <span className={cn('text-xs tabular-nums', m.below ? 'font-semibold text-error-600' : 'text-secondary-500', className)}>
+      {m.below ? 'Below cost: ' : 'Margin '}
+      {formatMoney(m.minor)}
+      {m.pct !== null && ` (${m.pct.toFixed(1)}%)`}
+    </span>
+  );
+}
 
 /** Product/category thumbnail: resolves storefront-relative paths and falls back to a placeholder. */
 export function ShopThumb({ src, className, fallback }: { src?: string | null; className?: string; fallback: React.ReactNode }) {

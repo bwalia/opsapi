@@ -195,6 +195,7 @@ local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHO
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
+local shop_cost_floor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-cost-floor") or {}
 -- VIP membership: its tables and the shop columns it adds (shop_orders.credit_minor,
 -- shop_credits, ...) are used by every shop payment (card and bank transfer), so they ship
 -- with the SHOP feature alone. The schema only stores billing ids as plain columns; the
@@ -2756,6 +2757,8 @@ local _migrations = {
     ['zzs52_shop_customer_delivery_notifications'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 2),
     -- Order update emails staff send from the order page, test sends included (migrations/shop-order-emails.lua)
     ['zzs53_shop_order_emails'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_email_migrations, 1),
+    -- Never price below cost: product/option costs, blocked price changes (migrations/shop-cost-floor.lua)
+    ['zzs54_shop_cost_floor'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_cost_floor_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

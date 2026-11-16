@@ -12,6 +12,7 @@
 
       product = {
         slug, name, base_price_minor, vat_rate, price_mode, attributes = {},
+        cost_minor = <int|nil>,         -- effective cost ex VAT (nil = unknown); never copied into the output
         available = <int|nil>,          -- stock_qty - held reservations (nil = untracked)
         stock_key = "p:<id>",           -- aggregation key for demand / shortages
         allow_backorder = bool, lead_time_days = int,
@@ -21,6 +22,7 @@
         min_qty, max_qty, sort_order, is_active,
         options = { {
           code, name, price_delta_minor, max_qty, is_default, is_active, attributes = {},
+          cost_minor = <int|nil>,       -- effective cost of one unit (nil = unknown)
           available = <int|nil>, stock_key = "p:<id>"|"o:<id>"|nil,
           allow_backorder = bool, lead_time_days = int,
         } },
@@ -31,7 +33,11 @@
 
     Output: the Priced shape (BUILD.prompt.md §3) plus a second return value
     `demand` = { { stock_key, qty, name, available, allow_backorder } } that the
-    checkout uses to place stock reservations.
+    checkout uses to place stock reservations, and a third `cost` =
+    { known, unit_cost_minor, below_cost } (lib/shop-cost.lua). Cost never goes into
+    the Priced table (it is snapshotted into carts, quotes and orders customers see).
+    A priced line whose unit price is below its known unit cost is invalid with the
+    violation rule "below_cost" (customer message: "needs a price check").
 
     Rule kinds (shop_rules.params):
       requires   {"if":"<group>.<option>", "then_group":"<group>", "one_of":["<option>",...]}
@@ -50,6 +56,10 @@
 local ShopPricing = {}
 
 local DEFAULT_VAT = 0.20
+
+-- What a customer is told about a below-cost line; never the cost itself (lib/shop-cost.lua).
+ShopPricing.PRICE_CHECK_MESSAGE = "This item needs a price check before it can be ordered. "
+    .. "Our team has been told and will be in touch."
 
 -- ---------------------------------------------------------------------------
 -- helpers
@@ -420,8 +430,11 @@ function ShopPricing.price(product, groups, rules, selections, qty)
         end
     end
 
-    -- price + breakdown
+    -- price + breakdown (+ unit cost over the parts whose cost is known)
     local unit = int(product.base_price_minor, 0)
+    local unit_cost, cost_known = 0, false
+    local pcost = int(product.cost_minor, nil)
+    if pcost then unit_cost, cost_known = pcost, true end
     local breakdown = {}
     local label_parts = {}
     for _, g in ipairs(ordered_groups) do
@@ -429,6 +442,8 @@ function ShopPricing.price(product, groups, rules, selections, qty)
         for _, e in ipairs(resolved[g.code]) do
             local delta = int(e.opt.price_delta_minor, 0)
             unit = unit + delta * e.qty
+            local ocost = int(e.opt.cost_minor, nil)
+            if ocost then unit_cost, cost_known = unit_cost + ocost * e.qty, true end
             breakdown[#breakdown + 1] = {
                 group = g.code, option = e.option, name = e.opt.name or e.option,
                 qty = e.qty, price_delta_minor = delta,
@@ -436,6 +451,14 @@ function ShopPricing.price(product, groups, rules, selections, qty)
             names[#names + 1] = (e.qty > 1 and (tostring(e.qty) .. "× ") or "") .. (e.opt.name or e.option)
         end
         if #names > 0 then label_parts[#label_parts + 1] = table.concat(names, " + ") end
+    end
+
+    -- Never below cost. A quote_only product has no list price yet: staff price it (apply_override), and
+    -- that price is checked against the same cost (ShopPricing.below_cost).
+    local cost = { known = cost_known, unit_cost_minor = cost_known and unit_cost or nil, below_cost = false }
+    if cost_known and product.price_mode ~= "quote_only" and unit < unit_cost then
+        cost.below_cost = true
+        violate("below_cost", ShopPricing.PRICE_CHECK_MESSAGE, {})
     end
 
     local vat_rate = num(product.vat_rate, DEFAULT_VAT)
@@ -510,7 +533,13 @@ function ShopPricing.price(product, groups, rules, selections, qty)
             orderable = orderable,
         },
     }
-    return priced, demand
+    return priced, demand, cost
+end
+
+--- Is this unit price below the line's known cost (the third value price() returns)? Unknown cost never is.
+function ShopPricing.below_cost(unit_price_minor, cost)
+    if type(cost) ~= "table" or not cost.known or cost.unit_cost_minor == nil then return false end
+    return int(unit_price_minor, 0) < cost.unit_cost_minor
 end
 
 --- Apply an admin unit-price override to a Priced table (returns a copy).
