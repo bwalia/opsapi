@@ -9,15 +9,18 @@
     Reuses the existing (tested) /tax/extract and /tax/classify endpoints via
     authenticated internal calls, rather than re-implementing the pipeline.
 
-    processing_status lifecycle: QUEUED -> EXTRACTING -> CLASSIFYING -> COMPLETED | ERROR.
+    processing_status lifecycle: QUEUED -> EXTRACTING (PROCESSING while /tax/extract
+    runs) -> CLASSIFYING -> COMPLETED | ERROR.
 
     Surviving a restart: the worker lives in one nginx worker's memory, so a deploy or
-    pod restart kills it and its statements would sit at QUEUED/CLASSIFYING forever.
-    While a job runs it touches updated_at every minute (heartbeat). A statement still
-    in a working state whose updated_at is older than STALE_SECS has no live worker,
-    so the next status poll claims it (one atomic UPDATE, so only one pod wins) and
-    starts it again as the polling user. Extract skips rows it already stored and
-    classify only reads PENDING rows, so a resume carries on where it stopped.
+    pod restart kills it and its statements would sit at QUEUED/PROCESSING/CLASSIFYING
+    forever. While a job runs it touches updated_at every minute (heartbeat); a manual
+    /tax/extract or /tax/classify does the same (keep_alive). A statement still in a
+    working state whose updated_at is older than STALE_SECS has no live worker, so the
+    next status poll claims it (one atomic UPDATE, so only one pod wins) and starts it
+    again as the polling user. Extract skips rows it already stored and classify only
+    reads PENDING rows, so a resume carries on where it stopped. A statement that keeps
+    killing its worker is restarted MAX_RESUMES times, then set aside as ERROR.
     ponytail: move to a real job queue if this ever needs to run at scale.
 ]]
 
@@ -39,7 +42,15 @@ end
 -- A job touches its statements this often; one untouched for STALE_SECS is orphaned.
 local HEARTBEAT_SECS = 60
 local STALE_SECS = 300
-local WORKING = "('QUEUED','EXTRACTING','CLASSIFYING')"
+-- PROCESSING is what /tax/extract sets while it runs (inside a job or on its own).
+local WORKING = "('QUEUED','EXTRACTING','CLASSIFYING','PROCESSING')"
+-- Restarts one statement gets after its worker died before it is set aside as ERROR,
+-- so a file that kills the worker isn't restarted on every poll forever.
+local MAX_RESUMES = 3
+-- Jobs running at once in this nginx worker. Each holds an ngx.timer for its whole
+-- run (lua_max_running_timers is 256 per worker, shared with everything else).
+local MAX_JOBS = tonumber(os.getenv("TAX_PROCESS_MAX_JOBS") or "") or 32
+local running = 0
 
 -- Add a line to the tax-agent chat this upload came from, so it survives a reload
 -- (and the model sees that statements were uploaded / processed). Best-effort.
@@ -146,10 +157,16 @@ local function heartbeat(premature, job)
     ngx.timer.at(HEARTBEAT_SECS, heartbeat, job)
 end
 
--- Background worker: process each statement in turn (extract then classify).
-local function process_all(premature, job)
-    if premature then return end
-    ngx.timer.at(HEARTBEAT_SECS, heartbeat, job)
+--- Keep one statement fresh while a request works on it: a manual /tax/extract or
+-- /tax/classify can run for many minutes on a slow model, and a status poll must not
+-- take it for an orphan and start it a second time. Call the returned function when done.
+local function keep_alive(id)
+    local live = { statements = { { id = id } } }
+    ngx.timer.at(HEARTBEAT_SECS, heartbeat, live)
+    return function() live.done = true end
+end
+
+local function run_statements(job)
     local failed = 0
     for _, s in ipairs(job.statements) do
         local ok, err = pcall(function()
@@ -172,7 +189,6 @@ local function process_all(premature, job)
             failed = failed + 1
         end
     end
-    job.done = true
     local n = #job.statements
     if failed == 0 then
         session_note(job.session, "assistant",
@@ -183,6 +199,17 @@ local function process_all(premature, job)
             .. "Try uploading %s again, or use Tax → Statements."):format(n - failed, n, plural(n), failed,
             failed == 1 and "it" or "them"))
     end
+end
+
+-- Background worker: process each statement in turn (extract then classify).
+local function process_all(premature, job)
+    if not premature then
+        ngx.timer.at(HEARTBEAT_SECS, heartbeat, job)
+        local ok, err = pcall(run_statements, job)
+        if not ok then ngx.log(ngx.ERR, "[tax-process] job failed: ", tostring(err)) end
+    end
+    job.done = true
+    running = math.max(0, running - 1)
 end
 
 -- The caller's Authorization header plus, for a JWT, its verified payload so the
@@ -199,8 +226,9 @@ local function caller_identity(self)
 end
 
 local function start_job(self, statements, session, profile_type)
+    if running >= MAX_JOBS then return nil, "busy" end
     local auth, jwt_payload = caller_identity(self)
-    return ngx.timer.at(0, process_all, {
+    local ok, err = ngx.timer.at(0, process_all, {
         statements = statements,
         session = session,
         auth = auth,
@@ -208,6 +236,8 @@ local function start_job(self, statements, session, profile_type)
         profile_type = profile_type,
         port = tonumber(ngx.var.server_port) or 80,
     })
+    if ok then running = running + 1 end
+    return ok, err
 end
 
 local function decode(v)
@@ -217,32 +247,47 @@ local function decode(v)
     return ok and type(t) == "table" and t or nil
 end
 
+-- What the statement shows once it has been given up on.
+local GAVE_UP = "Processing this statement stopped " .. (MAX_RESUMES + 1) .. " times before it finished, "
+    .. "so it was set aside. Try uploading it again, or a CSV export of it."
+
 --- Restart this user's statements that a dead worker left half done.
--- Claims them in one UPDATE (a second pod polling at the same moment gets nothing),
--- then restarts them grouped by the chat + profile they were uploaded with.
+-- Claims them in one UPDATE (a second pod polling at the same moment gets nothing) and
+-- counts the restart in processing_job.resumes; a statement already restarted
+-- MAX_RESUMES times goes to ERROR instead. The rest restart grouped by the chat +
+-- profile they were uploaded with.
 -- @return number of statements resumed
 local function resume_orphans(self, user_id)
-    local sql = [[UPDATE tax_statements SET processing_status = 'QUEUED', updated_at = NOW()
-        WHERE user_id = ? AND processing_status IN ]] .. WORKING .. [[
-          AND updated_at < NOW() - (? * INTERVAL '1 second')
-        RETURNING id, uuid, file_name, processing_job]]
-    local ok, rows = pcall(db.query, sql, user_id, STALE_SECS)
-    if not ok then -- processing_job not migrated yet: resume without the chat/profile
-        ok, rows = pcall(db.query, (sql:gsub(", processing_job$", "")), user_id, STALE_SECS)
+    if running >= MAX_JOBS then return 0 end -- this worker is full: the next poll claims them
+    local resumes = "COALESCE((processing_job->>'resumes')::int, 0)"
+    local stale = [[ WHERE user_id = ? AND processing_status IN ]] .. WORKING .. [[
+          AND updated_at < NOW() - (? * INTERVAL '1 second')]]
+    local ok, rows = pcall(db.query, [[UPDATE tax_statements
+        SET processing_status = CASE WHEN ]] .. resumes .. [[ >= ? THEN 'ERROR' ELSE 'QUEUED' END,
+            error_message = CASE WHEN ]] .. resumes .. [[ >= ? THEN ? ELSE error_message END,
+            processing_job = (CASE WHEN jsonb_typeof(processing_job) = 'object' THEN processing_job
+                ELSE '{}'::jsonb END) || jsonb_build_object('resumes', ]] .. resumes .. [[ + 1),
+            updated_at = NOW()]] .. stale .. [[
+        RETURNING id, uuid, file_name, processing_job, processing_status]],
+        MAX_RESUMES, MAX_RESUMES, GAVE_UP, user_id, STALE_SECS)
+    if not ok then -- processing_job not migrated yet: resume without the chat/profile/count
+        ok, rows = pcall(db.query, "UPDATE tax_statements SET processing_status = 'QUEUED', updated_at = NOW()"
+            .. stale .. " RETURNING id, uuid, file_name", user_id, STALE_SECS)
     end
     if not ok or type(rows) ~= "table" or #rows == 0 then return 0 end
     table.sort(rows, function(a, b) return tonumber(a.id) < tonumber(b.id) end)
 
-    local groups, order = {}, {}
+    local groups, order, resumed = {}, {}, 0
     for _, r in ipairs(rows) do
         local pj = decode(r.processing_job) or {}
         local key = tostring(pj.session_id) .. "|" .. tostring(pj.profile_type)
         if not groups[key] then
-            groups[key] = { session_id = pj.session_id, profile_type = pj.profile_type, statements = {} }
+            groups[key] = { session_id = pj.session_id, profile_type = pj.profile_type, statements = {}, gave_up = {} }
             order[#order + 1] = key
         end
-        local g = groups[key].statements
-        g[#g + 1] = { id = r.id, uuid = r.uuid, file_name = r.file_name }
+        local list = r.processing_status == "ERROR" and groups[key].gave_up or groups[key].statements
+        list[#list + 1] = { id = r.id, uuid = r.uuid, file_name = r.file_name }
+        if list == groups[key].statements then resumed = resumed + 1 end
     end
     for _, key in ipairs(order) do
         local g = groups[key]
@@ -251,21 +296,56 @@ local function resume_orphans(self, user_id)
             session = db.query([[SELECT id, namespace_id, user_id FROM tax_agent_sessions
                 WHERE id = ? AND user_id = ? LIMIT 1]], tonumber(g.session_id), user_id)[1]
         end
+        for _, s in ipairs(g.gave_up) do
+            ngx.log(ngx.WARN, "[tax-process] gave up on statement ", s.uuid, " after ", MAX_RESUMES, " restarts")
+            session_note(session, "assistant", "⚠️ I couldn't finish " .. tostring(s.file_name or "a statement")
+                .. ": processing it stopped several times. Try uploading it again, or a CSV export of it.")
+        end
         local n = #g.statements
-        ngx.log(ngx.WARN, "[tax-process] resuming ", n, " orphaned statement(s) for user ", user_id)
-        session_note(session, "assistant", ("I was interrupted by a server update, so I've picked "
-            .. "up the remaining %d statement%s where I left off."):format(n, plural(n)))
-        if not start_job(self, g.statements, session, g.profile_type) then
-            for _, s in ipairs(g.statements) do set_status(s.id, "ERROR") end
+        if n > 0 then
+            ngx.log(ngx.WARN, "[tax-process] resuming ", n, " orphaned statement(s) for user ", user_id)
+            session_note(session, "assistant", ("I was interrupted by a server update, so I've picked "
+                .. "up the remaining %d statement%s where I left off."):format(n, plural(n)))
+            if not start_job(self, g.statements, session, g.profile_type) then
+                for _, s in ipairs(g.statements) do set_status(s.id, "ERROR") end
+            end
         end
     end
-    return #rows
+    return resumed
 end
 
 -- Declare M before the metatable: inside `local M = setmetatable(..., { __call = ...M... })`
 -- the closure would see the (nil) global M, and the routes would never mount.
-local M = { _classify_profile = classify_profile, _resume_orphans = resume_orphans, _internal = internal }
+local M = { _classify_profile = classify_profile, _resume_orphans = resume_orphans, _internal = internal,
+    keep_alive = keep_alive }
 setmetatable(M, { __call = function(_, app) return M.register(app) end })
+
+--- Rate limit for /tax/extract and /tax/classify. Real clients are limited per IP, as
+-- before. Calls from 127.0.0.1 are this file's background jobs, which run for EVERY
+-- user from that one address: counted per IP (in Redis, across pods) one user's upload
+-- used up everyone's allowance and other people's statements failed. They are counted
+-- per user instead; the worker waits out a 429 (see internal()).
+-- @param config table RateLimit.wrap config { rate, window, prefix }
+-- @param fn function the route handler (it runs after requireAuth)
+function M.limit(config, fn)
+    local RateLimit = require("middleware.rate-limit")
+    local per_ip = RateLimit.wrap(config, AuthMiddleware.requireAuth(fn))
+    local per_user = AuthMiddleware.requireAuth(function(self)
+        local u = self.current_user or {}
+        local allowed, _, retry_after = RateLimit.check(
+            config.prefix .. ":user:" .. tostring(u.uuid or u.id), config.rate, config.window)
+        if not allowed then
+            ngx.header["Retry-After"] = tostring(retry_after)
+            return { status = 429, json = { error = "Too many requests. Please try again later.",
+                retry_after = retry_after } }
+        end
+        return fn(self)
+    end)
+    return function(self)
+        if ngx.var.remote_addr == "127.0.0.1" then return per_user(self) end
+        return per_ip(self)
+    end
+end
 
 function M.register(app)
     local function parse_body()
@@ -316,7 +396,7 @@ function M.register(app)
                 statements[#statements + 1] = rows[1]
                 set_status(rows[1].id, "QUEUED")
                 -- What a resume needs after a restart (no credentials). Best-effort.
-                pcall(db.query, "UPDATE tax_statements SET processing_job = ?::jsonb WHERE id = ?",
+                pcall(db.query, "UPDATE tax_statements SET processing_job = ?::jsonb, error_message = NULL WHERE id = ?",
                     cjson.encode({ session_id = session and session.id or nil, profile_type = profile_type }),
                     rows[1].id)
                 if tax_year then
@@ -356,7 +436,7 @@ function M.register(app)
                    (SELECT count(*) FROM tax_transactions t WHERE t.statement_id = s.id
                         AND t.classification_status <> 'PENDING') AS classified_count
             FROM tax_statements s
-            WHERE s.user_id = ? AND s.processing_status IN ('QUEUED','EXTRACTING','CLASSIFYING','PROCESSING')
+            WHERE s.user_id = ? AND s.processing_status IN ]] .. WORKING .. [[
             ORDER BY s.id ASC]], user_id)
         return { status = 200, json = { success = true, data = rows or {} } }
     end))

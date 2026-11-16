@@ -13,6 +13,7 @@ local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local RateLimit = require("middleware.rate-limit")
 local Global = require("helper.global")
+local TaxProcess = require("routes.tax-process")
 
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -72,10 +73,11 @@ return function(app)
         end)
     )
 
-    -- POST /api/v2/tax/classify — classify all transactions for a statement
+    -- POST /api/v2/tax/classify — classify all transactions for a statement.
+    -- Limited per IP for clients, per user for the background worker (TaxProcess.limit).
     app:post("/api/v2/tax/classify",
-        RateLimit.wrap({ rate = 5, window = 60, prefix = "classify" },
-            AuthMiddleware.requireAuth(function(self)
+        TaxProcess.limit({ rate = 5, window = 60, prefix = "classify" },
+            function(self)
                 local statement_id = self.params.statement_id
                 local llm_provider = self.params.llm_provider
                 -- Opt-in re-run. By default we only classify never-classified rows
@@ -174,6 +176,8 @@ return function(app)
                 -- OR low confidence. (Named for the broader meaning, not just confidence.)
                 local needs_review_count = 0
 
+                -- Heartbeat while it runs so a status poll doesn't restart it as an orphan.
+                local stop = TaxProcess.keep_alive(statement_id)
                 local ok_run, run_err = pcall(function()
                     local results = Classifier.classify_batch(transactions, {
                         profile_type = profile_type,
@@ -218,6 +222,7 @@ return function(app)
                         end
                     end
                 end)
+                stop()
 
                 if not ok_run then
                     db.update("tax_statements",
@@ -266,7 +271,7 @@ return function(app)
                         profile_type = profile_type,
                     }
                 }
-            end)
+            end
         )
     )
 
