@@ -383,8 +383,10 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         join = { settings = s, m = Membership.reserve(ns_id, s, jemail, interval) }
         local vat_rate = effective_vat_rate(totals.subtotal_minor, totals.vat_minor)
         -- A new membership year: the whole yearly cap is available to the order they join with.
-        local d = R.apply_trade(s, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
-            R.cap_remaining(s, 0))
+        -- Offer v2 (Pro): no tiers or cap; pro_discount_pct when set, else no discount.
+        local js = R.effective(s, R.offer_version(s))
+        local d = R.apply_trade(js, join.m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
+            R.cap_remaining(js, 0))
         if d.discount_minor > 0 then
             trade = { pct = d.pct, discount_minor = d.discount_minor }
             totals = { subtotal_minor = d.subtotal_minor, vat_minor = d.vat_minor,
@@ -405,7 +407,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if (from == "cart" or (quote and quote_trade == 0)) and not trade and member.active and type(m) == "table"
             and (m.status == "active" or m.status == "past_due") then
             -- Limited to what is left of this membership year's cap (order discounts + join credits so far).
-            local ms = Membership.settings(ns_id)
+            -- A v1 member keeps the v1 tiers until their membership year ends (legacy_until); then, like
+            -- every v2 member, they get the Pro members' % (none while pro_discount_pct is 0).
+            local ms = select(3, Membership.benefitsOf(m, Membership.settings(ns_id)))
             local d = R.apply_trade(ms, m.tier, totals.subtotal_minor, vat_rate, totals.shipping_minor,
                 Membership.capRemaining(ns_id, m, ms))
             if d.discount_minor > 0 then

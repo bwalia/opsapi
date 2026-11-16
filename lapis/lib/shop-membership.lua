@@ -20,6 +20,10 @@
       clawback     discount taken back from a refund when a return drops the order below its tier
       year_bounds  membership year (anniversary of joined_at) containing a moment
       year_fees_net / gap   fees paid for a year (ex VAT) and the refund-the-gap amount
+      offer v2     Trade Account (free) + Pro (annual only, no order-discount tiers; optional Pro members' %).
+                   benefits / legacy_until / effective: members who joined under v1 keep their v1 discount
+                   until the end of the membership year in which v2 went live (and never less than
+                   V2_NOTICE_DAYS after it); new joiners and v1 members after that date get v2.
 
     Money is integer pence. Settings (per namespace, admin-editable) default to
     DEFAULTS below.
@@ -51,12 +55,21 @@ M.DEFAULTS = {
     discount_tier2_min_order_minor = 300000,
     -- Most Trade discount (order discounts + join credits) one membership year can take; 0 = no cap.
     discount_cap_minor = 150000,
+    -- Offer version for NEW joiners: "v1" (the tiers above, monthly or annual) or "v2" (Pro: annual only,
+    -- no tiers; pro_discount_pct off basket orders when > 0, 0 = no members' price). Switching to v2 records
+    -- offer_v2_since (a column, not here); v1 members keep v1 benefits until legacy_until.
+    offer_version = "v1",
+    pro_discount_pct = 0,
 }
 
 M.MAX_DISCOUNT_PCT = 50
 
 M.LOCK_DAYS_ALLOWED = { [60] = true, [120] = true }
 M.INTERVALS = { month = true, year = true }
+M.OFFER_VERSIONS = { v1 = true, v2 = true }
+M.V2_INTERVALS = { year = true }
+--- v1 members' terms promise 30 days' notice of a change, so v1 benefits never end sooner than this after v2 goes live.
+M.V2_NOTICE_DAYS = 30
 
 local function round(x) return math.floor(x + 0.5) end
 
@@ -78,12 +91,13 @@ function M.settings(row)
     end
     s.vat_rate = tonumber(s.vat_rate) or M.DEFAULTS.vat_rate
     s.uplift_pct = tonumber(s.uplift_pct) or M.DEFAULTS.uplift_pct
-    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct" }) do
+    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct", "pro_discount_pct" }) do
         local n = tonumber(s[k]) or M.DEFAULTS[k]
         if n < 0 or n > M.MAX_DISCOUNT_PCT then n = M.DEFAULTS[k] end
         s[k] = n
     end
     if not M.LOCK_DAYS_ALLOWED[s.lock_days] then s.lock_days = M.DEFAULTS.lock_days end
+    if not M.OFFER_VERSIONS[s.offer_version] then s.offer_version = M.DEFAULTS.offer_version end
     return s
 end
 
@@ -136,7 +150,11 @@ function M.validate_update(body)
         if not n or n < 0 or n > 500 then return nil, "uplift_pct must be between 0 and 500" end
         out.uplift_pct = n
     end
-    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct" }) do
+    if body.offer_version ~= nil then
+        if not M.OFFER_VERSIONS[body.offer_version] then return nil, "offer_version must be v1 or v2" end
+        out.offer_version = body.offer_version
+    end
+    for _, k in ipairs({ "founding_discount_pct", "standard_discount_pct", "pro_discount_pct" }) do
         if body[k] ~= nil then
             local n = tonumber(body[k])
             if not n or n < 0 or n > M.MAX_DISCOUNT_PCT then
@@ -479,6 +497,80 @@ function M.credit_label(amount_minor, min_order_minor, money)
     local label = money(amount_minor) .. " off your next order"
     if (tonumber(min_order_minor) or 0) > 0 then label = label .. " over " .. money(min_order_minor) end
     return label .. " (before VAT)"
+end
+
+-- ---------------------------------------------------------------------------------------------
+-- Offer v2 (Trade Account + Pro) and honouring v1 members until their membership year ends
+-- ---------------------------------------------------------------------------------------------
+
+--- Offer version a NEW joiner gets now ("v1" | "v2").
+function M.offer_version(s)
+    return (s and s.offer_version == "v2") and "v2" or "v1"
+end
+
+--- Billing intervals a new joiner may choose: v2 (Pro) is annual only.
+function M.join_intervals(s)
+    return M.offer_version(s) == "v2" and M.V2_INTERVALS or M.INTERVALS
+end
+
+--- Intervals as a sorted list (for the public offer).
+function M.join_interval_list(s)
+    local out = {}
+    for k in pairs(M.join_intervals(s)) do out[#out + 1] = k end
+    table.sort(out, function(a, b) return a == "month" and b ~= "month" end)
+    return out
+end
+
+--- When a v1 member's v1 benefits end (unix), or nil while v2 is not live (no end).
+-- The end of the membership year that contains the moment v2 went live (or, for someone who joined
+-- after that moment on a v1 checkout already under way, their first membership year), and never sooner
+-- than V2_NOTICE_DAYS after v2 went live.
+function M.legacy_until(joined_unix, v2_since_unix)
+    v2_since_unix = tonumber(v2_since_unix)
+    if not v2_since_unix then return nil end
+    joined_unix = tonumber(joined_unix)
+    if not joined_unix then return math.floor(v2_since_unix) + M.V2_NOTICE_DAYS * 86400 end
+    local anchor = math.max(math.floor(joined_unix), math.floor(v2_since_unix))
+    local _, year_end = M.year_bounds(joined_unix, anchor)
+    return math.max(year_end, math.floor(v2_since_unix) + M.V2_NOTICE_DAYS * 86400)
+end
+
+--- Which benefits a membership has right now: "v1" (the tiers it joined with) or "v2" (Pro).
+-- m_version: shop_memberships.offer_version; joined_unix: when it started (nil while pending);
+-- v2_since_unix: settings.offer_v2_since (nil while v2 is off). Switching back to v1 restores v1 for v1 members.
+function M.benefits(s, m_version, joined_unix, now_unix, v2_since_unix)
+    if m_version == "v2" then return "v2" end
+    if M.offer_version(s) ~= "v2" then return "v1" end
+    local until_unix = M.legacy_until(joined_unix, v2_since_unix)
+    if not until_unix then return "v1" end
+    return (math.floor(tonumber(now_unix) or 0) < until_unix) and "v1" or "v2"
+end
+
+--- Settings to price an order with, for a set of benefits: v1 = the settings as they are; v2 = no fixed
+-- tiers, no yearly cap and pro_discount_pct for every tier (0 = no discount). Every existing rule
+-- (apply_trade, discount_for, tiers, cap_remaining, clawback) then works unchanged.
+function M.effective(s, benefits)
+    if benefits ~= "v2" then return s end
+    local e = {}
+    for k, v in pairs(s) do e[k] = v end
+    local pct = math.max(0, math.min(M.MAX_DISCOUNT_PCT, tonumber(s.pro_discount_pct) or 0))
+    e.discount_fixed_minor = 0
+    e.discount_tier2_minor = 0
+    e.discount_cap_minor = 0
+    e.founding_discount_pct = pct
+    e.standard_discount_pct = pct
+    return e
+end
+
+--- v1-only perks: the 48-hour join credit, fees back as credit on big orders and refund-the-gap.
+function M.v1_perks(benefits)
+    return benefits ~= "v2"
+end
+
+--- Stripe line name for the fee.
+function M.fee_label(m_version, tier)
+    if m_version == "v2" then return "Workstation Pro (12 months)" end
+    return "Workstation VIP membership" .. (tier == "founding" and " (founding member)" or "")
 end
 
 --- Normalised email or nil.

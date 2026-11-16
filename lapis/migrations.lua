@@ -2756,6 +2756,9 @@ local _migrations = {
     ['zzs52_shop_customer_delivery_notifications'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 2),
     -- Order update emails staff send from the order page, test sends included (migrations/shop-order-emails.lua)
     ['zzs53_shop_order_emails'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_email_migrations, 1),
+    -- Membership offer v2 (Trade Account + Pro): offer_version / offer_v2_since / pro_discount_pct settings,
+    -- per-membership offer_version (existing rows = v1), paid_by + invoice_ref (migrations/shop-membership.lua [9])
+    ['zzs54_shop_membership_offer_v2'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 9),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

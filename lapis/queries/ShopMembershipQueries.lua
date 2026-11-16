@@ -13,6 +13,8 @@
       credits                 reserve at checkout, use when paid, release when not; VIP fee refund;
                               48-hour join credit on first activation
       membership year         discount used against the yearly cap, year stats, refund-the-gap claims
+      offer v2                Trade Account + Pro (annual only); v1 members keep v1 benefits until legacy_until
+                              (lib/shop-membership.lua benefits / effective); Pro paid by invoice (recordInvoicedPro)
       early access, waitlist
 
     Memberships are mirrored into billing_subscriptions (customer_id → customers)
@@ -60,9 +62,12 @@ end
 -- ---------------------------------------------------------------------------
 
 function Q.settings(ns_id)
-    local row = db.query("SELECT * FROM shop_membership_settings WHERE namespace_id = ?", ns_id)[1]
+    local row = db.query([[SELECT *, floor(extract(epoch FROM offer_v2_since))::bigint AS v2_since_unix
+                             FROM shop_membership_settings WHERE namespace_id = ?]], ns_id)[1]
     local s = R.settings(row)
     s.billing_app_id = row and row.billing_app_id or nil
+    -- When offer v2 went live (unix), nil while it is off: v1 members' benefits are measured from it.
+    s.v2_since_unix = row and tonumber(row.v2_since_unix) or nil
     return s
 end
 
@@ -74,6 +79,16 @@ function Q.updateSettings(ns_id, body)
     local tiers_ok, terr = R.validate_tiers(merged)
     if not tiers_ok then return nil, U.err(400, "VALIDATION_ERROR", terr) end
     db.query("INSERT INTO shop_membership_settings (namespace_id) VALUES (?) ON CONFLICT (namespace_id) DO NOTHING", ns_id)
+    if fields.offer_version ~= nil then
+        -- Going live with v2 starts the clock for v1 members once; going back to v1 clears it, so a later
+        -- switch to v2 gives v1 members a full notice period again.
+        local cur = Q.settings(ns_id)
+        if fields.offer_version == "v2" and not cur.v2_since_unix then
+            fields.offer_v2_since = db.raw("NOW()")
+        elseif fields.offer_version == "v1" then
+            fields.offer_v2_since = db.NULL
+        end
+    end
     if next(fields) then
         fields.updated_at = db.raw("NOW()")
         db.update("shop_membership_settings", fields, { namespace_id = ns_id })
@@ -88,6 +103,8 @@ function Q.foundingTaken(ns_id)
            AND (joined_at IS NOT NULL OR (status = 'pending' AND reserve_expires_at > NOW()))
     ]], ns_id)[1].n
 end
+
+local function iso_ts(unix) return os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(unix)) end
 
 local function price_view(p)
     return {
@@ -140,6 +157,13 @@ function Q.offer(ns_id)
         terms_version = s.terms_version,
         -- Basket checkout takes { membership } and charges the order and the first fee in one payment.
         join_with_order = true,
+        -- Offer v2: what a NEW joiner gets. "v2" = Pro (annual only, no order-discount tiers;
+        -- pro_discount_pct off basket orders when > 0). trade_discount above stays the v1 settings, which
+        -- members who joined under v1 keep until their membership year ends (see /member legacy_until).
+        offer_version = R.offer_version(s),
+        pro_discount_pct = s.pro_discount_pct,
+        intervals = U.arr(R.join_interval_list(s)),
+        offer_v2_since = s.v2_since_unix and iso_ts(s.v2_since_unix) or U.null,
     }
 end
 
@@ -147,6 +171,7 @@ function Q.adminSettings(ns_id)
     local s = Q.settings(ns_id)
     local out = {}
     for k in pairs(R.DEFAULTS) do out[k] = s[k] end
+    out.offer_v2_since = s.v2_since_unix and iso_ts(s.v2_since_unix) or U.null
     out.offer = Q.offer(ns_id)
     return out
 end
@@ -241,11 +266,28 @@ end
 -- joining
 -- ---------------------------------------------------------------------------
 
+-- A Pro fee paid by invoice has no Stripe subscription to end it: it is in force until its period end.
+local IN_FORCE = [[status IN ('active', 'past_due')
+           AND (paid_by <> 'invoice' OR current_period_end IS NULL OR current_period_end > NOW())]]
+
 local function active_membership(ns_id, email)
     return db.query([[
         SELECT * FROM shop_memberships WHERE namespace_id = ? AND lower(email) = lower(?)
-           AND status IN ('active', 'past_due') ORDER BY joined_at DESC NULLS LAST LIMIT 1
+           AND ]] .. IN_FORCE .. [[ ORDER BY joined_at DESC NULLS LAST LIMIT 1
     ]], ns_id, email)[1]
+end
+
+--- The benefits a membership row has right now ("v1" | "v2"), when its v1 benefits end (unix or nil),
+-- and the settings to price its orders with. s = Q.settings(ns_id).
+function Q.benefitsOf(m, s)
+    if not m then return "v1", nil, s end
+    local t = db.query([[SELECT floor(extract(epoch FROM joined_at))::bigint AS j,
+                                floor(extract(epoch FROM NOW()))::bigint AS now
+                           FROM shop_memberships WHERE id = ?]], m.id)[1] or {}
+    local version = m.offer_version or "v1"
+    local b = R.benefits(s, version, tonumber(t.j), tonumber(t.now), s.v2_since_unix)
+    local until_unix = version == "v1" and R.offer_version(s) == "v2" and R.legacy_until(tonumber(t.j), s.v2_since_unix) or nil
+    return b, until_unix, R.effective(s, b)
 end
 
 local function recurring_item(name, amount, interval)
@@ -265,7 +307,10 @@ function Q.validateJoin(ns_id, body)
     local email = R.email(body.email)
     if not email then return nil, U.err(400, "VALIDATION_ERROR", "Please enter a valid email address") end
     local interval = body.interval
-    if not R.INTERVALS[interval] then return nil, U.err(400, "VALIDATION_ERROR", "interval must be month or year") end
+    if not R.join_intervals(s)[interval] then
+        return nil, U.err(400, "VALIDATION_ERROR", R.offer_version(s) == "v2" and "Pro is annual: interval must be year"
+            or "interval must be month or year")
+    end
     if body.accept_terms ~= true then
         return nil, U.err(400, "TERMS_NOT_ACCEPTED", "Please read and accept the membership terms")
     end
@@ -289,17 +334,18 @@ function Q.reserve(ns_id, s, email, interval)
         local price = R.prices(s, tier)[interval]
         return db.query([[
             INSERT INTO shop_memberships (uuid, namespace_id, email, tier, billing_interval, net_minor, vat_minor, status,
-                                          reserve_expires_at, terms_version, terms_accepted_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NOW() + (? || ' minutes')::interval, ?, NOW(), NOW(), NOW())
+                                          reserve_expires_at, terms_version, terms_accepted_at, offer_version,
+                                          created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NOW() + (? || ' minutes')::interval, ?, NOW(), ?, NOW(), NOW())
             RETURNING *
         ]], Global.generateUUID(), ns_id, email, tier, interval, price.net_minor, price.vat_minor,
-            tostring(RESERVE_MINUTES), s.terms_version)[1]
+            tostring(RESERVE_MINUTES), s.terms_version, R.offer_version(s))[1]
     end)
 end
 
 --- Stripe recurring line items for a reserved membership (fee, then VAT).
 function Q.joinItems(s, m)
-    local label = "Workstation VIP membership" .. (m.tier == "founding" and " (founding member)" or "")
+    local label = R.fee_label(m.offer_version, m.tier)
     local items = { recurring_item(label, tonumber(m.net_minor), m.billing_interval) }
     if tonumber(m.vat_minor) > 0 then
         items[2] = recurring_item("VAT (" .. math.floor(s.vat_rate * 100 + 0.5) .. "%)", tonumber(m.vat_minor),
@@ -401,6 +447,9 @@ end
 -- without a Trade discount earns its tier amount as credit, within the yearly cap. One per order (unique index).
 local function issue_join_credits(m)
     local s = Q.settings(m.namespace_id)
+    local benefits, _, es = Q.benefitsOf(m, s)
+    if not R.v1_perks(benefits) then return end
+    s = es
     local orders = db.query([[
         SELECT o.id, o.order_number, o.subtotal_minor, o.credit_minor FROM shop_orders o
          WHERE o.namespace_id = ? AND lower(o.email) = lower(?) AND o.cart_id IS NOT NULL AND o.quote_id IS NULL
@@ -832,10 +881,11 @@ function Q.maybeIssueRefundCredit(order)
     if not email then return nil end
     local m = db.query([[
         SELECT * FROM shop_memberships WHERE namespace_id = ? AND lower(email) = lower(?)
-           AND status IN ('active', 'past_due') ORDER BY joined_at DESC LIMIT 1 FOR UPDATE
+           AND ]] .. IN_FORCE .. [[ ORDER BY joined_at DESC LIMIT 1 FOR UPDATE
     ]], order.namespace_id, email)[1]
     if not m then return nil end
     local s = Q.settings(order.namespace_id)
+    if not R.v1_perks((Q.benefitsOf(m, s))) then return nil end
     -- What the order was worth before any credit or trade discount (neither stops it qualifying).
     local qualifying = (tonumber(order.subtotal_minor) or 0) + (tonumber(order.credit_minor) or 0)
         + (tonumber(order.member_discount_minor) or 0)
@@ -884,6 +934,8 @@ end
 function Q.yearView(ns_id, m, s)
     if not m or not nz(m.joined_at) then return nil end
     s = s or Q.settings(ns_id)
+    local benefits, legacy_until
+    benefits, legacy_until, s = Q.benefitsOf(m, s)
     local t = db.query([[
         SELECT floor(extract(epoch FROM joined_at))::bigint AS j, floor(extract(epoch FROM created_at))::bigint AS c,
                floor(extract(epoch FROM NOW()))::bigint AS now
@@ -902,7 +954,11 @@ function Q.yearView(ns_id, m, s)
     }
     -- Refund-the-gap (annual plan): the year that ended at the last renewal, claimable for GAP_CLAIM_DAYS after it.
     v.gap = { eligible = false, gap_minor = 0, window_ends_at = nil, claimed_at = nil }
-    if m.billing_interval == "year" and k >= 1 then
+    -- Refund-the-gap is a v1 promise: only for a year that ended while v1 benefits applied.
+    local v1_year = (m.offer_version or "v1") == "v1" and (legacy_until == nil or ys <= legacy_until)
+    v.benefits = benefits
+    v.legacy_until = legacy_until
+    if m.billing_interval == "year" and k >= 1 and v1_year then
         local ps = R.add_years(j, k - 1)
         local pfrom = k == 1 and math.min(v.created, j) or ps
         local pd, pc = window_usage(ns_id, m.email, pfrom, ys)
@@ -924,6 +980,7 @@ end
 --- What is left of a member's yearly cap (nil = no cap). Not yet joined → the whole cap.
 function Q.capRemaining(ns_id, m, s)
     s = s or Q.settings(ns_id)
+    if m then s = select(3, Q.benefitsOf(m, s)) end
     if R.cap_remaining(s, 0) == nil then return nil end
     local v = Q.yearView(ns_id, m, s)
     if not v then return R.cap_remaining(s, 0) end
@@ -937,7 +994,7 @@ function Q.tradeDiscountFor(ns_id, email, subtotal_net, vat_rate, shipping_minor
     if not nz(email) then return nil end
     local m = active_membership(ns_id, email)
     if not m then return nil end
-    local s = Q.settings(ns_id)
+    local s = select(3, Q.benefitsOf(m, Q.settings(ns_id)))
     local remaining = Q.capRemaining(ns_id, m, s)
     local d = R.apply_trade(s, m.tier, subtotal_net, vat_rate, shipping_minor or 0, remaining)
     return { discount_minor = d.discount_minor or 0, tier = m.tier, pct = d.pct,
@@ -991,8 +1048,10 @@ function Q.me(ns_id, member)
         }
     end
     local s = Q.settings(ns_id)
+    local benefits, legacy_until
+    if m then benefits, legacy_until, s = Q.benefitsOf(m, s) end
     local pending = deactivation_row(ns_id, member.email, "pending")
-    local y = m and Q.yearView(ns_id, m, s) or nil
+    local y = m and Q.yearView(ns_id, m, Q.settings(ns_id)) or nil
     return {
         email = member.email,
         active = member.active == true,
@@ -1023,6 +1082,12 @@ function Q.me(ns_id, member)
                 eligible = y ~= nil and y.gap.eligible == true, gap_minor = y and y.gap.gap_minor or 0,
                 window_ends_at = iso(y and y.gap.window_ends_at), claimed_at = y and y.gap.claimed_at or U.null,
             },
+            -- Offer v2: what this member joined under, the benefits they have now ("v1" until legacy_until,
+            -- then "v2"), and when their v1 benefits end (null while v2 is off or for a v2 member).
+            offer_version = m.offer_version or "v1",
+            benefits = benefits or "v1",
+            legacy_until = iso(legacy_until),
+            paid_by = m.paid_by or "card",
         } or U.null,
         credits = U.arr(credits),
         lock_days = s.lock_days,
@@ -1294,7 +1359,7 @@ function Q.adminMembers(ns_id, params)
     return U.arr(db.query([[
         SELECT m.uuid, m.email, m.tier, m.billing_interval, m.status, m.net_minor, m.vat_minor, m.joined_at,
                m.current_period_end, m.cancel_at_period_end, m.fees_paid_net_minor, m.fees_credited_net_minor,
-               m.terms_version, l.uuid AS lead_uuid,
+               m.terms_version, m.offer_version, m.paid_by, m.invoice_ref, l.uuid AS lead_uuid,
                NULLIF(TRIM(COALESCE(NULLIF(l.first_name, 'Shop customer'), '') || ' ' || COALESCE(l.last_name, '')), '') AS name,
                l.company_name AS company, l.phone
           FROM shop_memberships m
@@ -1306,6 +1371,55 @@ function Q.adminMembers(ns_id, params)
          WHERE ]] .. table.concat(where, " AND ") .. [[
          ORDER BY m.joined_at DESC NULLS LAST LIMIT 1000
     ]], unpack(vals)))
+end
+
+--- POST /membership/members/invoiced — staff record a Pro fee paid by invoice against the customer's PO
+-- (offer v2 only). Starts a 12-month Pro membership now, or adds 12 months to the end of the customer's
+-- invoiced Pro already in force (a renewal). Stripe is not involved: the membership ends at its period
+-- end unless staff record the next payment.
+-- body: { email, invoice_ref } (invoice_ref: the paid invoice's number, required).
+function Q.recordInvoicedPro(ns_id, body, actor)
+    body = type(body) == "table" and body or {}
+    local s = Q.settings(ns_id)
+    if R.offer_version(s) ~= "v2" then
+        return nil, U.err(409, "OFFER_NOT_V2", "Pro by invoice needs offer_version v2 (Shop → Membership settings)")
+    end
+    local email = R.email(body.email)
+    if not email then return nil, U.err(400, "VALIDATION_ERROR", "email must be a valid email address") end
+    local ref = type(body.invoice_ref) == "string" and body.invoice_ref:gsub("%c", " "):match("^%s*(.-)%s*$") or ""
+    if #ref < 1 or #ref > 64 then return nil, U.err(400, "VALIDATION_ERROR", "invoice_ref is required (1–64 characters)") end
+    return U.tx(function()
+        db.query("SELECT pg_advisory_xact_lock(hashtext('shop_vip_cap_' || ?))", tostring(ns_id))
+        local cur = active_membership(ns_id, email)
+        if cur and cur.paid_by == "invoice" and cur.offer_version == "v2" then
+            db.query([[
+                UPDATE shop_memberships SET current_period_end = GREATEST(current_period_end, NOW()) + interval '1 year',
+                       fees_paid_net_minor = fees_paid_net_minor + net_minor, invoice_ref = ?, status = 'active',
+                       updated_at = NOW()
+                 WHERE id = ?
+            ]], ref, cur.id)
+            local m = reload(cur.id)
+            record_lead(m, "Pro renewed by invoice " .. ref .. " (recorded by " .. tostring(actor or "staff") .. ")")
+            return { membership_uuid = m.uuid, renewed = true, current_period_end = m.current_period_end }
+        end
+        if cur then
+            return nil, U.err(409, "ALREADY_MEMBER", "This email already has a membership in force")
+        end
+        local tier = R.tier_for(s, Q.foundingTaken(ns_id))
+        local price = R.prices(s, tier).year
+        local m = db.query([[
+            INSERT INTO shop_memberships (uuid, namespace_id, email, tier, billing_interval, net_minor, vat_minor, status,
+                                          joined_at, current_period_end, fees_paid_net_minor, terms_version,
+                                          terms_accepted_at, offer_version, paid_by, invoice_ref, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'year', ?, ?, 'active', NOW(), NOW() + interval '1 year', ?, ?, NOW(), 'v2', 'invoice',
+                    ?, NOW(), NOW())
+            RETURNING *
+        ]], Global.generateUUID(), ns_id, email, tier, price.net_minor, price.vat_minor, price.net_minor,
+            s.terms_version, ref)[1]
+        record_lead(m, "Joined Pro, paid by invoice " .. ref .. " (recorded by " .. tostring(actor or "staff") .. ")")
+        vip_alert(m)
+        return { membership_uuid = m.uuid, renewed = false, current_period_end = m.current_period_end }
+    end)
 end
 
 --- VIP status for a page of customer emails (dashboard badges). Only memberships in force count:
@@ -1329,7 +1443,7 @@ function Q.lookup(ns_id, emails)
         SELECT DISTINCT ON (lower(email)) lower(email) AS email, uuid, tier, billing_interval, status, joined_at,
                current_period_end, cancel_at_period_end
           FROM shop_memberships
-         WHERE namespace_id = ? AND status IN ('active', 'past_due') AND lower(email) IN (]] .. table.concat(marks, ",") .. [[)
+         WHERE namespace_id = ? AND ]] .. IN_FORCE .. [[ AND lower(email) IN (]] .. table.concat(marks, ",") .. [[)
          ORDER BY lower(email), joined_at DESC NULLS LAST
     ]], ns_id, unpack(list))
     for _, r in ipairs(rows) do out[r.email] = r end
