@@ -100,11 +100,15 @@ end
 function Property.build_cumulative_body(opts)
     opts = opts or {}
     if not opts.user_id then return nil, "user_id is required" end
-    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end)
+    local start_date, end_date, err = Aggregator.period_bounds(opts.tax_year, opts.period_end, opts.commencement_date)
     if not start_date then return nil, err end
     -- A mid-year update counts transactions up to the quarter end only.
     local upto = (opts.period_end and opts.period_end ~= "") and (" AND t.transaction_date <= "
         .. db.escape_literal(end_date)) or ""
+    -- A business that started this year: only what came after it started.
+    if start_date == opts.commencement_date then
+        upto = upto .. " AND t.transaction_date >= " .. db.escape_literal(start_date)
+    end
 
     -- A statement belongs to the year stamped on it, like the estimate.
     local rows = db.query([[

@@ -265,15 +265,51 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     end
     local is_property = (kind == PROPERTY)
 
-    -- Aggregate classified transactions into the MTD body.
-    local agg, aerr
-    if is_property then
-        agg, aerr = require("lib.hmrc-property-aggregator").build_cumulative_body({
-            user_id = user_id, tax_year = tax_year, period_end = opts.period_end, profile = fprofile })
-    else
-        agg, aerr = Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year,
-            period_end = opts.period_end })
+    -- Aggregate classified transactions into the MTD body. commenced: the business's
+    -- start date when it falls inside the period (see below).
+    local function aggregate(commenced)
+        if is_property then
+            return require("lib.hmrc-property-aggregator").build_cumulative_body({
+                user_id = user_id, tax_year = tax_year, period_end = opts.period_end, profile = fprofile,
+                commencement_date = commenced })
+        end
+        return Aggregator.build_cumulative_body({ user_id = user_id, tax_year = tax_year,
+            period_end = opts.period_end, commencement_date = commenced })
     end
+    -- Why these figures can't go to HMRC (a ready error response), or nil.
+    local function refusal(agg, commenced)
+        if #agg.negative_fields > 0 then
+            if is_property then
+                return { status = 422, json = {
+                    error = "Your rental income comes out negative, which HMRC rejects. Check refunds or money "
+                        .. "paid back to tenants are categorised correctly.",
+                    negative_fields = agg.negative_fields } }
+            end
+            local neg_fields = {}
+            for _, nf in ipairs(agg.negative_fields) do
+                table.insert(neg_fields, (nf.field:gsub("Disallowable$", "")))
+            end
+            return { status = 422, json = {
+                error = "Aggregated body has negative values — HMRC would reject it. Fix the "
+                    .. "miscategorised credit/refund before submitting.",
+                negative_fields = agg.negative_fields,
+                offending_transactions = Aggregator.credit_offenders({ user_id = user_id, tax_year = tax_year,
+                    period_end = opts.period_end, commencement_date = commenced }, neg_fields) } }
+        end
+        if agg.empty then
+            return { status = 422, json = { error = "No income or expenses to submit for this tax year" } }
+        end
+        local unreviewed = tonumber(agg.stats and agg.stats.excluded_unreviewed) or 0
+        if opts.require_reviewed and unreviewed > 0 then
+            return { status = 422, json = {
+                code = "UNREVIEWED_TRANSACTIONS",
+                unreviewed = unreviewed,
+                error = unreviewed .. " transaction(s) for " .. tax_year .. " still need review. They are "
+                    .. "left out of the figures, so filing now would under-report them — review them first." } }
+        end
+    end
+
+    local agg, aerr = aggregate()
     if not agg then return nil, { status = 400, json = { error = aerr } } end
     -- Live HMRC refuses an update more than 10 days before its period ends: say when
     -- it can go instead of sending it (the sandbox accepts any dates).
@@ -283,35 +319,8 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
             error = "HMRC takes the update for the period ending " .. agg.tax_year_end .. " from " .. from
                 .. ". Pick the quarter HMRC has open now, or come back then." } }
     end
-    if #agg.negative_fields > 0 then
-        if is_property then
-            return nil, { status = 422, json = {
-                error = "Your rental income comes out negative, which HMRC rejects. Check refunds or money "
-                    .. "paid back to tenants are categorised correctly.",
-                negative_fields = agg.negative_fields } }
-        end
-        local neg_fields = {}
-        for _, nf in ipairs(agg.negative_fields) do
-            table.insert(neg_fields, (nf.field:gsub("Disallowable$", "")))
-        end
-        return nil, { status = 422, json = {
-            error = "Aggregated body has negative values — HMRC would reject it. Fix the "
-                .. "miscategorised credit/refund before submitting.",
-            negative_fields = agg.negative_fields,
-            offending_transactions = Aggregator.credit_offenders(
-                { user_id = user_id, tax_year = tax_year, period_end = opts.period_end }, neg_fields) } }
-    end
-    if agg.empty then
-        return nil, { status = 422, json = { error = "No income or expenses to submit for this tax year" } }
-    end
-    local unreviewed = tonumber(agg.stats and agg.stats.excluded_unreviewed) or 0
-    if opts.require_reviewed and unreviewed > 0 then
-        return nil, { status = 422, json = {
-            code = "UNREVIEWED_TRANSACTIONS",
-            unreviewed = unreviewed,
-            error = unreviewed .. " transaction(s) for " .. tax_year .. " still need review. They are "
-                .. "left out of the figures, so filing now would under-report them — review them first." } }
-    end
+    local refused = refusal(agg)
+    if refused then return nil, refused end
 
     -- Resolve the business id: param → stored default → the right business from HMRC.
     local business_id = self.params.business_id
@@ -331,6 +340,19 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
         return nil, { status = 422, json = {
             error = "No HMRC " .. (is_property and "UK property" or "self-employment")
                 .. " business found for this National Insurance number." } }
+    end
+
+    -- A business that started inside the period: live HMRC refuses an update that starts
+    -- before its commencement date (RULE_START_DATE_NOT_ALIGNED_TO_COMMENCEMENT_DATE), so
+    -- the update starts on it and counts only what came after. Not known: as before.
+    local details = Client.get_business(token, nino, business_id,
+        { test_scenario = Client.is_sandbox() and "STATEFUL" or nil })
+    local commenced = type(details) == "table" and details.commencementDate
+    if Aggregator.starts_inside(commenced, agg.tax_year_start, agg.tax_year_end) then
+        agg, aerr = aggregate(commenced)
+        if not agg then return nil, { status = 400, json = { error = aerr } } end
+        refused = refusal(agg, commenced)
+        if refused then return nil, refused end
     end
 
     -- Build the body (self-employment needs the period dates added; property has them).
