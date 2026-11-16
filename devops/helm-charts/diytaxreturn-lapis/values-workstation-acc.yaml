@@ -109,3 +109,9 @@ extraEnv:
   APP_NAME: "Workstation OpsAPI"
   # No DIY Tax Return support address in tax ID-lock messages (only the support chat).
   SUPPORT_EMAIL: ""
+
+# DB backup retention (templates/cronjob.yaml): hourly dumps kept 1 day, daily 7 days.
+# Non-prod; without this the hourly dumps filled INT's MinIO (50Gi) in a month.
+backup:
+  keepHourly: 1d
+  keepDaily: 7d
