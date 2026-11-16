@@ -156,6 +156,13 @@ function SetupNamespace.run(config)
             })
             modules_created = modules_created + 1
             print("  + Created module: " .. m.machine_name)
+            -- Owners and admins don't bypass RBAC: a module nobody holds can't be used until
+            -- someone grants it by hand. Give it to them on creation (first insert only), the
+            -- same as ModuleQueries.create does.
+            local ok_p, perr = pcall(function()
+                require("queries.ModuleQueries").propagateToNamespaceAdmins(m.machine_name, project_code)
+            end)
+            if not ok_p then print("    ! could not grant " .. m.machine_name .. " to owner/admin roles: " .. tostring(perr)) end
         end
     end
 
