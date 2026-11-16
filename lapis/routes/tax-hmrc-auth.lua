@@ -91,7 +91,7 @@ end
 -- the HMRC application subscribed to the VAT (MTD) API; income-tax connections
 -- don't ask for them, so they keep working without that subscription.
 local Scopes = {}
-function Scopes.for_purpose(purpose)
+local function purpose_scopes(purpose)
     if purpose == "vat" then
         return "read:self-assessment write:self-assessment read:vat write:vat"
     end
@@ -101,6 +101,15 @@ function Scopes.for_purpose(purpose)
             .. "read:check-relationship"
     end
     return "read:self-assessment write:self-assessment"
+end
+-- A person has ONE HMRC connection (hmrc_tokens): ask for the scopes it already has
+-- too, so connecting for VAT never drops Income Tax's, or the other way round.
+function Scopes.for_purpose(purpose, existing)
+    local seen, out = {}, {}
+    for s in ((type(existing) == "string" and existing or "") .. " " .. purpose_scopes(purpose)):gmatch("%S+") do
+        if not seen[s] then seen[s] = true; out[#out + 1] = s end
+    end
+    return table.concat(out, " ")
 end
 
 return function(app)
@@ -201,7 +210,8 @@ return function(app)
             auth_base,
             ngx.escape_uri(client_id),
             ngx.escape_uri(redirect_uri),
-            ngx.escape_uri(Scopes.for_purpose(self.params.purpose)),
+            ngx.escape_uri(Scopes.for_purpose(self.params.purpose, (require("lapis.db").query(
+                "SELECT scope FROM hmrc_tokens WHERE user_uuid = ? LIMIT 1", user_uuid)[1] or {}).scope)),
             ngx.escape_uri(state)
         )
 
