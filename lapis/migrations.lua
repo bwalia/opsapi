@@ -2850,6 +2850,11 @@ local _migrations = {
             .. " WHERE key = 'reports' AND name = 'Reports'")
         db.query("UPDATE menu_items SET is_active = false, updated_at = NOW() WHERE key = 'delivery' AND is_active")
     end,
+    -- "Orders" is the Stores & Products module's orders, not the shop's (those are under Shop → Orders):
+    -- call it Sales Orders so the two aren't confused. Workspaces that renamed it keep theirs.
+    ['zzmn3_orders_menu_is_sales_orders'] = function()
+        db.query("UPDATE menu_items SET name = 'Sales Orders', updated_at = NOW() WHERE key = 'orders' AND name = 'Orders'")
+    end,
     -- A workspace may opt in to the deployment's own (self-hosted) model as an AI provider.
     ['zzai2_platform_model_provider'] = function()
         db.query([[
