@@ -65,7 +65,7 @@ function suggestionsFor(message: string | undefined, quickReplies: string[] | nu
   return [];
 }
 
-function stageLabel(p: StatementStatus): string {
+export function stageLabel(p: StatementStatus): string {
   switch (p.processing_status) {
     case 'QUEUED': return 'Queued…';
     case 'EXTRACTING':

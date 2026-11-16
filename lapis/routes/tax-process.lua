@@ -170,14 +170,20 @@ local function run_statements(job)
     local failed = 0
     for _, s in ipairs(job.statements) do
         local ok, err = pcall(function()
-            ngx.log(ngx.INFO, "[tax-process] extracting ", s.uuid)
-            set_status(s.id, "EXTRACTING")
-            local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, job)
-            if not r1 or r1.status >= 400 then error("extract HTTP " .. tostring(r1 and r1.status)) end
-            ngx.log(ngx.INFO, "[tax-process] classifying ", s.uuid, " (extract HTTP ", r1.status, ")")
+            -- A statement already read (Statements page: Classify / Re-classify) goes straight
+            -- to classify; reading the file again would only find the same rows.
+            local step = (db.query("SELECT workflow_step FROM tax_statements WHERE id = ?", s.id)[1] or {}).workflow_step
+            if step ~= "EXTRACTED" and step ~= "CLASSIFIED" then
+                ngx.log(ngx.INFO, "[tax-process] extracting ", s.uuid)
+                set_status(s.id, "EXTRACTING")
+                local r1 = internal("POST", "/api/v2/tax/extract", "statement_id=" .. s.uuid, job)
+                if not r1 or r1.status >= 400 then error("extract HTTP " .. tostring(r1 and r1.status)) end
+            end
+            ngx.log(ngx.INFO, "[tax-process] classifying ", s.uuid)
             set_status(s.id, "CLASSIFYING")
             local body = "statement_id=" .. s.uuid
             if job.profile_type then body = body .. "&profile_type=" .. job.profile_type end
+            if job.reclassify then body = body .. "&reclassify=true" end
             local r2 = internal("POST", "/api/v2/tax/classify", body, job)
             if not r2 or r2.status >= 400 then error("classify HTTP " .. tostring(r2 and r2.status)) end
             ngx.log(ngx.INFO, "[tax-process] completed ", s.uuid, " (classify HTTP ", r2.status, ")")
@@ -225,7 +231,7 @@ local function caller_identity(self)
     return auth, jwt_payload
 end
 
-local function start_job(self, statements, session, profile_type)
+local function start_job(self, statements, session, profile_type, reclassify)
     if running >= MAX_JOBS then return nil, "busy" end
     local auth, jwt_payload = caller_identity(self)
     local ok, err = ngx.timer.at(0, process_all, {
@@ -234,6 +240,7 @@ local function start_job(self, statements, session, profile_type)
         auth = auth,
         jwt_payload = jwt_payload,
         profile_type = profile_type,
+        reclassify = reclassify,
         port = tonumber(ngx.var.server_port) or 80,
     })
     if ok then running = running + 1 end
@@ -386,7 +393,12 @@ function M.register(app)
                 WHERE uuid = ? AND user_id = ? LIMIT 1]], sid, user_id)[1]
         end
 
+        -- The chat's landlord rule first; else the profile the Statements page picked.
+        local asked = tostring(data.profile_type or self.params.profile_type or "")
         local profile_type = classify_profile(session, user_id)
+            or (asked:match("^[%w_]+$") and #asked <= 64 and asked or nil)
+        -- Re-classify: also re-run rows the AI already sorted (never the user's confirmed ones).
+        local reclassify = tostring(data.reclassify or self.params.reclassify or "") == "true"
         local statements = {}
         for _, ident in ipairs(ids) do
             local rows = db.query(
@@ -418,7 +430,7 @@ function M.register(app)
                 :format(n, plural(n)))
         end
 
-        local ok = start_job(self, statements, session, profile_type)
+        local ok = start_job(self, statements, session, profile_type, reclassify)
         if not ok then
             for _, s in ipairs(statements) do set_status(s.id, "ERROR") end
             return { status = 503, json = { error = "Could not start processing. Please try again." } }

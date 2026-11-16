@@ -561,32 +561,19 @@ export const taxService = {
   },
 
   // ── Classification ──────────────────────────────────────────────────────────
-  async classifyTransactions(
-    statementId: number,
-    profileType?: string,
-    reclassify?: boolean,
-  ): Promise<{
-    message: string;
-    classified?: number;
-    needs_review?: number;
-    total?: number;
-    profile_type?: string;
-  }> {
+  /**
+   * Start sorting a statement's transactions in the background (the server's statement
+   * worker). The AI takes from seconds to about a minute per transaction, so this returns
+   * at once; follow it with taxAgentService.processStatus() until the statement drops off.
+   */
+  async classifyInBackground(statementUuid: string, profileType?: string, reclassify?: boolean): Promise<void> {
     const params = new URLSearchParams();
-    params.append('statement_id', String(statementId));
-    // Optional per-run business profile. When provided it wins over the user's saved
-    // default; when omitted the backend uses the saved default (then sole_trader).
+    params.append('statement_ids', statementUuid);
+    // The business profile to sort as (the server keeps a landlord chat's own choice).
     if (profileType) params.append('profile_type', profileType);
-    // Opt-in re-run: also re-classify rows the AI already set (e.g. after a profile
-    // change). User-confirmed rows are always preserved server-side.
+    // Also re-run rows the AI already sorted; rows the user confirmed are always kept.
     if (reclassify) params.append('reclassify', 'true');
-    // AI classification runs the LLM per transaction (a local model can take
-    // several seconds each), so a whole statement easily exceeds the global
-    // 30s axios timeout and the request gets cancelled. Allow up to 5 minutes.
-    const response = await apiClient.post(`${TAX_BASE}/classify`, params.toString(), {
-      timeout: 300000,
-    });
-    return response.data;
+    await apiClient.post('/api/v2/tax/statements/process', params.toString());
   },
 
   async getClassificationProviders(): Promise<Array<{ name: string; available: boolean }>> {

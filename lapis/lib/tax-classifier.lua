@@ -843,6 +843,9 @@ function Classifier.classify_batch(transactions, opts)
                 }
             end
         end
+        -- Lets the caller save each batch as it finishes: on a slow model a statement takes
+        -- minutes, and saved rows are both the progress the UI shows and work a crash keeps.
+        if opts.on_batch then opts.on_batch(results, batch_start, batch_end) end
     end
 
     return results

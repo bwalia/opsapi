@@ -29,6 +29,8 @@ import { formatDate, formatCurrency, snakeToTitle } from '@/lib/utils';
 import StatementUploader, { useStatementQueue, type StatementItem } from '@/components/tax/StatementUploader';
 import type { DetectedBankDetails } from '@/services/tax.service';
 import type { TableColumn } from '@/types';
+import taxAgentService, { type StatementStatus } from '@/services/tax-agent.service';
+import { stageLabel } from '@/components/tax/TaxAgentChat';
 import toast from 'react-hot-toast';
 
 const STATUS_CONFIG: Record<string, { label: string; classes: string; icon: React.ReactNode }> = {
@@ -99,6 +101,12 @@ function StatementsContent() {
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  // Statements the server is sorting in the background (uuid → live status). The AI can take
+  // about a minute per transaction, so the page follows the job instead of waiting on one
+  // request; leaving and coming back picks the job up again.
+  const [working, setWorking] = useState<Record<string, StatementStatus>>({});
+  const workingRef = useRef(working);
+  workingRef.current = working;
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   // Business profile that classification runs as (prefilled from the saved default).
   const [profileOptions, setProfileOptions] = useState<
@@ -138,6 +146,7 @@ function StatementsContent() {
         setStatements(result.data);
         setTotal(result.total);
       }
+      return result.data;
     } catch {
       toast.error('Failed to load statements');
     } finally {
@@ -197,6 +206,43 @@ function StatementsContent() {
       setViewLoading(false);
     }
   }, []);
+
+  // Follow background jobs; when one finishes, reload and say how it went.
+  const pollWorking = useCallback(async () => {
+    let list: StatementStatus[];
+    try {
+      list = await taxAgentService.processStatus();
+    } catch {
+      return;
+    }
+    const now: Record<string, StatementStatus> = {};
+    for (const s of list) now[s.uuid] = s;
+    const finished = Object.keys(workingRef.current).filter((u) => !now[u]);
+    setWorking(now);
+    if (finished.length === 0) return;
+    const fresh = await fetchStatements();
+    for (const u of finished) {
+      const st = fresh?.find((s) => (s.uuid || String(s.id)) === u);
+      if (!st) continue;
+      if ((st.processing_status || '').toUpperCase() === 'ERROR') {
+        toast.error(st.error_message || `We couldn't sort ${st.file_name || 'this statement'}. Please try again.`);
+      } else {
+        toast.success(`${st.file_name || 'Your statement'}: every transaction is sorted`);
+        openStatementView(st);
+      }
+    }
+  }, [fetchStatements, openStatementView]);
+
+  const busy = Object.keys(working).length > 0;
+  // On arrival: pick up any job still running (the server also restarts ones a deploy stopped).
+  useEffect(() => {
+    pollWorking();
+  }, [pollWorking]);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(pollWorking, 3000);
+    return () => clearInterval(t);
+  }, [busy, pollWorking]);
 
   const handleSetDefaultProfile = async () => {
     if (!selectedProfile || selectedProfile === savedProfile) return;
@@ -380,16 +426,14 @@ function StatementsContent() {
     )
       return;
     setProcessingId(statement.id);
+    const key = statement.uuid || String(statement.id);
     try {
-      const result = await taxService.classifyTransactions(statement.id, selectedProfile || undefined, reclassify);
-      toast.success(
-        `${result.message || 'Classification complete'}${result.profile_type ? ` (as ${result.profile_type})` : ''}`,
-      );
-      fetchStatements();
-      // Show the (re)classified results inline.
-      openStatementView(statement);
-    } catch {
-      toast.error('Failed to classify transactions');
+      await taxService.classifyInBackground(key, selectedProfile || undefined, reclassify);
+      setWorking((w) => ({ ...w, [key]: { uuid: key, file_name: statement.file_name, processing_status: 'QUEUED' } }));
+      toast.success('Sorting your transactions now. It keeps going if you leave this page.');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || "We couldn't start sorting this statement. Please try again.");
     } finally {
       setProcessingId(null);
     }
@@ -461,6 +505,15 @@ function StatementsContent() {
       key: 'status',
       header: 'Status',
       render: (item) => {
+        const job = working[item.uuid || String(item.id)];
+        if (job) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {stageLabel(job)}
+            </span>
+          );
+        }
         const config = STATUS_CONFIG[statementStatus(item)] || STATUS_CONFIG.uploaded;
         return (
           <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.classes}`}>
@@ -505,7 +558,7 @@ function StatementsContent() {
               <Eye className="w-4 h-4" />
             </button>
           )}
-          {statementStatus(item) === 'classified' && (
+          {statementStatus(item) === 'classified' && !working[item.uuid || String(item.id)] && (
             <button
               onClick={(e) => { e.stopPropagation(); handleClassify(item, true); }}
               disabled={processingId === item.id}
@@ -515,7 +568,7 @@ function StatementsContent() {
               {processingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             </button>
           )}
-          {statementStatus(item) === 'extracted' && (
+          {statementStatus(item) === 'extracted' && !working[item.uuid || String(item.id)] && (
             <button
               onClick={(e) => { e.stopPropagation(); handleClassify(item); }}
               disabled={processingId === item.id}
