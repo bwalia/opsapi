@@ -1,0 +1,34 @@
+Copyright (c) 2024-2026 Balinder Walia. All rights reserved.
+
+OpsAPI, including its source code, object code, documentation, database schemas,
+configuration, deployment charts, designs, images and other materials in this
+repository (the "Software"), is proprietary and confidential to Balinder Walia,
+who owns all intellectual property rights in it.
+
+The source code is published for viewing only. No licence or other right is
+granted, by implication, estoppel or otherwise, except as set out below or in a
+separate written agreement signed by Balinder Walia.
+
+Without such an agreement you may not:
+  - use, run or deploy the Software, in whole or in part, for any purpose;
+  - copy, modify, adapt, translate or create derivative works of it;
+  - distribute, sublicense, sell, rent, lease or lend it, or offer it to others
+    as a hosted or managed service;
+  - remove or alter any copyright, trademark or other proprietary notice.
+
+Viewing the source on GitHub, and forking it within GitHub as GitHub's Terms of
+Service allow, does not grant any of the rights above.
+
+Parts of this repository that carry their own licence file (for example
+sdk/typescript/LICENSE) are licensed under that file's terms. Third-party
+components keep their own licences; see NOTICE.
+
+"OpsAPI" and its logos are trademarks of Balinder Walia.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+Licensing enquiries: bwalia@tenthmatrix.co.uk

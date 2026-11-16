@@ -17,7 +17,7 @@ export default function FeaturesPage() {
                     <p className="eyebrow">Features</p>
                     <h1 className="display-x">Everything behind one API</h1>
                     <p className="lead-x">
-                        {count} capabilities in five groups, all in the open-source code on GitHub. Business modules are
+                        {count} capabilities in five groups, all in the code on GitHub. Business modules are
                         switched on per deployment, so a product only carries what it uses.
                     </p>
                     <ul className="hero__chips" aria-label="Jump to a group">

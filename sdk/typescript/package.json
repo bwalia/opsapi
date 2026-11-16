@@ -3,6 +3,7 @@
   "version": "1.3.0",
   "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification, billing entitlements and licences.",
   "license": "MIT",
+  "author": "Balinder Walia",
   "homepage": "https://github.com/bwalia/opsapi/tree/main/sdk/typescript#readme",
   "bugs": { "url": "https://github.com/bwalia/opsapi/issues" },
   "keywords": ["opsapi", "api-client", "openapi", "typescript", "webhooks", "entitlements", "licensing", "property"],
