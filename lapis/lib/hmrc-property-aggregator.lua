@@ -10,7 +10,8 @@
 --   * mortgage payments are never deducted (capital + interest in one line). Interest
 --     comes from what the landlord told the assistant: residential interest goes in
 --     residentialFinancialCost (HMRC gives the 20% credit), commercial interest is an
---     ordinary expense (financialCosts).
+--     ordinary expense (financialCosts). Interest classified from the statements is
+--     residential unless the landlord said it's commercial (TaxTools._finance_split).
 -- Only CLASSIFIED and CONFIRMED rows count; PENDING / NEEDS_REVIEW are left out and
 -- counted so filing can refuse until they are reviewed.
 
@@ -46,10 +47,12 @@ end
 --- Pure: turn grouped rows + the landlord's stated interest into the HMRC body.
 -- rows: list of { transaction_type, category, hmrc_category, is_income, deductible, amount }
 -- profile: { property_finance_costs, commercial_finance_costs }
+-- finance_split: TaxTools._finance_split (passed in by tests; required otherwise)
 -- Returns { income = {...}, expenses = {...}, residential = n, commercial_added = n,
 --           negative_income = { field = value } }
-function Property.fold(rows, profile, commercial_interest)
+function Property.fold(rows, profile, finance_split)
     profile = profile or {}
+    finance_split = finance_split or require("lib.agent.tax-tools")._finance_split
     local income, expenses = {}, {}
     local classified_interest = 0
     for _, r in ipairs(rows or {}) do
@@ -69,12 +72,9 @@ function Property.fold(rows, profile, commercial_interest)
         end
     end
 
-    -- Residential interest: never an expense. If an older classification still claimed
-    -- interest from the statements, take the residential part back out (as the estimate does).
-    local fin = math.max(0, tonumber(profile.property_finance_costs) or 0)
-    local moved = math.min(fin, math.max(0, classified_interest))
-    local added = commercial_interest and commercial_interest(profile,
-        { finance_interest = classified_interest }, fin) or 0
+    -- Residential interest: never an expense. Interest classified from the statements is
+    -- taken back out and claimed as the credit, unless stated commercial (as the estimate does).
+    local fin, moved, added = finance_split(profile, classified_interest)
     if moved ~= 0 or added ~= 0 then
         expenses.financialCosts = (expenses.financialCosts or 0) - moved + added
     end
@@ -119,8 +119,7 @@ function Property.build_cumulative_body(opts)
         GROUP BY 1, 2, 3, 4, 5
     ]], opts.user_id, opts.tax_year) or {}
 
-    local ok_tools, TaxTools = pcall(require, "lib.agent.tax-tools")
-    local folded = Property.fold(rows, opts.profile, ok_tools and TaxTools._commercial_interest or nil)
+    local folded = Property.fold(rows, opts.profile)
 
     local counts = db.query([[
         SELECT COUNT(*) FILTER (WHERE t.classification_status IN ('PENDING','NEEDS_REVIEW')) AS unreviewed,
