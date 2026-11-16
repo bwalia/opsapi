@@ -1226,7 +1226,11 @@ function FileWizardContent() {
               total={txTotal}
               confirmed={txConfirmed}
               toCheck={overview.estimate.unreviewed ?? 0}
-              onChanged={loadOverview}
+              onChanged={() => {
+                loadOverview();
+                // Step 6 adds up confirmed rows only: re-check it so it never warns about rows just confirmed.
+                if (preview) loadPreview();
+              }}
             />
           ) : loadingOverview ? (
             <p className="flex items-center gap-2 text-sm text-secondary-500">

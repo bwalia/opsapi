@@ -367,9 +367,12 @@ local function buildAndSubmitCumulative(self, HMRC, Client, Aggregator, opts)
     -- obligations (e.g. XBIS12345678901) are NOT stateful, so submitting against them
     -- returns MATCHING_RESOURCE_NOT_FOUND. Self-heal: provision a stateful business for
     -- this NINO + tax year and retry once, so the user never has to know about provisioning.
+    -- Same when the test business was made for a later year: it "started" after this
+    -- period, so HMRC refuses this year's update (RULE_START_DATE_NOT_ALIGNED_TO_COMMENCEMENT_DATE;
+    -- one starting inside the period is handled above). Live HMRC never gets here.
     local sres, serr, sbody = submit(token, nino, business_id, tax_year, body)
-    if not sres and Client.is_sandbox()
-        and sbody and sbody.code == "MATCHING_RESOURCE_NOT_FOUND" then
+    if not sres and Client.is_sandbox() and sbody and (sbody.code == "MATCHING_RESOURCE_NOT_FOUND"
+        or sbody.code == "RULE_START_DATE_NOT_ALIGNED_TO_COMMENCEMENT_DATE") then
         local new_biz, perr = provisionSandboxBusiness(Client, Aggregator, token, nino, tax_year, user_id, kind)
         if new_biz then
             business_id = new_biz
