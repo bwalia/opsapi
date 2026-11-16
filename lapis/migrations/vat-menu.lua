@@ -48,4 +48,37 @@ return {
             end
         end
     end,
+
+    -- 3. Step 2 grants only when IT creates the module, but on existing installs
+    --    scripts/setup-namespace.lua had already created "vat" and "vat_agent" (from
+    --    PROJECT_MODULES, without granting them), so no owner or admin held them and
+    --    workspace VAT, groups and accountants worked only for platform admins. Grant
+    --    them to owner/admin roles in every workspace where no role has the key yet
+    --    (a workspace that already set it, even by taking it away, is left alone).
+    [3] = function()
+        local cjson = require("cjson.safe")
+        local t = db.query("SELECT to_regclass('public.namespace_roles') IS NOT NULL AS ok")[1]
+        if not (t and (t.ok == true or t.ok == "t")) then return end
+        local roles = db.query("SELECT id, namespace_id, role_name, permissions FROM namespace_roles") or {}
+        for _, key in ipairs({ "vat", "vat_agent" }) do
+            local configured, granted = {}, 0
+            for _, r in ipairs(roles) do
+                local perms = type(r.permissions) == "string" and cjson.decode(r.permissions) or nil
+                if type(perms) == "table" and perms[key] ~= nil then configured[r.namespace_id] = true end
+            end
+            for _, r in ipairs(roles) do
+                if (r.role_name == "owner" or r.role_name == "admin") and not configured[r.namespace_id] then
+                    local perms = type(r.permissions) == "string" and cjson.decode(r.permissions) or nil
+                    if type(perms) == "table" then
+                        perms[key] = { "manage" }
+                        local enc = cjson.encode(perms)
+                        db.update("namespace_roles", { permissions = enc }, { id = r.id })
+                        r.permissions = enc
+                        granted = granted + 1
+                    end
+                end
+            end
+            print("[VAT] " .. key .. ": granted to " .. granted .. " owner/admin role(s)")
+        end
+    end,
 }
