@@ -201,7 +201,7 @@ local function clean_customer(c, require_contact)
     local out = {}
     for _, k in ipairs({ "name", "email", "company", "phone", "vat_number" }) do
         local v = U.nz(c[k])
-        if v ~= nil then out[k] = tostring(v):sub(1, 255) end
+        if v ~= nil then out[k] = U.cut((tostring(v):gsub("%c", " ")), 255) end -- one line: names go into email subjects
     end
     if type(c.address) == "table" then
         out.address = c.address
@@ -217,6 +217,14 @@ local function clean_customer(c, require_contact)
     return out
 end
 ShopQuoteQueries.cleanCustomer = clean_customer
+
+--- valid_until from staff: nil (not given), the date, or (nil, message) for something that isn't a real date.
+local function valid_until_of(v)
+    if not U.nz(v) then return nil end
+    local d = U.date(v)
+    if not d then return nil, "valid_until must be a date (YYYY-MM-DD)" end
+    return d
+end
 
 --- Price an array of {product_slug, qty, selections, price_override_minor?}.
 -- opts.admin allows overrides, inactive products and invalid configurations.
@@ -745,28 +753,30 @@ function ShopQuoteQueries.sendToCustomer(ns_id, uuid, opts)
         return nil, U.err(503, "EMAIL_NOT_CONFIGURED", "No email server is set up for this workspace")
     end
     local discount = discount_of(q)
+    local brand = require("queries.ShopSettingsQueries").brandName(ns_id)
     local sent, merr = Mail.send({
-        to = to, subject = (opts.test and "[TEST] " or "") .. title .. " " .. q.quote_number .. " from Workstation",
+        to = to, subject = (opts.test and "[TEST] " or "") .. title .. " " .. q.quote_number .. " from " .. brand,
         template = "shop_order_authorisation",
         smtp = smtp, sync = true,
         from_email = smtp and smtp.from_email or nil,
-        from_name = smtp and smtp.from_name or "Workstation",
+        from_name = smtp and smtp.from_name or brand,
         reply_to = smtp and smtp.reply_to or nil,
         data = {
-            app_name = "Workstation", document_title = title, number = q.quote_number, is_order = staff_order(q),
+            app_name = brand, document_title = title, number = q.quote_number, is_order = staff_order(q),
             customer_name = customer.name, total = U.money(tonumber(q.total_minor) or 0),
             po_number = U.nz(q.customer_po_number), revision_no = tonumber(q.revision_no) or 0,
             discount = discount > 0 and U.money(discount) or nil, delivery_method = q.delivery_method,
             valid_until = q.valid_until and tostring(q.valid_until):sub(1, 10) or nil,
             test = opts.test == true, test_customer = opts.test and customer.email or nil,
-            link = opts.test and (shaped.public_url .. "&preview=1") or shaped.public_url, attached = pdf ~= nil, call_phone = U.env("SHOP_CALL_PHONE") or "+44 7515 356 146",
+            link = opts.test and (shaped.public_url .. "&preview=1") or shaped.public_url, attached = pdf ~= nil, call_phone = U.env("SHOP_CALL_PHONE"),
         },
         attachments = pdf and { { filename = q.quote_number .. ".pdf", content_type = "application/pdf",
                                   content_b64 = ngx.encode_base64(pdf) } } or nil,
     })
     if not sent then
         ngx.log(ngx.ERR, "[shop-quotes] email for ", q.quote_number, " failed: ", tostring(merr))
-        return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent: " .. tostring(merr):sub(1, 200))
+        return nil, U.err(502, "EMAIL_FAILED", "The email could not be sent. Check the workspace's email settings "
+            .. "(Workspace → Email) and try again")
     end
     if not opts.test then
         db.query([[UPDATE shop_quotes SET sent_at = NOW(), updated_at = NOW(),
@@ -942,13 +952,15 @@ function ShopQuoteQueries.adminCreate(ns_id, body, user_id)
     if not f then return nil, U.err(400, "VALIDATION_ERROR", ferr) end
     local po, perr = Rules.clean_po_number(body.customer_po_number)
     if perr then return nil, U.err(400, "VALIDATION_ERROR", perr) end
+    local valid_until, verr = valid_until_of(body.valid_until)
+    if verr then return nil, U.err(400, "VALIDATION_ERROR", verr) end
     local shipping = U.int(body.shipping_minor, 0)
     local staff = f.discount_minor or 0
     local trade = type(f.trade) == "number" and f.trade or 0
     if f.trade == "apply" then trade = trade_discount(ns_id, customer.email, lines, shipping, staff) end
     local q = ShopQuoteQueries.insert(ns_id, {
         lines = lines, customer = customer, notes = body.notes, internal_notes = body.internal_notes,
-        source = "admin", status = body.status or "draft", valid_until = body.valid_until,
+        source = "admin", status = body.status or "draft", valid_until = valid_until,
         shipping_minor = shipping, created_by_user_id = user_id,
         kind = f.kind or "quote", discount_minor = staff, discount_label = f.discount_label or nil,
         trade_discount_minor = trade, delivery_method = f.delivery_method or nil,
@@ -985,7 +997,9 @@ function ShopQuoteQueries.adminUpdate(ns_id, uuid, body)
     if body.internal_notes ~= nil then fields.internal_notes = U.nz(body.internal_notes) or db.NULL end
     if body.valid_until ~= nil then
         if not U.nz(body.valid_until) then return nil, U.err(400, "VALIDATION_ERROR", "valid_until is required") end
-        fields.valid_until = body.valid_until
+        local d, verr = valid_until_of(body.valid_until)
+        if not d then return nil, U.err(400, "VALIDATION_ERROR", verr) end
+        fields.valid_until = d
     end
     if body.customer ~= nil then
         local customer, cerr = clean_customer(body.customer, false)
@@ -1082,7 +1096,9 @@ function ShopQuoteQueries.revise(ns_id, uuid, body, user_id)
     local lines, lerr = ShopQuoteQueries.priceLines(ns_id, inputs, { admin = true })
     if not lines then return nil, lerr end
     -- Still in date: keep the date; expired: a fresh 30 days (or what staff chose).
-    local valid_until = U.nz(body.valid_until) or (not src.is_past_validity and src.valid_until) or nil
+    local chosen, verr = valid_until_of(body.valid_until)
+    if verr then return nil, U.err(400, "VALIDATION_ERROR", verr) end
+    local valid_until = chosen or (not src.is_past_validity and src.valid_until) or nil
 
     local new_id, terr = U.tx(function()
         -- Lock the old quote and the original so two revisions can't take the same number.

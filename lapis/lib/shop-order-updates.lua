@@ -19,6 +19,7 @@
       validate(body)               ({ headline, message }) | (nil, { field, message })
       delivery_summary(o)          "Tue 18 Nov 2026, morning, to 1 High St, London SW1A 1AA" or nil
       note_line(stamp, to, by, h)  the line appended to the order's internal notes after a real send
+      team_signature(brand)        "The Acme Ltd team" (an update from a staff member with no name)
 ]]
 
 local R = require("lib.shop-delivery-change")
@@ -29,8 +30,12 @@ M.HEADLINE_MAX = 120
 M.MESSAGE_MAX = 4000
 M.MAX_PER_DAY = 5        -- real sends to the customer per order in any 24 hours
 M.TEST_MAX_PER_DAY = 20  -- test sends per order in any 24 hours
-M.DEFAULT_SIGNATURE = "The Workstation team"
 M.TEMPLATE_KEY = "shop.order_update"
+
+--- How an update is signed when the staff member has no name: "The <workspace> team".
+function M.team_signature(brand)
+    return "The " .. tostring(brand) .. " team"
+end
 
 -- Never name a supplier or distributor here: the customer only deals with us.
 M.PRESETS = {

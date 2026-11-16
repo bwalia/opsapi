@@ -124,7 +124,7 @@ NamespaceMail.TEMPLATES = {
         subject = "{{headline}}: order {{order_number}}",
         variables = { "customer_name", "first_name", "order_number", "headline", "message", "order_link",
             "delivery_summary", "signature", "app_name", "call_phone" },
-        sample = { app_name = "Workstation", customer_name = "Ann Lee", first_name = "Ann", order_number = "WS-10042",
+        sample = { app_name = "Acme Ltd", customer_name = "Ann Lee", first_name = "Ann", order_number = "WS-10042",
             headline = "Order received",
             message = "Thank you, we've received your order WS-10042. We've placed the order with our supplier and "
                 .. "your item is reserved for you.\n\nWe'll be in touch to agree a delivery time that suits you.",
@@ -366,7 +366,8 @@ function NamespaceMail.send(namespace_id, key, to, data, brand, extra)
     if type(extra) == "table" and type(extra.attachments) == "table" then m.attachments = extra.attachments end
     if smtp then
         m.from_email = smtp.from_email
-        m.from_name = (brand and brand.app_name) or smtp.from_name
+        -- The workspace chose its own sender name with its own server: that wins over the template's brand.
+        m.from_name = smtp.from_name or (brand and brand.app_name)
         m.reply_to = (brand and brand.support_email ~= "" and brand.support_email) or smtp.reply_to
     elseif brand then
         m.from_name = brand.app_name

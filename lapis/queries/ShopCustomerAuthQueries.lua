@@ -161,7 +161,7 @@ local function locked(retry_after)
 end
 
 --- { email, password } → { session_token, email (masked) }; emails a 6-digit code.
-function Q.passwordStart(_, body)
+function Q.passwordStart(ns, body)
     body = type(body) == "table" and body or {}
     local email = R.email(body.email)
     local password = type(body.password) == "string" and body.password or nil
@@ -180,8 +180,9 @@ function Q.passwordStart(_, body)
     end
     Throttle.clear(key)
 
+    local brand = require("queries.ShopSettingsQueries").brandName(ns.id)
     local sent, send_err = OTP.sendToEmail({ id = user.id, email = user.email, first_name = user.first_name },
-        { app_name = "Workstation", header_title = "Workstation shop" })
+        { app_name = brand, header_title = brand .. " shop" })
     if send_err == "rate_limited" then return nil, locked(Throttle.OTP_SEND.window) end
     if not sent then ngx.log(ngx.ERR, "[shop-sign-in] OTP send failed for user ", user.id, ": ", tostring(send_err)) end
 

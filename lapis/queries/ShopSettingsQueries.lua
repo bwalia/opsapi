@@ -75,6 +75,13 @@ function Q.orderAlertEmail(ns_id)
     return e ~= U.null and e or nil
 end
 
+--- The name customer emails go out under: the workspace's "Name in emails", else its name.
+function Q.brandName(ns_id)
+    local n = db.query("SELECT * FROM namespaces WHERE id = ?", ns_id)[1] or {}
+    local name = U.nz(type(n.email_name) == "string" and n.email_name:match("^%s*(.-)%s*$")) or U.nz(n.name)
+    return name or U.env("APP_NAME") or "OpsAPI"
+end
+
 --- May we email the customer when staff decide on their delivery change request? Off by default.
 function Q.customerDeliveryNotifications(ns_id)
     return Q.get(ns_id).customer_delivery_notifications == true

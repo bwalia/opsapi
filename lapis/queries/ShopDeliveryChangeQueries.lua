@@ -38,7 +38,7 @@ local COLS = [[
     r.created_at, r.updated_at
 ]]
 
-local CUSTOMER_MESSAGE = "Thanks — we've received your delivery change request. Workstation will confirm it soon; "
+local CUSTOMER_MESSAGE = "Thanks — we've received your delivery change request. We'll confirm it soon; "
     .. "watch out for our email or SMS."
 
 local function nn(v) return U.nz(v) or U.null end
@@ -216,7 +216,7 @@ local function staff_alert(o, req, cur)
         local name = U.nz(customer.name) or U.nz(req.address.name) or U.nz(o.email) or "Customer"
         local first, last = tostring(name):match("^(%S+)%s*(.*)$")
         local base = (U.env("FRONTEND_URL") or ""):gsub("/+$", "")
-        local notes = table.concat({
+        local notes = U.join("\n",
             "Order " .. o.order_number .. " (" .. o.status .. "): the customer has asked to change the delivery.",
             "Nothing changes on the order until you approve it.",
             "Requested by: " .. req.email,
@@ -231,8 +231,7 @@ local function staff_alert(o, req, cur)
             "  Now: " .. R.window_label(cur.window),
             "  Requested: " .. (req.window and R.window_label(req.window) or "no change"),
             req.note and ("\nCustomer note:\n" .. req.note) or nil,
-            base ~= "" and ("\nApprove or decline it: " .. base .. "/dashboard/shop/orders/" .. o.uuid) or nil,
-        }, "\n")
+            base ~= "" and ("\nApprove or decline it: " .. base .. "/dashboard/shop/orders/" .. o.uuid) or nil)
         require("queries.CrmLeadNotificationQueries").notify(ns, {
             first_name = first or name, last_name = last ~= "" and last or nil,
             email = req.email, phone = U.nz(customer.phone) or req.address.phone,
@@ -417,16 +416,17 @@ local function notify_customer(o, r, decision)
         local details = {}
         for i = 1, 5 do if rows[i] then details[#details + 1] = rows[i] end end
         local base = (U.env("SHOP_PUBLIC_URL") or ""):gsub("/+$", "")
+        local brand = Settings.brandName(o.namespace_id)
         local queued = Mail.send({
             to = to,
             subject = (approved and "Delivery change confirmed: order " or "Delivery change not possible: order ") .. o.order_number,
             template = "notification",
             smtp = smtp,
             from_email = smtp and smtp.from_email or nil,
-            from_name = smtp and smtp.from_name or "Workstation",
+            from_name = smtp and smtp.from_name or brand,
             reply_to = smtp and smtp.reply_to or nil,
             data = {
-                app_name = "Workstation",
+                app_name = brand,
                 title = approved and "Your delivery change is confirmed" or "We couldn't make your delivery change",
                 message = approved and "We've updated the delivery for your order as you asked."
                     or "Sorry, we weren't able to change the delivery for your order as requested. Your original delivery "
