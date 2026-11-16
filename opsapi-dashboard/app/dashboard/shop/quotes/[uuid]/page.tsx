@@ -27,6 +27,7 @@ import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type 
 import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
 import { NextStepPanel, PoNumberField, StatusTimeline, quoteNextStep, quoteTimeline, type PanelAction } from '@/components/shop/workflow';
 import { ReviseQuoteModal } from '@/components/shop/ReviseQuoteModal';
+import { DealCodeBar } from '@/components/shop/DealCode';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { humanize, minorToPounds, poundsToMinor, quotePdfUrl } from '@/lib/shop';
 import { SHOP_QUOTE_STATUSES, type ShopQuote, type ShopQuoteStatus } from '@/types/shop';
@@ -465,7 +466,10 @@ function QuoteDetail() {
             </div>
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <Textarea label="Notes (shown to customer)" id="q-notes" rows={4} value={details.notes} disabled={!editable} onChange={(e) => setDetails({ ...details, notes: e.target.value })} />
-              <Textarea label="Internal notes" id="q-inotes" rows={4} value={details.internal_notes} disabled={!editable} onChange={(e) => setDetails({ ...details, internal_notes: e.target.value })} />
+              <div className="space-y-2">
+                <DealCodeBar code={quote.deal_code} kind="quote" uuid={quote.uuid} editable={editable} onChanged={reload} />
+                <Textarea label="Internal notes" id="q-inotes" rows={4} value={details.internal_notes} disabled={!editable} onChange={(e) => setDetails({ ...details, internal_notes: e.target.value })} />
+              </div>
             </div>
           </Card>
         </div>

@@ -195,6 +195,7 @@ local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHO
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
+local shop_deal_code_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-deal-codes") or {}
 -- VIP membership: its tables and the shop columns it adds (shop_orders.credit_minor,
 -- shop_credits, ...) are used by every shop payment (card and bank transfer), so they ship
 -- with the SHOP feature alone. The schema only stores billing ids as plain columns; the
@@ -2756,6 +2757,11 @@ local _migrations = {
     ['zzs52_shop_customer_delivery_notifications'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 2),
     -- Order update emails staff send from the order page, test sends included (migrations/shop-order-emails.lua)
     ['zzs53_shop_order_emails'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_email_migrations, 1),
+    -- Deal codes: one private code per deal linking lead/quotes/orders to supplier requests/POs, plus supplier
+    -- price requests and the idempotent backfill (migrations/shop-deal-codes.lua). zzs54 is taken by the cost floor.
+    ['zzs55_shop_deal_codes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 1),
+    ['zzs56_shop_supplier_requests'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 2),
+    ['zzs57_shop_deal_codes_backfill'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 3),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

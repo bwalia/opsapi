@@ -19,6 +19,7 @@ local Cart = require("queries.ShopCartQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
 local Rules = require("lib.shop-quote-rules")
+local Deal = require("queries.ShopDealQueries")
 
 local ShopQuoteQueries = {}
 
@@ -33,7 +34,7 @@ local QUOTE_COLS = [[
     q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at, q.price_locked,
     q.kind, q.discount_minor, q.discount_label, q.trade_discount_minor, q.delivery_method,
     q.delivery_address::text AS delivery_address, q.sent_at, q.authorised_at, q.authorised_by_name,
-    q.customer_po_number, q.revision_no, q.revision_of_id, q.superseded_by_id,
+    q.customer_po_number, q.revision_no, q.revision_of_id, q.superseded_by_id, q.deal_code,
     (q.valid_until < NOW()) AS is_past_validity
 ]]
 
@@ -160,6 +161,8 @@ function ShopQuoteQueries.shape(q, opts)
     out.list_subtotal_minor = list.subtotal_minor
     out.list_vat_minor = list.vat_minor
     if opts.admin then
+        -- The deal code is private: staff and suppliers only, never in the customer's shape (see the spec).
+        out.deal_code = U.nz(q.deal_code) or U.null
         out.internal_notes = q.internal_notes or U.null
         out.viewed_at = q.viewed_at or U.null
         out.updated_at = q.updated_at
@@ -299,6 +302,9 @@ function ShopQuoteQueries.insert(ns_id, params)
         db.query("UPDATE shop_chat_sessions SET quote_id = ?, updated_at = NOW() WHERE id = ?", row.id,
             params.chat_session_id)
     end
+    -- The deal code: a revision keeps its original's, a new deal gets a new one (now, or after the open
+    -- transaction commits).
+    Deal.assignLater("quote", ns_id, row.id, params.created_by_user_id)
     return ShopQuoteQueries.getById(row.id)
 end
 
@@ -382,6 +388,9 @@ local function capture_lead(ns_id, q, customer, total, chat_session)
     if not lead then return end
     db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE id = ?", lead.id, q.id)
     q.crm_lead_id = lead.id
+    -- The quote and the customer's lead are one deal (one deal code).
+    local ok, err = pcall(Deal.joinLead, ns_id, q.id, lead.id)
+    if not ok then ngx.log(ngx.WARN, "[shop-quotes] deal code not joined to the lead: ", tostring(err)) end
     if chat_session then
         db.query("UPDATE shop_chat_sessions SET crm_lead_id = ? WHERE id = ?", lead.id, chat_session.id)
     end
@@ -618,6 +627,9 @@ function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
     if src.crm_lead_id then
         db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE uuid = ? AND namespace_id = ?", src.crm_lead_id, res.uuid, ns_id)
     end
+    -- Same deal as the quote it came from.
+    local ok, derr = pcall(function() Deal.adoptQuote(ns_id, res.uuid, Deal.forQuote(ns_id, src.id, user_id)) end)
+    if not ok then ngx.log(ngx.WARN, "[shop-quotes] deal code not carried to ", res.quote_number, ": ", tostring(derr)) end
     return ShopQuoteQueries.adminGet(ns_id, res.uuid)
 end
 
@@ -897,8 +909,8 @@ function ShopQuoteQueries.adminList(ns_id, params)
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(q.quote_number ILIKE ? OR q.customer->>'email' ILIKE ? OR q.customer->>'name' ILIKE ? "
-            .. "OR q.customer->>'company' ILIKE ? OR q.customer_po_number ILIKE ?)"
-        for _ = 1, 5 do vals[#vals + 1] = like end
+            .. "OR q.customer->>'company' ILIKE ? OR q.customer_po_number ILIKE ? OR q.deal_code ILIKE ?)"
+        for _ = 1, 6 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
@@ -933,6 +945,10 @@ end
 function ShopQuoteQueries.adminGet(ns_id, uuid)
     local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
     if not q then return nil end
+    if not U.nz(q.deal_code) and Deal.enabled() then
+        local ok, code = pcall(Deal.forQuote, ns_id, q.id)
+        if ok then q.deal_code = code end
+    end
     local s = ShopQuoteQueries.shape(q, { admin = true })
     local chain = ShopQuoteQueries.revisionChain(q)
     s.revisions = U.arr(#chain > 1 and chain or {})

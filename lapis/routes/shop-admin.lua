@@ -18,7 +18,9 @@
                                                (shop.manage; amount_minor below the total → 400 PART_PAYMENT)
       POST              /orders/:uuid/invoice   accounting invoice from the order (idempotent; 501 without invoicing)
       GET               /orders/:uuid/purchase-order/preview  (?supplier_uuid=) the supplier PO before it is raised
-      POST              /orders/:uuid/purchase-order          { supplier_uuid?, supplier_name?, costs?, … }
+      POST              /orders/:uuid/purchase-order          { supplier_uuid?, supplier_name?, costs?, drop_ship?,
+                                               confirm_drop_ship?, … } the deal code is the reference; delivers to us
+                                               unless drop_ship + confirm_drop_ship (logged on the deal)
       POST              /orders/:uuid/refund   { amount_net_minor? | full: true, reason, dry_run? } refund returned
                                                goods via Stripe less the Trade discount clawback
       GET               /orders/:uuid/delivery-changes   the customer's delivery change requests (also on GET /orders/:uuid
@@ -66,6 +68,17 @@
                                                &checkpoint=&subject_ref=&limit=&offset=), newest first
       POST              /legal/acceptances/erase  { email } erasure request: deletes that person's acceptances
                                                (shop.delete; audited without the email)
+    Deal codes (queries/ShopDealQueries.lua: private, staff and suppliers only; every view and change is logged)
+      GET               /deals/search?q=        by deal code, WSQ number, order number, supplier quote ref or
+                                               customer email → { exact, results:[{ deal_code, matched_by, match }] }
+      GET               /deals/:code            the deal page: customer, quotes, orders, POs, supplier requests,
+                                               notes, compare table, audit trail
+      POST              /deals/:code/supplier-requests   { supplier_uuid? | supplier_name, contact_name?, contact_email?,
+                                               sent_at?, spec?, lines?:[{ line_uuid?, description, qty, unit_price_minor? }],
+                                               supplier_quote_ref?, lead_time?, valid_until?, notes? }
+      PUT/DELETE        /supplier-requests/:uuid
+      POST              /supplier-requests/:uuid/email-draft   { to, subject, body, mailto } a draft: nothing is sent
+      POST              /quotes/:uuid/deal-code | /orders/:uuid/deal-code   { deal_code } or { new: true }: link by hand
 ]]
 
 local U = require("lib.shop-util")
@@ -284,7 +297,7 @@ return function(app)
         local body, bad = body_or_400()
         if not body then return bad end
         local u = self.current_user or {}
-        local po, err = Orders.createPurchaseOrder(ns_id, self.params.uuid, body, u.uuid)
+        local po, err = Orders.createPurchaseOrder(ns_id, self.params.uuid, body, u.uuid, user_id(self))
         if not po then return U.from_err(err) end
         return U.ok(po, 201)
     end))
@@ -317,7 +330,7 @@ return function(app)
     -- What the supplier PO would say (supplier details, costs from the price file, Bill to, Deliver to).
     app:get(BASE .. "/orders/:uuid/purchase-order/preview", guard("read", function(self, ns_id)
         return result(Orders.purchaseOrderPreview(ns_id, self.params.uuid, { supplier_uuid = self.params.supplier_uuid,
-            include_custom = self.params.include_custom == "true" }))
+            include_custom = self.params.include_custom == "true", drop_ship = self.params.drop_ship == "true" }))
     end))
 
     app:post(BASE .. "/orders/:uuid/refund", guard("update", function(self, ns_id)
@@ -326,6 +339,52 @@ return function(app)
         local u = self.current_user or {}
         return result(Orders.adminRefund(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
+
+    -- deal codes ---------------------------------------------------------------------
+    local Deal = require("queries.ShopDealQueries")
+
+    app:get(BASE .. "/deals/search", guard("read", function(self, ns_id)
+        return U.ok(Deal.search(ns_id, self.params.q))
+    end))
+
+    app:get(BASE .. "/deals/:code", guard("read", function(self, ns_id)
+        return result(Deal.get(ns_id, self.params.code, user_id(self)))
+    end))
+
+    app:post(BASE .. "/deals/:code/supplier-requests", guard("create", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return created(Deal.createRequest(ns_id, self.params.code, body, user_id(self)))
+    end))
+
+    app:match(BASE .. "/supplier-requests/:uuid", function(self)
+        local m = ngx.req.get_method()
+        if m == "PUT" or m == "PATCH" then
+            return guard("update", function(s, ns_id)
+                local body, bad = body_or_400()
+                if not body then return bad end
+                return result(Deal.updateRequest(ns_id, s.params.uuid, body, user_id(s)))
+            end)(self)
+        elseif m == "DELETE" then
+            return guard("delete", function(s, ns_id) return result(Deal.deleteRequest(ns_id, s.params.uuid, user_id(s))) end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    -- A draft for staff to send from their own mail program: nothing is sent from here.
+    app:post(BASE .. "/supplier-requests/:uuid/email-draft", guard("update", function(self, ns_id)
+        local uid = user_id(self)
+        local u = uid and require("lapis.db").query("SELECT id, first_name, last_name FROM users WHERE id = ?", uid)[1]
+        return result(Deal.emailDraft(ns_id, self.params.uuid, u or { id = uid }))
+    end))
+
+    for _, kind in ipairs({ "quote", "order" }) do
+        app:post(BASE .. "/" .. kind .. "s/:uuid/deal-code", guard("update", function(self, ns_id)
+            local body, bad = body_or_400()
+            if not body then return bad end
+            return result(Deal.link(ns_id, kind, self.params.uuid, body, user_id(self)))
+        end))
+    end
 
     -- customer delivery change requests ---------------------------------------------
     app:get(BASE .. "/orders/:uuid/delivery-changes", guard("read", function(self, ns_id)

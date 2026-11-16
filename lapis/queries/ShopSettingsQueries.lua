@@ -17,9 +17,15 @@
                       only send test copies of order update emails ("Email the customer" on the order page,
                       queries/ShopOrderUpdateQueries.lua) to themselves. The dashboard calls it "Customer
                       emails from the shop". Leave it off until the shop's sending address is changed.
+    deal_code_prefix  the start of every new deal code (default WS: WS-DT5Z-994X). Deal codes are private:
+                      staff and suppliers see them, customers never do (queries/ShopDealQueries.lua).
+    deal_code_length  random characters after the prefix (default 8 = XXXX-XXXX; 6 to 16).
+    po_deliver_to     our own delivery address for supplier purchase orders (same keys as po_bill_to).
+                      Unset = the Bill to address. Suppliers deliver here unless staff confirm a drop-ship.
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")
+local DealCodes = require("lib.deal-codes")
 
 local Q = {}
 
@@ -28,8 +34,14 @@ local BILL_TO_KEYS = { "company", "line1", "line2", "city", "county", "postcode"
 
 function Q.get(ns_id)
     local ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
-                                              customer_delivery_notifications, updated_at
+                                              customer_delivery_notifications, deal_code_prefix, deal_code_length,
+                                              po_deliver_to::text AS po_deliver_to, updated_at
                                          FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    if not ok then -- before migration zzs55
+        ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
+                                            customer_delivery_notifications, updated_at
+                                       FROM shop_settings WHERE namespace_id = ?]], ns_id)
+    end
     if not ok then -- before migration zzs52
         ok, rows = pcall(db.query, [[SELECT checkout_enabled, po_bill_to::text AS po_bill_to, order_alert_email,
                                             updated_at FROM shop_settings WHERE namespace_id = ?]], ns_id)
@@ -44,6 +56,9 @@ function Q.get(ns_id)
         po_bill_to = row and U.nz(row.po_bill_to) and U.dec(row.po_bill_to, U.null) or U.null,
         order_alert_email = row and U.nz(row.order_alert_email) or U.null,
         customer_delivery_notifications = row ~= nil and row.customer_delivery_notifications == true,
+        deal_code_prefix = row and U.nz(row.deal_code_prefix) or DealCodes.DEFAULT_PREFIX,
+        deal_code_length = row and tonumber(row.deal_code_length) or DealCodes.DEFAULT_LENGTH,
+        po_deliver_to = row and U.nz(row.po_deliver_to) and U.dec(row.po_deliver_to, U.null) or U.null,
         updated_at = row and row.updated_at or U.null,
     }
 end
@@ -52,6 +67,14 @@ end
 function Q.billTo(ns_id)
     local b = Q.get(ns_id).po_bill_to
     return type(b) == "table" and b or nil
+end
+
+--- Where suppliers deliver unless staff confirm a drop-ship: po_deliver_to, else the Bill to address. Nil
+-- when neither is set.
+function Q.deliverTo(ns_id)
+    local s = Q.get(ns_id)
+    if type(s.po_deliver_to) == "table" then return s.po_deliver_to end
+    return type(s.po_bill_to) == "table" and s.po_bill_to or nil
 end
 
 local function clean_bill_to(b)
@@ -87,14 +110,36 @@ function Q.customerDeliveryNotifications(ns_id)
     return Q.get(ns_id).customer_delivery_notifications == true
 end
 
---- body: { checkout_enabled?, po_bill_to?, order_alert_email?, customer_delivery_notifications? } (at least one).
+--- body: { checkout_enabled?, po_bill_to?, order_alert_email?, customer_delivery_notifications?, deal_code_prefix?,
+-- deal_code_length?, po_deliver_to? } (at least one).
 function Q.update(ns_id, body)
     local has_checkout, has_bill = body.checkout_enabled ~= nil, body.po_bill_to ~= nil
     local has_alert = body.order_alert_email ~= nil
     local has_notify = body.customer_delivery_notifications ~= nil
-    if not has_checkout and not has_bill and not has_alert and not has_notify then
-        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to, order_alert_email "
-            .. "or customer_delivery_notifications)")
+    local has_prefix, has_length = body.deal_code_prefix ~= nil, body.deal_code_length ~= nil
+    local has_deliver = body.po_deliver_to ~= nil
+    if not has_checkout and not has_bill and not has_alert and not has_notify and not has_prefix and not has_length
+        and not has_deliver then
+        return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to, "
+            .. "order_alert_email, customer_delivery_notifications, deal_code_prefix, deal_code_length or po_deliver_to)")
+    end
+    local prefix, length, deliver
+    if has_prefix then
+        local perr
+        prefix, perr = DealCodes.clean_prefix(body.deal_code_prefix ~= U.null and body.deal_code_prefix or nil)
+        if not prefix then return nil, U.err(400, "VALIDATION_ERROR", perr) end
+    end
+    if has_length then
+        local lerr
+        length, lerr = DealCodes.clean_length(body.deal_code_length ~= U.null and body.deal_code_length or nil)
+        if not length then return nil, U.err(400, "VALIDATION_ERROR", lerr) end
+    end
+    if has_deliver then
+        local derr
+        deliver, derr = clean_bill_to(body.po_deliver_to)
+        if not deliver then
+            return nil, U.err(400, "VALIDATION_ERROR", ((derr or ""):gsub("po_bill_to", "po_deliver_to")))
+        end
     end
     if has_notify and type(body.customer_delivery_notifications) ~= "boolean" then
         return nil, U.err(400, "VALIDATION_ERROR", "customer_delivery_notifications must be true or false")
@@ -134,6 +179,15 @@ function Q.update(ns_id, body)
     if has_bill then
         db.query("UPDATE shop_settings SET po_bill_to = ?::jsonb, updated_at = NOW() WHERE namespace_id = ?",
             bill == U.null and db.NULL or U.enc(bill), ns_id)
+    end
+    if has_prefix or has_length then
+        db.query([[UPDATE shop_settings SET deal_code_prefix = COALESCE(?, deal_code_prefix),
+                   deal_code_length = COALESCE(?, deal_code_length), updated_at = NOW() WHERE namespace_id = ?]],
+            prefix or db.NULL, length or db.NULL, ns_id)
+    end
+    if has_deliver then
+        db.query("UPDATE shop_settings SET po_deliver_to = ?::jsonb, updated_at = NOW() WHERE namespace_id = ?",
+            deliver == U.null and db.NULL or U.enc(deliver), ns_id)
     end
     return Q.get(ns_id)
 end

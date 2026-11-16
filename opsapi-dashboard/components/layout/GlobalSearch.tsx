@@ -8,12 +8,28 @@
  * Opens on ⌘K / Ctrl+K, or via the `opsapi:open-search` window event that the
  * header search box dispatches. Keyboard: ↑/↓ to move, ↵ to open, Esc to close.
  * Hand-rolled (no cmdk dependency) — it's just a filtered list + key handling.
+ *
+ * Shop staff also find deals here: a deal code, WSQ quote number, order number, supplier quote reference or
+ * customer email lists the matching deals first, and typing a whole deal code opens its deal page.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, CornerDownLeft } from 'lucide-react';
+import { Search, CornerDownLeft, Lock } from 'lucide-react';
 import { useMenu, type MenuItemWithIcon } from '@/hooks';
+import { usePermissions } from '@/contexts/PermissionsContext';
+import { shopService } from '@/services/shop.service';
+import type { ShopDealSearchResult } from '@/types/shop';
+
+type SearchItem = MenuItemWithIcon & { subtitle?: string };
+
+const DEAL_MATCH: Record<ShopDealSearchResult['matched_by'], string> = {
+  deal_code: 'Deal code',
+  quote_number: 'Quote',
+  order_number: 'Order',
+  supplier_quote_ref: 'Supplier quote ref',
+  customer_email: 'Customer email',
+};
 
 /** All chars of `q` appear in order in `s` (cheap fuzzy match). */
 function fuzzy(q: string, s: string): boolean {
@@ -41,6 +57,9 @@ function scoreMatch(q: string, it: MenuItemWithIcon): number {
 export function GlobalSearch() {
   const router = useRouter();
   const { allMenu } = useMenu();
+  const { hasPermission } = usePermissions();
+  const canSeeDeals = hasPermission('shop', 'read');
+  const [deals, setDeals] = useState<SearchItem[]>([]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -80,16 +99,56 @@ export function GlobalSearch() {
     return () => clearTimeout(t);
   }, [open]);
 
-  const results = useMemo(() => {
+  // Deals (shop staff only): debounced; a whole deal code opens the deal page straight away.
+  useEffect(() => {
+    const term = query.trim();
+    if (!open || !canSeeDeals || term.length < 3) return;
+    let active = true;
+    const t = setTimeout(() => {
+      shopService
+        .searchDeals(term)
+        .then((r) => {
+          if (!active) return;
+          if (r.exact) {
+            setOpen(false);
+            router.push(`/dashboard/shop/deals/${encodeURIComponent(r.exact)}`);
+            return;
+          }
+          setDeals(
+            r.results.map(
+              (d) =>
+                ({
+                  key: `deal:${d.deal_code}`,
+                  name: `Deal ${d.deal_code}`,
+                  path: `/dashboard/shop/deals/${encodeURIComponent(d.deal_code)}`,
+                  module: 'shop',
+                  IconComponent: Lock,
+                  subtitle: `${DEAL_MATCH[d.matched_by] ?? d.matched_by}: ${d.match}${d.customer ? ` · ${d.customer}` : ''}`,
+                }) as unknown as SearchItem,
+            ),
+          );
+        })
+        .catch(() => active && setDeals([]));
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [query, open, canSeeDeals, router]);
+
+  const results = useMemo<SearchItem[]>(() => {
     const items = allMenu || [];
     const q = query.trim().toLowerCase();
     if (!q) return items;
-    return items
+    const pages = items
       .map((it) => ({ it, score: scoreMatch(q, it) }))
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((x) => x.it);
-  }, [query, allMenu]);
+    // Deals only while they still match what is typed (a stale answer is dropped).
+    const live = canSeeDeals && q.length >= 3 ? deals : [];
+    return [...live, ...pages];
+  }, [query, allMenu, deals, canSeeDeals]);
 
   // Keep the highlighted row visible.
   useEffect(() => {
@@ -97,7 +156,7 @@ export function GlobalSearch() {
   }, [active]);
 
   const go = useCallback(
-    (item?: MenuItemWithIcon) => {
+    (item?: SearchItem) => {
       const target = item || results[active];
       if (!target) return;
       setOpen(false);
@@ -146,7 +205,7 @@ export function GlobalSearch() {
               setActive(0);
             }}
             onKeyDown={onKeyDown}
-            placeholder="Search pages and modules…"
+            placeholder={canSeeDeals ? 'Search pages, or find a deal (code, WSQ number, order, email)…' : 'Search pages and modules…'}
             // The palette itself signals focus; the global input focus ring would
             // be clipped by the rounded panel (looked like a cut-off red box).
             style={{ outline: 'none', boxShadow: 'none', border: 'none' }}
@@ -186,7 +245,7 @@ export function GlobalSearch() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-secondary-900">{it.name}</span>
-                    <span className="block truncate text-xs text-secondary-400">{it.path}</span>
+                    <span className="block truncate text-xs text-secondary-400">{it.subtitle ?? it.path}</span>
                   </span>
                   {activeRow && <CornerDownLeft className="h-4 w-4 shrink-0 text-secondary-300" aria-hidden="true" />}
                 </button>

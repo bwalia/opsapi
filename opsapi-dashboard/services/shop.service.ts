@@ -66,6 +66,11 @@ import type {
   ShopStockAdjust,
   ShopStockMovement,
   ShopStockRow,
+  ShopDeal,
+  ShopDealSearch,
+  ShopSupplierRequest,
+  ShopSupplierRequestDraft,
+  ShopSupplierRequestInput,
 } from '@/types/shop';
 
 const BASE = '/api/v2/shop/admin';
@@ -83,6 +88,10 @@ export interface ShopOrderPurchaseOrderInput {
   /** Supplier cost per order line, pounds ex VAT, by line uuid. */
   costs?: Record<string, string>;
   include_custom?: boolean;
+  /** Supplier delivers straight to the customer (they see the customer's address): needs confirm_drop_ship. */
+  drop_ship?: boolean;
+  /** "I confirm the supplier will see this delivery address" (logged on the deal). */
+  confirm_drop_ship?: boolean;
 }
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
@@ -183,6 +192,12 @@ export interface ShopSettings {
    * outcome of a delivery change request. Off by default (test sends to staff always work).
    */
   customer_delivery_notifications?: boolean;
+  /** Start of every new deal code (default WS). */
+  deal_code_prefix?: string;
+  /** Random characters after the prefix (default 8 = XXXX-XXXX). */
+  deal_code_length?: number;
+  /** Our delivery address for supplier POs (unset: the Bill to address). */
+  po_deliver_to?: PurchaseOrderParty | null;
   updated_at: string | null;
 }
 
@@ -194,7 +209,7 @@ export const shopService = {
   },
 
   async updateSettings(
-    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications'>>,
+    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications' | 'deal_code_prefix' | 'deal_code_length' | 'po_deliver_to'>>,
   ): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);
@@ -379,13 +394,13 @@ export const shopService = {
   },
 
   /** What the supplier PO would say (supplier details, costs from the price file, Bill to, Deliver to). */
-  async previewOrderPurchaseOrder(uuid: string, supplierUuid?: string): Promise<ShopPurchaseOrderPreview> {
-    const qs = buildQueryString({ supplier_uuid: supplierUuid });
+  async previewOrderPurchaseOrder(uuid: string, supplierUuid?: string, dropShip = false): Promise<ShopPurchaseOrderPreview> {
+    const qs = buildQueryString({ supplier_uuid: supplierUuid, drop_ship: dropShip ? 'true' : undefined });
     const res = await apiClient.get(`${BASE}/orders/${uuid}/purchase-order/preview${qs}`);
     return unwrap<ShopPurchaseOrderPreview>(res);
   },
 
-  /** Draft a supplier PO for a paid order (Bill to us, deliver directly to the customer). */
+  /** Draft a supplier PO for a paid order (Bill to us, the deal code as reference, delivered to us unless a confirmed drop-ship). */
   async createOrderPurchaseOrder(uuid: string, body: ShopOrderPurchaseOrderInput): Promise<PurchaseOrder> {
     const res = await apiClient.post(`${BASE}/orders/${uuid}/purchase-order`, body, JSON_BODY);
     return unwrap<PurchaseOrder>(res);
@@ -394,6 +409,45 @@ export const shopService = {
   async updateOrder(uuid: string, body: ShopOrderUpdate): Promise<ShopOrder> {
     const res = await apiClient.put(`${BASE}/orders/${uuid}`, body, JSON_BODY);
     return unwrap<ShopOrder>(res);
+  },
+
+  // ---------------- Deal codes (private) ----------------
+  /** The deal page: customer, quotes, orders, POs, supplier requests, notes, compare table, audit. Logged. */
+  async getDeal(code: string): Promise<ShopDeal> {
+    const res = await apiClient.get(`${BASE}/deals/${encodeURIComponent(code)}`);
+    return unwrap<ShopDeal>(res);
+  },
+
+  /** By deal code, WSQ number, order number, supplier quote reference or customer email. */
+  async searchDeals(q: string): Promise<ShopDealSearch> {
+    const res = await apiClient.get(`${BASE}/deals/search${buildQueryString({ q })}`);
+    return unwrap<ShopDealSearch>(res) ?? { exact: null, results: [] };
+  },
+
+  /** Put a quote (with its revisions) or an order (with its POs) on another deal, or on a new one. */
+  async linkDealCode(kind: 'quote' | 'order', uuid: string, body: { deal_code?: string; new?: boolean }): Promise<{ deal_code: string; previous: string | null; moved: boolean }> {
+    const res = await apiClient.post(`${BASE}/${kind}s/${uuid}/deal-code`, body, JSON_BODY);
+    return unwrap(res);
+  },
+
+  async createSupplierRequest(code: string, body: ShopSupplierRequestInput): Promise<ShopSupplierRequest> {
+    const res = await apiClient.post(`${BASE}/deals/${encodeURIComponent(code)}/supplier-requests`, body, JSON_BODY);
+    return unwrap<ShopSupplierRequest>(res);
+  },
+
+  async updateSupplierRequest(uuid: string, body: ShopSupplierRequestInput): Promise<ShopSupplierRequest> {
+    const res = await apiClient.put(`${BASE}/supplier-requests/${uuid}`, body, JSON_BODY);
+    return unwrap<ShopSupplierRequest>(res);
+  },
+
+  async deleteSupplierRequest(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/supplier-requests/${uuid}`);
+  },
+
+  /** A draft email (subject "Price request: <code>", the spec, no customer details). Nothing is sent. */
+  async supplierRequestEmailDraft(uuid: string): Promise<ShopSupplierRequestDraft> {
+    const res = await apiClient.post(`${BASE}/supplier-requests/${uuid}/email-draft`, {}, JSON_BODY);
+    return unwrap<ShopSupplierRequestDraft>(res);
   },
 
   // ---------------- Quotes ----------------
