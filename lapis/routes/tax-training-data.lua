@@ -138,15 +138,21 @@ return function(app)
     )
 
     -- GET /api/v2/training-data/search-similar
+    -- Platform admins only, like the rest of this file: the training table holds every
+    -- workspace's confirmed transaction descriptions, and this search isn't scoped to one.
     app:get("/api/v2/training-data/search-similar",
         AuthMiddleware.requireAuth(function(self)
+            if not isAdmin(self.current_user) then
+                return { status = 403, json = { error = "Admin access required" } }
+            end
+
             local description = self.params.description
             if not description or #description == 0 then
                 return { status = 400, json = { error = "description parameter is required" } }
             end
 
-            local limit = tonumber(self.params.limit) or 5
-            local threshold = tonumber(self.params.threshold) or 0.7
+            local limit = math.max(1, math.min(math.floor(tonumber(self.params.limit) or 5), 50))
+            local threshold = math.max(0, math.min(tonumber(self.params.threshold) or 0.7, 1))
 
             local ok_llm, LLMClient = pcall(require, "lib.llm-client")
             if not ok_llm then

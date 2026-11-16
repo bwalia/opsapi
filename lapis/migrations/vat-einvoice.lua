@@ -44,4 +44,14 @@ return {
         db.query([[CREATE INDEX IF NOT EXISTS idx_vat_einvoice_documents_ns
             ON vat_einvoice_documents (namespace_id, created_at DESC)]])
     end,
+
+    -- 2. Documents are kept per VAT registration, not per workspace: sole traders share a
+    --    workspace, and two of them can receive the same supplier invoice number.
+    [2] = function()
+        local t = db.query([[SELECT 1 FROM information_schema.tables WHERE table_name = 'vat_einvoice_documents']])
+        if not t or #t == 0 then return end
+        db.query([[DROP INDEX IF EXISTS idx_vat_einvoice_documents_doc]])
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS idx_vat_einvoice_documents_reg_doc
+            ON vat_einvoice_documents (namespace_id, COALESCE(registration_id, 0), direction, document_id)]])
+    end,
 }
