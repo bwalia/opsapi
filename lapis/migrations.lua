@@ -195,10 +195,12 @@ local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHO
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
--- VIP membership reuses billing (customers, billing_subscriptions): needs SHOP and BILLING.
-local shop_membership_migrations = (ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.SHOP)
-    and ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.BILLING))
-    and require("migrations.shop-membership") or {}
+-- VIP membership: its tables and the shop columns it adds (shop_orders.credit_minor,
+-- shop_credits, ...) are used by every shop payment (card and bank transfer), so they ship
+-- with the SHOP feature alone. The schema only stores billing ids as plain columns; the
+-- membership routes still need BILLING at runtime. Gating these on BILLING too left a
+-- shop without billing (the `ecommerce` preset) unable to take any payment.
+local shop_membership_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-membership") or {}
 
 -- Render Templates (namespace {{slot}} template library). Core/always-on:
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
