@@ -585,6 +585,8 @@ function Q.adminSetAddress(ns_id, order_uuid, body, actor)
             end
         end
         append_note(o.id, line)
+        require("queries.ShopOrderEventQueries").record(o, "delivery_address",
+            { message = R.describe_address(addr), author = who })
         return true
     end)
     if err then return nil, err end
