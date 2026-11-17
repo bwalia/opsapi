@@ -97,6 +97,16 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
 
           <motion.p variants={item} className="text-xs text-white/40">
             © {new Date().getFullYear()} {brand.name} · Secure multi-tenant SaaS platform
+            <br />
+            Sponsored by{' '}
+            <a
+              href="https://www.workstation.co.uk/en"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-white/70"
+            >
+              Workstation
+            </a>
           </motion.p>
         </motion.div>
       </div>
@@ -113,6 +123,17 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
             <Logo size={34} tone="dark" />
           </div>
           {children}
+          <p className="mt-10 text-center text-xs text-secondary-500 lg:hidden">
+            Sponsored by{' '}
+            <a
+              href="https://www.workstation.co.uk/en"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2"
+            >
+              Workstation
+            </a>
+          </p>
         </motion.div>
       </div>
     </div>
