@@ -1275,7 +1275,8 @@ local function address_text(a)
     if type(a) ~= "table" then return nil end
     local lines = {
         join_nonempty({ a.name, a.company }, ", "), a.line1, a.line2,
-        join_nonempty({ a.city, a.county, a.postcode }, " "), a.country,
+        join_nonempty({ a.city, a.county, a.postcode }, " "),
+        (a.country == "GB" or a.country == "gb") and "United Kingdom" or a.country,
         a.phone, a.email, a.vat_number and ("VAT " .. a.vat_number) or nil,
     }
     local s = join_nonempty(lines, "\n")

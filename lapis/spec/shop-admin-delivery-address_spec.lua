@@ -145,5 +145,25 @@ reset(order({ delivery_address = cjson.encode({ name = "Kate", company = "", lin
 res, err = Q.adminSetAddress(3, "ord-1", { address = HOME }, "staff")
 check("same address refused (NO_CHANGE)", res == nil and err and err.code == "NO_CHANGE", err and (err.code or err.message))
 
+-- agreed address without an email: the customer's email mustn't make an unchanged address look changed
+reset(order({ delivery_address = cjson.encode({ name = "Kate", company = "", line1 = "15 Gadesden Road", line2 = "West Ewell",
+    city = "Epsom", postcode = "KT19 9LB", country = "GB", phone = "+447833229206" }) }))
+res, err = Q.adminSetAddress(3, "ord-1", { address = HOME }, "staff")
+check("same address, no agreed email: still NO_CHANGE", res == nil and err and err.code == "NO_CHANGE",
+    err and (err.code or err.message))
+
+reset(order({ delivery_address = cjson.encode({ name = "Kate", company = "", line1 = "15 Gadesden Road", line2 = "West Ewell",
+    city = "Epsom", postcode = "KT19 9LB", country = "GB", phone = "+447833229206" }) }))
+local with_email = {}
+for k, v in pairs(HOME) do with_email[k] = v end
+with_email.email = "new@example.com"
+res, err = Q.adminSetAddress(3, "ord-1", { address = with_email }, "staff")
+check("a newly typed email is a change", res ~= nil and state.writes[1] and state.writes[1].address.email == "new@example.com",
+    err and (err.code or err.message))
+
+-- the PO prints the country name, not the ISO code
+check("PO text says United Kingdom, not GB", Orders.addressText({ name = "A", line1 = "1 St", city = "Epsom", postcode = "KT19 9LB",
+    country = "GB" }):find("\nUnited Kingdom", 1, true) ~= nil)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end
