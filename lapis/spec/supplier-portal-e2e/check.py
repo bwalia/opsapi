@@ -6,6 +6,9 @@ All documents are made-up sample files generated here. Every check prints ok/FAI
 """
 import base64, email, email.policy, glob, hashlib, hmac, json, os, re, struct, subprocess, sys, time, zlib
 import urllib.error, urllib.parse, urllib.request, uuid
+import secrets
+# Throwaway password for the test-only supplier login, made fresh every run (never a fixed literal).
+SUPPLIER_PW = "Sp-" + secrets.token_urlsafe(18) + "9a"
 
 API = os.environ["API"]
 PG = os.environ["PG_CONTAINER"]
@@ -251,7 +254,7 @@ check("supplier login has only the supplier role, no permissions",
              JOIN namespace_user_roles ur ON ur.namespace_member_id = m.id JOIN namespace_roles r ON r.id = ur.namespace_role_id
              WHERE m.user_id = (SELECT id FROM users WHERE uuid = '%s')""" % A["uuid"]) == "supplier:{}")
 token = urllib.parse.parse_qs(urllib.parse.urlparse(A_LINK).query)["token"][0]
-s, j = http("POST", API + "/auth/reset-password", {}, {"token": token, "new_password": "Supplier-Portal-E2E-2026!"})
+s, j = http("POST", API + "/auth/reset-password", {}, {"token": token, "new_password": SUPPLIER_PW})
 check("the set-password link works (and is valid for days, not 30 minutes)", s == 200 and
       one("SELECT expires_at > now() + interval '6 days' FROM password_reset_tokens ORDER BY id LIMIT 1") == "t", j)
 
@@ -559,7 +562,7 @@ as_user(OWNER, "PUT", "/api/v2/shop/admin/settings", {"supplier_portal_emails_en
 
 print("== sign-in: a supplier login always needs the emailed code")
 before = len(mails())
-s, j = http("POST", API + "/auth/login", {}, form={"username": A["email"], "password": "Supplier-Portal-E2E-2026!"})
+s, j = http("POST", API + "/auth/login", {}, form={"username": A["email"], "password": SUPPLIER_PW})
 check("password alone gives no token: a sign-in code is required", s == 200 and j.get("requires_2fa") is True and "token" not in j, j)
 check("a sign-in code was created for the supplier login", one("""SELECT count(*) FROM admin_otp_codes WHERE user_id =
       (SELECT id FROM users WHERE uuid = '%s')""" % A["uuid"]) == "1")
