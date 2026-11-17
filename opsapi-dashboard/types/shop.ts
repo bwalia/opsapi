@@ -88,6 +88,35 @@ export interface ShopAvailability {
 // Catalogue
 // ============================================================
 
+/** Shop languages: the UK shop (en) and the Belgian shop (fr, nl). */
+export const SHOP_SEO_LOCALES = ['en', 'fr', 'nl'] as const;
+export type ShopSeoLocale = (typeof SHOP_SEO_LOCALES)[number];
+
+/**
+ * Search and page content for one language. target_keyword is staff-only: OpsAPI never sends it to the
+ * shop. Empty title = "<keyword> | <brand>"; "{price}" in a description becomes the live "from" price.
+ */
+export interface ShopSeoBlock {
+  target_keyword?: string;
+  title?: string;
+  description?: string;
+  intro?: string;
+  /** Products only: "Who it's for". */
+  audience?: string[];
+  /** Products only: product-specific questions (the shop adds shared ones). */
+  faqs?: { q: string; a: string }[];
+}
+export type ShopSeo = Partial<Record<ShopSeoLocale, ShopSeoBlock>>;
+
+/** A product photo; the first is the main photo. fallback_url is a JPEG copy of a WebP url. */
+export interface ShopPhoto {
+  url: string;
+  fallback_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  alt: Partial<Record<ShopSeoLocale, string>>;
+}
+
 export interface ShopCategory {
   id?: number;
   uuid: string;
@@ -101,6 +130,7 @@ export interface ShopCategory {
   sort_order: number;
   is_active: boolean;
   product_count?: number;
+  seo?: ShopSeo;
   created_at?: string;
   updated_at?: string;
 }
@@ -113,6 +143,7 @@ export interface ShopCategoryInput {
   parent_uuid?: string | null;
   sort_order?: number;
   is_active?: boolean;
+  seo?: ShopSeo;
 }
 
 export interface ShopOption {
@@ -261,6 +292,8 @@ export interface ShopProduct {
   /** Read-only: supplier cost if linked, else manual cost, else null. */
   effective_cost_minor?: number | null;
   cost_source?: ShopProductCostSource;
+  seo?: ShopSeo;
+  photos?: ShopPhoto[];
   created_at?: string;
   updated_at?: string;
 }
@@ -300,6 +333,8 @@ export interface ShopProductInput {
   category_uuid?: string | null;
   option_groups: Omit<ShopOptionGroup, 'id' | 'uuid'>[];
   rules: Omit<ShopRule, 'id'>[];
+  seo?: ShopSeo;
+  photos?: ShopPhoto[];
 }
 
 export interface ShopProductListParams {

@@ -383,10 +383,10 @@ return function(app)
         return U.ok(res)
     end))
 
-    -- shop settings (checkout_enabled false = enquiries only) ----------------------------
+    -- shop settings (checkout_enabled false = enquiries only; UK delivery facts; quote validity) --------
     app:get(BASE .. "/settings", public(function(_, ns_id)
-        local s = require("queries.ShopSettingsQueries").get(ns_id)
-        return U.ok({ checkout_enabled = s.checkout_enabled })
+        local Settings = require("queries.ShopSettingsQueries")
+        return U.ok(Settings.public(Settings.get(ns_id)))
     end))
 
     -- VIP membership ------------------------------------------------------------------

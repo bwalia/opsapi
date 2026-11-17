@@ -20,6 +20,7 @@ local Pricing = require("lib.shop-pricing")
 local Stock = require("queries.ShopStockQueries")
 local Insights = require("queries.ShopInsightsQueries")
 local Cost = require("lib.shop-cost")
+local SEO = require("lib.shop-seo")
 
 local ShopCatalogQueries = {}
 
@@ -45,6 +46,36 @@ local PRODUCT_COLS = [[
     p.public_launch_at, COALESCE(p.public_launch_at > NOW(), false) AS prelaunch, p.created_at, p.updated_at
 ]]
 ShopCatalogQueries.PRODUCT_COLS = PRODUCT_COLS
+
+-- When a product, its price or its stock last changed (alias p), as ISO 8601 UTC: the product row (stock
+-- moves and price changes update it), its option groups and options, and the component products whose
+-- price or stock an option follows. The sitemap's <lastmod>.
+local LAST_MODIFIED_SQL = [[
+    to_char(GREATEST(p.updated_at, (
+        SELECT MAX(GREATEST(g.updated_at, o.updated_at, cp.updated_at))
+          FROM shop_option_groups g JOIN shop_options o ON o.group_id = g.id
+          LEFT JOIN shop_products cp ON cp.id = o.component_product_id
+         WHERE g.product_id = p.id
+    )), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_modified
+]]
+
+-- Product SEO content and photos (migration zzs59). Selected only once the columns exist.
+local _seo_cols = { at = 0, value = false }
+function ShopCatalogQueries.hasSeoColumns()
+    local now = ngx and ngx.now() or os.time()
+    if _seo_cols.value or now - _seo_cols.at < 300 then return _seo_cols.value end
+    local ok, rows = pcall(db.query, [[
+        SELECT 1 FROM information_schema.columns
+         WHERE table_name = 'shop_products' AND column_name = 'photos' LIMIT 1
+    ]])
+    _seo_cols.value = ok and rows and #rows > 0 or false
+    _seo_cols.at = now
+    return _seo_cols.value
+end
+local function seo_cols(alias)
+    if not ShopCatalogQueries.hasSeoColumns() then return "" end
+    return (", %s.seo::text AS seo, %s.photos::text AS photos"):format(alias, alias)
+end
 
 -- The price an option adds (aliases o = shop_options, cp = its component product, LEFT JOINed).
 -- An option backed by a priced component product follows that product's live base price, so a
@@ -99,6 +130,13 @@ function ShopCatalogQueries.namespaceBySlug(slug)
     return rows[1]
 end
 
+--- The shop's name for default titles ("<keyword> | <brand>"): the workspace's "Name in emails", else its name.
+function ShopCatalogQueries.brandName(ns_id)
+    if not ns_id then return nil end
+    local ok, name = pcall(function() return require("queries.ShopSettingsQueries").brandName(ns_id) end)
+    return ok and name or nil
+end
+
 -- ---------------------------------------------------------------------------
 -- embeddings capability (per-worker cache)
 -- ---------------------------------------------------------------------------
@@ -128,9 +166,15 @@ local function norm_product(r)
     r.vat_rate = tonumber(r.vat_rate) or 0.2
     r.base_price_minor = tonumber(r.base_price_minor) or 0
     r.stock_qty = tonumber(r.stock_qty) or 0
+    r.seo = U.dec(r.seo, {})
+    r.photos = U.dec(r.photos, {})
     return r
 end
 ShopCatalogQueries.normProduct = norm_product
+
+-- Services and licences have no physical stock: they are always available and never show a count.
+local UNTRACKED_TYPES = { service = true, software = true }
+ShopCatalogQueries.UNTRACKED_TYPES = UNTRACKED_TYPES
 
 local function category_ref(r)
     if U.nz(r.category_slug) then
@@ -145,6 +189,9 @@ function ShopCatalogQueries.card(r, available)
     available = tonumber(available)
     if available == nil then available = (tonumber(r.stock_qty) or 0) end
     local from = tonumber(r.from_price_minor) or r.base_price_minor
+    if UNTRACKED_TYPES[r.product_type] then available = nil end
+    local availability = Stock.availability(available, tonumber(r.lead_time_days) or 10)
+    if not availability.in_stock then availability.backorder = r.allow_backorder ~= false end
     return {
         uuid = r.uuid,
         sku = r.sku,
@@ -160,12 +207,16 @@ function ShopCatalogQueries.card(r, available)
         currency = r.currency or "GBP",
         vat_rate = r.vat_rate,
         category = category_ref(r),
-        availability = Stock.availability(available, tonumber(r.lead_time_days) or 10),
+        availability = availability,
         price_verified = r.price_verified == true,
         is_featured = r.is_featured == true,
         specs = r.specs,
         -- set only while the product is in the members' early-access window
         public_launch_at = r.prelaunch == true and r.public_launch_at or U.null,
+        -- product photos with per-language alt text (first = main photo); images stays the legacy list
+        photos = SEO.publicPhotos(r.photos),
+        -- when the product, its price or its stock last changed (sitemap lastmod)
+        updated_at = r.last_modified or r.updated_at or U.null,
     }
 end
 
@@ -182,7 +233,8 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
     elseif by.uuid then where, val = "p.uuid = ?", by.uuid
     elseif by.id then where, val = "p.id = ?", by.id
     else return nil end
-    local sql = "SELECT " .. PRODUCT_COLS .. [[, c.uuid AS category_uuid, c.slug AS category_slug, c.name AS category_name
+    local sql = "SELECT " .. PRODUCT_COLS .. seo_cols("p") .. ", " .. LAST_MODIFIED_SQL
+        .. [[, c.uuid AS category_uuid, c.slug AS category_slug, c.name AS category_name
           FROM shop_products p LEFT JOIN shop_categories c ON c.id = p.category_id
          WHERE p.namespace_id = ? AND ]] .. where
     if opts.public then sql = sql .. " AND p.status = 'active' AND " .. ShopCatalogQueries.launchSql("p") end
@@ -210,7 +262,7 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
                o.stock_qty, o.max_qty, o.is_default, o.is_active, o.sort_order, o.attributes::text AS attributes,
                cp.uuid AS component_uuid, cp.sku AS component_sku, cp.name AS component_name,
                cp.allow_backorder AS component_allow_backorder, cp.lead_time_days AS component_lead_time_days,
-               cp.status AS component_status,
+               cp.status AS component_status, cp.product_type AS component_type,
                ]] .. OPTION_COST_SQL .. [[ AS cost_minor, o.cost_minor AS manual_cost_minor,
                COALESCE(csi.cost_minor, cp.cost_minor) AS component_cost_minor
           FROM shop_options o
@@ -253,7 +305,12 @@ function ShopCatalogQueries.loadBundle(ns_id, by, opts)
         o.cost_minor = tonumber(o.cost_minor)
         o.manual_cost_minor = tonumber(o.manual_cost_minor)
         o.component_cost_minor = tonumber(o.component_cost_minor)
-        if U.nz(o.component_product_id) then
+        if U.nz(o.component_product_id) and UNTRACKED_TYPES[o.component_type] then
+            -- a service or licence: no stock count (always available)
+            o.available = nil
+            o.stock_key = nil
+            o.lead_time_days = tonumber(o.component_lead_time_days) or p.lead_time_days
+        elseif U.nz(o.component_product_id) then
             local a = pav[o.component_product_id]
             o.available = a and a.available or 0
             o.stock_key = "p:" .. tostring(o.component_product_id)
@@ -360,6 +417,8 @@ function ShopCatalogQueries.fullProduct(bundle)
     local out = ShopCatalogQueries.card(p, p.available)
     out.description = p.description or U.null
     out.attributes = p.attributes
+    -- per-language title/description/intro/audience/FAQs; the admin-only target keyword is dropped here
+    out.seo = SEO.public(p.seo, "product", ShopCatalogQueries.brandName(p.namespace_id))
     local groups = {}
     for _, g in ipairs(bundle.groups) do
         local opts = {}
@@ -481,7 +540,7 @@ function ShopCatalogQueries.queryProducts(ns_id, params, opts)
     }
     local sort = sorts[params.sort or ""] or (q and sorts.relevance) or sorts.featured
 
-    local sql = "WITH base AS (SELECT " .. PRODUCT_COLS .. [[,
+    local sql = "WITH base AS (SELECT " .. PRODUCT_COLS .. seo_cols("p") .. ", " .. LAST_MODIFIED_SQL .. [[,
                c.uuid AS category_uuid, c.slug AS category_slug, c.name AS category_name,
                ]] .. FROM_PRICE_SQL .. [[ AS from_price_minor,
                ]] .. HELD_SQL .. [[ AS held,
@@ -515,7 +574,7 @@ end
 function ShopCatalogQueries.cardsByIds(ns_id, ids)
     local map = {}
     if #ids == 0 then return map end
-    local rows = db.query("SELECT " .. PRODUCT_COLS .. [[,
+    local rows = db.query("SELECT " .. PRODUCT_COLS .. seo_cols("p") .. [[,
                c.slug AS category_slug, c.name AS category_name,
                ]] .. FROM_PRICE_SQL .. [[ AS from_price_minor,
                p.stock_qty - ]] .. HELD_SQL .. [[ AS available
@@ -538,15 +597,19 @@ function ShopCatalogQueries.listCategories(ns_id, opts)
                pc.slug AS parent_slug, pc.uuid AS parent_uuid,
                (SELECT COUNT(*) FROM shop_products p WHERE p.category_id = c.id
                   AND (p.status = 'active' OR ?))::int AS product_count,
-               c.created_at, c.updated_at
+               c.created_at, c.updated_at]] .. (ShopCatalogQueries.hasSeoColumns() and ", c.seo::text AS seo" or "") .. [[
           FROM shop_categories c LEFT JOIN shop_categories pc ON pc.id = c.parent_id
          WHERE c.namespace_id = ? ]] .. (opts.admin and "" or "AND c.is_active") .. [[
          ORDER BY c.sort_order, c.name
     ]], opts.admin and true or false, ns_id)
+    local brand = not opts.admin and #rows > 0 and ShopCatalogQueries.brandName(ns_id) or nil
     for _, r in ipairs(rows) do
         for _, k in ipairs({ "description", "image_url", "parent_slug", "parent_uuid" }) do
             if r[k] == nil then r[k] = U.null end
         end
+        -- admin: the stored document (with the target keyword); public: without it
+        local seo = U.dec(r.seo, {})
+        r.seo = opts.admin and seo or SEO.public(seo, "category", brand)
         if not opts.admin then
             r.is_active = nil
             r.created_at = nil
@@ -614,6 +677,9 @@ function ShopCatalogQueries.saveCategory(ns_id, doc, uuid)
         sort_order = U.int(pick("sort_order", 0), 0),
         is_active = U.bool(pick("is_active", true), true),
     }
+    if doc.seo ~= nil and ShopCatalogQueries.hasSeoColumns() then
+        fields.seo = db.raw(db.escape_literal(U.enc(SEO.clean(doc.seo, "category"))) .. "::jsonb")
+    end
     -- supplier pricing: category margin % (null = use the supplier's default)
     if doc.margin_pct ~= nil then
         local m = tonumber(doc.margin_pct)
@@ -688,6 +754,8 @@ function ShopCatalogQueries.adminDocument(ns_id, uuid)
             return active
         end)()),
         created_at = p.created_at, updated_at = p.updated_at,
+        -- staff only: the full SEO document, target keyword included
+        seo = p.seo, photos = U.arr(p.photos),
     }
     local groups = {}
     for _, g in ipairs(b.groups) do
@@ -1025,6 +1093,14 @@ function ShopCatalogQueries.saveProduct(ns_id, doc, opts)
             fields.images = jsonb(U.arr(type(doc.images) == "table" and doc.images or {}), {})
         end
         if doc.tags ~= nil then fields.tags = text_array(doc.tags) end
+        if ShopCatalogQueries.hasSeoColumns() then
+            if doc.seo ~= nil then fields.seo = jsonb(SEO.clean(doc.seo, "product"), {}) end
+            if doc.photos ~= nil then
+                local photos, perr = SEO.cleanPhotos(doc.photos)
+                if not photos then return nil, U.err(400, "VALIDATION_ERROR", "Photos: " .. perr) end
+                fields.photos = jsonb(photos, {})
+            end
+        end
         if doc.base_price_minor ~= nil then fields.base_price_minor = U.int(doc.base_price_minor, 0) end
         set("currency", U.nz(doc.currency) and tostring(doc.currency):upper() or nil)
         if doc.vat_rate ~= nil and tonumber(doc.vat_rate) then fields.vat_rate = tonumber(doc.vat_rate) end

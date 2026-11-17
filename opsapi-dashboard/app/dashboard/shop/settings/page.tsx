@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Switch, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { shopService, type ShopSettings } from '@/services/shop.service';
+import { SHOP_DELIVERY_KEYS, shopService, type ShopSettings } from '@/services/shop.service';
 import { extractApiError, formatDate } from '@/lib/utils';
 import type { PurchaseOrderParty } from '@/services/purchase-orders.service';
 
@@ -24,6 +24,23 @@ const BILL_TO_FIELDS: [keyof PurchaseOrderParty, string][] = [
   ['vat_number', 'VAT number'],
 ];
 
+type DeliveryKey = (typeof SHOP_DELIVERY_KEYS)[number];
+const DELIVERY_DEFAULTS: Record<DeliveryKey, number> = {
+  delivery_cost_minor: 0,
+  delivery_handling_min_days: 1,
+  delivery_handling_max_days: 2,
+  delivery_transit_min_days: 1,
+  delivery_transit_max_days: 3,
+  quote_valid_days: 30,
+};
+const DELIVERY_FIELDS: [DeliveryKey, string, string][] = [
+  ['delivery_handling_min_days', 'Dispatch: from (working days)', 'In-stock items. The shop says "Ships in 1–2 days"'],
+  ['delivery_handling_max_days', 'Dispatch: up to (working days)', 'Out-of-stock items use their own lead time'],
+  ['delivery_transit_min_days', 'Courier: from (working days)', 'After dispatch, UK mainland'],
+  ['delivery_transit_max_days', 'Courier: up to (working days)', ''],
+  ['quote_valid_days', 'Quotes hold their price for (days)', 'New quotes; also the "price valid until" search engines see'],
+];
+
 function SettingsContent() {
   const { canUpdate } = usePermissions();
   const [settings, setSettings] = useState<ShopSettings | null>(null);
@@ -38,6 +55,10 @@ function SettingsContent() {
   const [dealPrefix, setDealPrefix] = useState('WS');
   const [dealLength, setDealLength] = useState('8');
   const [savingDeal, setSavingDeal] = useState(false);
+  const [delivery, setDelivery] = useState<Record<DeliveryKey, string>>(() =>
+    Object.fromEntries(SHOP_DELIVERY_KEYS.map((k) => [k, String(k === 'delivery_cost_minor' ? DELIVERY_DEFAULTS[k] / 100 : DELIVERY_DEFAULTS[k])])) as Record<DeliveryKey, string>,
+  );
+  const [savingDelivery, setSavingDelivery] = useState(false);
 
   useEffect(() => {
     shopService
@@ -49,6 +70,14 @@ function SettingsContent() {
         setDeliverTo(s.po_deliver_to ?? {});
         setDealPrefix(s.deal_code_prefix ?? 'WS');
         setDealLength(String(s.deal_code_length ?? 8));
+        setDelivery(
+          Object.fromEntries(
+            SHOP_DELIVERY_KEYS.map((k) => {
+              const v = s[k] ?? DELIVERY_DEFAULTS[k];
+              return [k, k === 'delivery_cost_minor' ? (v / 100).toFixed(2) : String(v)];
+            }),
+          ) as Record<DeliveryKey, string>,
+        );
       })
       .catch((e) => toast.error(extractApiError(e, 'Could not load shop settings')));
   }, []);
@@ -101,6 +130,27 @@ function SettingsContent() {
       toast.error(extractApiError(e, 'Could not save'));
     } finally {
       setSavingDeliver(false);
+    }
+  };
+
+  const saveDelivery = async () => {
+    const body: Partial<Record<DeliveryKey, number>> = {};
+    for (const k of SHOP_DELIVERY_KEYS) {
+      const n = Number(delivery[k]);
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error('Enter a number of 0 or more in every delivery field');
+        return;
+      }
+      body[k] = k === 'delivery_cost_minor' ? Math.round(n * 100) : Math.round(n);
+    }
+    setSavingDelivery(true);
+    try {
+      setSettings(await shopService.updateSettings(body));
+      toast.success('Delivery settings saved');
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingDelivery(false);
     }
   };
 
@@ -268,6 +318,42 @@ function SettingsContent() {
               value={deliverTo[k] ?? ''}
               disabled={!canUpdate('shop')}
               onChange={(e) => setDeliverTo({ ...deliverTo, [k]: e.target.value })}
+            />
+          ))}
+        </div>
+      </Card>
+      <Card className="p-6">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">UK delivery and quote validity</h2>
+            <p className="text-sm text-secondary-600">
+              What the shop tells customers and search engines (Google Shopping) about delivery. Keep it the same as the basket and your Terms of Sale:
+              a delivery cost of 0 shows as &ldquo;Included&rdquo;.
+            </p>
+          </div>
+          <Button size="sm" isLoading={savingDelivery} disabled={!settings || !canUpdate('shop')} onClick={saveDelivery}>Save</Button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input
+            label="UK delivery cost (£ ex VAT)"
+            id="delivery-cost"
+            inputMode="decimal"
+            value={delivery.delivery_cost_minor}
+            helperText="0 = included in the price"
+            disabled={!canUpdate('shop')}
+            onChange={(e) => setDelivery({ ...delivery, delivery_cost_minor: e.target.value })}
+          />
+          {DELIVERY_FIELDS.map(([k, label, help]) => (
+            <Input
+              key={k}
+              label={label}
+              id={`delivery-${k}`}
+              type="number"
+              min={k === 'quote_valid_days' ? 1 : 0}
+              value={delivery[k]}
+              helperText={help || undefined}
+              disabled={!canUpdate('shop')}
+              onChange={(e) => setDelivery({ ...delivery, [k]: e.target.value })}
             />
           ))}
         </div>

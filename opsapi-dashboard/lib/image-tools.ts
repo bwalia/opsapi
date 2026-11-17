@@ -127,3 +127,33 @@ export function apiErrorText(e: unknown, fallback: string): string {
   if (typeof msg === 'string' && msg) return msg;
   return e instanceof Error && e.message ? e.message : fallback;
 }
+
+/** Shop product photos are scaled to fit this (plenty for a 2× product gallery). */
+const PHOTO_EDGE = 1600;
+
+/**
+ * A product photo in the two formats the shop serves: WebP (small, every current browser) and a JPEG
+ * fallback (white background for transparent PNGs). Both scaled to fit PHOTO_EDGE; EXIF dropped.
+ */
+export async function productPhotoPair(
+  file: File,
+): Promise<{ webp: Blob; jpeg: Blob; width: number; height: number; base: string }> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(url);
+    const scale = Math.min(1, PHOTO_EDGE / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    const width = Math.max(1, Math.round(img.naturalWidth * scale));
+    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const { canvas, ctx } = canvas2d(width, height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const webp = await toBlob(canvas, 'image/webp', 0.85);
+    if (webp.type !== 'image/webp') throw new Error('Your browser cannot save WebP images. Try Chrome, Edge or Firefox.');
+    const jpeg = await toBlob(canvas, 'image/jpeg', 0.85);
+    const base = file.name.replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '-').slice(0, 80) || 'photo';
+    return { webp, jpeg, width, height, base };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

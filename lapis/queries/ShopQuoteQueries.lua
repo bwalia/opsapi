@@ -303,12 +303,13 @@ function ShopQuoteQueries.insert(ns_id, params)
                                  currency, valid_until, cart_id, chat_session_id, created_by_user_id,
                                  created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, ?, 'GBP',
-                COALESCE(?::timestamp, NOW() + interval '30 days'), ?, ?, ?, NOW(), NOW())
+                COALESCE(?::timestamp, NOW() + make_interval(days => ?)), ?, ?, ?, NOW(), NOW())
         RETURNING id
     ]], Global.generateUUID(), ns_id, params.quote_number or next_number(), U.token(24), params.status or "draft",
         params.source or "cart", U.enc(params.customer or {}), U.nz(params.notes) or db.NULL,
         U.nz(params.internal_notes) or db.NULL, U.enc(U.arr(params.lines)), t.subtotal_minor, t.vat_minor,
-        t.shipping_minor, t.total_minor, U.nz(params.valid_until) or db.NULL, params.cart_id or db.NULL,
+        t.shipping_minor, t.total_minor, U.nz(params.valid_until) or db.NULL,
+        require("queries.ShopSettingsQueries").quoteValidDays(ns_id), params.cart_id or db.NULL,
         params.chat_session_id or db.NULL, params.created_by_user_id or db.NULL)[1]
     if params.kind or params.discount_minor or params.trade_discount_minor or params.delivery_method
         or params.delivery_address then

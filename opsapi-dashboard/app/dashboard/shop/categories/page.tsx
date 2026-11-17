@@ -10,6 +10,8 @@ import { usePermissions } from '@/contexts/PermissionsContext';
 import { shopService } from '@/services/shop.service';
 import { SHOP_MODULE, ShopThumb } from '@/components/shop/shared';
 import { CheckboxField } from '@/components/shop/editor-fields';
+import { SeoContentEditor, cleanSeo } from '@/components/shop/SeoContentEditor';
+import type { ShopSeo } from '@/types/shop';
 import { extractApiError } from '@/lib/utils';
 import { slugify, typingSlug } from '@/lib/shop';
 import type { ShopCategory, TableColumn } from '@/types';
@@ -22,9 +24,10 @@ interface CatForm {
   parent_uuid: string;
   sort_order: string;
   is_active: boolean;
+  seo: ShopSeo;
 }
 
-const emptyForm: CatForm = { name: '', slug: '', description: '', image_url: '', parent_uuid: '', sort_order: '0', is_active: true };
+const emptyForm: CatForm = { name: '', slug: '', description: '', image_url: '', parent_uuid: '', sort_order: '0', is_active: true, seo: {} };
 
 function CategoriesContent() {
   const { canCreate, canUpdate, canDelete } = usePermissions();
@@ -66,6 +69,7 @@ function CategoriesContent() {
             parent_uuid: c.parent_uuid ?? '',
             sort_order: String(c.sort_order ?? 0),
             is_active: c.is_active !== false,
+            seo: c.seo ?? {},
           }
     );
   };
@@ -84,6 +88,7 @@ function CategoriesContent() {
       parent_uuid: form.parent_uuid || null,
       sort_order: parseInt(form.sort_order, 10) || 0,
       is_active: form.is_active,
+      seo: cleanSeo(form.seo),
     };
     setSaving(true);
     try {
@@ -255,6 +260,17 @@ function CategoriesContent() {
             <Input label="Image URL" id="cat-img" value={form.image_url} onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))} placeholder="https://…" />
             <Textarea label="Description" id="cat-desc" rows={3} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
             <CheckboxField label="Active (visible on the shop)" checked={form.is_active} onChange={(v) => setForm((f) => ({ ...f, is_active: v }))} />
+            <div className="border-t border-secondary-200 pt-4">
+              <p className="mb-3 text-sm font-semibold text-secondary-900">Search &amp; page content</p>
+              <SeoContentEditor
+                value={form.seo}
+                onChange={(seo) => setForm((f) => ({ ...f, seo }))}
+                kind="category"
+                h1={form.name}
+                lead={form.description}
+                price={null}
+              />
+            </div>
             <div className="flex justify-end gap-2 border-t border-secondary-200 pt-4">
               <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
               <Button type="submit" isLoading={saving}>{editing === 'new' ? 'Create' : 'Save'}</Button>
