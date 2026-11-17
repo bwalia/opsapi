@@ -435,7 +435,8 @@ return function(app)
             end
 
             local company = self.namespace.name or "Your Company"
-            local number = invoice.invoice_number or "invoice"
+            -- The customer's number (their own, else the internal one), never the internal one if they differ.
+            local number = InvoiceQueries.customerNumber(invoice) or "invoice"
             local subject = body.subject
             if not subject or subject == "" then
                 subject = "Invoice " .. number .. " from " .. company

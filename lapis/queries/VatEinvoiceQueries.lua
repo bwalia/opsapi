@@ -70,6 +70,8 @@ function Q.export(namespace_id, invoice_uuid, reg, actor_id)
     end
     local lines = db.query("SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id",
         inv.id) or {}
+    -- The customer sees their own invoice number on the e-invoice (cbc:ID), as on the PDF.
+    inv.invoice_number = require("queries.InvoiceQueries").customerNumber(inv)
     local addr = decode(inv.customer_address) or decode(inv.billing_address) or opt(inv.customer_address)
     if type(addr) == "table" and next(addr) == nil then addr = decode(inv.billing_address) end
     local xml, problems = Einvoice.build({

@@ -18,6 +18,11 @@ local cjson = require("cjson")
 
 local InvoiceQueries = {}
 
+-- A JSON null in a request body.
+local function is_null(v)
+    return v == cjson.null or (ngx ~= nil and v == ngx.null)
+end
+
 --- po_number (the customer's purchase order number) and payment_method_uuid (null = the namespace default bank
 -- account) arrive with migrations/payment-methods.lua [2]. Returns (po_number, payment_method_uuid, err); a value
 -- of db.NULL clears the field. A payment_method_uuid must be one of this namespace's payment methods.
@@ -84,6 +89,49 @@ end
 -- ============================================================
 -- Invoices
 -- ============================================================
+
+-- ============================================================
+-- Customer invoice number
+-- ============================================================
+-- invoice_number (INV-0001, …) is internal and sequential. customer_invoice_number is what the customer sees
+-- (PDF, email, e-invoice); it starts as invoice_number (a DB trigger fills it in) and staff may set their own
+-- while the invoice is a draft. Unique per workspace (case-insensitive) against both numbers of every other
+-- live invoice, so a customer number can never point at a different invoice.
+
+InvoiceQueries.CUSTOMER_NUMBER_MAX = 40
+
+--- (clean number) | (nil, message). nil/"" means "use the internal number".
+function InvoiceQueries.cleanCustomerNumber(v)
+    if v == nil or is_null(v) then return "" end
+    if type(v) ~= "string" then return nil, "Customer invoice number must be text" end
+    v = v:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+    if v == "" then return "" end
+    if #v > InvoiceQueries.CUSTOMER_NUMBER_MAX then
+        return nil, "Customer invoice number: at most " .. InvoiceQueries.CUSTOMER_NUMBER_MAX .. " characters"
+    end
+    if not v:match("^[%w][%w%-_/%.# ]*$") then
+        return nil, "Customer invoice number: use letters, numbers, spaces and - _ / . # (start with a letter or number)"
+    end
+    if not v:match("%d") then
+        return nil, "Customer invoice number must include at least one digit (invoice numbers must be unique and identifiable)"
+    end
+    return v
+end
+
+--- The number the customer sees.
+function InvoiceQueries.customerNumber(inv)
+    if type(inv) ~= "table" then return nil end
+    local c = inv.customer_invoice_number
+    if type(c) == "string" and c:match("%S") then return c end
+    return inv.invoice_number
+end
+
+--- Is v already used by another live invoice in the workspace (as either number)?
+function InvoiceQueries.customerNumberTaken(namespace_id, v, except_id)
+    return db.query([[SELECT 1 FROM invoices WHERE namespace_id = ? AND deleted_at IS NULL AND id <> ?
+                        AND (lower(customer_invoice_number) = lower(?) OR lower(invoice_number) = lower(?)) LIMIT 1]],
+        namespace_id, except_id or 0, v, v)[1] ~= nil
+end
 
 --- Create a new invoice
 -- @param params table { namespace_id, customer_name, customer_email, customer_address, account_id, issue_date, due_date, currency, notes, payment_terms_days, owner_user_uuid, line_items }
@@ -165,6 +213,7 @@ function InvoiceQueries.list(namespace_id, params)
     if params.search and params.search ~= "" then
         table.insert(conditions, "(i.customer_name ILIKE " .. db.escape_literal("%" .. params.search .. "%") ..
             " OR i.invoice_number ILIKE " .. db.escape_literal("%" .. params.search .. "%") ..
+            " OR i.customer_invoice_number ILIKE " .. db.escape_literal("%" .. params.search .. "%") ..
             " OR i.customer_email ILIKE " .. db.escape_literal("%" .. params.search .. "%") .. ")")
     end
 
@@ -199,6 +248,7 @@ function InvoiceQueries.list(namespace_id, params)
             i.uuid as id,
             i.namespace_id,
             i.invoice_number,
+            i.customer_invoice_number,
             i.status,
             i.customer_name,
             i.customer_email,
@@ -333,6 +383,21 @@ function InvoiceQueries.update(uuid, params, namespace_id)
     if ferr then return nil, ferr end
     if po_number ~= nil then update_data.po_number = po_number end
     if payment_method_uuid ~= nil then update_data.payment_method_uuid = payment_method_uuid end
+
+    if params.customer_invoice_number ~= nil then
+        local num, nerr = InvoiceQueries.cleanCustomerNumber(params.customer_invoice_number)
+        if not num then return nil, nerr end
+        if num == "" then num = invoice.invoice_number end
+        if num ~= InvoiceQueries.customerNumber(invoice) then
+            if invoice.status ~= "draft" then
+                return nil, "The customer invoice number can only be changed while the invoice is a draft"
+            end
+            if InvoiceQueries.customerNumberTaken(invoice.namespace_id, num, invoice.id) then
+                return nil, "Another invoice already uses " .. num
+            end
+            update_data.customer_invoice_number = num
+        end
+    end
 
     update_data.updated_at = db.raw("NOW()")
 

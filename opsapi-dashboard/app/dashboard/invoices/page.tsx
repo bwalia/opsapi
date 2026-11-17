@@ -21,6 +21,7 @@ import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
   invoicesService,
+  customerInvoiceNumber,
   type InvoiceFilters,
   type InvoiceDashboardStats,
   type Invoice,
@@ -699,9 +700,10 @@ function InvoicesPageContent() {
               <FileText className="w-5 h-5 text-secondary-500" />
             </div>
             <div>
-              <p className="font-medium text-secondary-900">
-                {invoice.invoice_number || invoice.uuid.slice(0, 8)}
-              </p>
+              <p className="font-medium text-secondary-900">{customerInvoiceNumber(invoice)}</p>
+              {invoice.customer_invoice_number && invoice.customer_invoice_number !== invoice.invoice_number && (
+                <p className="text-xs text-secondary-500" title="Internal invoice number">{invoice.invoice_number}</p>
+              )}
             </div>
           </div>
         ),

@@ -422,6 +422,7 @@ local payment_methods_migrations = load_if_enabled({ ProjectConfig.FEATURES.CORE
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
+local invoice_customer_number_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoice-customer-number") or {}
 local document_template_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-template-menu") or {}
 
 -- Field Service (service jobs, job phases, engineer site visits)
@@ -2749,6 +2750,8 @@ local _migrations = {
     -- Payment methods ("Getting paid", core) + invoices.po_number / payment_method_uuid (invoicing)
     ['zzpm1_namespace_payment_methods'] = conditional_array(ProjectConfig.FEATURES.CORE, payment_methods_migrations, 1),
     ['zzpm2_invoices_po_payment_method'] = conditional_array(ProjectConfig.FEATURES.INVOICING, payment_methods_migrations, 2),
+    -- Customer invoice number: what the customer sees; defaults to invoice_number (migrations/invoice-customer-number.lua)
+    ['zzinvc1_invoices_customer_number'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoice_customer_number_migrations, 1),
     -- Customer PO numbers, quote revisions, supplier PO contacts (migrations/shop-customer-po.lua)
     ['zzs45_shop_customer_po_number'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 1),
     ['zzs46_shop_quote_revisions'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_customer_po_migrations, 2),
