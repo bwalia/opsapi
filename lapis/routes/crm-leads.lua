@@ -491,6 +491,12 @@ return function(app)
         local lead, res = workable_lead(self)
         if not lead then return res end
         local u = self.current_user or {}
+        -- Sent from the workspace's own address: keep one person to a sensible number an hour.
+        local allowed = require("middleware.rate-limit").check("lead_email:" .. tostring(u.uuid or u.id), 60, 3600)
+        if not allowed then
+            return Api.fail(select(2, U.fail(429, "TOO_MANY_EMAILS",
+                "You've sent a lot of emails in the last hour. Try again a little later.")))
+        end
         local result, err = require("lib.crm.lead-email").send(self.namespace.id, lead,
             { uuid = u.uuid, email = u.email }, self.body or {})
         if not result then return Api.fail(err) end

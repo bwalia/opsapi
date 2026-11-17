@@ -39,8 +39,11 @@ const blankForm = (first: boolean): AccountForm => ({
   fromEmail: '', fromName: '', replyTo: '', enabled: true, isDefault: first,
 });
 
-function AccountDialog({ account, first, onClose, onSaved }: {
-  account: MailAccount | 'new' | null; first: boolean; onClose: () => void; onSaved: () => void;
+function AccountDialog({ account, first, othersOn, onClose, onSaved }: {
+  account: MailAccount | 'new' | null; first: boolean;
+  /** Other accounts that are switched on (the default can't be switched off while there are any). */
+  othersOn: number;
+  onClose: () => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState<AccountForm>(blankForm(first));
   const [saving, setSaving] = useState(false);
@@ -106,9 +109,14 @@ function AccountDialog({ account, first, onClose, onSaved }: {
           <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
             <div>
               <p className="text-sm font-medium text-secondary-800">Use this account</p>
-              <p className="text-xs text-secondary-500">Off: its emails go through the default instead.</p>
+              <p className="text-xs text-secondary-500">
+                {editing?.is_default && othersOn > 0
+                  ? 'The default stays on. To switch it off, make another account the default first.'
+                  : 'Off: its emails go through the default instead.'}
+              </p>
             </div>
-            <Switch checked={form.enabled} onChange={(v) => set('enabled', v)} aria-label="Use this account" />
+            <Switch checked={form.enabled} onChange={(v) => set('enabled', v)} aria-label="Use this account"
+              disabled={!!editing?.is_default && othersOn > 0 && form.enabled} />
           </div>
           <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
             <div>
@@ -176,8 +184,10 @@ function MailAccounts({ editable }: { editable: boolean }) {
   const remove = async () => {
     if (!removing) return;
     try {
-      await namespaceMailService.deleteAccount(removing.uuid);
-      toast.success(`${removing.name} removed`);
+      const res = await namespaceMailService.deleteAccount(removing.uuid);
+      toast.success(
+        res.new_default ? `${removing.name} removed. ${res.new_default} is now the default.` : `${removing.name} removed`,
+      );
       setRemoving(null);
       load();
     } catch (err) {
@@ -233,6 +243,16 @@ function MailAccounts({ editable }: { editable: boolean }) {
             </Button>
           )}
         </div>
+        {overview && accounts.some((a) => a.enabled) && !(defaultAccount && defaultAccount.enabled) && (
+          <p role="status" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {defaultAccount
+              ? `The default account, ${defaultAccount.name}, is switched off`
+              : 'There is no default account'}
+            , so emails without an account of their own go through the{' '}
+            {platformLabel.charAt(0).toLowerCase() + platformLabel.slice(1)}. To send them from your own address, pick a
+            default under &ldquo;Which account sends what&rdquo;.
+          </p>
+        )}
         {!overview ? null : accounts.length === 0 ? (
           <p className="mt-4 rounded-lg border border-dashed border-secondary-300 p-4 text-sm text-secondary-500">
             No email accounts yet. Every email goes through the {platformLabel.charAt(0).toLowerCase() + platformLabel.slice(1)}.
@@ -256,7 +276,7 @@ function MailAccounts({ editable }: { editable: boolean }) {
                     </div>
                     {editable && (
                       <div className="flex flex-wrap gap-2">
-                        {!a.is_default && (
+                        {!a.is_default && a.enabled && (
                           <Button size="sm" variant="ghost" onClick={() => makeDefault(a)}>
                             <Star className="w-4 h-4 mr-1" /> Make default
                           </Button>
@@ -318,7 +338,8 @@ function MailAccounts({ editable }: { editable: boolean }) {
                 >
                   <option value="">{r.key === 'default' ? platformLabel : 'Use the default'}</option>
                   {accounts.map((a) => (
-                    <option key={a.uuid} value={a.uuid}>
+                    <option key={a.uuid} value={a.uuid}
+                      disabled={r.key === 'default' && !a.enabled && accounts.some((x) => x.enabled && x.uuid !== a.uuid)}>
                       {a.name}{a.enabled ? '' : ' (off)'}
                     </option>
                   ))}
@@ -340,6 +361,7 @@ function MailAccounts({ editable }: { editable: boolean }) {
       <AccountDialog
         account={editing}
         first={accounts.length === 0}
+        othersOn={accounts.filter((a) => a.enabled && !(editing && editing !== 'new' && a.uuid === editing.uuid)).length}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
@@ -364,7 +386,13 @@ function MailAccounts({ editable }: { editable: boolean }) {
         title={removing ? `Remove ${removing.name}?` : ''}
         message={
           removing?.is_default
-            ? 'This is the default account. Emails it sends will go through the platform’s server until you pick another default.'
+            ? (() => {
+                const next = accounts.filter((a) => a.uuid !== removing.uuid && a.enabled)
+                  .sort((x, y) => (x.created_at || '').localeCompare(y.created_at || ''))[0];
+                return next
+                  ? `This is the default account. ${next.name} becomes the default instead (you can change that).`
+                  : 'This is the default account. With no other account switched on, emails will go through the platform’s server.';
+              })()
             : 'Emails sent through this account will go through the default account instead.'
         }
         confirmText="Remove"

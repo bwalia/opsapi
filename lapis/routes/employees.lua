@@ -75,15 +75,21 @@ return function(app)
         -- password is NOT emailed — the admin hands it over (returned below).
         pcall(function()
             local company = self.namespace.name or "our team"
-            local login_url = (body.login_url ~= nil and body.login_url ~= "" and body.login_url) or nil
+            -- Names, the email and the link come from people: escape them, and only link http(s).
+            local function esc(v)
+                return (tostring(v):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;",
+                    ['"'] = "&quot;", ["'"] = "&#39;" }))
+            end
+            local login_url = type(body.login_url) == "string" and body.login_url:match("^https?://[^%s\"'<>]+$")
+                and #body.login_url <= 500 and body.login_url or nil
             local html = table.concat({
-                "<p>Hi ", (result.name ~= "" and result.name or "there"), ",</p>",
-                "<p>An account has been created for you on ", company, "'s workspace.</p>",
-                "<p>Your sign-in email is <strong>", result.email, "</strong>.",
-                login_url and (" Sign in at <a href=\"" .. login_url .. "\">" .. login_url .. "</a>.") or "",
+                "<p>Hi ", esc(result.name ~= "" and result.name or "there"), ",</p>",
+                "<p>An account has been created for you on ", esc(company), "'s workspace.</p>",
+                "<p>Your sign-in email is <strong>", esc(result.email), "</strong>.",
+                login_url and (" Sign in at <a href=\"" .. esc(login_url) .. "\">" .. esc(login_url) .. "</a>.") or "",
                 "</p>",
                 "<p>Your administrator will give you a temporary password — please change it once you've signed in.</p>",
-                "<p>Thanks,<br>", company, "</p>",
+                "<p>Thanks,<br>", esc(company), "</p>",
             })
             -- Through the workspace's "New team member accounts" email account (Workspace → Email).
             local msg = require("helper.namespace-mail").prepare(self.namespace.id, "employee_welcome",

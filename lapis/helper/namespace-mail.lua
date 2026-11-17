@@ -163,13 +163,14 @@ local GROUP_RANK = {}
 for i, g in ipairs(GROUPS) do GROUP_RANK[g] = i end
 
 --- Declare a kind of email (idempotent; a later call updates it). Returns the key.
--- meta: { name, group?, description?, feature? (hidden where that feature isn't deployed) }
+-- meta: { name, group?, description?, feature? (hidden where that feature isn't deployed),
+--         plugin? (its code: hidden in a workspace that switched the plugin off) }
 function NamespaceMail.kind(key, meta)
     assert(type(key) == "string" and key:match(KEY) and #key <= 40, "email kind keys look like shop_quotes")
     meta = meta or {}
     if not KINDS[key] then KIND_ORDER[#KIND_ORDER + 1] = key end
     KINDS[key] = { key = key, name = meta.name or key, group = meta.group or "Other",
-        description = meta.description or "", feature = meta.feature }
+        description = meta.description or "", feature = meta.feature, plugin = meta.plugin }
     return key
 end
 
@@ -254,7 +255,8 @@ function NamespaceMail.kinds()
     for i, key in ipairs(KIND_ORDER) do
         local k = KINDS[key]
         if available(k) then
-            out[#out + 1] = { key = k.key, name = k.name, group = k.group, description = k.description, i = i }
+            out[#out + 1] = { key = k.key, name = k.name, group = k.group, description = k.description, i = i,
+                plugin = k.plugin }
         end
         seen[key] = true
     end
@@ -359,7 +361,28 @@ local function clear_other_defaults(namespace_id, keep_id)
         namespace_id, keep_id)
 end
 
---- Create (uuid = nil) or update an account. The first account becomes the default.
+-- Accounts other than `except_id` that are switched on.
+local function others_on(namespace_id, except_id)
+    return tonumber(db.query([[SELECT count(*) AS n FROM namespace_smtp_accounts
+        WHERE namespace_id = ? AND enabled AND id <> ?]], namespace_id, except_id or 0)[1].n) or 0
+end
+
+local function has_accounts(namespace_id)
+    return db.query("SELECT 1 FROM namespace_smtp_accounts WHERE namespace_id = ? LIMIT 1", namespace_id)[1] ~= nil
+end
+
+-- With a switched-off default, every email without its own account would quietly go through
+-- the platform's server, even with other accounts switched on. These keep the default usable.
+local DEFAULT_STAYS_ON = "This is the default account. Make another account the default first (or pick "
+    .. "\"Platform server\" as the default), then switch this one off."
+local SWITCH_ON_FIRST = "Switch this account on before making it the default."
+local CHANGED_MEANWHILE = "These email accounts were just changed by someone else. Reload the page and try again."
+
+local function conflict(err)
+    return tostring(err):find("duplicate key", 1, true) or tostring(err):find("unique", 1, true)
+end
+
+--- Create (uuid = nil) or update an account. The workspace's first account becomes the default.
 -- @return presented account | nil, err
 function NamespaceMail.saveAccount(namespace_id, uuid, actor, b)
     local current
@@ -415,8 +438,16 @@ function NamespaceMail.saveAccount(namespace_id, uuid, actor, b)
         f.password_encrypted = b.password ~= "" and Global.encryptSecret(b.password) or db.NULL
     end
 
-    local make_default = b.is_default == true
-        or (not current and default_account(namespace_id) == nil)
+    -- Only a workspace's very first account becomes the default by itself: one that chose
+    -- "Platform server" as its default keeps that choice when it adds an account.
+    local make_default = b.is_default == true or (not current and not has_accounts(namespace_id))
+    if current and current.is_default and current.enabled and not f.enabled and b.is_default ~= false
+        and others_on(namespace_id, current.id) > 0 then
+        return nil, DEFAULT_STAYS_ON
+    end
+    if make_default and not f.enabled and others_on(namespace_id, current and current.id) > 0 then
+        return nil, SWITCH_ON_FIRST
+    end
     local id
     db.query("BEGIN")
     local tx_ok, tx_err = pcall(function()
@@ -439,6 +470,7 @@ function NamespaceMail.saveAccount(namespace_id, uuid, actor, b)
     end)
     if not tx_ok then
         db.query("ROLLBACK")
+        if conflict(tx_err) then return nil, CHANGED_MEANWHILE end
         error(tx_err)
     end
     db.query("COMMIT")
@@ -449,6 +481,7 @@ end
 function NamespaceMail.setDefaultAccount(namespace_id, uuid)
     local row = account_by_uuid(namespace_id, uuid)
     if not row then return nil, "Email account not found" end
+    if not row.enabled and others_on(namespace_id, row.id) > 0 then return nil, SWITCH_ON_FIRST end
     db.query("BEGIN")
     local ok, err = pcall(function()
         clear_other_defaults(namespace_id, row.id)
@@ -456,19 +489,36 @@ function NamespaceMail.setDefaultAccount(namespace_id, uuid)
     end)
     if not ok then
         db.query("ROLLBACK")
+        if conflict(err) then return nil, CHANGED_MEANWHILE end
         error(err)
     end
     db.query("COMMIT")
     return NamespaceMail.presentAccount(account_by_uuid(namespace_id, uuid))
 end
 
---- Delete an account. Emails routed to it go back to the default account; if it
--- was the default, the deployment's server becomes the default.
+--- Delete an account. Emails routed to it go back to the default account. If it was the
+-- default, the oldest account still switched on takes over (none: the deployment's server).
+-- @return { new_default = name | nil } | nil, err
 function NamespaceMail.deleteAccount(namespace_id, uuid)
     local row = account_by_uuid(namespace_id, uuid)
     if not row then return nil, "Email account not found" end
-    db.query("DELETE FROM namespace_smtp_accounts WHERE id = ?", row.id) -- routes cascade
-    return true
+    local promoted
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        db.query("DELETE FROM namespace_smtp_accounts WHERE id = ?", row.id) -- routes cascade
+        if row.is_default then
+            promoted = db.query([[UPDATE namespace_smtp_accounts SET is_default = TRUE, updated_at = NOW()
+                WHERE id = (SELECT id FROM namespace_smtp_accounts WHERE namespace_id = ? AND enabled
+                    ORDER BY created_at, id LIMIT 1) RETURNING name]], namespace_id)[1]
+        end
+    end)
+    if not ok then
+        db.query("ROLLBACK")
+        if conflict(err) then return nil, CHANGED_MEANWHILE end
+        error(err)
+    end
+    db.query("COMMIT")
+    return { new_default = promoted and promoted.name or nil }
 end
 
 local function smtp_config(row)
@@ -544,10 +594,20 @@ function NamespaceMail.routing(namespace_id)
         routes[r.purpose] = r.uuid
     end
     local def = default_account(namespace_id)
+    local kinds, plugins = NamespaceMail.kinds(), {}
+    for _, k in ipairs(kinds) do
+        if k.plugin then plugins[#plugins + 1] = k.plugin end
+    end
+    -- A plugin switched off in this workspace sends nothing here: leave its rows out.
+    local ok_off, off = pcall(function() return require("helper.plugin-workspaces").disabledIn(namespace_id, plugins) end)
+    off = ok_off and off or {}
     local out = {}
-    for _, k in ipairs(NamespaceMail.kinds()) do
-        k.account_uuid = (k.key == "default" and (def and def.uuid) or routes[k.key]) or require("cjson").null
-        out[#out + 1] = k
+    for _, k in ipairs(kinds) do
+        if not (k.plugin and off[k.plugin]) then
+            k.account_uuid = (k.key == "default" and (def and def.uuid) or routes[k.key]) or require("cjson").null
+            k.plugin = nil
+            out[#out + 1] = k
+        end
     end
     return out
 end
@@ -563,6 +623,9 @@ function NamespaceMail.saveRouting(namespace_id, actor, routes)
         if type(uuid) == "string" and uuid ~= "" then
             row = account_by_uuid(namespace_id, uuid)
             if not row then return nil, "Email account not found for " .. purpose end
+            if purpose == "default" and not row.enabled and others_on(namespace_id, row.id) > 0 then
+                return nil, SWITCH_ON_FIRST
+            end
         elseif uuid ~= "" and uuid ~= db.NULL and uuid ~= require("cjson").null and uuid ~= false then
             return nil, purpose .. " must be an account uuid or null"
         end

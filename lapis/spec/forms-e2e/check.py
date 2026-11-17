@@ -183,8 +183,9 @@ sql("""INSERT INTO namespace_user_roles (uuid, namespace_member_id, namespace_ro
        SELECT gen_random_uuid()::text, m.id, r.id, now(), now() FROM namespace_members m, namespace_roles r
        WHERE m.namespace_id = %s AND r.namespace_id = %s AND r.role_name = 'forms_editor'
          AND m.user_id = (SELECT id FROM users WHERE uuid = '%s')""" % (ID_A, ID_A, member_a["uuid"]))
-sql("""INSERT INTO namespace_mail_settings (namespace_id, enabled, host, port, security, from_email, updated_at)
-       VALUES (%s, true, 'smtp', 2525, 'none', 'forms@a.formsink.net', now())""" % ID_A)
+# Workspace A's default email account (Workspace → Email): the SMTP sink.
+sql("""INSERT INTO namespace_smtp_accounts (uuid, namespace_id, name, host, port, security, from_email, enabled, is_default)
+       VALUES (gen_random_uuid()::text, %s, 'Main', 'smtp', 2525, 'none', 'forms@a.formsink.net', true, true)""" % ID_A)
 
 # ---------------------------------------------------------------------------
 print("== permissions and targets")

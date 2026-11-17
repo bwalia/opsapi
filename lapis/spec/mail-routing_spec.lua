@@ -25,11 +25,24 @@ end
 ngx = setmetatable({ log = function() end, ERR = 3, WARN = 4, time = os.time, now = os.time, ctx = {}, var = {} }, -- luacheck: ignore 111
     { __index = function() return function() end end })
 
--- A database that remembers recorded kinds (namespace_mail_kinds) and nothing else.
-local recorded_rows, inserts = {}, 0
+-- A scripted database: tests add responders { pattern, fn }; it also remembers recorded kinds
+-- (namespace_mail_kinds). Every query is logged in `queries`.
+local recorded_rows, inserts, responders, queries = {}, 0, {}, {}
+local fail_update = nil
 package.loaded["lapis.db"] = setmetatable({
     NULL = setmetatable({}, { __tostring = function() return "NULL" end }),
-    query = function(sql, a)
+    raw = function(v) return v end,
+    escape_literal = function(v) return "'" .. tostring(v) .. "'" end,
+    update = function(t)
+        queries[#queries + 1] = "UPDATE " .. t
+        if fail_update then error(fail_update) end
+        return {}
+    end,
+    query = function(sql, a, ...)
+        queries[#queries + 1] = sql
+        for _, r in ipairs(responders) do
+            if sql:find(r[1], 1, true) then return r[2](a, ...) end
+        end
         if sql:find("INSERT INTO namespace_mail_kinds", 1, true) then
             inserts = inserts + 1
             recorded_rows[a] = true
@@ -47,6 +60,18 @@ package.loaded["lapis.db"] = setmetatable({
         return {}
     end,
 }, { __index = function() return function() return {} end end })
+local function respond(list) responders, queries = list, {} end
+local function ran(fragment)
+    for _, q in ipairs(queries) do if q:find(fragment, 1, true) then return true end end
+    return false
+end
+
+-- Hosts resolve to a public address; secrets and ids are stand-ins.
+package.loaded["lib.outbound-webhooks"] = { resolve = function() return { "93.184.215.14" } end,
+    isPublicIPv4 = function() return true end }
+package.loaded["helper.global"] = { generateUUID = function() return "new-uuid" end,
+    encryptSecret = function(v) return "enc:" .. v end, decryptSecret = function(v) return v end }
+package.loaded["helper.plugin-workspaces"] = { disabledIn = function() return { some_plugin = true } end }
 
 local disabled = { shop = true } -- a deployment without the shop
 package.loaded["helper.project-config"] = { isFeatureEnabled = function(f) return not disabled[f] end }
@@ -127,6 +152,91 @@ ok = NamespaceMail.saveRouting(7, "me", { visit_reminders = require("cjson").nul
 check("a recorded kind can be routed", ok ~= nil)
 ok = NamespaceMail.saveRouting(7, "me", { quotes_demo = require("cjson").null, leads = require("cjson").null })
 check("declared kinds can be routed", ok ~= nil)
+
+print("the default account stays usable")
+local MAIN = { id = 1, uuid = "main", name = "Main", is_default = true, enabled = true, host = "smtp.example.com",
+    port = 587, security = "starttls", from_email = "hello@example.com" }
+local OFF = { id = 2, uuid = "off", name = "Spare", is_default = false, enabled = false, host = "smtp.example.com",
+    port = 587, security = "starttls", from_email = "spare@example.com" }
+local function accounts(others_on, extra)
+    local list = {
+        { "AND uuid = ?", function(_, uuid) return ({ main = { MAIN }, off = { OFF } })[uuid] or {} end },
+        { "lower(name) = lower(?)", function() return {} end },
+        { "SELECT count(*) AS n FROM namespace_smtp_accounts", function() return { { n = others_on } } end },
+        { "SELECT * FROM namespace_smtp_accounts WHERE id = ?", function() return { MAIN } end },
+    }
+    for _, r in ipairs(extra or {}) do table.insert(list, 1, r) end
+    respond(list)
+end
+accounts(1)
+local res, err = NamespaceMail.saveAccount(7, "main", "me", { enabled = false })
+check("the default can't be switched off while another account is on", not res and tostring(err):find("default first", 1, true), err)
+accounts(0)
+res = NamespaceMail.saveAccount(7, "main", "me", { enabled = false })
+check("...but can when it's the only one", res ~= nil and ran("UPDATE namespace_smtp_accounts"))
+accounts(1)
+res = NamespaceMail.saveAccount(7, "main", "me", { name = "Main office" })
+check("other edits to the default are fine", res ~= nil)
+
+accounts(1)
+res, err = NamespaceMail.setDefaultAccount(7, "off")
+check("a switched-off account can't become the default while another is on", not res and tostring(err):find("Switch this account on", 1, true), err)
+accounts(1)
+res, err = NamespaceMail.saveRouting(7, "me", { default = "off" })
+check("...nor through the routing list", not res and tostring(err):find("Switch this account on", 1, true), err)
+
+print("a new account becomes the default only when it's the first")
+accounts(0, { { "SELECT 1 FROM namespace_smtp_accounts WHERE namespace_id = ? LIMIT 1", function() return {} end },
+    { "RETURNING id", function() return { { id = 9 } } end } })
+res = NamespaceMail.saveAccount(7, nil, "me", { name = "First", host = "smtp.example.com", port = 587,
+    security = "starttls", from_email = "first@example.com" })
+check("the first account is the default", res ~= nil and ran("SET is_default = TRUE WHERE id = ?"))
+accounts(0, { { "SELECT 1 FROM namespace_smtp_accounts WHERE namespace_id = ? LIMIT 1", function() return { { 1 } } end },
+    { "RETURNING id", function() return { { id = 10 } } end } })
+res = NamespaceMail.saveAccount(7, nil, "me", { name = "Second", host = "smtp.example.com", port = 587,
+    security = "starttls", from_email = "second@example.com" })
+check("a later one isn't, even with \"Platform server\" as the default", res ~= nil and not ran("SET is_default = TRUE WHERE id = ?"))
+
+print("deleting the default hands over to an account that's on")
+accounts(1, { { "RETURNING name", function() return { { name = "Spare" } } end } })
+res = NamespaceMail.deleteAccount(7, "main")
+check("the oldest switched-on account takes over", res and res.new_default == "Spare"
+    and ran("ORDER BY created_at, id LIMIT 1") and ran("WHERE namespace_id = ? AND enabled"), res and res.new_default)
+accounts(1)
+res = NamespaceMail.deleteAccount(7, "off")
+check("deleting another account leaves the default alone", res and res.new_default == nil and not ran("RETURNING name"))
+
+print("two people editing at once get a message, not an error page")
+accounts(0)
+fail_update = "ERROR: duplicate key value violates unique constraint \"namespace_smtp_accounts_one_default\""
+res, err = NamespaceMail.saveAccount(7, "main", "me", { name = "Main" })
+fail_update = nil
+check("a clash is reported in plain words", not res and tostring(err):find("Reload the page", 1, true), err)
+
+print("a plugin switched off in a workspace has no rows there")
+NamespaceMail.kind("plugin_demo", { name = "Plugin demo", group = "Some plugin", plugin = "some_plugin" })
+NamespaceMail.kind("plugin_demo_on", { name = "Plugin demo (on)", group = "Other plugin", plugin = "other_plugin" })
+respond({})
+local seen = {}
+for _, r in ipairs(NamespaceMail.routing(7)) do seen[r.key] = r end
+check("its rows are left out", seen.plugin_demo == nil)
+check("other plugins' rows stay", seen.plugin_demo_on ~= nil and seen.plugin_demo_on.plugin == nil)
+
+print("routes")
+local mroutes = read("routes/namespace-mail.lua")
+check("the platform's SMTP host isn't shown to workspace admins",
+    mroutes:find("configured = p.configured }", 1, true) ~= nil and not mroutes:find("platform = Mail.deploymentSender(),", 1, true))
+check("test emails are rate-limited per person", mroutes:find('"mail_test:" .. tostring(u.uuid or u.id), 10, 600', 1, true) ~= nil)
+check("deleting says who took over", mroutes:find("new_default = res.new_default", 1, true) ~= nil)
+check("lead emails are rate-limited per person", read("routes/crm-leads.lua"):find('"lead_email:" .. tostring(u.uuid or u.id), 60, 3600', 1, true) ~= nil)
+local emp = read("routes/employees.lua")
+check("the new team member email escapes what people typed", emp:find("esc(company)", 1, true) ~= nil
+    and emp:find("esc(result.email)", 1, true) ~= nil)
+check("and only links http(s)", emp:find('match("^https?://', 1, true) ~= nil)
+for _, f in ipairs({ "spec/forms-e2e/check.py", "spec/purchase-orders-e2e/check.py", "spec/shop-vip-e2e/run.sh" }) do
+    check(f .. " sets up an email account, not the old single server",
+        read(f):find("INSERT INTO namespace_smtp_accounts", 1, true) ~= nil and not read(f):find("namespace_mail_settings", 1, true))
+end
 
 print("templates are sent as their kind")
 for key, t in pairs(NamespaceMail.TEMPLATES) do

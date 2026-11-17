@@ -330,7 +330,7 @@ function ProjectLoader.register(manifest)
     -- Its kinds of email, listed under the plugin's name on Workspace → Email.
     for _, k in ipairs(manifest.email_kinds or {}) do
         pcall(require("helper.namespace-mail").kind, k.key, { name = k.name, description = k.description,
-            group = k.group or manifest.name or manifest.code })
+            group = k.group or manifest.name or manifest.code, plugin = manifest.code })
     end
 
     _registered[manifest.code] = manifest
