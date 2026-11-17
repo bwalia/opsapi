@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
 import { DealCodeBar } from '@/components/shop/DealCode';
+import { EditDeliveryAddress, canEditDeliveryAddress } from '@/components/shop/EditDeliveryAddress';
 import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } from '@/components/shop/DeliveryChangeRequests';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { OrderUpdateEmail } from '@/components/shop/OrderUpdateEmail';
@@ -350,6 +351,17 @@ function OrderDetail() {
                     {order.delivery_window ? `, ${DELIVERY_WINDOW_LABEL[order.delivery_window].toLowerCase()}` : ''}
                   </p>
                 )}
+              </div>
+            )}
+            {editable && canEditDeliveryAddress(order) && (
+              <div className="mt-3">
+                <EditDeliveryAddress
+                  order={order}
+                  onSaved={(o) => {
+                    setOrder(o);
+                    setNotes(o.internal_notes ?? '');
+                  }}
+                />
               </div>
             )}
             {order.billing_address && (

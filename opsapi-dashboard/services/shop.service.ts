@@ -39,6 +39,8 @@ import type {
   ShopMarketSourceInput,
   ShopMarketUpsertResult,
   ShopDeliveryChangeDecision,
+  ShopSetDeliveryAddressBody,
+  ShopSetDeliveryAddressResult,
   ShopDeliveryChangeRequest,
   ShopOrder,
   ShopOrderInvoiceResult,
@@ -372,6 +374,12 @@ export const shopService = {
   async approveDeliveryChange(orderUuid: string, requestUuid: string, staffNote?: string): Promise<ShopDeliveryChangeDecision> {
     const res = await apiClient.post(`${BASE}/orders/${orderUuid}/delivery-changes/${requestUuid}/approve`, { staff_note: staffNote || undefined }, JSON_BODY);
     return unwrap<ShopDeliveryChangeDecision>(res);
+  },
+
+  /** Staff change the delivery address (UK; 409 once shipped). Open drop-ship supplier POs follow by default. */
+  async setDeliveryAddress(orderUuid: string, body: ShopSetDeliveryAddressBody): Promise<ShopSetDeliveryAddressResult> {
+    const res = await apiClient.put(`${BASE}/orders/${orderUuid}/delivery-address`, body, JSON_BODY);
+    return unwrap<ShopSetDeliveryAddressResult>(res);
   },
 
   /** Decline with a reason (shown to the customer on their order page). Idempotent. */

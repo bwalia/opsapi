@@ -517,6 +517,77 @@ local function decide(ns_id, order_uuid, request_uuid, body, actor, decision)
     }
 end
 
+--- Drop-ship supplier POs of an order that still go out (not received, billed or cancelled). POs raised before
+-- deal codes have no drop_ship flag; they were all drop-ships.
+local function open_drop_ship_pos(ns_id, order_uuid)
+    local ok, rows = pcall(db.query, [[
+        SELECT id, po_number, status, supplier_name, sent_at
+          FROM purchase_orders
+         WHERE namespace_id = ? AND metadata->>'shop_order_uuid' = ? AND deleted_at IS NULL
+           AND COALESCE((metadata->>'drop_ship')::boolean, true)
+           AND status NOT IN ('received', 'billed', 'cancelled')
+         ORDER BY id FOR UPDATE]], ns_id, order_uuid)
+    return ok and rows or {}
+end
+
+--- Staff change the order's delivery address in the back office (no customer request needed).
+-- body: { address = {name, company?, line1, line2?, city, county?, postcode, phone?, email?}, staff_note?,
+--         update_purchase_orders? (default true) }. The old address goes into the internal notes. With
+-- update_purchase_orders, open drop-ship supplier POs get the new "Deliver directly to" as well; POs already
+-- sent come back in purchase_orders[].already_sent so staff know to tell the supplier.
+function Q.adminSetAddress(ns_id, order_uuid, body, actor)
+    body = type(body) == "table" and body or {}
+    local addr, verr = R.clean_address(body.address)
+    if not addr then return nil, U.err(400, "VALIDATION_ERROR", verr.message, { field = verr.field }) end
+    local staff_note = R.clean_note(body.staff_note, R.NOTE_MAX)
+    local update_pos = body.update_purchase_orders ~= false
+    local who = U.nz(actor) and tostring(actor):sub(1, 254) or "staff"
+    local pos_out = {}
+    local _, err = U.tx(function()
+        local o = db.query("SELECT " .. Orders.ORDER_COLS .. " FROM shop_orders o WHERE o.namespace_id = ? AND o.uuid = ? FOR UPDATE",
+            ns_id, tostring(order_uuid or ""))[1]
+        if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+        if not R.order_open(o.status) then
+            return nil, U.err(409, "ORDER_NOT_CHANGEABLE", "The order is " .. o.status
+                .. ", so the delivery address can't be changed.")
+        end
+        local cur = current_delivery(o)
+        -- Keep what the form doesn't cover (email if left blank, VAT number on an agreed delivery address).
+        local agreed = U.nz(o.delivery_address) and U.dec(o.delivery_address, {}) or {}
+        addr.email = addr.email or agreed.email
+        addr.vat_number = agreed.vat_number
+        if cur.address and R.same_address(cur.address, addr) and (cur.address.phone or "") == (addr.phone or "")
+            and (cur.address.email or "") == (addr.email or "") then
+            return nil, U.err(400, "NO_CHANGE", "That is already the delivery address")
+        end
+        -- Blank company stays blank: a home address mustn't pick up the customer's company on the supplier PO.
+        addr.company = addr.company or ""
+        db.query("UPDATE shop_orders SET delivery_address = ?::jsonb, updated_at = NOW() WHERE id = ?", U.enc(addr), o.id)
+        local line = stamp() .. " Delivery address changed by " .. who .. ": " .. R.describe_address(addr)
+            .. ". Was: " .. R.describe_address(cur.address)
+        if staff_note then line = line .. ". Note: " .. staff_note:gsub("\n", " ") end
+        if update_pos then
+            o.delivery_address = U.enc(addr)
+            local ship_to = Orders.shipTo(o)
+            local text = Orders.addressText(ship_to)
+            for _, po in ipairs(open_drop_ship_pos(ns_id, o.uuid)) do
+                db.query([[UPDATE purchase_orders SET delivery_address = ?,
+                           metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ship_to}', ?::jsonb), updated_at = NOW()
+                           WHERE id = ?]], text or db.NULL, U.enc(ship_to), po.id)
+                pos_out[#pos_out + 1] = { po_number = po.po_number, supplier_name = po.supplier_name, status = po.status,
+                                          already_sent = U.nz(po.sent_at) ~= nil }
+                line = line .. ". Supplier PO " .. tostring(po.po_number) .. " updated"
+                    .. (U.nz(po.sent_at) and (" (already sent to " .. tostring(po.supplier_name or "the supplier")
+                        .. ": tell them)") or "")
+            end
+        end
+        append_note(o.id, line)
+        return true
+    end)
+    if err then return nil, err end
+    return { order = Orders.adminGet(ns_id, order_uuid), purchase_orders = U.arr(pos_out) }
+end
+
 function Q.approve(ns_id, order_uuid, request_uuid, body, actor)
     return decide(ns_id, order_uuid, request_uuid, body, actor, "approved")
 end
