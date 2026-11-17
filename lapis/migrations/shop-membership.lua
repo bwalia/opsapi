@@ -33,7 +33,12 @@
 
     Plus (zzs29): Trade price lock default shortened from 90 → 60 days (allowed values 60 or 120).
 
-    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26, zzs27, zzs28 and zzs29. Idempotent.
+    Plus (zzs54): offer v2 (Trade Account + Pro) — shop_membership_settings.offer_version ('v1' until an admin
+    switches it), offer_v2_since (when it went live), pro_discount_pct (Pro members' %, 0 = none);
+    shop_memberships.offer_version (what the member joined under; every existing row is 'v1'),
+    paid_by ('card' via Stripe, or 'invoice' when staff record a Pro fee paid by invoice) and invoice_ref.
+
+    Registered in migrations.lua as zzs19–zzs21, zzs25, zzs26, zzs27, zzs28, zzs29 and zzs54. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -253,5 +258,19 @@ return {
         db.query([[ALTER TABLE shop_membership_settings ALTER COLUMN lock_days SET DEFAULT 60]])
         db.query([[ALTER TABLE shop_membership_settings ADD CONSTRAINT shop_membership_settings_lock_days_check
                    CHECK (lock_days IN (60, 120))]])
+    end,
+    -- [9] Offer v2 (Trade Account + Pro), honouring v1 members until their membership year ends --------
+    [9] = function()
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS offer_version varchar(8)
+                   NOT NULL DEFAULT 'v1' CHECK (offer_version IN ('v1', 'v2'))]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS offer_v2_since timestamptz]])
+        db.query([[ALTER TABLE shop_membership_settings ADD COLUMN IF NOT EXISTS pro_discount_pct numeric(5,2)
+                   NOT NULL DEFAULT 0 CHECK (pro_discount_pct BETWEEN 0 AND 50)]])
+        -- Existing memberships joined under v1: the default marks them so.
+        db.query([[ALTER TABLE shop_memberships ADD COLUMN IF NOT EXISTS offer_version varchar(8)
+                   NOT NULL DEFAULT 'v1' CHECK (offer_version IN ('v1', 'v2'))]])
+        db.query([[ALTER TABLE shop_memberships ADD COLUMN IF NOT EXISTS paid_by varchar(16)
+                   NOT NULL DEFAULT 'card' CHECK (paid_by IN ('card', 'invoice'))]])
+        db.query([[ALTER TABLE shop_memberships ADD COLUMN IF NOT EXISTS invoice_ref varchar(64)]])
     end,
 }

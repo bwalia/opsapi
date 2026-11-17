@@ -52,6 +52,7 @@
                                                not emailed about delivery change decisions
       GET/PUT           /membership/settings   (VIP: prices, founding cap, lock days 60|120, refund threshold, …)
       GET               /membership/members    (?status=&q=)
+      POST              /membership/members/invoiced  { email, invoice_ref }  record a Pro fee paid by invoice (offer v2)
       GET               /waitlist              (?product_uuid=&include_notified=; members first)
       GET/POST          /credits               loyalty credit (?q=&status=&source=); POST { email, amount_minor,
                                                min_order_minor?, reason, expires_in_days?, notify? }
@@ -594,6 +595,17 @@ return function(app)
 
     app:get(BASE .. "/membership/members", guard("read", function(self, ns_id)
         return U.ok(Membership.adminMembers(ns_id, self.params))
+    end))
+
+    -- Offer v2: a Pro fee paid by invoice against the customer's PO (no Stripe). shop.manage, like
+    -- marking an order paid: it says money arrived and starts the benefits.
+    app:post(BASE .. "/membership/members/invoiced", guard("update", function(self, ns_id)
+        local body, err = U.read_json()
+        if not body then return U.fail(400, "INVALID_JSON", err) end
+        local u = self.current_user or {}
+        local res, ierr = Membership.recordInvoicedPro(ns_id, body, u.email or u.uuid or (u.api_key and "api-key") or nil)
+        if not res then return U.from_err(ierr) end
+        return U.ok(res, 201)
     end))
 
     -- VIP badges: which of these customer emails hold a membership in force. POST so the addresses
