@@ -554,10 +554,13 @@ function Q.adminSetAddress(ns_id, order_uuid, body, actor)
         local cur = current_delivery(o)
         -- Keep what the form doesn't cover (email if left blank, VAT number on an agreed delivery address).
         local agreed = U.nz(o.delivery_address) and U.dec(o.delivery_address, {}) or {}
+        local typed_email = addr.email
         addr.email = addr.email or agreed.email
         addr.vat_number = agreed.vat_number
+        -- Unchanged? A blank email means "keep it", so it only counts when one was typed (the current
+        -- address carries the customer's email even when none was agreed).
         if cur.address and R.same_address(cur.address, addr) and (cur.address.phone or "") == (addr.phone or "")
-            and (cur.address.email or "") == (addr.email or "") then
+            and (typed_email == nil or (cur.address.email or ""):lower() == typed_email:lower()) then
             return nil, U.err(400, "NO_CHANGE", "That is already the delivery address")
         end
         -- Blank company stays blank: a home address mustn't pick up the customer's company on the supplier PO.
