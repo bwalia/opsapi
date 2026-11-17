@@ -16,6 +16,7 @@ import {
   RefreshCw,
   X,
   ChevronDown,
+  Info,
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -24,6 +25,8 @@ import { ordersService, type OrderFilters, type OrderStats, type StoreOption } f
 import { formatDate, formatCurrency, getFullName } from '@/lib/utils';
 import type { Order, TableColumn, OrderStatus, PaymentStatus } from '@/types';
 import { useAuthStore } from '@/store/auth.store';
+import { useMenu } from '@/hooks/useMenu';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 
 // Stats card component
@@ -274,6 +277,8 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, isOpen, on
 };
 
 function OrdersPageContent() {
+  const { allMenu } = useMenu();
+  const hasShop = allMenu.some((m) => m.key === 'shop');
   // State
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -550,8 +555,8 @@ function OrdersPageContent() {
     <div className="space-y-6">
       {/* Page Header */}
       <PageHeader
-        title="Orders"
-        description={isAdmin ? 'Manage all orders across the platform' : 'Manage your store orders'}
+        title="Sales Orders"
+        description={isAdmin ? 'Orders from your online stores, across the platform' : 'Orders from your online stores'}
         icon={<ShoppingCart className="h-5 w-5" />}
         actions={
           <button
@@ -563,6 +568,21 @@ function OrdersPageContent() {
           </button>
         }
       />
+
+      {/* Shop orders live in the Shop module; this page is the Stores & Products module's orders. */}
+      {hasShop && (
+        <div className="flex items-start gap-3 rounded-lg border border-info-500/20 bg-info-500/10 px-4 py-3 text-sm text-secondary-700">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-info-600" />
+          <p>
+            This page lists orders from your online stores (Stores &amp; Products). Orders placed in your shop are
+            under{' '}
+            <Link href="/dashboard/shop/orders" className="font-medium text-primary-600 hover:underline">
+              Shop → Orders
+            </Link>
+            .
+          </p>
+        </div>
+      )}
 
       {/* Stats Cards */}
       {stats && (
@@ -783,7 +803,7 @@ function OrdersPageContent() {
 
 export default function OrdersPage() {
   return (
-    <ProtectedPage module="orders" title="Orders">
+    <ProtectedPage module="orders" title="Sales Orders">
       <OrdersPageContent />
     </ProtectedPage>
   );

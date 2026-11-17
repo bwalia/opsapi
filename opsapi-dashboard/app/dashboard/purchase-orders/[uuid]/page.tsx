@@ -853,8 +853,18 @@ function PurchaseOrderDetailContent() {
                 <dd className="text-secondary-900 whitespace-pre-line">{partyLines(po.metadata.bill_to).join('\n')}</dd>
               </div>
             )}
+            {typeof po.metadata?.deal_code === 'string' && po.metadata.deal_code && (
+              <div className="print:hidden">
+                <dt className="inline text-secondary-500">Deal:</dt>
+                <dd className="inline ml-2">
+                  <Link href={`/dashboard/shop/deals/${encodeURIComponent(po.metadata.deal_code)}`} className="font-mono text-primary-600 hover:underline">
+                    {po.metadata.deal_code}
+                  </Link>
+                </dd>
+              </div>
+            )}
             {po.metadata?.shop_order_uuid && (
-              <div>
+              <div className="print:hidden">
                 <dt className="inline text-secondary-500">Shop order:</dt>
                 <dd className="inline ml-2">
                   <Link href={`/dashboard/shop/orders/${po.metadata.shop_order_uuid}`} className="text-primary-600 hover:underline">

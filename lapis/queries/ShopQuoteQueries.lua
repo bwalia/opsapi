@@ -19,6 +19,8 @@ local Cart = require("queries.ShopCartQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
 local Rules = require("lib.shop-quote-rules")
+local Deal = require("queries.ShopDealQueries")
+local Cost = require("queries.ShopCostQueries")
 
 local ShopQuoteQueries = {}
 
@@ -33,7 +35,7 @@ local QUOTE_COLS = [[
     q.viewed_at, q.created_by_user_id, q.created_at, q.updated_at, q.price_locked,
     q.kind, q.discount_minor, q.discount_label, q.trade_discount_minor, q.delivery_method,
     q.delivery_address::text AS delivery_address, q.sent_at, q.authorised_at, q.authorised_by_name,
-    q.customer_po_number, q.revision_no, q.revision_of_id, q.superseded_by_id,
+    q.customer_po_number, q.revision_no, q.revision_of_id, q.superseded_by_id, q.deal_code,
     (q.valid_until < NOW()) AS is_past_validity
 ]]
 
@@ -160,6 +162,8 @@ function ShopQuoteQueries.shape(q, opts)
     out.list_subtotal_minor = list.subtotal_minor
     out.list_vat_minor = list.vat_minor
     if opts.admin then
+        -- The deal code is private: staff and suppliers only, never in the customer's shape (see the spec).
+        out.deal_code = U.nz(q.deal_code) or U.null
         out.internal_notes = q.internal_notes or U.null
         out.viewed_at = q.viewed_at or U.null
         out.updated_at = q.updated_at
@@ -227,7 +231,8 @@ local function valid_until_of(v)
 end
 
 --- Price an array of {product_slug, qty, selections, price_override_minor?}.
--- opts.admin allows overrides, inactive products and invalid configurations.
+-- opts.admin allows overrides, inactive products and invalid configurations, but never a price below cost:
+-- staff get 422 BELOW_COST (item, price, cost), a customer 409 PRICE_CHECK_REQUIRED (and staff an alert).
 -- Returns (lines, err).
 function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
     opts = opts or {}
@@ -235,7 +240,7 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
         return nil, U.err(400, "VALIDATION_ERROR", "at least one line is required")
     end
     if #inputs > 100 then return nil, U.err(400, "VALIDATION_ERROR", "too many lines") end
-    local lines = {}
+    local lines, below = {}, {}
     for i, l in ipairs(inputs) do
         if type(l) ~= "table" then return nil, U.err(400, "VALIDATION_ERROR", "line " .. i .. " is invalid") end
         if opts.admin and (l.custom == true or (not U.nz(l.product_slug) and U.nz(l.name))) then
@@ -246,19 +251,42 @@ function ShopQuoteQueries.priceLines(ns_id, inputs, opts)
             goto continue
         end
         do
-        local priced, bundle_or_err = Catalog.priceRequest(ns_id, l, { admin = opts.admin })
+        local priced, bundle_or_err, _, cost = Catalog.priceRequest(ns_id, l, { admin = opts.admin })
         if not priced then return nil, bundle_or_err end
-        if not priced.valid and not opts.admin then
+        local override = opts.admin and U.nz(l.price_override_minor) ~= nil and U.int(l.price_override_minor, nil) or nil
+        -- An unpriced quote_only line (no override) has no price to check yet.
+        local unit = override or priced.unit_price_minor
+        local unpriced = priced.price_mode == "quote_only" and override == nil
+        if not unpriced and Pricing.below_cost(unit, cost) then
+            local p = bundle_or_err.product
+            below[#below + 1] = { line_index = i, line_uuid = U.nz(l.uuid), product_id = p.id, product_uuid = p.uuid,
+                product_name = p.name, sku = p.sku, qty = priced.qty, unit_price_minor = unit,
+                unit_cost_minor = cost.unit_cost_minor }
+        end
+        if not priced.valid and not opts.admin and not (cost and cost.below_cost) then
             return nil, U.err(422, "INVALID_CONFIGURATION", "Line " .. i .. " has an invalid configuration",
                 { violations = priced.violations, line_index = i })
         end
         local line = Catalog.lineSnapshot(bundle_or_err, priced, U.nz(l.uuid))
-        if opts.admin and U.nz(l.price_override_minor) ~= nil and U.int(l.price_override_minor, nil) then
-            line = Pricing.apply_override(line, l.price_override_minor)
+        if override then
+            line = Pricing.apply_override(line, override)
+            -- the staff price is what counts: drop the list price's below_cost flag when it clears the cost
+            if cost and cost.below_cost and not Pricing.below_cost(override, cost) then
+                local kept = {}
+                for _, v in ipairs(line.violations or {}) do
+                    if v.rule ~= "below_cost" then kept[#kept + 1] = v end
+                end
+                line.violations = U.arr(kept)
+                line.valid = #kept == 0
+            end
         end
         lines[#lines + 1] = line
         end
         ::continue::
+    end
+    if #below > 0 then
+        if opts.admin then return nil, Cost.adminError(below) end
+        return nil, Cost.refuse(ns_id, below, "quote")
     end
     return lines
 end
@@ -299,6 +327,9 @@ function ShopQuoteQueries.insert(ns_id, params)
         db.query("UPDATE shop_chat_sessions SET quote_id = ?, updated_at = NOW() WHERE id = ?", row.id,
             params.chat_session_id)
     end
+    -- The deal code: a revision keeps its original's, a new deal gets a new one (now, or after the open
+    -- transaction commits).
+    Deal.assignLater("quote", ns_id, row.id, params.created_by_user_id)
     return ShopQuoteQueries.getById(row.id)
 end
 
@@ -382,6 +413,9 @@ local function capture_lead(ns_id, q, customer, total, chat_session)
     if not lead then return end
     db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE id = ?", lead.id, q.id)
     q.crm_lead_id = lead.id
+    -- The quote and the customer's lead are one deal (one deal code).
+    local ok, err = pcall(Deal.joinLead, ns_id, q.id, lead.id)
+    if not ok then ngx.log(ngx.WARN, "[shop-quotes] deal code not joined to the lead: ", tostring(err)) end
     if chat_session then
         db.query("UPDATE shop_chat_sessions SET crm_lead_id = ? WHERE id = ?", lead.id, chat_session.id)
     end
@@ -402,6 +436,8 @@ function ShopQuoteQueries.createPublic(ns_id, body, cart_token)
         if not cart then return nil, U.err(404, "CART_NOT_FOUND", "Cart not found") end
         local view = Cart.view(ns_id, cart)
         if #view.lines == 0 then return nil, U.err(400, "EMPTY_CART", "The cart is empty") end
+        local below = Cost.checkLines(ns_id, view.lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "quote") end
         for i, l in ipairs(view.lines) do
             if not l.valid then
                 return nil, U.err(422, "INVALID_CONFIGURATION", "Line " .. i .. " has an invalid configuration",
@@ -618,6 +654,9 @@ function ShopQuoteQueries.orderFromQuote(ns_id, uuid, body, user_id)
     if src.crm_lead_id then
         db.query("UPDATE shop_quotes SET crm_lead_id = ? WHERE uuid = ? AND namespace_id = ?", src.crm_lead_id, res.uuid, ns_id)
     end
+    -- Same deal as the quote it came from.
+    local ok, derr = pcall(function() Deal.adoptQuote(ns_id, res.uuid, Deal.forQuote(ns_id, src.id, user_id)) end)
+    if not ok then ngx.log(ngx.WARN, "[shop-quotes] deal code not carried to ", res.quote_number, ": ", tostring(derr)) end
     return ShopQuoteQueries.adminGet(ns_id, res.uuid)
 end
 
@@ -897,8 +936,8 @@ function ShopQuoteQueries.adminList(ns_id, params)
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(q.quote_number ILIKE ? OR q.customer->>'email' ILIKE ? OR q.customer->>'name' ILIKE ? "
-            .. "OR q.customer->>'company' ILIKE ? OR q.customer_po_number ILIKE ?)"
-        for _ = 1, 5 do vals[#vals + 1] = like end
+            .. "OR q.customer->>'company' ILIKE ? OR q.customer_po_number ILIKE ? OR q.deal_code ILIKE ?)"
+        for _ = 1, 6 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
@@ -933,6 +972,10 @@ end
 function ShopQuoteQueries.adminGet(ns_id, uuid)
     local q = ShopQuoteQueries.getByUuid(ns_id, uuid)
     if not q then return nil end
+    if not U.nz(q.deal_code) and Deal.enabled() then
+        local ok, code = pcall(Deal.forQuote, ns_id, q.id)
+        if ok then q.deal_code = code end
+    end
     local s = ShopQuoteQueries.shape(q, { admin = true })
     local chain = ShopQuoteQueries.revisionChain(q)
     s.revisions = U.arr(#chain > 1 and chain or {})

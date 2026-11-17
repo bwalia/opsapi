@@ -138,7 +138,19 @@ export interface ShopOption {
   held?: number;
   /** Admin document: available units (own stock or component product's). */
   available?: number | null;
+  /** Admin document: the option's own stored delta (price_delta_minor is the effective one). */
+  stored_price_delta_minor?: number;
+  /** Admin document: true when a priced component product sets this option's price. */
+  price_follows_component?: boolean;
+  /** Manual cost (pence ex VAT) of one unit of the price delta. Editable; null = unknown. */
+  cost_minor?: number | null;
+  /** Read-only: the component product's cost when linked, else cost_minor. */
+  effective_cost_minor?: number | null;
+  cost_source?: ShopOptionCostSource;
 }
+
+export type ShopOptionCostSource = 'component' | 'option' | null;
+export type ShopProductCostSource = 'supplier' | 'manual' | null;
 
 export interface ShopOptionGroup {
   id?: number;
@@ -242,6 +254,13 @@ export interface ShopProduct {
   rules: ShopRule[];
   default_selections?: ShopSelections;
   has_embedding?: boolean;
+  /** Manual cost (pence ex VAT). Editable; null = unknown. */
+  cost_minor?: number | null;
+  /** Read-only: the linked supplier item's cost. */
+  supplier_cost_minor?: number | null;
+  /** Read-only: supplier cost if linked, else manual cost, else null. */
+  effective_cost_minor?: number | null;
+  cost_source?: ShopProductCostSource;
   created_at?: string;
   updated_at?: string;
 }
@@ -265,6 +284,8 @@ export interface ShopProductInput {
   images: string[];
   tags: string[];
   base_price_minor: number;
+  /** Manual cost in pence ex VAT; null clears it, omitted leaves it unchanged. */
+  cost_minor?: number | null;
   currency: string;
   vat_rate: number;
   stock_qty?: number;
@@ -460,6 +481,8 @@ export interface ShopOrder extends ShopTotals {
   paid_at?: string | null;
   tracking?: ShopTracking | null;
   internal_notes?: string | null;
+  /** Private deal code (staff and suppliers only; never shown to the customer). */
+  deal_code?: string | null;
   quote?: ShopRef | null;
   quote_uuid?: string | null;
   url_path?: string;
@@ -657,8 +680,15 @@ export interface ShopPurchaseOrderPreview {
   };
   last_supplier_uuid: string | null;
   bill_to: Record<string, string> | null;
+  /** The deal code: the PO's reference (the supplier never sees the customer or our quote number). */
+  deal_code: string | null;
+  /** Where the supplier delivers by default: us (Shop → Settings, else Bill to). */
+  deliver_to: Record<string, string> | null;
+  deliver_to_text: string | null;
+  /** The customer's address: only on the PO for a confirmed drop-ship. */
   ship_to: ShopDeliveryAddress;
   ship_to_text: string | null;
+  drop_ship?: boolean;
   delivery_method: string | null;
   customer_po_number: string | null;
   notes: string;
@@ -680,6 +710,8 @@ export interface ShopQuote extends ShopTotals {
   lines: ShopLine[];
   notes?: string | null;
   internal_notes?: string | null;
+  /** Private deal code (staff and suppliers only; never shown to the customer). */
+  deal_code?: string | null;
   valid_until: string;
   viewed_at?: string | null;
   url_path?: string;
@@ -976,8 +1008,16 @@ export interface ShopSupplierItem {
   product_margin_pct: number | null;
 }
 
-export type ShopPriceChangeStatus = 'pending' | 'applied' | 'approved' | 'rejected' | 'superseded';
-export const SHOP_PRICE_CHANGE_STATUSES: ShopPriceChangeStatus[] = ['pending', 'applied', 'approved', 'rejected', 'superseded'];
+/** blocked_below_cost: a supplier price (or an approval) that would sell below cost; never applied. */
+export type ShopPriceChangeStatus = 'pending' | 'applied' | 'approved' | 'rejected' | 'superseded' | 'blocked_below_cost';
+export const SHOP_PRICE_CHANGE_STATUSES: ShopPriceChangeStatus[] = [
+  'pending',
+  'applied',
+  'approved',
+  'rejected',
+  'superseded',
+  'blocked_below_cost',
+];
 
 export interface ShopPriceChange {
   uuid: string;
@@ -996,6 +1036,62 @@ export interface ShopPriceChange {
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
+}
+
+/** One item in a 422 BELOW_COST save refusal. */
+export interface ShopBelowCostItem {
+  kind: 'product' | 'option';
+  name: string;
+  product_name?: string;
+  group_code?: string;
+  option_code?: string;
+  price_minor: number;
+  cost_minor: number;
+  message: string;
+}
+
+/** GET /pricing/below-cost */
+export interface ShopBelowCostProduct {
+  uuid: string;
+  sku: string;
+  name: string;
+  status: ShopProductStatus;
+  price_mode: ShopPriceMode;
+  price_minor: number;
+  cost_minor: number;
+  cost_source: ShopProductCostSource;
+  margin_minor: number;
+}
+
+export interface ShopBelowCostOption {
+  product_uuid: string;
+  product_sku: string;
+  product_name: string;
+  group_code: string;
+  group_name: string;
+  option_code: string;
+  option_name: string;
+  price_minor: number;
+  cost_minor: number;
+  cost_source: ShopOptionCostSource;
+  margin_minor: number;
+}
+
+export interface ShopBelowCostQuote {
+  uuid: string;
+  quote_number: string;
+  status: string;
+  kind: string;
+  customer_name: string | null;
+  lines: { line_uuid: string; product_name: string; qty: number; unit_price_minor: number; unit_cost_minor: number }[];
+}
+
+export interface ShopBelowCostReport {
+  products: ShopBelowCostProduct[];
+  options: ShopBelowCostOption[];
+  missing_cost: { products: number; options: number };
+  missing_cost_products: { uuid: string; sku: string; name: string }[];
+  quotes?: ShopBelowCostQuote[];
 }
 
 export interface ShopChatSession {
@@ -1331,4 +1427,99 @@ export interface ShopVipStatus {
   joined_at: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
+}
+
+// ============================================================
+// Deal codes (private: staff and suppliers only)
+// ============================================================
+
+export interface ShopSupplierRequestLine {
+  /** The line of our quote this prices (for the compare table). */
+  line_uuid?: string | null;
+  description: string;
+  qty: number;
+  /** Their price per unit, pence ex VAT. */
+  unit_price_minor?: number | null;
+  note?: string | null;
+}
+
+export interface ShopSupplierRequest {
+  uuid: string;
+  deal_code: string;
+  supplier_uuid: string | null;
+  supplier_name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  sent_at: string | null;
+  spec: string | null;
+  lines: ShopSupplierRequestLine[];
+  supplier_quote_ref: string | null;
+  lead_time: string | null;
+  valid_until: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ShopSupplierRequestInput = Partial<Omit<ShopSupplierRequest, 'uuid' | 'deal_code' | 'created_at' | 'updated_at'>>;
+
+export interface ShopSupplierRequestDraft {
+  to: string | null;
+  subject: string;
+  body: string;
+  mailto: string;
+  sent: false;
+}
+
+export interface ShopDealCompareCell {
+  request_uuid: string;
+  supplier_name: string;
+  cost_unit_minor?: number | null;
+  profit_unit_minor?: number | null;
+  profit_line_minor?: number | null;
+  below_cost: boolean;
+}
+
+export interface ShopDealCompareRow {
+  line_uuid: string;
+  description: string;
+  qty: number;
+  our_unit_minor: number | null;
+  suppliers: ShopDealCompareCell[];
+}
+
+export interface ShopDealAuditEntry {
+  action: string;
+  detail: Record<string, unknown> | null;
+  at: string;
+  by: string | null;
+}
+
+export interface ShopDeal {
+  deal_code: string;
+  customer: { name: string | null; email: string | null; phone: string | null; company: string | null };
+  leads: { uuid: string; name: string; email: string | null; phone: string | null; company: string | null; status: string; source: string | null; created_at: string }[];
+  quotes: { uuid: string; quote_number: string; revision_no: number; kind: ShopQuoteKind; status: ShopQuoteStatus; total_minor: number; subtotal_minor: number; currency: string; created_at: string; superseded: boolean; order_uuid: string | null; order_number: string | null }[];
+  orders: { uuid: string; order_number: string; status: ShopOrderStatus; total_minor: number; subtotal_minor: number; currency: string; paid_at: string | null; created_at: string; quote_number: string | null }[];
+  purchase_orders: { uuid: string; po_number: string; status: string; supplier_name: string; total: string | number; currency: string; reference: string | null; created_at: string; sent_at: string | null; drop_ship: boolean; drop_ship_confirmed: boolean; legacy_drop_ship: boolean }[];
+  supplier_requests: ShopSupplierRequest[];
+  notes: { source: string; uuid: string; kind: 'quote' | 'order'; text: string }[];
+  /** Our customer lines (the newest live quote, else the order): new requests start from these. */
+  lines: { uuid: string; description: string; qty: number; unit_price_minor: number | null }[];
+  lines_from: string | null;
+  compare: { rows: ShopDealCompareRow[]; below_cost_count: number };
+  audit: ShopDealAuditEntry[];
+}
+
+export interface ShopDealSearchResult {
+  deal_code: string;
+  matched_by: 'deal_code' | 'quote_number' | 'order_number' | 'supplier_quote_ref' | 'customer_email';
+  match: string;
+  customer?: string | null;
+}
+
+export interface ShopDealSearch {
+  /** Set when the query is a full deal code of this workspace: open the deal page. */
+  exact: string | null;
+  results: ShopDealSearchResult[];
 }

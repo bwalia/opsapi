@@ -195,6 +195,8 @@ local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHO
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
+local shop_deal_code_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-deal-codes") or {}
+local shop_cost_floor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-cost-floor") or {}
 -- VIP membership: its tables and the shop columns it adds (shop_orders.credit_minor,
 -- shop_credits, ...) are used by every shop payment (card and bank transfer), so they ship
 -- with the SHOP feature alone. The schema only stores billing ids as plain columns; the
@@ -2756,9 +2758,16 @@ local _migrations = {
     ['zzs52_shop_customer_delivery_notifications'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_delivery_change_migrations, 2),
     -- Order update emails staff send from the order page, test sends included (migrations/shop-order-emails.lua)
     ['zzs53_shop_order_emails'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_email_migrations, 1),
+    -- Deal codes: one private code per deal linking lead/quotes/orders to supplier requests/POs, plus supplier
+    -- price requests and the idempotent backfill (migrations/shop-deal-codes.lua). zzs54 is taken by the cost floor.
+    ['zzs55_shop_deal_codes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 1),
+    ['zzs56_shop_supplier_requests'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 2),
+    ['zzs57_shop_deal_codes_backfill'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 3),
+    -- Never price below cost: product/option costs, blocked price changes (migrations/shop-cost-floor.lua)
+    ['zzs54_shop_cost_floor'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_cost_floor_migrations, 1),
     -- Membership offer v2 (Trade Account + Pro): offer_version / offer_v2_since / pro_discount_pct settings,
     -- per-membership offer_version (existing rows = v1), paid_by + invoice_ref (migrations/shop-membership.lua [9])
-    ['zzs54_shop_membership_offer_v2'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 9),
+    ['zzs58_shop_membership_offer_v2'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_membership_migrations, 9),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
@@ -2852,6 +2861,11 @@ local _migrations = {
         db.query("UPDATE menu_items SET name = 'Audit Logs', updated_at = NOW()"
             .. " WHERE key = 'reports' AND name = 'Reports'")
         db.query("UPDATE menu_items SET is_active = false, updated_at = NOW() WHERE key = 'delivery' AND is_active")
+    end,
+    -- "Orders" is the Stores & Products module's orders, not the shop's (those are under Shop → Orders):
+    -- call it Sales Orders so the two aren't confused. Workspaces that renamed it keep theirs.
+    ['zzmn3_orders_menu_is_sales_orders'] = function()
+        db.query("UPDATE menu_items SET name = 'Sales Orders', updated_at = NOW() WHERE key = 'orders' AND name = 'Orders'")
     end,
     -- A workspace may opt in to the deployment's own (self-hosted) model as an AI provider.
     ['zzai2_platform_model_provider'] = function()

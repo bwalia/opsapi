@@ -23,6 +23,9 @@ local Stock = require("queries.ShopStockQueries")
 local PaymentMethods = require("queries.PaymentMethodQueries")
 local PM = require("lib.payment-methods")
 local Rules = require("lib.shop-quote-rules")
+local Deal = require("queries.ShopDealQueries")
+local DealCodes = require("lib.deal-codes")
+local Cost = require("queries.ShopCostQueries")
 
 local ShopOrderQueries = {}
 
@@ -45,7 +48,7 @@ local ORDER_COLS = [[
     o.cart_id, o.quote_id, o.stripe_session_id, o.stripe_payment_intent_id, o.paid_at,
     o.tracking::text AS tracking, o.internal_notes, o.created_at, o.updated_at,
     o.payment_method, o.paid_reference, o.paid_amount_minor, o.invoice_uuid, o.customer_po_number,
-    o.delivery_date::text AS delivery_date, o.delivery_window
+    o.delivery_date::text AS delivery_date, o.delivery_window, o.deal_code
 ]]
 ShopOrderQueries.ORDER_COLS = ORDER_COLS
 
@@ -94,6 +97,8 @@ function ShopOrderQueries.shape(o, opts)
         out.payment_reference = o.order_number
     end
     if opts.admin then
+        -- The deal code is private: staff and suppliers only, never in the customer's shape.
+        out.deal_code = U.nz(o.deal_code) or U.null
         out.refunded_minor = tonumber(o.refunded_minor) or 0
         out.returned_net_minor = tonumber(o.returned_net_minor) or 0
         out.refund_clawback_minor = tonumber(o.refund_clawback_minor) or 0
@@ -283,6 +288,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
         if not cart then return nil, U.err(404, "CART_NOT_FOUND", "Cart not found") end
         local view = Cart.view(ns_id, cart)
         if #view.lines == 0 then return nil, U.err(400, "EMPTY_CART", "The cart is empty") end
+        -- Never sold below cost (hard rule): refuse, alert staff; the customer is not told the cost.
+        local below = Cost.checkLines(ns_id, view.lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "checkout") end
         local reasons = {}
         for _, l in ipairs(view.lines) do
             if l.price_mode == "quote_only" then
@@ -318,6 +326,9 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             return nil, U.err(409, "QUOTE_PRICING_PENDING", "We still need to price " .. table.concat(unpriced, ", ")
                 .. ". We'll send you the updated quote to pay.", { products = U.arr(unpriced) })
         end
+        -- A quoted price that has fallen below the item's current cost is not sold either.
+        local below = Cost.checkLines(ns_id, lines)
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "order", quote.quote_number) end
         customer = U.dec(quote.customer, {})
         email = email or U.nz(customer.email)
     else
@@ -477,6 +488,7 @@ function ShopOrderQueries.checkout(ns_id, body, cart_token)
             cart and cart.id or db.NULL, quote and quote.id or db.NULL,
             quote and Quote.orderFieldsFromQuote(quote).customer_po_number or db.NULL)[1]
         Stock.hold(ns_id, row.id, demand, RESERVATION_MINUTES)
+        Deal.assignLater("order", ns_id, row.id)
         if credit then require("queries.ShopMembershipQueries").reserveCredits(ns_id, row.id, credit.applied) end
         return row
     end)
@@ -753,6 +765,12 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
     local quote = Quote.getWithToken(ns_id, uuid, token)
     if not quote then return nil, U.err(404, "QUOTE_NOT_FOUND", "Quote not found") end
     Quote.maybeExpire(quote)
+    -- Never sold below cost. Checked before the transaction so the staff alert isn't rolled back with it;
+    -- a quote that already has its order (a repeat click) just gets that order back below.
+    if not nz(quote.order_id) then
+        local below = Cost.checkLines(ns_id, U.dec(quote.lines, {}))
+        if #below > 0 then return nil, Cost.refuse(ns_id, below, "order", quote.quote_number) end
+    end
     return U.tx(function()
         -- Lock the quote so two clicks can't create two orders.
         local q = db.query("SELECT id, order_id, status FROM shop_quotes WHERE id = ? FOR UPDATE", quote.id)[1]
@@ -810,6 +828,7 @@ function ShopOrderQueries.bankTransfer(ns_id, uuid, token)
             "Customer chose bank transfer for " .. tostring(quote.quote_number))[1]
         -- The quote fields every order made from a quote carries (the customer's PO number).
         ShopOrderQueries.applyQuoteFields(row.id, quote)
+        Deal.assignLater("order", ns_id, row.id)
         Stock.hold(ns_id, row.id, demand, BANK_TRANSFER_HOLD_MINUTES)
         db.query("UPDATE shop_quotes SET order_id = ?, updated_at = NOW() WHERE id = ?", row.id, quote.id)
         if quote.crm_lead_id then
@@ -1007,8 +1026,8 @@ function ShopOrderQueries.adminList(ns_id, params)
     if U.nz(params.q) then
         local like = "%" .. tostring(params.q):gsub("[%%_\\]", "\\%0") .. "%"
         where[#where + 1] = "(o.order_number ILIKE ? OR o.email ILIKE ? OR o.customer->>'name' ILIKE ? "
-            .. "OR o.customer->>'company' ILIKE ? OR o.customer_po_number ILIKE ?)"
-        for _ = 1, 5 do vals[#vals + 1] = like end
+            .. "OR o.customer->>'company' ILIKE ? OR o.customer_po_number ILIKE ? OR o.deal_code ILIKE ?)"
+        for _ = 1, 6 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     vals[#vals + 1] = offset
@@ -1044,6 +1063,10 @@ end
 function ShopOrderQueries.adminGet(ns_id, uuid)
     local o = ShopOrderQueries.getByUuid(ns_id, uuid)
     if not o then return nil end
+    if not U.nz(o.deal_code) and Deal.enabled() then
+        local ok, code = pcall(Deal.forOrder, ns_id, o.id)
+        if ok then o.deal_code = code end
+    end
     local s = ShopOrderQueries.shape(o, { admin = true })
     s.reservations = U.arr(db.query([[
         SELECT r.uuid, r.qty, r.status, r.expires_at, p.sku, p.name AS product_name, op.code AS option_code,
@@ -1308,6 +1331,9 @@ end
 
 --- Everything a supplier PO for this order would say, before it is raised. Shared by the preview
 -- (GET /orders/:uuid/purchase-order/preview) and POST /orders/:uuid/purchase-order.
+-- The supplier sees the deal code, never the customer: the PO's reference is the deal code and it delivers to
+-- our own address (deliver_to). ship_to (the customer's address) is for staff, and only goes on the PO when
+-- staff confirm a drop-ship (body.drop_ship + body.confirm_drop_ship).
 -- Returns (draft) or (nil, err).
 function ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
     body = type(body) == "table" and body or {}
@@ -1335,9 +1361,14 @@ function ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
             cost_source = given and "entered" or (from_file and "supplier_price_file") or U.null,
         }
     end
+    local deal_code = U.nz(o.deal_code)
+    if not deal_code and Deal.enabled() then deal_code = Deal.forOrder(ns_id, o.id) end
+    local Settings = require("queries.ShopSettingsQueries")
+    local deliver_to = Settings.deliverTo(ns_id)
     local ship_to = ship_to_of(o)
     local method = U.nz(body.delivery_method) or U.nz(o.delivery_method)
     local customer_po = U.nz(o.customer_po_number)
+    local drop = body.drop_ship == true or body.drop_ship == "true"
     local supplier = {
         uuid = sup and sup.uuid or U.null,
         name = U.nz(body.supplier_name) or (sup and sup.name) or U.null,
@@ -1347,28 +1378,35 @@ function ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
         account_number = sup and U.nz(sup.account_number) or U.null,
         po_notes = sup and U.nz(sup.po_notes) or U.null,
     }
+    local function v(x) return x ~= U.null and x or nil end
+    local printed = DealCodes.supplier_po({
+        deal_code = deal_code or "", drop_ship = drop, customer_po_number = customer_po, delivery_method = method,
+        notes = U.nz(body.notes),
+        supplier = { account_number = v(supplier.account_number), notes = v(supplier.po_notes) },
+    })
     return {
         order = o,
         order_uuid = o.uuid, order_number = o.order_number, order_status = o.status,
+        deal_code = deal_code or U.null,
         can_raise = PO_STATUSES[o.status] == true,
         supplier = supplier,
         last_supplier_uuid = last_supplier_uuid(ns_id) or U.null,
-        bill_to = require("queries.ShopSettingsQueries").billTo(ns_id) or U.null,
+        bill_to = Settings.billTo(ns_id) or U.null,
+        -- Where the supplier delivers by default: us.
+        deliver_to = deliver_to or U.null, deliver_to_text = address_text(deliver_to) or U.null,
+        -- The customer's address: staff only; on the PO only for a confirmed drop-ship.
         ship_to = ship_to, ship_to_text = address_text(ship_to) or U.null,
+        drop_ship = drop,
         delivery_method = method or U.null,
         customer_po_number = customer_po or U.null,
-        notes = Rules.supplier_po_notes({
-            customer_po_number = customer_po, account_number = supplier.account_number ~= U.null and supplier.account_number or nil,
-            delivery_method = method, supplier_notes = supplier.po_notes ~= U.null and supplier.po_notes or nil,
-            notes = U.nz(body.notes),
-        }),
+        notes = printed.notes,
         lines = U.arr(lines),
         missing_costs = missing,
         currency = o.currency or "GBP",
     }
 end
 
---- GET /orders/:uuid/purchase-order/preview?supplier_uuid= — what the PO would say (no PO is created).
+--- GET /orders/:uuid/purchase-order/preview?supplier_uuid=&drop_ship= — what the PO would say (no PO is created).
 function ShopOrderQueries.purchaseOrderPreview(ns_id, uuid, params)
     local d, err = ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, params)
     if not d then return nil, err end
@@ -1376,14 +1414,17 @@ function ShopOrderQueries.purchaseOrderPreview(ns_id, uuid, params)
     return d
 end
 
---- POST /orders/:uuid/purchase-order — draft a supplier PO for a paid order: Bill to (shop settings),
--- Deliver directly to (the order's delivery address), delivery method, the end customer's PO number, the
--- order's product lines (free-text lines only with include_custom) at the supplier costs given (pounds ex
+--- POST /orders/:uuid/purchase-order — draft a supplier PO for a paid order: Bill to (shop settings), the
+-- deal code as the reference, delivery to our own address (Shop settings → our delivery address, else Bill to),
+-- the order's product lines (free-text lines only with include_custom) at the supplier costs given (pounds ex
 -- VAT, by line uuid), else the cost in the chosen supplier's price file, else 0 to fill in on the PO.
+-- Nothing on it identifies the customer (422 CUSTOMER_DETAILS_FOR_SUPPLIER if staff notes would), unless staff
+-- choose a drop-ship: drop_ship = true needs confirm_drop_ship = true ("I confirm the supplier will see this
+-- delivery address"), and is logged on the deal.
 -- body: { supplier_uuid?, supplier_name (unless supplier_uuid), supplier_email?, supplier_phone?,
 --         supplier_address?, expected_date?, delivery_method?, notes?, costs? = { [line_uuid] = "123.45" },
---         include_custom? }   Values in the body override the supplier's saved details.
-function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
+--         include_custom?, drop_ship?, confirm_drop_ship? }   Values in the body override the supplier's saved details.
+function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid, user_id)
     body = type(body) == "table" and body or {}
     local d, derr = ShopOrderQueries.purchaseOrderDraft(ns_id, uuid, body)
     if not d then return nil, derr end
@@ -1393,8 +1434,23 @@ function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
     end
     local okPO, POQ = pcall(require, "queries.PurchaseOrderQueries")
     if not okPO then return nil, U.err(501, "PURCHASE_ORDERS_UNAVAILABLE", "Purchase orders are not enabled here") end
+    if d.deal_code == U.null then
+        return nil, U.err(503, "DEAL_CODES_UNAVAILABLE", "This order has no deal code yet: try again in a minute")
+    end
     local sup = d.supplier
     if sup.name == U.null then return nil, U.err(400, "VALIDATION_ERROR", "Choose a supplier (or give supplier_name)") end
+    local drop = d.drop_ship
+    if drop and body.confirm_drop_ship ~= true then
+        return nil, U.err(400, "DROP_SHIP_NOT_CONFIRMED", "Tick “I confirm the supplier will see this delivery address” "
+            .. "to have the supplier deliver straight to the customer")
+    end
+    if drop and d.ship_to_text == U.null then
+        return nil, U.err(400, "VALIDATION_ERROR", "This order has no delivery address to drop-ship to")
+    end
+    if not drop and d.deliver_to_text == U.null then
+        return nil, U.err(400, "NO_DELIVERY_ADDRESS", "Add our delivery address (or the Bill to address) in Shop → Settings "
+            .. "so the supplier delivers to us")
+    end
     local items = {}
     for _, l in ipairs(d.lines) do
         if l.included then
@@ -1408,29 +1464,42 @@ function ShopOrderQueries.createPurchaseOrder(ns_id, uuid, body, user_uuid)
     end
     if #items == 0 then return nil, U.err(400, "VALIDATION_ERROR", "This order has no product lines to order") end
     local function v(x) return x ~= U.null and x or nil end
-    local po, msg, code = POQ.create(ns_id, user_uuid, {
-        supplier_name = tostring(sup.name):sub(1, 255),
-        supplier_email = v(sup.email), supplier_phone = v(sup.phone), supplier_address = v(sup.address),
-        reference = o.order_number,
-        expected_date = U.nz(body.expected_date),
-        delivery_address = v(d.ship_to_text),
-        currency = d.currency,
-        notes = d.notes ~= "" and d.notes or nil,
-        items = items,
-        metadata = {
-            shop_order_uuid = o.uuid, shop_order_number = o.order_number,
-            shop_supplier_uuid = v(sup.uuid), supplier_account_number = sup.account_number,
-            end_customer_po = d.customer_po_number,
-            bill_to = d.bill_to, ship_to = d.ship_to, delivery_method = d.delivery_method,
-            drop_ship = true,
-        },
+    local params = DealCodes.supplier_po({
+        deal_code = d.deal_code, order_uuid = o.uuid, order_number = o.order_number,
+        supplier = { uuid = v(sup.uuid), name = sup.name, email = v(sup.email), phone = v(sup.phone),
+                     address = v(sup.address), account_number = v(sup.account_number), notes = v(sup.po_notes) },
+        items = items, bill_to = v(d.bill_to),
+        our_address = v(d.deliver_to), our_address_text = v(d.deliver_to_text),
+        ship_to = d.ship_to, ship_to_text = v(d.ship_to_text), drop_ship = drop,
+        customer_po_number = v(d.customer_po_number), delivery_method = v(d.delivery_method),
+        notes = U.nz(body.notes), expected_date = U.nz(body.expected_date), currency = d.currency,
     })
+    if not drop then
+        local leaked = DealCodes.leaks(DealCodes.supplier_visible(params), Deal.customerMarkers(ns_id, d.deal_code))
+        if #leaked > 0 then
+            return nil, U.err(422, "CUSTOMER_DETAILS_FOR_SUPPLIER", "Suppliers must not see the customer's details. Remove "
+                .. "the customer's " .. table.concat(leaked, ", ") .. " from the notes and supplier details (the deal code "
+                .. "is the only reference they need)", { fields = U.arr(leaked) })
+        end
+    end
+    local po, msg, code = POQ.create(ns_id, user_uuid, params)
     if not po then
         return nil, U.err(code == "not_found" and 404 or 400, "PURCHASE_ORDER_FAILED", tostring(msg))
     end
+    if Deal.exists("purchase_orders", "deal_code") then
+        pcall(db.query, "UPDATE purchase_orders SET deal_code = ? WHERE namespace_id = ? AND uuid = ?", d.deal_code, ns_id, po.uuid)
+    end
     pcall(db.query, [[UPDATE shop_orders SET internal_notes = COALESCE(internal_notes || E'\n', '') || ?, updated_at = NOW()
                       WHERE id = ?]], "Supplier PO " .. tostring(po.po_number or po.uuid) .. " raised ("
-        .. tostring(sup.name) .. ")", o.id)
+        .. tostring(sup.name) .. (drop and ", drop-ship to the customer" or ", delivered to us") .. ")", o.id)
+    Deal.audit(ns_id, d.deal_code, "purchase_order.created", user_id,
+        { po_uuid = po.uuid, po_number = po.po_number, supplier = sup.name, drop_ship = drop })
+    if drop then
+        Deal.audit(ns_id, d.deal_code, "drop_ship.confirmed", user_id, {
+            po_uuid = po.uuid, po_number = po.po_number, supplier = sup.name,
+            confirmation = "I confirm the supplier will see this delivery address",
+        })
+    end
     return po
 end
 

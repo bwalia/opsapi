@@ -2,7 +2,7 @@
  * Shop back-office helpers: money (minor units ↔ pounds), status colours,
  * customer-link → PDF URL derivation, Stripe dashboard links.
  */
-import type { ShopOrderStatus, ShopQuoteStatus, ShopProduct, ShopOptionGroup } from '@/types/shop';
+import type { ShopBelowCostItem, ShopOrderStatus, ShopQuoteStatus, ShopProduct, ShopOptionGroup } from '@/types/shop';
 
 const formatters = new Map<string, Intl.NumberFormat>();
 
@@ -194,4 +194,21 @@ export function shopAssetUrl(u: string | null | undefined): string {
   if (!s || /^(https?:|data:|blob:)/i.test(s) || s.startsWith('//')) return s;
   const base = (process.env.NEXT_PUBLIC_SHOP_URL || '').replace(/\/+$/, '');
   return base && s.startsWith('/') ? base + s : s;
+}
+
+/** Margin of a price over a cost: £ (minor) and % of price. Null when the cost is unknown. */
+export function margin(priceMinor: number | null | undefined, costMinor: number | null | undefined): { minor: number; pct: number | null; below: boolean } | null {
+  if (priceMinor === null || priceMinor === undefined || costMinor === null || costMinor === undefined) return null;
+  const minor = priceMinor - costMinor;
+  return { minor, pct: priceMinor !== 0 ? (minor / priceMinor) * 100 : null, below: minor < 0 };
+}
+
+/** A 422 BELOW_COST save refusal (price under cost) from a product save, else null. */
+export function belowCostError(err: unknown): { message: string; items: ShopBelowCostItem[] } | null {
+  const data = (err as { response?: { data?: { code?: string; error?: unknown; items?: unknown } } })?.response?.data;
+  if (!data || data.code !== 'BELOW_COST') return null;
+  return {
+    message: typeof data.error === 'string' ? data.error : 'A price is below cost',
+    items: Array.isArray(data.items) ? (data.items as ShopBelowCostItem[]) : [],
+  };
 }

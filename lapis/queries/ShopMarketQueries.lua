@@ -20,6 +20,7 @@ local Global = require("helper.global")
 local U = require("lib.shop-util")
 local Stock = require("queries.ShopStockQueries")
 local Insights = require("queries.ShopInsightsQueries")
+local Cost = require("lib.shop-cost")
 
 local ShopMarketQueries = {}
 
@@ -860,6 +861,16 @@ function ShopMarketQueries.applyPrice(ns_id, uuid, body)
         end
     else
         return nil, U.err(400, "VALIDATION_ERROR", "strategy must be 'median', 'min' or 'value'")
+    end
+    -- Never below cost (hard rule): a market price under what the product costs us is not applied.
+    local c = db.query([[SELECT COALESCE(si.cost_minor, p.cost_minor) AS cost_minor
+                          FROM shop_products p LEFT JOIN shop_supplier_items si ON si.id = p.supplier_item_id
+                         WHERE p.id = ?]], p.id)[1] or {}
+    if p.price_mode ~= "quote_only" and Cost.below(value, c.cost_minor) then
+        local msg = string.format("%s: price %s is below its cost %s", tostring(p.name or p.sku), Cost.money(value),
+            Cost.money(c.cost_minor))
+        return nil, U.err(422, "BELOW_COST", "Below cost, not applied: " .. msg, { items = U.arr({ {
+            kind = "product", name = p.name, price_minor = value, cost_minor = tonumber(c.cost_minor), message = msg } }) })
     end
     local previous = tonumber(p.base_price_minor) or 0
     db.query([[

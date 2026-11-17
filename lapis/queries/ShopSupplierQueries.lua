@@ -22,6 +22,7 @@ local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 local Global = require("helper.global")
 local U = require("lib.shop-util")
 local S = require("lib.shop-supplier")
+local Cost = require("lib.shop-cost")
 
 local Q = {}
 
@@ -272,8 +273,29 @@ local function rejected_already(product_id, old_price, new_price)
         and tonumber(last.old_price_minor) == tonumber(old_price)
 end
 
+--- Never below cost: a price change that would sell below the supplier's cost is not made (not clamped
+-- either). It is recorded once as 'blocked_below_cost' (again only when the price or cost moves) so staff see it.
+-- Returns true when this move was already recorded.
+local function blocked_already(product_id, new_price, cost)
+    local last = db.query([[SELECT status, new_price_minor, cost_minor FROM shop_price_changes
+                             WHERE product_id = ? ORDER BY id DESC LIMIT 1]], product_id)[1]
+    return last ~= nil and last.status == "blocked_below_cost" and tonumber(last.new_price_minor) == tonumber(new_price)
+        and tonumber(last.cost_minor) == tonumber(cost)
+end
+
+local function record_blocked(ns_id, p, new_price, cost, margin)
+    if blocked_already(p.id, new_price, cost) then return end
+    supersede_pending(p.id)
+    db.query([[
+        INSERT INTO shop_price_changes (uuid, namespace_id, product_id, supplier_item_id, old_price_minor, new_price_minor,
+                                        cost_minor, margin_pct, change_pct, status, decided_by, decided_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'blocked_below_cost', 'auto', NOW())
+    ]], Global.generateUUID(), ns_id, p.id, p.supplier_item_id or db.NULL, p.base_price_minor, new_price, cost, margin,
+        S.change_pct(p.base_price_minor, new_price) or db.NULL)
+end
+
 --- Reprice products linked to supplier items. where_sql filters products (alias p).
--- Returns { applied, pending, unchanged }.
+-- Returns { applied, pending, unchanged, blocked_below_cost, blocked = { {sku, name, new_price_minor, cost_minor} } }.
 local function reprice(ns_id, where_sql, ...)
     local rows = db.query([[
         SELECT p.id, p.uuid, p.sku, p.name, p.base_price_minor, p.margin_pct::float8 AS margin_pct, p.supplier_item_id,
@@ -286,7 +308,7 @@ local function reprice(ns_id, where_sql, ...)
           JOIN shop_suppliers s ON s.id = i.supplier_id
           LEFT JOIN shop_categories c ON c.id = p.category_id
          WHERE p.namespace_id = ? AND ]] .. where_sql, ns_id, ...)
-    local out = { applied = 0, pending = 0, unchanged = 0, lead_times_updated = 0 }
+    local out = { applied = 0, pending = 0, unchanged = 0, lead_times_updated = 0, blocked_below_cost = 0, blocked = {} }
     for _, p in ipairs(rows) do
         if p.update_lead_times and p.item_active and tonumber(p.item_lead_time_days) then
             local upd = db.query([[UPDATE shop_products SET lead_time_days = ?, updated_at = NOW()
@@ -298,7 +320,13 @@ local function reprice(ns_id, where_sql, ...)
             local margin = S.margin(p.margin_pct, p.category_margin_pct, p.supplier_margin_pct)
             local new_price = S.sell_price(p.cost_minor, margin)
             local decision = S.decide(p.base_price_minor, new_price, p.threshold_pct)
-            if decision == "apply" then
+            if decision ~= "none" and Cost.below(new_price, p.cost_minor) then
+                -- e.g. a negative margin: never set, never clamped; recorded for staff
+                record_blocked(ns_id, p, new_price, p.cost_minor, margin)
+                out.blocked_below_cost = out.blocked_below_cost + 1
+                out.blocked[#out.blocked + 1] = { sku = p.sku, name = p.name, new_price_minor = new_price,
+                    cost_minor = tonumber(p.cost_minor) }
+            elseif decision == "apply" then
                 apply_price(ns_id, p, new_price, p.cost_minor, margin, "applied")
                 out.applied = out.applied + 1
             elseif decision == "review" and rejected_already(p.id, p.base_price_minor, new_price) then
@@ -326,6 +354,7 @@ local function reprice(ns_id, where_sql, ...)
             end
         end
     end
+    out.blocked = U.arr(out.blocked)
     return out
 end
 
@@ -665,6 +694,19 @@ function Q.decide(ns_id, uuid, approve, actor)
         return nil, U.err(409, "NOT_PENDING", "This price change was already " .. c.status)
     end
     if approve then
+        -- Never below cost: the cost now (the supplier's may have moved since the change was proposed).
+        local now = db.query([[SELECT p.name, COALESCE(si.cost_minor, p.cost_minor) AS cost_minor
+                                FROM shop_products p LEFT JOIN shop_supplier_items si ON si.id = p.supplier_item_id
+                               WHERE p.id = ?]], c.product_id)[1] or {}
+        if Cost.below(c.new_price_minor, now.cost_minor) then
+            db.query("UPDATE shop_price_changes SET status = 'blocked_below_cost', decided_by = ?, decided_at = NOW() WHERE id = ?",
+                actor or db.NULL, c.id)
+            local msg = string.format("%s: price %s is below its cost %s", tostring(now.name), Cost.money(c.new_price_minor),
+                Cost.money(now.cost_minor))
+            return nil, U.err(422, "BELOW_COST", "Below cost, not applied: " .. msg, { items = U.arr({ {
+                kind = "product", name = now.name, price_minor = tonumber(c.new_price_minor),
+                cost_minor = tonumber(now.cost_minor), message = msg } }) })
+        end
         apply_price(ns_id, { id = c.product_id, base_price_minor = c.base_price_minor, supplier_item_id = c.supplier_item_id },
             tonumber(c.new_price_minor), tonumber(c.cost_minor), tonumber(c.margin_pct), "approved", actor, c.uuid)
     else

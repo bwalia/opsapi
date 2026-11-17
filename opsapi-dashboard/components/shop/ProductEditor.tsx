@@ -10,11 +10,12 @@ import { Button, Card, ConfirmDialog, Input, Select, Textarea, Switch } from '@/
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { shopService } from '@/services/shop.service';
 import { extractApiError } from '@/lib/utils';
-import { estimateFromPrice, formatMoney, humanize, incVat, minorToPounds, poundsToMinor, slugify, typingSlug } from '@/lib/shop';
+import { belowCostError, estimateFromPrice, formatMoney, humanize, incVat, minorToPounds, poundsToMinor, slugify, typingSlug } from '@/lib/shop';
 import {
   SHOP_PRICE_MODES,
   SHOP_PRODUCT_STATUSES,
   SHOP_PRODUCT_TYPES,
+  type ShopBelowCostItem,
   type ShopCategory,
   type ShopPriceMode,
   type ShopProduct,
@@ -36,7 +37,7 @@ import {
 } from './editor-fields';
 import { OptionGroupsEditor, groupToForm, groupsToPayload, type GroupForm } from './OptionGroupsEditor';
 import { RulesEditor, ruleToForm, rulesToPayload, type RuleForm } from './RulesEditor';
-import { MovementsDrawer, PriceVerifiedBadge, ProductStatusBadge, SHOP_MODULE, StockAdjustModal, type StockTarget } from './shared';
+import { MarginHint, MovementsDrawer, PriceVerifiedBadge, ProductStatusBadge, SHOP_MODULE, StockAdjustModal, type StockTarget } from './shared';
 
 interface BasicsForm {
   name: string;
@@ -51,6 +52,7 @@ interface BasicsForm {
   description: string;
   tags: string; // comma separated
   base_price: string; // pounds
+  cost: string; // pounds; '' = unknown
   vat_rate: string; // percent
   stock_qty: string; // only used on create
   low_stock_threshold: string;
@@ -75,6 +77,7 @@ function toBasics(p?: ShopProduct): BasicsForm {
     description: p?.description ?? '',
     tags: (p?.tags ?? []).join(', '),
     base_price: minorToPounds(p?.base_price_minor ?? 0),
+    cost: minorToPounds(p?.cost_minor),
     vat_rate: String(Math.round(((p?.vat_rate ?? 0.2) * 100) * 100) / 100),
     stock_qty: String(p?.stock_qty ?? 0),
     low_stock_threshold: String(p?.low_stock_threshold ?? 2),
@@ -110,6 +113,7 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
   const [componentProducts, setComponentProducts] = useState<ShopProductListItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [belowCost, setBelowCost] = useState<{ message: string; items: ShopBelowCostItem[] } | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [stockTarget, setStockTarget] = useState<StockTarget | null>(null);
@@ -149,6 +153,11 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
     return Number.isFinite(n) ? n / 100 : 0.2;
   })();
   const [, attrError] = parseJsonObject(attributes);
+  const costMinor = basics.cost.trim() === '' ? null : poundsToMinor(basics.cost);
+  const costInvalid = basics.cost.trim() !== '' && (costMinor === null || costMinor < 0);
+  // Same precedence as OpsAPI: a linked supplier item's cost wins over the manual cost.
+  const supplierCost = product?.supplier_cost_minor ?? null;
+  const effectiveCost = supplierCost ?? (costInvalid ? null : costMinor);
 
   const fromPreview = useMemo(() => {
     const { groups: g } = groupsToPayload(groups);
@@ -162,6 +171,7 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
     const slug = basics.slug.trim() || slugify(basics.name);
     if (!slug) errs.push('Slug is required');
     if (basePriceMinor === null || basePriceMinor < 0) errs.push('Base price must be a valid amount ≥ 0');
+    if (costInvalid) errs.push('Cost must be a valid amount ≥ 0 (or blank if unknown)');
     const vat = Number(basics.vat_rate);
     if (!Number.isFinite(vat) || vat < 0 || vat > 100) errs.push('VAT rate must be between 0 and 100%');
     const [attrs, aErr] = parseJsonObject(attributes);
@@ -191,6 +201,7 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
       description: basics.description,
       tags: basics.tags.split(',').map((t) => t.trim()).filter(Boolean),
       base_price_minor: basePriceMinor ?? 0,
+      cost_minor: costMinor,
       currency: 'GBP',
       vat_rate: Math.round(vat * 100) / 10000,
       low_stock_threshold: Math.max(0, intOr(basics.low_stock_threshold, 2)),
@@ -213,6 +224,7 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
   const save = async () => {
     const { payload, errs } = buildPayload();
     setErrors(errs);
+    setBelowCost(null);
     if (!payload) {
       toast.error(`Fix ${errs.length} problem${errs.length === 1 ? '' : 's'} before saving`);
       return;
@@ -229,6 +241,13 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
         onReload?.();
       }
     } catch (err) {
+      const bc = belowCostError(err);
+      if (bc) {
+        setBelowCost(bc);
+        toast.error('Not saved: a price is below cost');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
       toast.error(extractApiError(err, 'Failed to save product'));
     } finally {
       setSaving(false);
@@ -297,6 +316,26 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
               <li key={i}>{e}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {belowCost && (
+        <div className="rounded-xl border border-error-300 bg-error-50 p-4" role="alert">
+          <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-error-700">
+            <AlertTriangle className="h-4 w-4" /> Not saved: price below cost
+          </p>
+          <p className="mb-2 text-sm text-error-700">{belowCost.message}</p>
+          {belowCost.items.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-6 text-sm text-error-700">
+              {belowCost.items.map((it, i) => (
+                <li key={i}>
+                  <strong>{it.kind === 'option' && it.product_name && it.product_name !== it.name ? `${it.product_name} › ${it.name}` : it.name}</strong>: price{' '}
+                  {formatMoney(it.price_minor)} is below cost {formatMoney(it.cost_minor)}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-xs text-error-600">Raise the price, or correct the cost if it is wrong, then save again.</p>
         </div>
       )}
 
@@ -424,6 +463,25 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
                 error={basePriceMinor === null ? 'Enter an amount, e.g. 1299.00' : undefined}
                 helperText={basePriceMinor !== null ? `${formatMoney(incVat(basePriceMinor, vatRate))} inc VAT` : undefined}
               />
+              <div>
+                <Input
+                  label="Cost (£ ex VAT)"
+                  id="p-cost"
+                  value={basics.cost}
+                  onChange={(e) => set('cost', e.target.value)}
+                  onBlur={() => costMinor !== null && costMinor >= 0 && set('cost', minorToPounds(costMinor))}
+                  inputMode="decimal"
+                  placeholder="unknown"
+                  leftIcon={<span className="text-sm">£</span>}
+                  error={costInvalid ? 'Enter an amount ≥ 0, or leave blank' : undefined}
+                  helperText={
+                    supplierCost !== null
+                      ? `Supplier cost ${formatMoney(supplierCost)} is used (it wins over this manual cost)`
+                      : 'Manual cost. Saves are refused if the price is below it.'
+                  }
+                />
+                <MarginHint priceMinor={basePriceMinor} costMinor={effectiveCost} className="mt-1 block" />
+              </div>
               <Input label="VAT rate (%)" id="p-vat" value={basics.vat_rate} onChange={(e) => set('vat_rate', e.target.value)} inputMode="decimal" />
               <div className="flex items-center justify-between gap-3 rounded-lg border border-secondary-200 px-3 py-2.5">
                 <div>

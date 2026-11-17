@@ -29,7 +29,7 @@ Orders the business places with suppliers (builders, merchants), e.g. materials 
 - Responses return the uuid as `id`. Find a PO by number with `search`. `project_uuid` must be a project in this workspace (find it with list_projects).
 
 ## From shop orders
-- Shop staff raise drop-ship POs from a paid shop order (Shop → Orders → "Raise supplier PO"): metadata holds shop_order_uuid/number, shop_supplier_uuid (the shop supplier), supplier_account_number, end_customer_po (the customer's own PO, printed in the Deliver to block), bill_to, ship_to.
+- Shop staff raise supplier POs from a paid shop order (Shop → Orders → "Raise supplier PO"). The reference is the order's private deal code (WS-XXXX-XXXX); the supplier never sees the customer's name, email, phone, company or WSQ quote number. It delivers to our address (Shop → Settings) unless staff tick drop-ship and confirm "I confirm the supplier will see this delivery address" (logged on the deal). metadata holds deal_code, shop_order_uuid/number, shop_supplier_uuid, supplier_account_number, bill_to, drop_ship, and for a confirmed drop-ship ship_to, end_customer_po and drop_ship_confirmed. POs raised before deal codes were all drop-ships: they stay as they are and are marked as legacy on the deal.
 - A shop supplier's PO details (Shop → Suppliers → Edit → Purchase orders: po_email, po_phone, po_address, account_number, po_notes) fill the PO; costs come from its price file.
 - Shop → Suppliers lists each supplier's POs (by metadata.shop_supplier_uuid, or older ones by supplier name).
 

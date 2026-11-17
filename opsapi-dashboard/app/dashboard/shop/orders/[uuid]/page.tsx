@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, PackageCheck, Printe
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SupplierPoModal } from '@/components/shop/SupplierPoModal';
+import { DealCodeBar } from '@/components/shop/DealCode';
 import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } from '@/components/shop/DeliveryChangeRequests';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { OrderUpdateEmail } from '@/components/shop/OrderUpdateEmail';
@@ -218,6 +219,8 @@ function OrderDetail() {
         }}
       />
 
+      <DealCodeBar code={order.deal_code} kind="order" uuid={order.uuid} editable={editable} onChanged={reload} />
+
       <div className="flex flex-wrap items-center gap-3">
         <OrderStatusBadge status={order.status} />
         {order.delivery_change_pending && (
@@ -279,6 +282,7 @@ function OrderDetail() {
             >
               Internal notes
             </SectionTitle>
+            <DealCodeBar code={order.deal_code} className="mb-3" />
             <Textarea
               aria-label="Internal notes"
               value={notes}

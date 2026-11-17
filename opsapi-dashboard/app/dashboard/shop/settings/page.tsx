@@ -33,6 +33,11 @@ function SettingsContent() {
   const [alertEmail, setAlertEmail] = useState('');
   const [savingAlert, setSavingAlert] = useState(false);
   const [savingNotify, setSavingNotify] = useState(false);
+  const [deliverTo, setDeliverTo] = useState<PurchaseOrderParty>({});
+  const [savingDeliver, setSavingDeliver] = useState(false);
+  const [dealPrefix, setDealPrefix] = useState('WS');
+  const [dealLength, setDealLength] = useState('8');
+  const [savingDeal, setSavingDeal] = useState(false);
 
   useEffect(() => {
     shopService
@@ -41,6 +46,9 @@ function SettingsContent() {
         setSettings(s);
         setBillTo(s.po_bill_to ?? {});
         setAlertEmail(s.order_alert_email ?? '');
+        setDeliverTo(s.po_deliver_to ?? {});
+        setDealPrefix(s.deal_code_prefix ?? 'WS');
+        setDealLength(String(s.deal_code_length ?? 8));
       })
       .catch((e) => toast.error(extractApiError(e, 'Could not load shop settings')));
   }, []);
@@ -78,6 +86,36 @@ function SettingsContent() {
       toast.error(extractApiError(e, 'Could not save'));
     } finally {
       setSavingBill(false);
+    }
+  };
+
+  const saveDeliverTo = async () => {
+    setSavingDeliver(true);
+    try {
+      const clean = Object.fromEntries(Object.entries(deliverTo).filter(([, v]) => typeof v === 'string' && v.trim())) as PurchaseOrderParty;
+      const s = await shopService.updateSettings({ po_deliver_to: Object.keys(clean).length ? clean : null });
+      setSettings(s);
+      setDeliverTo(s.po_deliver_to ?? {});
+      toast.success('Delivery address saved');
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingDeliver(false);
+    }
+  };
+
+  const saveDealCodes = async () => {
+    setSavingDeal(true);
+    try {
+      const s = await shopService.updateSettings({ deal_code_prefix: dealPrefix.trim(), deal_code_length: Number(dealLength) });
+      setSettings(s);
+      setDealPrefix(s.deal_code_prefix ?? 'WS');
+      setDealLength(String(s.deal_code_length ?? 8));
+      toast.success('Deal code settings saved. New deals use them; existing codes stay as they are.');
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingDeal(false);
     }
   };
 
@@ -193,7 +231,7 @@ function SettingsContent() {
           <div className="space-y-1">
             <h2 className="text-base font-semibold text-secondary-900">Supplier purchase orders: Bill to</h2>
             <p className="text-sm text-secondary-600">
-              Printed as &ldquo;Bill to&rdquo; on purchase orders raised from paid shop orders. The supplier delivers directly to the customer.
+              Printed as &ldquo;Bill to&rdquo; on purchase orders raised from paid shop orders.
             </p>
           </div>
           <Button size="sm" isLoading={savingBill} disabled={!settings || !canUpdate('shop')} onClick={saveBillTo}>Save</Button>
@@ -209,6 +247,45 @@ function SettingsContent() {
               onChange={(e) => setBillTo({ ...billTo, [k]: e.target.value })}
             />
           ))}
+        </div>
+      </Card>
+      <Card className="p-6">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">Supplier purchase orders: deliver to us</h2>
+            <p className="text-sm text-secondary-600">
+              Suppliers deliver here unless you tick a drop-ship on the purchase order. Leave it empty to use the Bill to address.
+            </p>
+          </div>
+          <Button size="sm" isLoading={savingDeliver} disabled={!settings || !canUpdate('shop')} onClick={saveDeliverTo}>Save</Button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {BILL_TO_FIELDS.filter(([k]) => k !== 'vat_number').map(([k, label]) => (
+            <Input
+              key={k}
+              label={label}
+              id={`deliver-${k}`}
+              value={deliverTo[k] ?? ''}
+              disabled={!canUpdate('shop')}
+              onChange={(e) => setDeliverTo({ ...deliverTo, [k]: e.target.value })}
+            />
+          ))}
+        </div>
+      </Card>
+      <Card className="p-6">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">Deal codes</h2>
+            <p className="text-sm text-secondary-600">
+              Every deal gets one private code (for example {dealPrefix || 'WS'}-DT5Z-994X) that links the customer’s quotes and orders to supplier requests and purchase orders.
+              Suppliers see only the code. Customers never see it.
+            </p>
+          </div>
+          <Button size="sm" isLoading={savingDeal} disabled={!settings || !canUpdate('shop')} onClick={saveDealCodes}>Save</Button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input label="Prefix" id="deal-prefix" value={dealPrefix} maxLength={6} helperText="1 to 6 letters or numbers" disabled={!canUpdate('shop')} onChange={(e) => setDealPrefix(e.target.value.toUpperCase())} />
+          <Input label="Length (random characters)" id="deal-length" type="number" min={6} max={16} value={dealLength} helperText="6 to 16. 8 gives XXXX-XXXX" disabled={!canUpdate('shop')} onChange={(e) => setDealLength(e.target.value)} />
         </div>
       </Card>
     </div>
