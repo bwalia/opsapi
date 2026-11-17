@@ -20,13 +20,14 @@ local ProjectConfig = require("helper.project-config")
 local NamespaceMail = {}
 
 --- Every email a workspace can customise: its default subject, the etlua file
--- of its default body, the variables it can use, sample data for previews, and
--- the feature that sends it (hidden where that feature isn't deployed).
+-- of its default body, the variables it can use, sample data for previews, the
+-- feature that sends it (hidden where that feature isn't deployed), and the kind
+-- of email it is (which email account sends it — see NamespaceMail.kind).
 NamespaceMail.TEMPLATES = {
     ["billing.access_link"] = {
         name = "Billing: account link",
         feature = "billing",
-        file = "billing_access_link",
+        file = "billing_access_link", kind = "billing",
         subject = "Your {{app_name}} account link",
         variables = { "app_name", "customer_email", "link", "expires_minutes", "support_email" },
         sample = { app_name = "Acme Desktop", customer_email = "you@example.com",
@@ -36,7 +37,7 @@ NamespaceMail.TEMPLATES = {
     ["billing.licence_key"] = {
         name = "Billing: licence key",
         feature = "billing",
-        file = "billing_licence_key",
+        file = "billing_licence_key", kind = "billing",
         subject = "Your {{app_name}} licence key",
         variables = { "app_name", "customer_email", "licence_key", "plan_name", "account_link", "support_email" },
         sample = { app_name = "Acme Desktop", customer_email = "you@example.com",
@@ -45,7 +46,7 @@ NamespaceMail.TEMPLATES = {
     },
     ["namespace.invitation"] = {
         name = "Workspace invitation",
-        file = "invitation",
+        file = "invitation", kind = "invitations",
         subject = "You're invited to join {{namespace_name}}",
         variables = { "namespace_name", "inviter_name", "role_name", "message", "accept_url", "expires_in" },
         sample = { app_name = "Acme Ltd", namespace_name = "Acme Ltd", inviter_name = "Sam Taylor",
@@ -55,7 +56,7 @@ NamespaceMail.TEMPLATES = {
     ["forms.new_response"] = {
         name = "Forms: new response",
         feature = "forms",
-        file = "forms_new_response",
+        file = "forms_new_response", kind = "forms",
         subject = "New response: {{form_title}}",
         variables = { "form_title", "answers_text", "response_url" },
         sample = { app_name = "Acme Ltd", form_title = "Contact us",
@@ -66,7 +67,7 @@ NamespaceMail.TEMPLATES = {
     ["crm.meeting_invite"] = {
         name = "Leads: meeting invitation",
         feature = "crm",
-        file = "crm_meeting_invite",
+        file = "crm_meeting_invite", kind = "crm_meetings",
         subject = "{{meeting_title}}: {{when}}",
         variables = { "recipient_name", "meeting_title", "when", "location", "meeting_url", "organiser_name", "notes", "updated" },
         sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
@@ -77,7 +78,7 @@ NamespaceMail.TEMPLATES = {
     ["crm.meeting_cancelled"] = {
         name = "Leads: meeting cancelled",
         feature = "crm",
-        file = "crm_meeting_cancelled",
+        file = "crm_meeting_cancelled", kind = "crm_meetings",
         subject = "Cancelled: {{meeting_title}}",
         variables = { "recipient_name", "meeting_title", "when", "organiser_name" },
         sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
@@ -86,7 +87,7 @@ NamespaceMail.TEMPLATES = {
     ["crm.meeting_reminder"] = {
         name = "Leads: meeting reminder",
         feature = "crm",
-        file = "crm_meeting_reminder",
+        file = "crm_meeting_reminder", kind = "crm_meetings",
         subject = "Reminder: {{meeting_title}}, {{when}}",
         variables = { "recipient_name", "meeting_title", "when", "location", "meeting_url" },
         sample = { app_name = "Acme Ltd", recipient_name = "Ann Lee", meeting_title = "Video call with Ann Lee",
@@ -96,7 +97,7 @@ NamespaceMail.TEMPLATES = {
     ["crm.partner_referral"] = {
         name = "Leads: deal passed to a partner",
         feature = "crm",
-        file = "crm_partner_referral",
+        file = "crm_partner_referral", kind = "crm_partner_referrals",
         subject = "New referral from {{from_name}}: {{deal_title}}",
         variables = { "partner_name", "from_name", "deal_title", "summary", "wants", "value", "commission", "customer",
             "message", "respond_url" },
@@ -109,7 +110,7 @@ NamespaceMail.TEMPLATES = {
     ["forms.auto_reply"] = {
         name = "Forms: reply to the person who answered",
         feature = "forms",
-        file = "forms_auto_reply",
+        file = "forms_auto_reply", kind = "forms_auto_reply",
         subject = "{{reply_subject}}",
         variables = { "form_title", "reply_subject", "reply_body" },
         sample = { app_name = "Acme Ltd", form_title = "Contact us", reply_subject = "Thanks, Ann",
@@ -121,7 +122,7 @@ NamespaceMail.TEMPLATES = {
     ["shop.order_update"] = {
         name = "Shop: order update to the customer",
         feature = "shop",
-        file = "shop_order_update",
+        file = "shop_order_update", kind = "shop_orders",
         subject = "{{headline}}: order {{order_number}}",
         variables = { "customer_name", "first_name", "order_number", "headline", "message", "order_link",
             "delivery_summary", "signature", "app_name", "call_phone" },
@@ -135,56 +136,156 @@ NamespaceMail.TEMPLATES = {
 }
 
 -- ---------------------------------------------------------------------------
--- SMTP accounts and routing
+-- Kinds of email (which account sends what)
 -- ---------------------------------------------------------------------------
--- A workspace can keep several named SMTP accounts (namespace_smtp_accounts) and
--- choose which one sends each kind of email (namespace_smtp_routes). A purpose
--- with no route uses the default account; with no default account (or when the
+-- A workspace keeps several named SMTP accounts (namespace_smtp_accounts) and picks
+-- the one that sends each KIND of email (namespace_smtp_routes). A kind with no
+-- account picked uses the default account; with no default account (or when the
 -- chosen one is switched off) the deployment's server (SMTP_* env) sends it.
+--
+-- The list is open-ended. A feature that sends email declares its kind once,
+-- anywhere that loads at start-up (a route file, a plugin's api file):
+--
+--     NamespaceMail.kind("quotes", { name = "Quotations", group = "Sales",
+--         description = "Quotations sent to customers.", feature = "shop" })
+--
+-- and sends with that key: NamespaceMail.smtp(ns, "quotes") / prepare / send(...,
+-- { purpose = "quotes" }). Workspace → Email then shows it with its own dropdown.
+-- A kind used without being declared still appears: the first send records it in
+-- namespace_mail_kinds and the page shows it under "Other", named from its key.
 
---- The kinds of email a workspace can route, in the order the settings page
--- shows them. `feature`: hidden where that feature isn't deployed.
-NamespaceMail.PURPOSES = {
-    { key = "default", name = "Default",
-        description = "Every email that isn't sent through a different account below." },
-    { key = "leads", name = "New enquiries",
-        description = "The thank-you email to someone who sends an enquiry, and the new-lead alert to your team." },
-    { key = "lead_followup", name = "Questions and follow-up",
-        description = "Emails your team sends to a lead or customer: questions, follow-ups, meeting invitations, "
-            .. "reminders and partner referrals." },
-    { key = "team", name = "Team notifications",
-        description = "Lead assignments and reminders to your staff, and workspace invitations." },
-    { key = "shop_orders", name = "Shop orders", feature = "shop",
-        description = "Quotes, order updates and delivery changes sent to shop customers." },
-    { key = "shop_members", name = "Shop members", feature = "shop",
-        description = "Members' sign-in links and store credit notices." },
-    { key = "invoices", name = "Invoices and purchase orders", feature = "invoicing",
-        description = "Invoices to customers and purchase orders to suppliers." },
-    { key = "field_service", name = "Field service", feature = "field_service",
-        description = "Quotations sent from jobs." },
-    { key = "forms", name = "Forms and feedback", feature = "forms",
-        description = "Contact, feedback and survey forms: new responses to your team, and the automatic reply to "
-            .. "the person who answered." },
-    { key = "billing", name = "Billing", feature = "billing",
-        description = "Account links and licence keys for your customers." },
-}
+local KINDS, KIND_ORDER = {}, {}
+local KEY = "^[a-z][a-z0-9_]*$"
 
-local PURPOSE_BY_KEY = {}
-for _, p in ipairs(NamespaceMail.PURPOSES) do PURPOSE_BY_KEY[p.key] = p end
+--- The order groups appear in on the Email page; a group not listed comes after them.
+local GROUPS = { "General", "Leads and customers", "Sales", "Shop", "Marketing", "Team", "Forms", "Billing", "Tax" }
+local GROUP_RANK = {}
+for i, g in ipairs(GROUPS) do GROUP_RANK[g] = i end
 
-local function purpose_available(key)
-    local p = PURPOSE_BY_KEY[key]
-    return p ~= nil and (not p.feature or ProjectConfig.isFeatureEnabled(p.feature))
+--- Declare a kind of email (idempotent; a later call updates it). Returns the key.
+-- meta: { name, group?, description?, feature? (hidden where that feature isn't deployed) }
+function NamespaceMail.kind(key, meta)
+    assert(type(key) == "string" and key:match(KEY) and #key <= 40, "email kind keys look like shop_quotes")
+    meta = meta or {}
+    if not KINDS[key] then KIND_ORDER[#KIND_ORDER + 1] = key end
+    KINDS[key] = { key = key, name = meta.name or key, group = meta.group or "Other",
+        description = meta.description or "", feature = meta.feature }
+    return key
 end
 
---- Which purpose a built-in template is sent under.
-local TEMPLATE_PURPOSE = { ["namespace.invitation"] = "team", ["shop.order_update"] = "shop_orders" }
-local TEMPLATE_PREFIX_PURPOSE = { billing = "billing", forms = "forms", crm = "lead_followup" }
+local K = NamespaceMail.kind
+K("default", { group = "General", name = "Default",
+    description = "Every email that isn't sent through a different account below." })
+-- Leads and customers
+K("leads", { group = "Leads and customers", name = "New enquiries",
+    description = "The thank-you email to someone who sends an enquiry, and the new-lead alert to your team." })
+K("lead_followup", { group = "Leads and customers", name = "Emails to leads and customers",
+    description = "Questions and follow-ups your team sends from a lead's page." })
+K("crm_meetings", { group = "Leads and customers", name = "Meeting invitations", feature = "crm",
+    description = "Meeting invitations, changes, cancellations and reminders." })
+K("crm_partner_referrals", { group = "Leads and customers", name = "Partner referrals", feature = "crm",
+    description = "Deals you pass to a partner." })
+-- Sales
+K("shop_quotes", { group = "Sales", name = "Quotations", feature = "shop",
+    description = "Quotations and order authorisations sent to shop customers." })
+K("field_service", { group = "Sales", name = "Field service quotations", feature = "field_service",
+    description = "Quotations sent from field service jobs." })
+K("invoices", { group = "Sales", name = "Invoices", feature = "invoicing",
+    description = "Invoices sent to your customers." })
+K("purchase_orders", { group = "Sales", name = "Purchase orders", feature = "invoicing",
+    description = "Purchase orders sent to your suppliers." })
+-- Shop
+K("shop_orders", { group = "Shop", name = "Order updates", feature = "shop",
+    description = "Order updates and delivery changes sent to shop customers." })
+K("shop_members", { group = "Shop", name = "Member emails", feature = "shop",
+    description = "Members' sign-in links and store credit notices." })
+K("shop_alerts", { group = "Shop", name = "Shop alerts to your team", feature = "shop",
+    description = "New orders, refunds needed and price checks, sent to your team." })
+-- Team
+K("team", { group = "Team", name = "Team notifications",
+    description = "Lead assignments and reminders sent to your staff." })
+K("invitations", { group = "Team", name = "Workspace invitations",
+    description = "Invitations to join this workspace." })
+K("employee_welcome", { group = "Team", name = "New team member accounts",
+    description = "The email telling a new team member their account is ready." })
+-- Forms
+K("forms", { group = "Forms", name = "New responses", feature = "forms",
+    description = "New form responses sent to your team." })
+K("forms_auto_reply", { group = "Forms", name = "Automatic replies", feature = "forms",
+    description = "The automatic reply to the person who answered a form." })
+-- Billing
+K("billing", { group = "Billing", name = "Account links and licence keys", feature = "billing",
+    description = "Account links and licence keys for your customers." })
+-- Tax
+K("tax_filing", { group = "Tax", name = "Tax return requests", feature = "tax_copilot",
+    description = "Updates to customers about their tax return request, and alerts to the accountant." })
 
+--- Emails the platform always sends itself, whatever the workspace sets up: they must
+-- arrive even when a workspace's own account is broken (shown on the Email page).
+NamespaceMail.PLATFORM_ONLY = {
+    "Sign-in codes and password resets",
+    "Security alerts, such as a change to your bank details",
+}
+
+--- A key's label when nothing declared it: "property_quotes" -> "Property quotes".
+local function humanize(key)
+    local s = tostring(key):gsub("_", " ")
+    return (s:gsub("^%l", string.upper))
+end
+
+-- Kinds this worker has already recorded (or found declared), so a send records at most once.
+local recorded = {}
+
+--- A kind used without being declared: record it so the Email page lists it.
+local function record(key)
+    if KINDS[key] or recorded[key] or type(key) ~= "string" or not key:match(KEY) or #key > 40 then return end
+    recorded[key] = true
+    pcall(db.query, "INSERT INTO namespace_mail_kinds (key) VALUES (?) ON CONFLICT (key) DO NOTHING", key)
+end
+
+local function available(k)
+    return not k.feature or ProjectConfig.isFeatureEnabled(k.feature)
+end
+
+--- Every kind the Email page shows, in page order: declared ones (where their feature is
+-- deployed), then any recorded on first use, each { key, name, group, description }.
+function NamespaceMail.kinds()
+    local out, seen = {}, {}
+    for i, key in ipairs(KIND_ORDER) do
+        local k = KINDS[key]
+        if available(k) then
+            out[#out + 1] = { key = k.key, name = k.name, group = k.group, description = k.description, i = i }
+        end
+        seen[key] = true
+    end
+    local ok, rows = pcall(db.query, "SELECT key FROM namespace_mail_kinds ORDER BY key")
+    for _, r in ipairs(ok and rows or {}) do
+        if not seen[r.key] then
+            out[#out + 1] = { key = r.key, name = humanize(r.key), group = "Other", i = #KIND_ORDER + #out + 1,
+                description = "Found in use; its feature didn't describe it." }
+        end
+    end
+    table.sort(out, function(a, b)
+        local ra, rb = GROUP_RANK[a.group] or #GROUPS + 1, GROUP_RANK[b.group] or #GROUPS + 1
+        if ra ~= rb then return ra < rb end
+        if a.group ~= b.group then return a.group < b.group end
+        return a.i < b.i
+    end)
+    for _, k in ipairs(out) do k.i = nil end
+    return out
+end
+
+local function kind_known(key)
+    if KINDS[key] then return available(KINDS[key]) end
+    if type(key) ~= "string" or not key:match(KEY) then return false end
+    local ok, rows = pcall(db.query, "SELECT 1 FROM namespace_mail_kinds WHERE key = ?", key)
+    return ok and rows[1] ~= nil
+end
+
+--- Which kind a built-in template is sent as (its `kind`, else the default).
 function NamespaceMail.templatePurpose(key)
-    if TEMPLATE_PURPOSE[key] then return TEMPLATE_PURPOSE[key] end
-    local prefix = tostring(key):match("^([%w_]+)%.")
-    return prefix and TEMPLATE_PREFIX_PURPOSE[prefix] or "default"
+    local t = NamespaceMail.TEMPLATES[key]
+    return t and t.kind or "default"
 end
 
 local function allow_private()
@@ -396,10 +497,12 @@ local function routed_account(namespace_id, purpose)
 end
 
 --- The SMTP config to send a workspace's `purpose` email with (nil = the deployment's).
--- `purpose` is a key of NamespaceMail.PURPOSES; omitted = "default".
--- The result carries account_uuid / account_name for logs.
+-- `purpose` is a kind of email (NamespaceMail.kind); omitted = "default". An undeclared
+-- kind is recorded so the Email page lists it. The result carries account_uuid /
+-- account_name for logs.
 function NamespaceMail.smtp(namespace_id, purpose)
     if not namespace_id then return nil end
+    if purpose and purpose ~= "default" then record(purpose) end
     local ok, row = pcall(routed_account, namespace_id, purpose)
     if not ok then
         -- Accounts table not migrated yet: behave as if the workspace has none.
@@ -432,7 +535,8 @@ function NamespaceMail.canSend(namespace_id, purpose)
     return NamespaceMail.smtp(namespace_id, purpose) ~= nil or Mail.isConfigured()
 end
 
---- Every routable purpose with the account it's sent through.
+--- Every kind of email with the account picked for it (null = the default account;
+-- for "default" itself, null = the deployment's server), grouped for the Email page.
 function NamespaceMail.routing(namespace_id)
     local routes = {}
     for _, r in ipairs(db.query([[SELECT r.purpose, a.uuid FROM namespace_smtp_routes r
@@ -441,11 +545,9 @@ function NamespaceMail.routing(namespace_id)
     end
     local def = default_account(namespace_id)
     local out = {}
-    for _, p in ipairs(NamespaceMail.PURPOSES) do
-        if purpose_available(p.key) then
-            out[#out + 1] = { key = p.key, name = p.name, description = p.description,
-                account_uuid = (p.key == "default" and (def and def.uuid) or routes[p.key]) or require("cjson").null }
-        end
+    for _, k in ipairs(NamespaceMail.kinds()) do
+        k.account_uuid = (k.key == "default" and (def and def.uuid) or routes[k.key]) or require("cjson").null
+        out[#out + 1] = k
     end
     return out
 end
@@ -456,7 +558,7 @@ function NamespaceMail.saveRouting(namespace_id, actor, routes)
     if type(routes) ~= "table" then return nil, "routes must be an object of purpose: account uuid" end
     local plan = {}
     for purpose, uuid in pairs(routes) do
-        if not purpose_available(purpose) then return nil, "unknown purpose " .. tostring(purpose) end
+        if not kind_known(purpose) then return nil, "unknown kind of email " .. tostring(purpose) end
         local row
         if type(uuid) == "string" and uuid ~= "" then
             row = account_by_uuid(namespace_id, uuid)

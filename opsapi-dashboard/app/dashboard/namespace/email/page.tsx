@@ -25,6 +25,7 @@ import {
   type MailAccount,
   type MailAccountInput,
   type MailAccountsOverview,
+  type MailRoute,
   type MailSecurity,
 } from '@/services/namespace-mail.service';
 
@@ -288,11 +289,21 @@ function MailAccounts({ editable }: { editable: boolean }) {
         <Card className="shadow-sm">
           <h2 className="text-base font-semibold text-secondary-900">Which account sends what</h2>
           <p className="text-sm text-secondary-500">
-            Choose the account for each kind of email. &ldquo;Use the default&rdquo; sends it through the default
-            account; an account that&apos;s switched off falls back to the default too.
+            Every kind of email this workspace sends is listed here. Pick the account for each one.
+            &ldquo;Use the default&rdquo; sends it through the default account; an account that&apos;s switched off
+            falls back to the default too.
           </p>
-          <ul className="mt-4 divide-y divide-secondary-100 rounded-lg border border-secondary-200">
-            {overview.routing.map((r) => (
+          {accounts.length < 2 && (
+            <p className="mt-2 rounded-lg bg-primary-50 px-3 py-2 text-sm text-primary-800">
+              To send some emails from a different address (e.g. marketing from news@, quotations from sales@), add
+              another account above. It then appears in every list below.
+            </p>
+          )}
+          {groupRoutes(overview.routing).map(([group, rows]) => (
+          <div key={group} className="mt-5">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary-500">{group}</h3>
+          <ul className="divide-y divide-secondary-100 rounded-lg border border-secondary-200">
+            {rows.map((r) => (
               <li key={r.key} className="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[1fr_260px] sm:items-center">
                 <div className="min-w-0">
                   <p className="font-medium text-secondary-900">{r.name}</p>
@@ -315,6 +326,14 @@ function MailAccounts({ editable }: { editable: boolean }) {
               </li>
             ))}
           </ul>
+          </div>
+          ))}
+          {!!overview.platform_only?.length && (
+            <p className="mt-5 text-xs text-secondary-500">
+              Always sent by the platform, so they arrive even if an account here stops working:{' '}
+              {overview.platform_only.join('; ')}.
+            </p>
+          )}
         </Card>
       )}
 
@@ -549,6 +568,17 @@ function EmailContent() {
       />
     </div>
   );
+}
+
+/** Rows grouped by `group`, in the order the API lists them (groups appear where their first row does). */
+function groupRoutes(routes: MailRoute[]): [string, MailRoute[]][] {
+  const groups = new Map<string, MailRoute[]>();
+  for (const r of routes) {
+    const g = r.group || 'Other';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(r);
+  }
+  return [...groups.entries()];
 }
 
 export default function NamespaceEmailPage() {

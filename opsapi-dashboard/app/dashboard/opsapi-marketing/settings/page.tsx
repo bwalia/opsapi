@@ -44,6 +44,7 @@ type Sending = {
   via: 'workspace' | 'deployment' | 'none';
   workspace_smtp_saved: boolean;
   workspace_smtp_enabled: boolean;
+  account?: string;
   host?: string;
   from_email?: string;
   from_name?: string;
@@ -85,7 +86,7 @@ function SendingCard() {
 
   const via =
     info.via === 'workspace'
-      ? 'This workspace’s own SMTP'
+      ? `This workspace’s “${info.account || 'own'}” email account`
       : info.via === 'deployment'
         ? 'The platform’s shared SMTP (no workspace SMTP is switched on)'
         : 'No SMTP is set up';
@@ -117,6 +118,9 @@ function SendingCard() {
         <Row label="Sent through">
           {via}
           {info.host ? <span className="text-secondary-500"> · {info.host}</span> : null}
+          <Link href={WORKSPACE_EMAIL_HREF} className="ml-2 text-primary-700 underline underline-offset-2">
+            Change
+          </Link>
         </Row>
         <Row label="From">
           {info.from_email ? `${info.from_name ? `${info.from_name} ` : ''}<${info.from_email}>` : 'Not set'}

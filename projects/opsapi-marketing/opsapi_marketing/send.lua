@@ -320,7 +320,7 @@ function S.prepare(delivery_id, opts)
                 reply_to = campaign.reply_to,
                 unsubscribe_url = unsub,
                 -- Looked up here: deliver must not touch the database.
-                smtp = d.channel == "email" and (NamespaceMail.smtp(d.namespace_id) or false) or nil,
+                smtp = d.channel == "email" and (NamespaceMail.smtp(d.namespace_id, "marketing") or false) or nil,
             },
         }
     end)

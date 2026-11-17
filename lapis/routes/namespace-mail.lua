@@ -9,7 +9,8 @@
         (the four above act on the default account; kept for older clients)
 
     Several email accounts, and which one sends which kind of email:
-      GET    /api/v2/namespace/mail-accounts                  namespace.read   accounts + routing + platform sender
+      GET    /api/v2/namespace/mail-accounts                  namespace.read   accounts + routing (every kind of
+                                                                email, grouped) + platform sender + platform_only
       POST   /api/v2/namespace/mail-accounts                  namespace.update { name, host, port, security, username,
                                                                 password, from_email, from_name?, reply_to?, enabled?,
                                                                 is_default? }
@@ -45,6 +46,8 @@ return function(app)
             accounts = setmetatable(NamespaceMail.listAccounts(self.namespace.id), require("cjson").array_mt),
             routing = setmetatable(NamespaceMail.routing(self.namespace.id), require("cjson").array_mt),
             platform = Mail.deploymentSender(),
+            -- Emails the platform always sends itself (not routable), for the page to explain.
+            platform_only = setmetatable(NamespaceMail.PLATFORM_ONLY, require("cjson").array_mt),
         })
     end))
 

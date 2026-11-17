@@ -8,6 +8,10 @@
           namespace_smtp_routes     which server sends which kind of email (leads, shop, invoices...)
           The single server from [1] becomes the default account, so nothing changes until
           the workspace adds a second one.
+      [4] namespace_mail_kinds      kinds of email found in use that no feature declared, so
+          Workspace → Email still lists them. Kinds split out of a broader one (purchase orders
+          from invoices, quotations from shop orders...) start on the account the broader kind
+          had, so nothing changes until the workspace picks another.
 ]]
 
 local db = require("lapis.db")
@@ -100,5 +104,28 @@ return {
             FROM namespace_mail_settings s
             WHERE NOT EXISTS (SELECT 1 FROM namespace_smtp_accounts a WHERE a.namespace_id = s.namespace_id)
         ]])
+    end,
+
+    [4] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS namespace_mail_kinds (
+                key TEXT PRIMARY KEY CHECK (key ~ '^[a-z][a-z0-9_]{0,39}$'),
+                first_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+        -- new kind <- the kind it was part of
+        for _, pair in ipairs({
+            { "purchase_orders", "invoices" },
+            { "shop_quotes", "shop_orders" }, { "shop_alerts", "shop_orders" },
+            { "crm_meetings", "lead_followup" }, { "crm_partner_referrals", "lead_followup" },
+            { "invitations", "team" },
+            { "forms_auto_reply", "forms" },
+        }) do
+            db.query([[
+                INSERT INTO namespace_smtp_routes (namespace_id, purpose, account_id, updated_by, updated_at)
+                SELECT namespace_id, ?, account_id, updated_by, updated_at FROM namespace_smtp_routes WHERE purpose = ?
+                ON CONFLICT (namespace_id, purpose) DO NOTHING
+            ]], pair[1], pair[2])
+        end
     end,
 }

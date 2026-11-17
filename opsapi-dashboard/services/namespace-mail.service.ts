@@ -73,6 +73,8 @@ export interface MailAccountInput {
 export interface MailRoute {
   key: string;
   name: string;
+  /** Where it's listed on the page: "Leads and customers", "Sales", a plugin's name, "Other"… */
+  group: string;
   description: string;
   account_uuid: string | null;
 }
@@ -81,6 +83,8 @@ export interface MailAccountsOverview {
   accounts: MailAccount[];
   routing: MailRoute[];
   platform: { host: string; from_email: string; from_name: string; configured: boolean };
+  /** Emails the platform always sends itself, whatever is set here. */
+  platform_only?: string[];
 }
 
 export interface EmailTemplate {

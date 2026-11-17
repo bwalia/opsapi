@@ -189,4 +189,10 @@ return {
                                   default = true, description = "The AI drafts it; a person approves before it is sent. "
                                       .. "Needs an AI provider; only leads with an owner." },
     },
+
+    -- Kinds of email it sends: each gets its own "which account sends it" dropdown on Workspace → Email.
+    email_kinds = {
+        { key = "property_deals", name = "Emails you approve",
+            description = "Emails the AI drafts and you approve: to estate agents, conveyancers and others." },
+    },
 }

@@ -197,4 +197,10 @@ return {
             description = "e.g. https://api.example.com — used in List-Unsubscribe and pixels.",
         },
     },
+
+    -- Kinds of email it sends: each gets its own "which account sends it" dropdown on Workspace → Email.
+    email_kinds = {
+        { key = "marketing", name = "Marketing campaigns",
+            description = "Campaign emails sent to your lists." },
+    },
 }

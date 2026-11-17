@@ -504,7 +504,7 @@ local function vip_alert(m)
             first_name = lead.first_name, last_name = lead.last_name, email = m.email, phone = lead.phone,
             company_name = lead.company_name, job_title = lead.job_title, source = "shop_vip",
             notes = tier .. ", " .. fee .. ". Trade terms " .. tostring(m.terms_version) .. ".",
-        }, { purpose = "shop_members", staff = {
+        }, { purpose = "shop_alerts", staff = {
             subject = "New VIP member: " .. who,
             headline = "New VIP member",
             intro = who .. " has just paid for VIP membership (" .. tier:lower() .. ", " .. fee

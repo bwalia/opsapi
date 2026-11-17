@@ -2800,6 +2800,7 @@ local _migrations = {
     ['zznm1_namespace_mail_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 1),
     ['zznm2_namespace_email_templates'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 2),
     ['zznm5_namespace_smtp_accounts'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 3),
+    ['zznm6_namespace_mail_kinds'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 4),
     -- Workspace setting: ask its members for a sign-in code (MFA). On by default, so every existing workspace, and
     -- every app on OpsAPI (e.g. DIY Tax Return), keeps MFA unless its owner turns it off.
     ['zznm3_namespace_mfa_required'] = conditional(ProjectConfig.FEATURES.CORE, function()
