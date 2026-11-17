@@ -56,7 +56,7 @@ export function SeoContentEditor({
   const catDesc = (block.intro || lead || h1).replace(/\s+/g, ' ').trim();
   const defDesc =
     kind === 'product'
-      ? defaultSeoDescription(block.intro || lead || h1, price, loc)
+      ? defaultSeoDescription(block.intro || lead || h1, price, loc, h1)
       : catDesc.length > SEO_DESC_MAX
         ? `${catDesc.slice(0, SEO_DESC_MAX - 1).replace(/\s+\S*$/, '')}…`
         : catDesc;

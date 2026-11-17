@@ -26,10 +26,13 @@ const TAIL: Record<ShopSeoLocale, (price: string | null) => string> = {
 };
 
 /** The shop's default meta description: the intro (or short description) cut to fit, then the price line. */
-export function defaultSeoDescription(lead: string | undefined, price: string | null, locale: ShopSeoLocale = 'en'): string {
+export function defaultSeoDescription(lead: string | undefined, price: string | null, locale: ShopSeoLocale = 'en', name?: string): string {
   const tail = TAIL[locale](price);
   const room = SEO_DESC_MAX - tail.length - 1;
   let text = (lead ?? '').replace(/[#*_`>[\]]/g, '').replace(/\s+/g, ' ').trim();
+  // The shop names the product first when the text doesn't (so every default is unique).
+  const short = (name ?? '').split(/\s+[—–]\s+/)[0].trim();
+  if (short && text && !text.toLowerCase().includes(short.toLowerCase())) text = `${short}: ${text}`;
   if (text.length > room) {
     const cut = text.slice(0, room);
     const sentence = cut.lastIndexOf('. ');
