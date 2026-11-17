@@ -46,6 +46,7 @@ Orders come from Stripe Checkout (cart or paid quote) or from an authorised Orde
 - `POST /api/v2/shop/admin/orders/{uuid}/invoice {payment_method_uuid, due_date: YYYY-MM-DD, payment_terms_days: int, notes}` — draft accounting invoice from the order → {invoice_uuid, invoice_number, existing}
 - `GET /api/v2/namespace/payment-methods` — the workspace's bank accounts (How to pay)
 - `PUT /api/v2/shop/admin/orders/{uuid} {status, tracking: {carrier, tracking_number, url, shipped_at}, internal_notes, customer_po_number}` — update status / tracking / notes / the customer's PO number
+- `PUT /api/v2/shop/admin/orders/{uuid}/delivery-address {address*: {name*, company, line1*, line2, city*, county, postcode* (UK), phone, email}, staff_note, update_purchase_orders: bool (default true)}` — change where the order is delivered (not once shipped). The old address goes into the internal notes; open drop-ship supplier POs get the new address too → {order, purchase_orders: [{po_number, supplier_name, already_sent}]}. A PO already_sent means the supplier must be told
 - `GET /api/v2/shop/admin/orders?filter=needs_supplier_po` — paid orders with no supplier PO yet
 - `GET /api/v2/shop/admin/quotes?status&q&filter=awaiting_authorisation|awaiting_payment|needs_supplier_po|bank_transfer_due&kind=quote|order&limit&offset` — list (q also matches customer_po_number)
 - `GET /api/v2/shop/admin/quotes/{uuid}` — quote incl. public_url (customer link)

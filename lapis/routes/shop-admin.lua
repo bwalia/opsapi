@@ -34,6 +34,10 @@
       POST              /orders/:uuid/delivery-changes/:request_uuid/decline  { staff_note } the reason, shown to the
                                                customer (idempotent). The customer is emailed about either only while
                                                settings.customer_delivery_notifications is on
+      PUT               /orders/:uuid/delivery-address  { address, staff_note?, update_purchase_orders? } staff change the
+                                               delivery address (UK; 409 once shipped). The old one goes into the
+                                               internal notes; open drop-ship supplier POs follow unless
+                                               update_purchase_orders is false → { order, purchase_orders[] }
       GET               /orders/:uuid/update-email/presets   order update emails: presets filled in for this order,
                                                the recipient, whether customer emails are on, and the history
       POST              /orders/:uuid/update-email/preview   { preset?, headline?, message? } → { subject, html, to, warnings }
@@ -416,6 +420,14 @@ return function(app)
         if not body then return bad end
         local u = self.current_user or {}
         return result(DeliveryChange.decline(ns_id, self.params.uuid, self.params.request_uuid, body,
+            u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    app:put(BASE .. "/orders/:uuid/delivery-address", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        return result(DeliveryChange.adminSetAddress(ns_id, self.params.uuid, body,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
 

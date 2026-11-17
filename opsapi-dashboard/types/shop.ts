@@ -580,6 +580,20 @@ export interface ShopDeliveryChangeRequest {
   created_at: string;
 }
 
+/** PUT /shop/admin/orders/:uuid/delivery-address: staff change where the order is delivered. */
+export interface ShopSetDeliveryAddressBody {
+  address: ShopDeliveryAddress;
+  staff_note?: string;
+  /** Default true: open drop-ship supplier POs get the new "Deliver directly to" as well. */
+  update_purchase_orders?: boolean;
+}
+
+export interface ShopSetDeliveryAddressResult {
+  order: ShopOrder;
+  /** Supplier POs updated; already_sent means the supplier has the old address and must be told. */
+  purchase_orders: { po_number: string; supplier_name: string | null; status: string; already_sent: boolean }[];
+}
+
 export interface ShopDeliveryChangeDecision {
   request: ShopDeliveryChangeRequest;
   /** Clicked twice: it was already decided this way. */
