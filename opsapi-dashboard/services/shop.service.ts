@@ -40,6 +40,7 @@ import type {
   ShopMarketUpsertResult,
   ShopDeliveryChangeDecision,
   ShopSetDeliveryAddressBody,
+  ShopCustomerUpdate,
   ShopSetDeliveryAddressResult,
   ShopDeliveryChangeRequest,
   ShopOrder,
@@ -380,6 +381,17 @@ export const shopService = {
   async setDeliveryAddress(orderUuid: string, body: ShopSetDeliveryAddressBody): Promise<ShopSetDeliveryAddressResult> {
     const res = await apiClient.put(`${BASE}/orders/${orderUuid}/delivery-address`, body, JSON_BODY);
     return unwrap<ShopSetDeliveryAddressResult>(res);
+  },
+
+  /** Post an update the customer sees on their order page (plain text, ≤ 2000 characters). */
+  async addCustomerUpdate(orderUuid: string, message: string): Promise<ShopCustomerUpdate> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/updates`, { message }, JSON_BODY);
+    return unwrap<ShopCustomerUpdate>(res);
+  },
+
+  /** Hide an update from the customer's order page. */
+  async removeCustomerUpdate(orderUuid: string, updateUuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/orders/${orderUuid}/updates/${updateUuid}`);
   },
 
   /** Decline with a reason (shown to the customer on their order page). Idempotent. */
