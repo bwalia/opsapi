@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Invoice } from '@/services/invoices.service';
+import { customerInvoiceNumber, type Invoice } from '@/services/invoices.service';
 import { kindLabel, paymentMethodRows } from '@/lib/payment-methods';
 
 // The "from" party printed at the top of the invoice. Name is required (the
@@ -55,7 +55,7 @@ function initials(name: string): string {
 }
 
 function invoiceFileName(invoice: InvoiceWithAddress): string {
-  return `Invoice-${invoice.invoice_number || invoice.uuid.slice(0, 8)}.pdf`;
+  return `Invoice-${customerInvoiceNumber(invoice).replace(/[^\w.-]+/g, '_')}.pdf`;
 }
 
 /**
@@ -116,7 +116,7 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(11);
   doc.setTextColor(...FAINT);
-  doc.text(`# ${invoice.invoice_number || invoice.uuid.slice(0, 8)}`, right, 70, { align: 'right' });
+  doc.text(`# ${customerInvoiceNumber(invoice)}`, right, 70, { align: 'right' });
 
   // Status pill (right, inside band).
   const statusColor = STATUS_COLORS[invoice.status] || MUTED;
@@ -284,7 +284,7 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
     const rowsPm = paymentMethodRows(pm);
     const title = pm.kind === 'bank_transfer' ? `Bank transfer — ${pm.label}` : pm.label || kindLabel(pm.kind);
     const instr = pm.instructions ? (doc.splitTextToSize(String(pm.instructions), right - margin - 24) as string[]) : [];
-    const ref = invoice.invoice_number || invoice.uuid.slice(0, 8);
+    const ref = customerInvoiceNumber(invoice);
     const boxH = 46 + rowsPm.length * 13 + instr.length * 12 + 16;
     let py = Math.max(notesBottom, ty + 30) + 22;
     if (py + boxH > pageH - 70) {
@@ -342,7 +342,7 @@ function buildInvoiceDoc(invoice: InvoiceWithAddress, company: InvoiceCompany): 
   const terms = invoice.payment_terms_days ? `Payment terms: net ${invoice.payment_terms_days} days` : '';
   if (terms) doc.text(terms, margin, pageH - 28);
   doc.text(`${company.name || ''}`, right, pageH - 40, { align: 'right' });
-  doc.text(`Invoice ${invoice.invoice_number || ''}`, right, pageH - 28, { align: 'right' });
+  doc.text(`Invoice ${customerInvoiceNumber(invoice)}`, right, pageH - 28, { align: 'right' });
 
   return doc;
 }

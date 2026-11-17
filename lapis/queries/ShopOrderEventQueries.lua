@@ -66,7 +66,8 @@ end
 
 local function invoice_of(o)
     if not U.nz(o.invoice_uuid) then return nil end
-    local ok, rows = pcall(db.query, "SELECT invoice_number, " .. iso_tz("created_at::timestamptz") .. [[ AS created_at
+    local ok, rows = pcall(db.query, "SELECT COALESCE(customer_invoice_number, invoice_number) AS invoice_number, "
+        .. iso_tz("created_at::timestamptz") .. [[ AS created_at
         FROM invoices WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL]], o.namespace_id, o.invoice_uuid)
     return ok and rows[1] or nil
 end

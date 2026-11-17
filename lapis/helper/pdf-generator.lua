@@ -21,7 +21,7 @@ function PdfGenerator.generateInvoiceHtml(invoice, line_items, company_info)
 <html>
 <head>
 <meta charset="utf-8">
-<title>Invoice ]] .. (invoice.invoice_number or "") .. [[</title>
+<title>Invoice ]] .. (invoice.customer_invoice_number or invoice.invoice_number or "") .. [[</title>
 <style>
     body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
     .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
@@ -66,7 +66,7 @@ function PdfGenerator.generateInvoiceHtml(invoice, line_items, company_info)
     </div>
     <div class="invoice-info">
         <h2>INVOICE</h2>
-        <p><strong>Invoice #:</strong> ]] .. (invoice.invoice_number or "N/A") .. [[</p>
+        <p><strong>Invoice #:</strong> ]] .. (invoice.customer_invoice_number or invoice.invoice_number or "N/A") .. [[</p>
         <p><strong>Date:</strong> ]] .. (invoice.invoice_date or "") .. [[</p>
         <p><strong>Due Date:</strong> ]] .. (invoice.due_date or "") .. [[</p>
         <p><strong>Status:</strong> <span class="status-badge status-]] .. (invoice.status or "draft") .. [[">]] .. string.upper(invoice.status or "DRAFT") .. [[</span></p>

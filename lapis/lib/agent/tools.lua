@@ -788,7 +788,8 @@ register({
         local rows = {}
         for _, i in ipairs(take(items_of(r), 25)) do
             rows[#rows + 1] = {
-                uuid = i.id, number = i.invoice_number, customer = i.customer_name, status = i.status,
+                uuid = i.id, number = i.invoice_number, customer_number = i.customer_invoice_number,
+                customer = i.customer_name, status = i.status,
                 total = i.total_amount, balance_due = i.balance_due, currency = i.currency, due_date = i.due_date,
             }
         end

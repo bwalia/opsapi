@@ -19,6 +19,7 @@ import { Modal, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   invoicesService,
+  customerInvoiceNumber,
   type Invoice,
   type InvoiceStatus,
   type InvoiceLineItem,
@@ -346,6 +347,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
     payment_terms_days: invoice.payment_terms_days,
     po_number: invoice.po_number || '',
     payment_method_uuid: invoice.payment_method_uuid || '',
+    customer_invoice_number: invoice.customer_invoice_number || invoice.invoice_number || '',
   });
   // The workspace's "Getting paid" methods, for the payment method picker.
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
@@ -365,6 +367,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
       payment_terms_days: invoice.payment_terms_days,
       po_number: invoice.po_number || '',
       payment_method_uuid: invoice.payment_method_uuid || '',
+      customer_invoice_number: invoice.customer_invoice_number || invoice.invoice_number || '',
     });
   }, [invoice]);
 
@@ -464,6 +467,36 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
               className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               min="0"
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Customer invoice number</label>
+            <input
+              type="text"
+              value={formData.customer_invoice_number || ''}
+              maxLength={40}
+              disabled={invoice.status !== 'draft'}
+              onChange={(e) => setFormData((prev) => ({ ...prev, customer_invoice_number: e.target.value }))}
+              placeholder={invoice.invoice_number}
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 disabled:bg-secondary-50 disabled:text-secondary-500"
+            />
+            <p className="mt-1 text-xs text-secondary-500">
+              {invoice.status === 'draft'
+                ? `Shown to the customer (PDF, email). Leave blank to use ${invoice.invoice_number}. Must be unique and include a number.`
+                : 'Fixed once the invoice has been sent.'}
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Internal invoice number</label>
+            <input
+              type="text"
+              value={invoice.invoice_number}
+              disabled
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm font-mono bg-secondary-50 text-secondary-500"
+            />
+            <p className="mt-1 text-xs text-secondary-500">For internal use only; set automatically.</p>
           </div>
         </div>
 
@@ -620,7 +653,7 @@ function InvoiceDetailContent() {
       toast.error('Add a customer email to this invoice before sending.');
       return;
     }
-    if (!(await confirmDialog({ title: `Email invoice ${invoice.invoice_number} to ${to}?`, confirmText: 'Send' }))) return;
+    if (!(await confirmDialog({ title: `Email invoice ${customerInvoiceNumber(invoice)} to ${to}?`, confirmText: 'Send' }))) return;
     try {
       // Attach the same PDF the Download button produces, built in the browser.
       const { base64, filename } = invoicePdfBase64(invoice, {
@@ -740,7 +773,7 @@ function InvoiceDetailContent() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-secondary-900">
-                Invoice {invoice.invoice_number || `#${invoice.uuid.slice(0, 8)}`}
+                Invoice {customerInvoiceNumber(invoice)}
               </h1>
               <InvoiceStatusBadge status={invoice.status} />
             </div>
@@ -855,6 +888,15 @@ function InvoiceDetailContent() {
                 <span className="ml-2 text-secondary-900">Net {invoice.payment_terms_days} days</span>
               </div>
             )}
+            <div>
+              <span className="text-secondary-500">Customer invoice no.:</span>
+              <span className="ml-2 font-mono text-secondary-900">{customerInvoiceNumber(invoice)}</span>
+            </div>
+            <div>
+              <span className="text-secondary-500">Internal invoice no.:</span>
+              <span className="ml-2 font-mono text-secondary-900">{invoice.invoice_number}</span>
+              <span className="ml-1 text-xs text-secondary-400">(internal only)</span>
+            </div>
             {invoice.po_number && (
               <div>
                 <span className="text-secondary-500">Customer PO:</span>
@@ -1026,7 +1068,7 @@ function InvoiceDetailContent() {
 
       {/* How to pay (as printed on the PDF) */}
       {invoice.payment_method && invoice.status !== 'paid' && invoice.status !== 'void' && (
-        <HowToPay methods={[invoice.payment_method]} reference={invoice.invoice_number} />
+        <HowToPay methods={[invoice.payment_method]} reference={customerInvoiceNumber(invoice)} />
       )}
 
       {/* Notes */}
@@ -1069,7 +1111,7 @@ function InvoiceDetailContent() {
       <Modal
         isOpen={!!previewUrl}
         onClose={closePreview}
-        title={`Invoice ${invoice?.invoice_number || ''} — Preview`}
+        title={`Invoice ${invoice ? customerInvoiceNumber(invoice) : ''} — Preview`}
         size="2xl"
       >
         <div className="space-y-3">

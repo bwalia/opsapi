@@ -45,7 +45,10 @@ export interface InvoicePayment {
 // Invoice
 export interface Invoice {
   uuid: string;
+  /** Internal, sequential (INV-0001). */
   invoice_number: string;
+  /** What the customer sees (PDF, email, e-invoice). Same as invoice_number unless staff set their own. */
+  customer_invoice_number?: string | null;
   status: InvoiceStatus;
   customer_name: string;
   customer_email?: string;
@@ -112,6 +115,8 @@ export interface InvoicePayload {
   notes?: string;
   payment_terms_days?: number;
   /** "" clears it. */
+  /** Draft only. Blank = use the internal invoice number. */
+  customer_invoice_number?: string;
   po_number?: string;
   /** "" = the workspace default bank account. */
   payment_method_uuid?: string;
@@ -428,3 +433,8 @@ export const invoicesService = {
 };
 
 export default invoicesService;
+
+/** The invoice number the customer sees: their own, else the internal one. */
+export function customerInvoiceNumber(inv: Pick<Invoice, 'invoice_number' | 'customer_invoice_number' | 'uuid'>): string {
+  return inv.customer_invoice_number?.trim() || inv.invoice_number || `#${inv.uuid.slice(0, 8)}`;
+}

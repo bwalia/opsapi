@@ -481,7 +481,7 @@ return function(app)
             -- Fetch the invoice
             local invoice_results = db_module.query([[
                 SELECT
-                    i.id as internal_id, i.uuid, i.namespace_id, i.invoice_number,
+                    i.id as internal_id, i.uuid, i.namespace_id, i.invoice_number, i.customer_invoice_number,
                     i.status, i.customer_name, i.customer_email, i.customer_address,
                     i.issue_date AS invoice_date, i.due_date, i.currency, i.subtotal, i.tax_amount,
                     i.discount_amount, i.total_amount, i.amount_paid, i.balance_due,
@@ -523,7 +523,10 @@ return function(app)
                 company_address = body.company_address or "",
                 company_email = body.company_email or "",
                 company_phone = body.company_phone or "",
-                invoice_number = invoice.invoice_number,
+                -- {{invoice_number}} on a customer document is the customer's number; the internal one is
+                -- {{internal_invoice_number}}.
+                invoice_number = require("queries.InvoiceQueries").customerNumber(invoice),
+                internal_invoice_number = invoice.invoice_number,
                 invoice_date = invoice.invoice_date,
                 due_date = invoice.due_date or "",
                 currency = invoice.currency or "GBP",
@@ -591,6 +594,7 @@ return function(app)
                 generated_by_uuid = self.current_user.uuid,
                 metadata = {
                     invoice_number = invoice.invoice_number,
+                    customer_invoice_number = require("queries.InvoiceQueries").customerNumber(invoice),
                     customer_name = invoice.customer_name,
                     total_amount = invoice.total_amount,
                     template_name = template.name
