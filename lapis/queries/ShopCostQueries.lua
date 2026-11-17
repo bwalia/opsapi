@@ -113,7 +113,7 @@ function Q.alert(ns_id, info)
             first_name = "Price check", last_name = name, source = "shop_below_cost", notes = notes,
         }, {
             to = require("queries.ShopSettingsQueries").orderAlertEmail(ns_id),
-            purpose = "shop_orders",
+            purpose = "shop_alerts",
             staff = {
                 subject = "Price check needed: " .. name .. " is priced below cost",
                 headline = "Priced below cost",

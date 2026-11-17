@@ -31,7 +31,7 @@ function X.send_email(ns, to, subject, body)
         U.fail(422, "No valid recipient address; edit the draft to add one, then approve again")
     end
     local Mail = require("helper.mail")
-    local smtp = require("helper.namespace-mail").smtp(ns)
+    local smtp = require("helper.namespace-mail").smtp(ns, "property_deals")
     if not smtp and not Mail.isConfigured() then
         U.fail(422, "No email server: set the workspace's SMTP in Settings → Email")
     end

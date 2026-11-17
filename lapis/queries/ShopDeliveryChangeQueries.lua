@@ -238,7 +238,7 @@ local function staff_alert(o, req, cur)
             company_name = U.nz(customer.company) or req.address.company, source = "shop_delivery_change", notes = notes,
         }, {
             to = require("queries.ShopSettingsQueries").orderAlertEmail(o.namespace_id),
-            purpose = "shop_orders",
+            purpose = "shop_alerts",
             staff = {
                 subject = "Delivery change request: " .. o.order_number .. " (" .. tostring(name) .. ")",
                 headline = "Delivery change requested",

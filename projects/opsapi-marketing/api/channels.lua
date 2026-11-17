@@ -28,7 +28,7 @@ return function(app)
         local Mail = require("helper.mail")
         local NamespaceMail = require("helper.namespace-mail")
         local own = NamespaceMail.settings(ns)
-        local smtp = NamespaceMail.smtp(ns)
+        local smtp = NamespaceMail.smtp(ns, "marketing")
         local deployment = Mail.deploymentSender()
         local via = smtp and "workspace" or (deployment.configured and "deployment" or "none")
         local used = U.one([[
@@ -39,6 +39,8 @@ return function(app)
         ]], ns).n
         return sdk.ok({
             via = via,
+            -- The workspace email account that sends campaigns (Workspace → Email → Marketing campaigns).
+            account = smtp and smtp.account_name or nil,
             workspace_smtp_saved = own ~= nil,
             workspace_smtp_enabled = own ~= nil and own.enabled == true,
             host = smtp and smtp.host or (via == "deployment" and deployment.host or nil),

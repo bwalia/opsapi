@@ -263,6 +263,18 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     end
     manifest.publishes = publishes
 
+    -- Kinds of email the plugin sends: each gets its own "which account sends it"
+    -- dropdown on Workspace → Email. The plugin sends with
+    -- require("helper.namespace-mail").smtp(ns, key) (or prepare / send):
+    --   email_kinds = { { key = "campaigns", name = "Marketing campaigns", description = "..." } }
+    for i, k in ipairs(manifest.email_kinds or {}) do
+        if type(k) ~= "table" or type(k.key) ~= "string" or not k.key:match("^[a-z][a-z0-9_]*$") or #k.key > 40
+            or type(k.name) ~= "string" or k.name == "" then
+            return nil, manifest_path .. ": email_kinds[" .. i .. "] looks like "
+                .. "{ key = \"campaigns\", name = \"Marketing campaigns\", description = \"...\" }"
+        end
+    end
+
     -- Per-workspace on/off and settings (helper.plugin-workspaces).
     if manifest.default_enabled ~= nil and type(manifest.default_enabled) ~= "boolean" then
         return nil, manifest_path .. ": default_enabled must be true or false"
@@ -314,6 +326,11 @@ function ProjectLoader.register(manifest)
         end
         table.insert(feature_list, manifest.feature)
         ProjectConfig.registerFeature(manifest.code, feature_list, manifest.modules)
+    end
+    -- Its kinds of email, listed under the plugin's name on Workspace → Email.
+    for _, k in ipairs(manifest.email_kinds or {}) do
+        pcall(require("helper.namespace-mail").kind, k.key, { name = k.name, description = k.description,
+            group = k.group or manifest.name or manifest.code })
     end
 
     _registered[manifest.code] = manifest

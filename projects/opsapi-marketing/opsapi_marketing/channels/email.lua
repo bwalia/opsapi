@@ -150,7 +150,7 @@ function C.send(payload, recipient, ctx)
     -- ctx.smtp is looked up by the caller (false = none) so this makes no database call.
     local ns = ctx.namespace_id
     local smtp = ctx.smtp
-    if smtp == nil and ns then smtp = NamespaceMail.smtp(ns) or false end
+    if smtp == nil and ns then smtp = NamespaceMail.smtp(ns, "marketing") or false end
     if not smtp and not Mail.isConfigured() then
         local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
         if env ~= "production" then

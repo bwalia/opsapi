@@ -85,7 +85,10 @@ return function(app)
                 "<p>Your administrator will give you a temporary password — please change it once you've signed in.</p>",
                 "<p>Thanks,<br>", company, "</p>",
             })
-            require("helper.mail").send({ to = result.email, subject = "Your account for " .. company, html = html })
+            -- Through the workspace's "New team member accounts" email account (Workspace → Email).
+            local msg = require("helper.namespace-mail").prepare(self.namespace.id, "employee_welcome",
+                { to = result.email, subject = "Your account for " .. company, html = html })
+            if msg then require("helper.mail").send(msg) end
         end)
 
         return Http.ok({

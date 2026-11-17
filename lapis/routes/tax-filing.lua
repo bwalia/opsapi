@@ -151,19 +151,19 @@ local function xlsx_response(bytes, filename)
 end
 
 -- Fire-and-forget email; never fails the request. No figures / free text in the body.
-local function notify(to, subject, line)
+-- Sent through the workspace's "Tax return requests" email account (Workspace → Email).
+local function notify(ns, to, subject, line)
     if not to or not to:match("^[^@%s]+@[^@%s]+%.[^@%s]+$") then return end
     pcall(function()
-        local Mail = require("helper.mail")
-        if not Mail.isConfigured() then return end
-        Mail.send({ to = to, subject = subject,
+        local msg = require("helper.namespace-mail").prepare(ns, "tax_filing", { to = to, subject = subject,
             html = "<p>" .. line .. "</p><p style=\"color:#666;font-size:13px\">You can see the details "
                 .. "by logging in to your account.</p>" })
+        if msg then require("helper.mail").send(msg) end
     end)
 end
 
-local function notify_accountant(subject, line)
-    notify(os.getenv("TAX_FILING_NOTIFY_EMAIL"), subject, line)
+local function notify_accountant(ns, subject, line)
+    notify(ns, os.getenv("TAX_FILING_NOTIFY_EMAIL"), subject, line)
 end
 
 local function append_update(id, entry)
@@ -299,7 +299,7 @@ return function(app)
             ngx.log(ngx.ERR, "[tax-filing] create failed: ", tostring(res))
             return fail(500, "CREATE_FAILED", "Could not send your request. Please try again.")
         end
-        notify_accountant("New filing request — " .. year,
+        notify_accountant(self.namespace.id, "New filing request — " .. year,
             "A customer has asked us to file their " .. year .. " Self Assessment return. Open Tax → Filing requests.")
         return { status = 201, json = { success = true, data = customer_json(res[1]) } }
     end))
@@ -314,7 +314,7 @@ return function(app)
             WHERE id = ? AND status = ? RETURNING *]], r.id, r.status)
         if not res[1] then return fail(409, "CHANGED", "This request just changed — please reload.") end
         append_update(r.id, { type = "status", status = "cancelled", by = "customer", at = now_iso() })
-        notify_accountant("Filing request cancelled — " .. r.tax_year,
+        notify_accountant(r.namespace_id, "Filing request cancelled — " .. r.tax_year,
             "A customer cancelled their " .. r.tax_year .. " filing request.")
         return { status = 200, json = { success = true, data = customer_json(own_request(self, u.id)) } }
     end))
@@ -333,7 +333,7 @@ return function(app)
             WHERE id = ? AND status = 'needs_info' RETURNING *]], r.id)
         if not res[1] then return fail(409, "CHANGED", "This request just changed — please reload.") end
         append_update(r.id, { type = "reply", text = text, by = "customer", at = now_iso() })
-        notify_accountant("Customer replied — " .. r.tax_year,
+        notify_accountant(r.namespace_id, "Customer replied — " .. r.tax_year,
             "A customer answered your question on their " .. r.tax_year .. " return.")
         return { status = 200, json = { success = true, data = customer_json(own_request(self, u.id)) } }
     end))
@@ -470,7 +470,7 @@ return function(app)
 
         local cust = db.query("SELECT email FROM users WHERE id = ? LIMIT 1", r.user_id)[1]
         if cust and CUSTOMER_EMAIL[to] then
-            notify(cust.email, "Update on your " .. r.tax_year .. " tax return", CUSTOMER_EMAIL[to]:format(r.tax_year))
+            notify(r.namespace_id, cust.email, "Update on your " .. r.tax_year .. " tax return", CUSTOMER_EMAIL[to]:format(r.tax_year))
         end
         return { status = 200, json = { success = true, data = { uuid = r.uuid, status = to } } }
     end))
