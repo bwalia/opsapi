@@ -12,6 +12,7 @@ import { EditDeliveryAddress, canEditDeliveryAddress } from '@/components/shop/E
 import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } from '@/components/shop/DeliveryChangeRequests';
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { OrderUpdateEmail } from '@/components/shop/OrderUpdateEmail';
+import { CustomerUpdates } from '@/components/shop/CustomerUpdates';
 import { MoreMenu, NextStepPanel, PoNumberField, StatusTimeline, activePurchaseOrder, orderNextStep, orderTimeline, type PanelAction } from '@/components/shop/workflow';
 import { purchaseOrdersService } from '@/services/purchase-orders.service';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
@@ -263,6 +264,7 @@ function OrderDetail() {
               setNotes(o.internal_notes ?? '');
             }}
           />
+          <CustomerUpdates order={order} editable={editable} onChanged={reload} />
           <Card>
             <SectionTitle>Lines</SectionTitle>
             <LinesTable lines={order.lines} currency={cur} />

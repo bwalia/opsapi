@@ -530,6 +530,8 @@ export interface ShopOrder extends ShopTotals {
   delivery_address?: ShopDeliveryAddress | null;
   /** Supplier POs raised from this order. */
   purchase_orders?: ShopOrderPurchaseOrderRef[];
+  /** The log the customer sees on their order page (comments + events), newest first. */
+  customer_updates?: ShopCustomerUpdate[];
   /** The end customer's purchase order number (carried from the quote; editable on the order). */
   customer_po_number?: string | null;
   quote_number?: string | null;
@@ -578,6 +580,19 @@ export interface ShopDeliveryChangeRequest {
   cancelled_at: string | null;
   customer_notified_at: string | null;
   created_at: string;
+}
+
+/** An entry in the log the customer sees on their order page. */
+export interface ShopCustomerUpdate {
+  uuid?: string | null;
+  kind: 'comment' | 'status' | 'delivery_address' | 'delivery_change' | 'email';
+  at: string;
+  status?: string | null;
+  title?: string | null;
+  message?: string | null;
+  /** Admin view only. */
+  author?: string | null;
+  removable?: boolean;
 }
 
 /** PUT /shop/admin/orders/:uuid/delivery-address: staff change where the order is delivered. */
