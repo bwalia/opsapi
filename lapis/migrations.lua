@@ -195,6 +195,7 @@ local shop_bank_transfer_migrations = load_if_enabled(ProjectConfig.FEATURES.SHO
 local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-customer-po") or {}
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
+local shop_order_event_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-events") or {}
 local shop_deal_code_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-deal-codes") or {}
 local shop_cost_floor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-cost-floor") or {}
 local shop_seo_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-seo") or {}
@@ -2777,6 +2778,8 @@ local _migrations = {
     -- off until switched on (migrations/supplier-portal.lua; skipped without purchase orders)
     ['zzs60_supplier_portal_tables'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 1),
     ['zzs61_supplier_portal_settings'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 2),
+    -- Order updates on the customer's order page: staff comments + status/address events (migrations/shop-order-events.lua)
+    ['zzs62_shop_order_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_event_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

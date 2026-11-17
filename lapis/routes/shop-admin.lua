@@ -38,6 +38,10 @@
                                                delivery address (UK; 409 once shipped). The old one goes into the
                                                internal notes; open drop-ship supplier POs follow unless
                                                update_purchase_orders is false → { order, purchase_orders[] }
+      POST              /orders/:uuid/updates   { message } an update the customer sees on their order page (201)
+      DELETE            /orders/:uuid/updates/:event_uuid   hide an update from the customer. The order (GET) has
+                                               customer_updates; status changes and staff address changes are
+                                               logged there automatically
       GET               /orders/:uuid/update-email/presets   order update emails: presets filled in for this order,
                                                the recipient, whether customer emails are on, and the history
       POST              /orders/:uuid/update-email/preview   { preset?, headline?, message? } → { subject, html, to, warnings }
@@ -103,6 +107,7 @@ local Dashboard = require("queries.ShopDashboardQueries")
 local ShopStripe = require("queries.ShopStripeQueries")
 local Legal = require("queries.ShopLegalQueries")
 local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
+local OrderEvents = require("queries.ShopOrderEventQueries")
 local OrderUpdates = require("queries.ShopOrderUpdateQueries")
 
 local BASE = "/api/v2/shop/admin"
@@ -301,7 +306,9 @@ return function(app)
             PUT = function(s, ns_id)
                 local body, bad = body_or_400()
                 if not body then return bad end
-                return result(Orders.adminUpdate(ns_id, s.params.uuid, body))
+                local u = s.current_user or {}
+                return result(Orders.adminUpdate(ns_id, s.params.uuid, body,
+                    u.email or u.uuid or (u.api_key and "api-key") or nil, user_id(s)))
             end,
         }))(self)
     end)
@@ -428,6 +435,21 @@ return function(app)
         if not body then return bad end
         local u = self.current_user or {}
         return result(DeliveryChange.adminSetAddress(ns_id, self.params.uuid, body,
+            u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    -- updates the customer sees on their order page (comments + events) -------------------------------
+    app:post(BASE .. "/orders/:uuid/updates", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        return created(OrderEvents.addComment(ns_id, self.params.uuid, body,
+            u.email or u.uuid or (u.api_key and "api-key") or nil, user_id(self)))
+    end))
+
+    app:delete(BASE .. "/orders/:uuid/updates/:event_uuid", guard("update", function(self, ns_id)
+        local u = self.current_user or {}
+        return result(OrderEvents.remove(ns_id, self.params.uuid, self.params.event_uuid,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
 

@@ -148,6 +148,9 @@ function ShopOrderQueries.publicView(ns_id, uuid, token, member_email)
     local o = ShopOrderQueries.getByUuid(ns_id, uuid)
     if not o or not U.secure_equals(o.access_token, token) then return nil end
     local out = ShopOrderQueries.shape(o)
+    local Events = require("queries.ShopOrderEventQueries")
+    out.progress = Events.progress(o)
+    out.updates = Events.updates(o)
     if U.nz(member_email) then
         local DeliveryChange = require("queries.ShopDeliveryChangeQueries")
         out.viewer_owns_order = DeliveryChange.ownsOrder(o, member_email)
@@ -1078,6 +1081,7 @@ function ShopOrderQueries.adminGet(ns_id, uuid)
     ]], o.id))
     s.purchase_orders = ShopOrderQueries.purchaseOrdersFor(ns_id, o.uuid)
     s.delivery_change_requests = require("queries.ShopDeliveryChangeQueries").forOrder(o.id, { admin = true })
+    s.customer_updates = require("queries.ShopOrderEventQueries").updates(o, { admin = true })
     s.delivery_change_pending = false
     for _, r in ipairs(s.delivery_change_requests) do
         if r.status == "pending" then s.delivery_change_pending = true end
@@ -1183,7 +1187,7 @@ function ShopOrderQueries.adminRefund(ns_id, uuid, body, actor)
     end)
 end
 
-function ShopOrderQueries.adminUpdate(ns_id, uuid, body)
+function ShopOrderQueries.adminUpdate(ns_id, uuid, body, actor, user_id)
     local o = ShopOrderQueries.getByUuid(ns_id, uuid)
     if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
     local fields = { updated_at = db.raw("NOW()") }
@@ -1204,6 +1208,10 @@ function ShopOrderQueries.adminUpdate(ns_id, uuid, body)
     end
     local _, err = U.tx(function()
         db.update("shop_orders", fields, { id = o.id })
+        local Events = require("queries.ShopOrderEventQueries")
+        if fields.status and fields.status ~= o.status and Events.LOGGED_STATUSES[fields.status] then
+            Events.record(o, "status", { status = fields.status, author = actor, author_user_id = user_id })
+        end
         if fields.status and (fields.status == "cancelled" or fields.status == "payment_failed")
             and o.status == "pending_payment" then
             Stock.release(o.id)
