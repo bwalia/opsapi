@@ -103,7 +103,10 @@ setup:
 # workstation.academy lets the Academy tenant's instructor dashboard
 # (teach.workstation.academy) call this shared API cross-origin;
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
-corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk"
+# pintopets.app: PintoPets (bwalia/pintopets) signs people in through this
+# OpsAPI's hosted page (/auth/signin?frontend_url=https://pintopets.app), which
+# only accepts trusted origins. Matches int.
+corsAllowedDomains: "workstation.co.uk,workstation.academy,tenthmatrix.com,tenthmatrix.co.uk,pintopets.app"
 
 # Google sign-in returns here, not to the diytaxreturn API in the shared Vault
 # secret. Must be an authorised redirect URI on the Google OAuth client.
@@ -181,3 +184,13 @@ tolerations:
     operator: Exists
     effect: NoExecute
     tolerationSeconds: 900
+
+# Plugin overlays (same mechanism as int): the init container copies each image's
+# plugin into the pods and the migrate job, which applies its migrations.
+# pintopets: the PintoPets plugin (bwalia/pintopets opsapi/pintopets), pinned to a
+# commit tag that ran on int, never the moving :int tag. To ship a new plugin
+# version to prod, change the tag to the sha int is running and redeploy.
+pluginOverlays:
+  - name: pintopets
+    image: docker.io/harneetk78/pintopets-opsapi-plugin:1034274
+    pullPolicy: IfNotPresent
