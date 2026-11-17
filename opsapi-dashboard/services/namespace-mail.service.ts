@@ -51,6 +51,7 @@ export interface MailAccount {
   reply_to?: string | null;
   last_tested_at?: string | null;
   last_error?: string | null;
+  created_at?: string;
   updated_at?: string;
 }
 
@@ -109,7 +110,11 @@ export const namespaceMailService = {
     data<MailAccount>(await apiClient.post('/api/v2/namespace/mail-accounts', input, JSON_HDR)),
   updateAccount: async (uuid: string, input: Partial<MailAccountInput>) =>
     data<MailAccount>(await apiClient.put(`/api/v2/namespace/mail-accounts/${enc(uuid)}`, input, JSON_HDR)),
-  deleteAccount: async (uuid: string) => apiClient.delete(`/api/v2/namespace/mail-accounts/${enc(uuid)}`),
+  /** Removes an account; if it was the default, `new_default` names the account that took over. */
+  deleteAccount: async (uuid: string) =>
+    data<{ deleted: boolean; new_default?: string | null }>(
+      await apiClient.delete(`/api/v2/namespace/mail-accounts/${enc(uuid)}`),
+    ),
   makeDefault: async (uuid: string) =>
     data<MailAccount>(await apiClient.post(`/api/v2/namespace/mail-accounts/${enc(uuid)}/default`, {}, JSON_HDR)),
   testAccount: async (uuid: string, to: string) =>

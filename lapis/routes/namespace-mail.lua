@@ -45,7 +45,11 @@ return function(app)
         return Http.ok({
             accounts = setmetatable(NamespaceMail.listAccounts(self.namespace.id), require("cjson").array_mt),
             routing = setmetatable(NamespaceMail.routing(self.namespace.id), require("cjson").array_mt),
-            platform = Mail.deploymentSender(),
+            -- The platform's sender, for "Platform server (...)" labels (not its SMTP host: that's ours).
+            platform = (function()
+                local p = Mail.deploymentSender()
+                return { from_email = p.from_email, from_name = p.from_name, configured = p.configured }
+            end)(),
             -- Emails the platform always sends itself (not routable), for the page to explain.
             platform_only = setmetatable(NamespaceMail.PLATFORM_ONLY, require("cjson").array_mt),
         })
@@ -70,18 +74,26 @@ return function(app)
     end))
 
     app:delete("/api/v2/namespace/mail-accounts/:uuid", Http.guard("namespace", "update", function(self)
-        local ok, err = NamespaceMail.deleteAccount(self.namespace.id, self.params.uuid)
-        if not ok then return Http.fail(404, err) end
-        return Http.ok({ deleted = true })
+        local res, err = NamespaceMail.deleteAccount(self.namespace.id, self.params.uuid)
+        if not res then return Http.fail(err == "Email account not found" and 404 or 409, err) end
+        return Http.ok({ deleted = true, new_default = res.new_default })
     end))
 
     app:post("/api/v2/namespace/mail-accounts/:uuid/default", Http.guard("namespace", "update", function(self)
         local row, err = NamespaceMail.setDefaultAccount(self.namespace.id, self.params.uuid)
-        if not row then return Http.fail(404, err) end
+        if not row then return Http.fail(err == "Email account not found" and 404 or 422, err) end
         return Http.ok(row)
     end))
 
     app:post("/api/v2/namespace/mail-accounts/:uuid/test", with_body("update", function(self, body)
+        -- A test goes to any address the admin types: keep it to a few at a time.
+        local u = self.current_user or {}
+        local allowed, _, retry = require("middleware.rate-limit").check(
+            "mail_test:" .. tostring(u.uuid or u.id), 10, 600)
+        if not allowed then
+            ngx.header["Retry-After"] = tostring(retry)
+            return Http.fail(429, "That's a lot of test emails. Try again in a few minutes.")
+        end
         local ok, err = NamespaceMail.testAccount(self.namespace.id, self.params.uuid, body.to)
         if not ok then return Http.fail(err == "Email account not found" and 404 or 422, err) end
         return Http.ok({ sent = true })

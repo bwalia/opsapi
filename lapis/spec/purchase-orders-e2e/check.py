@@ -135,8 +135,9 @@ sql("""INSERT INTO namespace_user_roles (uuid, namespace_member_id, namespace_ro
        WHERE m.namespace_id = %s AND r.namespace_id = %s AND r.role_name = 'po_clerk'
          AND m.user_id = (SELECT id FROM users WHERE uuid = '%s')""" % (ID_A, ID_A, clerk_a["uuid"]))
 # Workspace A sends through its own SMTP (the sink); B uses the platform's.
-sql("""INSERT INTO namespace_mail_settings (namespace_id, enabled, host, port, security, from_email, reply_to, updated_at)
-       VALUES (%s, true, 'smtp', 2525, 'none', 'buying@a.test', 'accounts@a.test', now())""" % ID_A)
+sql("""INSERT INTO namespace_smtp_accounts (uuid, namespace_id, name, host, port, security, from_email, reply_to, enabled,
+           is_default)
+       VALUES (gen_random_uuid()::text, %s, 'Main', 'smtp', 2525, 'none', 'buying@a.test', 'accounts@a.test', true, true)""" % ID_A)
 for name, email_ in (("Acme Timber", "sales@acme.test"), ("Bricks R Us", "orders@bricks.test")):
     sql("""INSERT INTO crm_accounts (uuid, namespace_id, name, email, phone, address_line1, city, owner_user_uuid)
            VALUES (gen_random_uuid()::text, %s, '%s', '%s', '0100', '1 High St', 'Leeds', '%s')"""

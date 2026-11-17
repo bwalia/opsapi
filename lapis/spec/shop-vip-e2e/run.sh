@@ -73,8 +73,9 @@ SELECT gen_random_uuid()::text, id, v.sku, v.slug, v.name, 'gpu', 'fixed', v.pri
        AS v(sku, slug, name, price, stock, lead)
  WHERE namespaces.slug = 'workstation';
 -- the workspace's own mail server: the sandbox SMTP sink (plain SMTP)
-INSERT INTO namespace_mail_settings (namespace_id, host, port, security, from_email, from_name, enabled, updated_at)
-SELECT id, 'e2e-smtp', 2525, 'none', 'shop@e2e.test', 'Workstation', true, NOW() FROM namespaces WHERE slug = 'workstation';
+INSERT INTO namespace_smtp_accounts (uuid, namespace_id, name, host, port, security, from_email, from_name, enabled, is_default)
+SELECT gen_random_uuid()::text, id, 'Main', 'e2e-smtp', 2525, 'none', 'shop@e2e.test', 'Workstation', true, true
+FROM namespaces WHERE slug = 'workstation';
 SQL
 python3 -I "$HERE/check.py" "http://127.0.0.1:$PORT" "$BFF_KEY" "$WHSEC" "e2e-pg-$$" "e2e-smtp-$$" "$OWNER" "e2e-feed-$$" || {
   echo "--- API log (mail / shop-vip / errors) ---"
