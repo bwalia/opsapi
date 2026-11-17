@@ -2061,6 +2061,35 @@ local _migrations = {
         end
     end,
 
+    -- When a refresh-token family's sign-in happened. Rotation copies it, so a
+    -- JWT minted by /auth/refresh keeps the sign-in's auth_time instead of
+    -- looking like a fresh sign-in (recent-sign-in checks, lib/account-deletion.lua).
+    -- NULL on older rows: helper/refresh-token.lua falls back to the family's first row.
+    -- '440a' sorts after '440_create_refresh_tokens' (keys run in string order).
+    ['440a_refresh_tokens_auth_time'] = function()
+        db.query("ALTER TABLE IF EXISTS refresh_tokens ADD COLUMN IF NOT EXISTS auth_time TIMESTAMPTZ NULL")
+    end,
+
+    -- Provider tokens kept for later calls on the user's behalf. Today: Apple
+    -- refresh tokens from Sign in with Apple, revoked with Apple when the user
+    -- deletes their account (App Store guideline 5.1.1(v)). token_sealed is
+    -- helper/secret-box.lua output (AES-256-GCM), never the plain token.
+    ['440b_create_user_oauth_tokens'] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS user_oauth_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                token_sealed TEXT NOT NULL,
+                token_type TEXT NOT NULL DEFAULT 'refresh_token',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, provider, client_id)
+            )
+        ]])
+    end,
+
     -- Hospital Care Management System (conditional)
     ['442_create_departments_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 1),
     ['443_create_wards_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 2),

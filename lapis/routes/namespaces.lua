@@ -309,7 +309,8 @@ return function(app)
         }, {
             user_roles = platform_roles,
             namespace_roles = ns_roles,
-            namespace_permissions = permissions
+            namespace_permissions = permissions,
+            auth_time = ngx.ctx.auth_time, -- switching workspace is not signing in
         })
 
         return success_response({
@@ -393,7 +394,8 @@ return function(app)
             is_owner = true
         }, {
             user_roles = platform_roles,
-            namespace_permissions = namespace_permissions
+            namespace_permissions = namespace_permissions,
+            auth_time = ngx.ctx.auth_time, -- creating a workspace is not signing in
         })
 
         return success_response({

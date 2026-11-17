@@ -22,6 +22,7 @@ local Mail = require("helper.mail")
 local UserActivity = require("lib.user-activity")
 local Throttle = require("helper.auth-throttle")
 local AppleSignIn = require("helper.apple-signin")
+local AccountDeletion = require("lib.account-deletion")
 local ShopCustomerAuth = require("queries.ShopCustomerAuthQueries")
 local ShopCustomerAuthRules = require("lib.shop-customer-auth")
 
@@ -1013,41 +1014,25 @@ return function(app)
         }
     end)))
 
-    -- Deactivate own account (soft delete: active=false). Requires password
-    -- confirmation, then revokes all sessions. Permanent deletion stays an
-    -- admin/support action (UserQueries.destroy) — matching the tax-settings copy.
+    -- Deactivate own account (soft delete: active=false): App Store guideline
+    -- 5.1.1(v). Needs the password OR a sign-in within the last 10 minutes
+    -- (the JWT's auth_time; OAuth users have no usable password), else 403
+    -- reauth_required. Revokes all sessions, revokes the user's Apple tokens
+    -- with Apple and deletes their push device tokens. Permanent deletion stays
+    -- an admin/support action (UserQueries.destroy). See lib/account-deletion.lua.
     app:post("/auth/delete-account", UserActivity.guardAuth("account_deactivation", "password", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
-        local user = self.current_user
-        if not user or not user.uuid then
-            return { status = 401, json = { error = "Authentication required" } }
-        end
-
-        local body = parse_json_body()
-        local password = body.password or body.current_password
-        if type(password) ~= "string" or password == "" then
-            return Errors.response(self, "VALIDATION_400", {
-                context = { field = "password", reason = "required" },
-            })
-        end
-
-        local rows = db.select("id, password FROM users WHERE uuid = ? LIMIT 1", user.uuid)
-        local record = rows and rows[1]
-        if not record then
-            return { status = 404, json = { error = "User not found" } }
-        end
-        if not Global.matchPassword(password, record.password) then
-            return { status = 403, json = { error = "Password is incorrect" } }
-        end
-
-        db.query("UPDATE users SET active = false, updated_at = NOW() WHERE uuid = ?", user.uuid)
-        pcall(RefreshToken.revokeAllForUser, record.id)
-        pcall(AuthCookies.clear, self)
-
-        UserActivity.auth("account_deactivation", { method = "password", user = user })
-        return {
-            status = 200,
-            json = { message = "Your account has been deactivated. Contact support to permanently delete your data." },
-        }
+        return AccountDeletion.handle({
+            user = self.current_user,
+            body = parse_json_body(),
+            auth_time = ngx.ctx.auth_time,
+            api_key = self.api_key_auth or ngx.ctx.api_key_auth,
+        }, {
+            null = cJson.null,
+            clear_cookies = function() AuthCookies.clear(self) end,
+            audit = function(method, user)
+                UserActivity.auth("account_deactivation", { method = method, user = user })
+            end,
+        })
     end)))
 
     -- Google OAuth Routes
@@ -1493,6 +1478,7 @@ return function(app)
         -- Prefer exchanging the code (gives a fresh id_token). Fall back to
         -- the form_post id_token when Apple included it directly.
         local claims, claims_err
+        local apple_tokens -- kept for revocation on account deletion (refresh_token)
         if code then
             local token_data, exchange_err = AppleSignIn.exchange_code(code)
             if not token_data then
@@ -1500,6 +1486,7 @@ return function(app)
                 return apple_error_redirect("token_exchange_failed")
             end
             id_token = token_data.id_token or id_token
+            apple_tokens = token_data
         end
 
         claims, claims_err = AppleSignIn.verify_identity_token(id_token)
@@ -1542,6 +1529,13 @@ return function(app)
         if not session then
             ngx.log(ngx.ERR, "[OAuth/Apple] session mint failed: ", tostring(session_err))
             return apple_error_redirect("session_failed")
+        end
+
+        -- Keep Apple's refresh token (sealed) so deleting the account can revoke
+        -- it with Apple. Best effort: never blocks the sign-in, never logged.
+        if apple_tokens and apple_tokens.refresh_token then
+            pcall(AccountDeletion.store_apple_token, session.user_id or user.id, apple_tokens,
+                Global.getEnvVar("APPLE_CLIENT_ID"))
         end
 
         local final_url = string.format("%s/auth/callback?token=%s&redirect=%s",
@@ -1999,8 +1993,9 @@ return function(app)
                     end
                 end
 
-                -- Rebuild namespace context from DB
-                local token_options = { roles = rolesArray }
+                -- Rebuild namespace context from DB. auth_time stays the sign-in's:
+                -- refreshing is not signing in (recent-sign-in checks rely on it).
+                local token_options = { roles = rolesArray, auth_time = rt_data.auth_time }
                 local default_ns = NamespaceQueries.getUserDefaultNamespace(db_user.id)
                 local ns_membership
                 if default_ns then
@@ -2029,7 +2024,8 @@ return function(app)
                 if token_options.namespace and ns_membership then
                     new_jwt = JWTHelper.generateNamespaceToken(userWithRoles, token_options.namespace, ns_membership, {
                         user_roles = rolesArray,
-                        namespace_permissions = token_options.namespace_permissions
+                        namespace_permissions = token_options.namespace_permissions,
+                        auth_time = rt_data.auth_time,
                     })
                 else
                     new_jwt = JWTHelper.generateToken(userWithRoles, token_options)
@@ -2142,12 +2138,13 @@ return function(app)
             }
         end
 
-        -- Get full user data
+        -- Get full user data. A deactivated (deleted) or vanished account gets
+        -- 401, so an app holding a still-unexpired access JWT signs out.
         local user = UserQueries.show(self.current_user.uuid)
-        if not user then
+        if not user or is_deactivated(user) then
             return {
-                status = 404,
-                json = { error = "User not found" }
+                status = 401,
+                json = { error = "Not authenticated", code = "account_inactive" }
             }
         end
 
