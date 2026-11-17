@@ -52,7 +52,14 @@ export function SeoContentEditor({
   const set = (patch: Partial<ShopSeoBlock>) => onChange({ ...value, [loc]: { ...block, ...patch } });
 
   const defTitle = defaultSeoTitle(block.target_keyword) || `${h1} | Workstation`;
-  const defDesc = defaultSeoDescription(block.intro || (loc === 'en' ? lead : undefined), kind === 'product' ? price : null, loc);
+  // Categories: the shop uses the intro (or description) as it is, trimmed to 160 characters.
+  const catDesc = (block.intro || lead || h1).replace(/\s+/g, ' ').trim();
+  const defDesc =
+    kind === 'product'
+      ? defaultSeoDescription(block.intro || lead || h1, price, loc)
+      : catDesc.length > SEO_DESC_MAX
+        ? `${catDesc.slice(0, SEO_DESC_MAX - 1).replace(/\s+\S*$/, '')}…`
+        : catDesc;
   const title = block.title?.trim() || defTitle;
   const description = block.description?.trim() ? fillPrice(block.description.trim(), price) : defDesc;
   const warnings = seoWarnings({ block, h1, title, description });
