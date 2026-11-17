@@ -27,6 +27,12 @@
                       items (min/max, default 1-2: "Ships in 1-2 days") and courier transit days (min/max,
                       default 1-3). Out-of-stock items use their own lead time instead of the handling days.
     quote_valid_days  how long a new quote holds its price (default 30); also the shop's "price valid until".
+    supplier_portal_enabled
+                      false (default) → the supplier portal is closed: supplier logins get "not available yet"
+                      (queries/SupplierPortalQueries.lua). Staff can still invite logins and use the PO panels.
+    supplier_portal_emails_enabled
+                      false (default) → nothing is emailed to suppliers about their POs (payments, documents,
+                      messages, invites); they see changes when they sign in. Never emails a customer either way.
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")
@@ -70,6 +76,9 @@ function Q.get(ns_id)
                             FROM shop_settings WHERE namespace_id = ?]], ns_id)
     end
     local row = rows[1]
+    local ok3, prow = pcall(db.query, [[SELECT supplier_portal_enabled, supplier_portal_emails_enabled
+                                          FROM shop_settings WHERE namespace_id = ?]], ns_id) -- before zzs61: off
+    local portal = ok3 and prow and prow[1] or {}
     local ok2, drows = pcall(db.query, "SELECT " .. table.concat(DELIVERY_KEYS, ", ")
         .. " FROM shop_settings WHERE namespace_id = ?", ns_id)
     local d = ok2 and drows and drows[1] or {}
@@ -89,6 +98,8 @@ function Q.get(ns_id)
         deal_code_prefix = row and U.nz(row.deal_code_prefix) or DealCodes.DEFAULT_PREFIX,
         deal_code_length = row and tonumber(row.deal_code_length) or DealCodes.DEFAULT_LENGTH,
         po_deliver_to = row and U.nz(row.po_deliver_to) and U.dec(row.po_deliver_to, U.null) or U.null,
+        supplier_portal_enabled = portal.supplier_portal_enabled == true,
+        supplier_portal_emails_enabled = portal.supplier_portal_emails_enabled == true,
         updated_at = row and row.updated_at or U.null,
     }
 end
@@ -186,10 +197,16 @@ function Q.update(ns_id, body)
     local has_notify = body.customer_delivery_notifications ~= nil
     local has_prefix, has_length = body.deal_code_prefix ~= nil, body.deal_code_length ~= nil
     local has_deliver = body.po_deliver_to ~= nil
+    local has_portal = body.supplier_portal_enabled ~= nil or body.supplier_portal_emails_enabled ~= nil
+    for _, k in ipairs({ "supplier_portal_enabled", "supplier_portal_emails_enabled" }) do
+        if body[k] ~= nil and type(body[k]) ~= "boolean" then
+            return nil, U.err(400, "VALIDATION_ERROR", k .. " must be true or false")
+        end
+    end
     local delivery, delivery_err = Q.cleanDelivery(body, Q.get(ns_id))
     if delivery_err then return nil, U.err(400, "VALIDATION_ERROR", delivery_err) end
     if not has_checkout and not has_bill and not has_alert and not has_notify and not has_prefix and not has_length
-        and not has_deliver and not delivery then
+        and not has_deliver and not delivery and not has_portal then
         return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to, "
             .. "order_alert_email, customer_delivery_notifications, deal_code_prefix, deal_code_length, po_deliver_to, "
             .. "delivery settings or quote_valid_days)")
@@ -259,6 +276,11 @@ function Q.update(ns_id, body)
     if has_deliver then
         db.query("UPDATE shop_settings SET po_deliver_to = ?::jsonb, updated_at = NOW() WHERE namespace_id = ?",
             deliver == U.null and db.NULL or U.enc(deliver), ns_id)
+    end
+    for _, k in ipairs({ "supplier_portal_enabled", "supplier_portal_emails_enabled" }) do
+        if body[k] ~= nil then
+            db.query("UPDATE shop_settings SET " .. k .. " = ?, updated_at = NOW() WHERE namespace_id = ?", body[k], ns_id)
+        end
     end
     if delivery then
         local sets, vals = {}, {}

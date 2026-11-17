@@ -36,6 +36,7 @@ local cjson = require("cjson.safe")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local PurchaseOrderQueries = require("queries.PurchaseOrderQueries")
+local ProjectConfig = require("helper.project-config")
 local Mail = require("helper.mail")
 local NamespaceMail = require("helper.namespace-mail")
 local Idempotency = require("helper.idempotency")
@@ -207,6 +208,11 @@ return function(app)
     app:post("/api/v2/purchase-orders/:uuid/send", guard("update", function(self)
         local po, message, code = PurchaseOrderQueries.send(self.params.uuid, self.namespace.id)
         if not po then return fail(message, code) end
+        -- Supplier portal: tell the supplier's portal users (only when supplier emails are switched on).
+        -- Never fails the send (SupplierPortalQueries.notifyShared catches its own errors).
+        if ProjectConfig.isFeatureEnabled("shop") then
+            require("queries.SupplierPortalQueries").notifyShared(self.namespace.id, po.uuid)
+        end
         return ok(200, po)
     end))
 

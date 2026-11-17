@@ -50,6 +50,7 @@ function SettingsContent() {
   const [alertEmail, setAlertEmail] = useState('');
   const [savingAlert, setSavingAlert] = useState(false);
   const [savingNotify, setSavingNotify] = useState(false);
+  const [savingPortal, setSavingPortal] = useState(false);
   const [deliverTo, setDeliverTo] = useState<PurchaseOrderParty>({});
   const [savingDeliver, setSavingDeliver] = useState(false);
   const [dealPrefix, setDealPrefix] = useState('WS');
@@ -191,6 +192,33 @@ function SettingsContent() {
     }
   };
 
+  const setSupplierPortal = async (key: 'supplier_portal_enabled' | 'supplier_portal_emails_enabled', on: boolean) => {
+    if (
+      on &&
+      key === 'supplier_portal_emails_enabled' &&
+      !(await confirmDialog({
+        title: 'Turn on supplier portal emails?',
+        message:
+          'Suppliers’ portal contacts will be emailed when you record a payment, share a document or write a message. Customers are never emailed.',
+        confirmText: 'Turn on',
+      }))
+    )
+      return;
+    setSavingPortal(true);
+    try {
+      setSettings(await shopService.updateSettings({ [key]: on }));
+      if (key === 'supplier_portal_enabled') {
+        toast.success(on ? 'Supplier portal is on' : 'Supplier portal is off');
+      } else {
+        toast.success(on ? 'Supplier portal emails are on' : 'Supplier portal emails are off');
+      }
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not save'));
+    } finally {
+      setSavingPortal(false);
+    }
+  };
+
   const saveAlertEmail = async () => {
     setSavingAlert(true);
     try {
@@ -273,6 +301,39 @@ function SettingsContent() {
             checked={!!settings?.customer_delivery_notifications}
             disabled={!settings || savingNotify || !canUpdate('shop')}
             onChange={setCustomerNotifications}
+          />
+        </div>
+      </Card>
+      <Card className="p-6">
+        <div className="flex items-start justify-between gap-6">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-secondary-900">Supplier portal</h2>
+            <p className="text-sm text-secondary-600">
+              Let invited supplier contacts sign in and see their purchase orders.
+              {settings?.supplier_portal_enabled
+                ? ' On: they can sign in, see their own purchase orders, upload proformas and invoices, enter dispatch and write to you.'
+                : ' Off: supplier logins see “not available yet”. You can still invite them (Shop → Suppliers) and use the supplier panels on a purchase order.'}
+            </p>
+          </div>
+          <Switch
+            aria-label="Supplier portal"
+            checked={!!settings?.supplier_portal_enabled}
+            disabled={!settings || savingPortal || !canUpdate('shop')}
+            onChange={(on) => setSupplierPortal('supplier_portal_enabled', on)}
+          />
+        </div>
+        <div className="mt-5 flex items-start justify-between gap-6 border-t border-secondary-100 pt-5">
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold text-secondary-900">Supplier portal emails</h3>
+            <p className="text-sm text-secondary-600">
+              Email suppliers about payments, documents and messages. Off: nothing is emailed; they see updates when they sign in. Customers are never emailed.
+            </p>
+          </div>
+          <Switch
+            aria-label="Supplier portal emails"
+            checked={!!settings?.supplier_portal_emails_enabled}
+            disabled={!settings || savingPortal || !canUpdate('shop')}
+            onChange={(on) => setSupplierPortal('supplier_portal_emails_enabled', on)}
           />
         </div>
       </Card>

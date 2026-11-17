@@ -209,6 +209,10 @@ export interface ShopSettings {
   delivery_transit_max_days?: number;
   /** How long a new quote holds its price (also the shop's "price valid until"). */
   quote_valid_days?: number;
+  /** Supplier portal: invited supplier contacts can sign in and see their own purchase orders. Off by default. */
+  supplier_portal_enabled?: boolean;
+  /** Supplier portal emails: suppliers are emailed about payments, documents and messages. Off by default. */
+  supplier_portal_emails_enabled?: boolean;
   updated_at: string | null;
 }
 
@@ -230,7 +234,7 @@ export const shopService = {
   },
 
   async updateSettings(
-    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications' | 'deal_code_prefix' | 'deal_code_length' | 'po_deliver_to' | (typeof SHOP_DELIVERY_KEYS)[number]>>,
+    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications' | 'supplier_portal_enabled' | 'supplier_portal_emails_enabled' | 'deal_code_prefix' | 'deal_code_length' | 'po_deliver_to' | (typeof SHOP_DELIVERY_KEYS)[number]>>,
   ): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);

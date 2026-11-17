@@ -296,6 +296,8 @@ end)
 -- AUTH MIDDLEWARE
 -- ============================================
 
+local ProjectConfigForGuard = require("helper.project-config")
+
 app:before_filter(function(self)
     -- The path Lapis routes on (raw request_uri), not ngx.var.uri: nginx decodes and
     -- normalises that one, so /api/v2/modules/..%2Fpublic%2Fx looked like the public
@@ -408,6 +410,17 @@ app:before_filter(function(self)
                 ngx.log(ngx.ERR, "[namespace-status] ", tostring(blocked))
             elseif blocked then
                 return self:write(blocked)
+            end
+
+            -- A supplier portal login may only use the supplier portal (helper/supplier-portal-guard.lua).
+            if ProjectConfigForGuard.isFeatureEnabled("shop") then
+                local g_ok, refused = pcall(require("helper.supplier-portal-guard").check, self, uri)
+                if not g_ok then
+                    ngx.log(ngx.ERR, "[supplier-portal-guard] ", tostring(refused))
+                    return self:write({ status = 503, json = { error = "Please try again shortly" } })
+                elseif refused then
+                    return self:write(refused)
+                end
             end
         end
     end
@@ -807,6 +820,8 @@ load_if("shop", "routes.shop-public")
 load_if("shop", "routes.shop-admin")
 load_if("shop", "routes.shop-analytics")
 load_if("shop", "routes.shop-market")
+-- Supplier portal: suppliers' POs, proformas, payments, documents and deliveries online (routes/supplier-portal.lua)
+load_if("shop", "routes.supplier-portal")
 
 -- ============================================
 -- PLUGINS (projects/<plugin>/ — see PLUGINS.md)

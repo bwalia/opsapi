@@ -482,7 +482,9 @@ return function(app)
 
         -- MFA: a sign-in code unless every active workspace this person belongs to has turned it off
         -- (NamespaceQueries.mfaRequiredForUser). Platform admins can reach every workspace: always asked.
-        if not AdminCheck.isPlatformAdmin(userWithRoles) and not NamespaceQueries.mfaRequiredForUser(user_id) then
+        -- Supplier portal logins are always asked too (helper/supplier-portal-guard.lua).
+        if not AdminCheck.isPlatformAdmin(userWithRoles) and not NamespaceQueries.mfaRequiredForUser(user_id)
+            and not require("helper.supplier-portal-guard").isSupplier(userWithRoles.uuid) then
             local device_info = ngx.req.get_headers()["user-agent"]
             if device_info and #device_info > 255 then device_info = device_info:sub(1, 255) end
             local body = build_login_response(self, userWithRoles, user_id, device_info)
