@@ -9,6 +9,7 @@ import { Badge, Button, Card, Input, Modal, Pagination, SearchableSelect, Select
 import type { SearchableSelectOption } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { FilterSelect, ShopLoading } from '@/components/shop/shared';
+import SupplierPortalLogins from '@/components/shop/SupplierPortalLogins';
 import { shopService } from '@/services/shop.service';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize } from '@/lib/shop';
@@ -706,6 +707,13 @@ function SuppliersContent() {
         <Card padding="md">
           <h2 className="mb-3 text-lg font-semibold text-secondary-900">{current.name}: purchase orders</h2>
           <SupplierPurchaseOrders key={current.uuid} supplier={current} version={version} />
+        </Card>
+      )}
+
+      {current && (
+        <Card padding="md">
+          <h2 className="mb-3 text-lg font-semibold text-secondary-900">{current.name}: supplier portal logins</h2>
+          <SupplierPortalLogins key={current.uuid} supplierUuid={current.uuid} supplierName={current.name} />
         </Card>
       )}
 

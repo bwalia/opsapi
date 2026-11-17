@@ -33,6 +33,12 @@ Orders the business places with suppliers (builders, merchants), e.g. materials 
 - A shop supplier's PO details (Shop → Suppliers → Edit → Purchase orders: po_email, po_phone, po_address, account_number, po_notes) fill the PO; costs come from its price file.
 - Shop → Suppliers lists each supplier's POs (by metadata.shop_supplier_uuid, or older ones by supplier name).
 
+## Supplier portal
+- Shop → Suppliers → Edit → Supplier portal logins → Invite: staff get a 7-day set-password link to pass on (nothing is emailed; the address must not already be a login). A supplier login sees only /supplier (its supplier's sent POs), always gets a sign-in code, and gets 403 everywhere else.
+- Off until Shop → Settings → "Supplier portal" is on. "Supplier portal emails" (off by default): off = nothing is emailed to suppliers. Customers are never emailed.
+- Stages: sent → acknowledged → proforma received → part paid / paid (from payments) → dispatched → delivered → final invoice received → closed; cancelled. Suppliers acknowledge, upload documents, enter dispatch, mark delivered, write messages. Staff record payments (with proof), void / remove with a reason, and close (delivered + final invoice + paid, or with a reason).
+- Staff (not suppliers) see flags on proformas: differs from the PO, below cost, bank details changed. A PO raised by hand must be linked to a shop supplier first.
+
 ## API
 - `GET /api/v2/purchase-orders?page&perPage&status=draft|sent|acknowledged|partially_received|received|billed|cancelled&supplier&project_uuid&from_date&to_date&search` — list (status may be a comma list; dates YYYY-MM-DD on issue date)
 - `GET /api/v2/purchase-orders/stats` — open/overdue/to-bill/draft counts; values per currency in by_currency[] (open_value, to_bill_value, billed_value, total_value); by_status counts
@@ -53,3 +59,4 @@ Orders the business places with suppliers (builders, merchants), e.g. materials 
 - `DELETE /api/v2/purchase-orders/items/{item_uuid}` — remove line
 - `GET /api/v2/kanban/projects` — projects (uuid, name) to link a PO to
 - `GET /api/v2/crm/accounts?search` — CRM companies (uuid, name) to use as supplier_company_uuid
+- `GET /api/v2/purchase-orders/{uuid}/portal` — supplier panels: stage, documents, invoices + flags, payments, balance, history

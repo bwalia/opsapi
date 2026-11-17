@@ -18,6 +18,7 @@ import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AUTH_TOKEN_KEY } from '@/lib/api-client';
 import { isEmbeddedInApp } from '@/lib/embed';
+import { isSupplierToken } from '@/lib/supplier-portal';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -73,6 +74,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
     // Redirect to login if not authenticated or no token
     if (!token || !isAuthenticated || !actualToken) {
       router.push('/login');
+      return;
+    }
+
+    // A supplier portal login has its own app: the staff layout's calls (menus, chat, assistant)
+    // are refused to it anyway.
+    if (isSupplierToken(actualToken)) {
+      router.replace('/supplier');
     }
   }, [token, isAuthenticated, _hasHydrated, router, setToken]);
 
@@ -136,6 +144,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   const actualToken = typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
   if (!isAuthenticated || !token || !actualToken) {
     return <LoadingScreen message="Redirecting to login..." />;
+  }
+
+  // Supplier logins never get the staff layout (the effect above sends them to /supplier).
+  if (isSupplierToken(actualToken)) {
+    return <LoadingScreen message="Opening the supplier portal..." />;
   }
 
   // Inside a phone app the app has its own navigation: no top bar, sidebar or footer, and the page

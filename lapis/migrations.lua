@@ -198,6 +198,7 @@ local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP,
 local shop_deal_code_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-deal-codes") or {}
 local shop_cost_floor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-cost-floor") or {}
 local shop_seo_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-seo") or {}
+local supplier_portal_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.supplier-portal") or {}
 -- VIP membership: its tables and the shop columns it adds (shop_orders.credit_minor,
 -- shop_credits, ...) are used by every shop payment (card and bank transfer), so they ship
 -- with the SHOP feature alone. The schema only stores billing ids as plain columns; the
@@ -2772,6 +2773,10 @@ local _migrations = {
     -- Product SEO: per-language keyword/title/description/intro/FAQs, product photos with alt text, category SEO,
     -- delivery facts and quote validity settings (migrations/shop-seo.lua)
     ['zzs59_shop_seo'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_seo_migrations, 1),
+    -- Supplier portal: POs, proformas, payments, documents, deliveries and messages online with the supplier,
+    -- off until switched on (migrations/supplier-portal.lua; skipped without purchase orders)
+    ['zzs60_supplier_portal_tables'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 1),
+    ['zzs61_supplier_portal_settings'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

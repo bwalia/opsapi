@@ -26,6 +26,7 @@ import { Modal, confirmDialog, promptDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PurchaseOrderStatusBadge } from '@/components/purchase-orders/PurchaseOrderStatusBadge';
 import { PurchaseOrderFormModal } from '@/components/purchase-orders/PurchaseOrderFormModal';
+import SupplierPortalPanel from '@/components/purchase-orders/SupplierPortalPanel';
 import {
   partyLines,
   purchaseOrdersService,
@@ -1061,6 +1062,9 @@ function PurchaseOrderDetailContent() {
           </ul>
         </div>
       )}
+
+      {/* Supplier portal: documents, proforma / invoices, payments, delivery, messages, history */}
+      <SupplierPortalPanel po={po} company={company} onChanged={fetchPo} />
 
       {/* Receipt history */}
       {receipts.length > 0 && (

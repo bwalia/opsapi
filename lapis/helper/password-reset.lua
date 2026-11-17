@@ -91,9 +91,12 @@ end
 --
 -- @param user_id    integer  required
 -- @param ip_address string|nil optional, recorded for audit
+-- @param ttl_seconds number|nil optional lifetime (default 30 minutes; at
+--        most 7 days). Only for links handed over by staff, e.g. a new
+--        supplier portal login's "set your password" link.
 -- @return string|nil raw token (send to user via email)
 -- @return string|nil error code on failure
-function PasswordReset.create(user_id, ip_address)
+function PasswordReset.create(user_id, ip_address, ttl_seconds)
     if not user_id or type(user_id) ~= "number" then
         return nil, "invalid_user_id"
     end
@@ -108,6 +111,9 @@ function PasswordReset.create(user_id, ip_address)
         WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW()
     ]], user_id)
 
+    local ttl = math.floor(tonumber(ttl_seconds) or TOKEN_TTL_SECONDS)
+    if ttl < 60 or ttl > 7 * 86400 then ttl = TOKEN_TTL_SECONDS end
+
     local raw = generate_random_token()
     local token_hash = hash_token(raw)
     if not token_hash then
@@ -119,7 +125,7 @@ function PasswordReset.create(user_id, ip_address)
             user_id = user_id,
             token_hash = token_hash,
             expires_at = db.raw(
-                ("NOW() + INTERVAL '%d seconds'"):format(TOKEN_TTL_SECONDS)
+                ("NOW() + INTERVAL '%d seconds'"):format(ttl)
             ),
             ip_address = ip_address or nil,
             created_at = db.raw("NOW()"),
