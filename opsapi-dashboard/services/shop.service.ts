@@ -199,8 +199,28 @@ export interface ShopSettings {
   deal_code_length?: number;
   /** Our delivery address for supplier POs (unset: the Bill to address). */
   po_deliver_to?: PurchaseOrderParty | null;
+  /** UK delivery the shop publishes (product page, search results). 0 = included. Pence ex VAT. */
+  delivery_cost_minor?: number;
+  /** In-stock items: working days before dispatch ("Ships in 1–2 days"). */
+  delivery_handling_min_days?: number;
+  delivery_handling_max_days?: number;
+  /** Courier days after dispatch. */
+  delivery_transit_min_days?: number;
+  delivery_transit_max_days?: number;
+  /** How long a new quote holds its price (also the shop's "price valid until"). */
+  quote_valid_days?: number;
   updated_at: string | null;
 }
+
+/** Delivery and quote-validity settings, editable together. */
+export const SHOP_DELIVERY_KEYS = [
+  'delivery_cost_minor',
+  'delivery_handling_min_days',
+  'delivery_handling_max_days',
+  'delivery_transit_min_days',
+  'delivery_transit_max_days',
+  'quote_valid_days',
+] as const;
 
 export const shopService = {
   // ---------------- Settings ----------------
@@ -210,7 +230,7 @@ export const shopService = {
   },
 
   async updateSettings(
-    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications' | 'deal_code_prefix' | 'deal_code_length' | 'po_deliver_to'>>,
+    body: Partial<Pick<ShopSettings, 'checkout_enabled' | 'po_bill_to' | 'order_alert_email' | 'customer_delivery_notifications' | 'deal_code_prefix' | 'deal_code_length' | 'po_deliver_to' | (typeof SHOP_DELIVERY_KEYS)[number]>>,
   ): Promise<ShopSettings> {
     const res = await apiClient.put(`${BASE}/settings`, body, JSON_BODY);
     return unwrap<ShopSettings>(res);

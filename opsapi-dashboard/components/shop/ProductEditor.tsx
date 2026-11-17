@@ -23,6 +23,8 @@ import {
   type ShopProductListItem,
   type ShopProductStatus,
   type ShopProductType,
+  type ShopPhoto,
+  type ShopSeo,
 } from '@/types/shop';
 import {
   CheckboxField,
@@ -36,6 +38,8 @@ import {
   type KvRow,
 } from './editor-fields';
 import { OptionGroupsEditor, groupToForm, groupsToPayload, type GroupForm } from './OptionGroupsEditor';
+import { ProductPhotosEditor } from './ProductPhotosEditor';
+import { SeoContentEditor, cleanSeo } from './SeoContentEditor';
 import { RulesEditor, ruleToForm, rulesToPayload, type RuleForm } from './RulesEditor';
 import { MarginHint, MovementsDrawer, PriceVerifiedBadge, ProductStatusBadge, SHOP_MODULE, StockAdjustModal, type StockTarget } from './shared';
 
@@ -89,6 +93,16 @@ function toBasics(p?: ShopProduct): BasicsForm {
   };
 }
 
+/** "£17,805" (pence shown only when there are any), as the shop writes prices in descriptions. */
+const wholePounds = (minor: number) =>
+  new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: minor % 100 ? 2 : 0, maximumFractionDigits: 2 }).format(minor / 100);
+
+/** The spec that best sums a product up for alt text (GPU first), as the shop picks it. */
+function keySpecOf(rows: KvRow[]): string | undefined {
+  const by = (re: RegExp) => rows.find((r) => re.test(r.k.trim()) && r.v.trim())?.v.trim();
+  return by(/^gpus?$/i) ?? by(/^(cpu|processor)$/i) ?? rows.find((r) => r.v.trim())?.v.trim();
+}
+
 const intOr = (s: string, d: number) => {
   const n = parseInt(s, 10);
   return Number.isFinite(n) ? n : d;
@@ -105,6 +119,8 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
   const [specs, setSpecs] = useState<KvRow[]>(() => kvFromObject(product?.specs));
   const [attributes, setAttributes] = useState<string>(() => prettyJson(product?.attributes));
   const [images, setImages] = useState<string[]>(() => product?.images ?? []);
+  const [seo, setSeo] = useState<ShopSeo>(() => product?.seo ?? {});
+  const [photos, setPhotos] = useState<ShopPhoto[]>(() => product?.photos ?? []);
   const [groups, setGroups] = useState<GroupForm[]>(() =>
     [...(product?.option_groups ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(groupToForm)
   );
@@ -126,6 +142,8 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
     setSpecs(kvFromObject(product.specs));
     setAttributes(prettyJson(product.attributes));
     setImages(product.images ?? []);
+    setSeo(product.seo ?? {});
+    setPhotos(product.photos ?? []);
     setGroups([...(product.option_groups ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(groupToForm));
     setRules((product.rules ?? []).map(ruleToForm));
   }, [product]);
@@ -213,6 +231,11 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
       specs: kvToObject(specs),
       attributes: attrs ?? {},
       images: images.map((u) => u.trim()).filter(Boolean),
+      seo: cleanSeo(seo),
+      photos: photos.map((ph) => ({
+        ...ph,
+        alt: Object.fromEntries(Object.entries(ph.alt ?? {}).map(([k, v]) => [k, (v ?? '').trim()]).filter(([, v]) => v)),
+      })),
       option_groups: g.groups,
       rules: r.rules,
     };
@@ -411,7 +434,29 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
           </Card>
 
           <Card>
-            <h2 className="mb-4 text-base font-semibold text-secondary-900">Images</h2>
+            <h2 className="mb-1 text-base font-semibold text-secondary-900">Search &amp; page content</h2>
+            <p className="mb-4 text-sm text-secondary-500">
+              What Google shows and the text above the configurator, per shop language. The target keyword stays here: the shop never receives it.
+            </p>
+            <SeoContentEditor
+              value={seo}
+              onChange={setSeo}
+              kind="product"
+              h1={basics.name}
+              lead={basics.short_description}
+              price={basics.price_mode === 'quote_only' ? null : wholePounds(basics.price_mode === 'configurable' ? fromPreview : basePriceMinor ?? 0)}
+            />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold text-secondary-900">Photos</h2>
+            <p className="mb-4 text-sm text-secondary-500">Several photos with alt text. The first is the main photo (gallery, sharing, Google Shopping).</p>
+            <ProductPhotosEditor photos={photos} onChange={setPhotos} name={basics.name} keySpec={keySpecOf(specs)} />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold text-secondary-900">Images (legacy list)</h2>
+            <p className="mb-4 text-sm text-secondary-500">Manufacturer photos and the placeholder drawing. Used when there are no Photos above.</p>
             <ImageListEditor urls={images} onChange={setImages} />
           </Card>
 

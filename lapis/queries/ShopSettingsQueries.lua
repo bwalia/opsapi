@@ -22,12 +22,31 @@
     deal_code_length  random characters after the prefix (default 8 = XXXX-XXXX; 6 to 16).
     po_deliver_to     our own delivery address for supplier purchase orders (same keys as po_bill_to).
                       Unset = the Bill to address. Suppliers deliver here unless staff confirm a drop-ship.
+    delivery_*        UK delivery facts the shop publishes (product page, search-engine structured data):
+                      delivery_cost_minor (0 = included, as the basket shows), handling days for in-stock
+                      items (min/max, default 1-2: "Ships in 1-2 days") and courier transit days (min/max,
+                      default 1-3). Out-of-stock items use their own lead time instead of the handling days.
+    quote_valid_days  how long a new quote holds its price (default 30); also the shop's "price valid until".
 ]]
 local db = require("lapis.db")
 local U = require("lib.shop-util")
 local DealCodes = require("lib.deal-codes")
+local unpack = unpack or table.unpack -- luacheck: ignore 113 143
 
 local Q = {}
+
+-- Defaults until migration zzs59 adds the columns (same values as the column defaults).
+Q.DELIVERY_DEFAULTS = {
+    delivery_cost_minor = 0, delivery_handling_min_days = 1, delivery_handling_max_days = 2,
+    delivery_transit_min_days = 1, delivery_transit_max_days = 3, quote_valid_days = 30,
+}
+local DELIVERY_LIMITS = {
+    delivery_cost_minor = { 0, 10000000 }, delivery_handling_min_days = { 0, 60 }, delivery_handling_max_days = { 0, 60 },
+    delivery_transit_min_days = { 0, 30 }, delivery_transit_max_days = { 0, 30 }, quote_valid_days = { 1, 365 },
+}
+local DELIVERY_KEYS = { "delivery_cost_minor", "delivery_handling_min_days", "delivery_handling_max_days",
+                        "delivery_transit_min_days", "delivery_transit_max_days", "quote_valid_days" }
+Q.DELIVERY_KEYS = DELIVERY_KEYS
 
 local BILL_TO_KEYS = { "company", "line1", "line2", "city", "county", "postcode", "country", "phone", "email",
                        "vat_number" }
@@ -51,7 +70,18 @@ function Q.get(ns_id)
                             FROM shop_settings WHERE namespace_id = ?]], ns_id)
     end
     local row = rows[1]
+    local ok2, drows = pcall(db.query, "SELECT " .. table.concat(DELIVERY_KEYS, ", ")
+        .. " FROM shop_settings WHERE namespace_id = ?", ns_id)
+    local d = ok2 and drows and drows[1] or {}
+    local delivery = {}
+    for _, k in ipairs(DELIVERY_KEYS) do delivery[k] = tonumber(d[k]) or Q.DELIVERY_DEFAULTS[k] end
     return {
+        delivery_cost_minor = delivery.delivery_cost_minor,
+        delivery_handling_min_days = delivery.delivery_handling_min_days,
+        delivery_handling_max_days = delivery.delivery_handling_max_days,
+        delivery_transit_min_days = delivery.delivery_transit_min_days,
+        delivery_transit_max_days = delivery.delivery_transit_max_days,
+        quote_valid_days = delivery.quote_valid_days,
         checkout_enabled = row ~= nil and row.checkout_enabled == true,
         po_bill_to = row and U.nz(row.po_bill_to) and U.dec(row.po_bill_to, U.null) or U.null,
         order_alert_email = row and U.nz(row.order_alert_email) or U.null,
@@ -110,18 +140,59 @@ function Q.customerDeliveryNotifications(ns_id)
     return Q.get(ns_id).customer_delivery_notifications == true
 end
 
+--- What the shop may publish (GET /public/shop/:ns/settings): no addresses, emails or deal-code settings.
+function Q.public(s)
+    return {
+        checkout_enabled = s.checkout_enabled,
+        delivery = {
+            cost_minor = s.delivery_cost_minor,
+            handling_min_days = s.delivery_handling_min_days, handling_max_days = s.delivery_handling_max_days,
+            transit_min_days = s.delivery_transit_min_days, transit_max_days = s.delivery_transit_max_days,
+        },
+        quote_valid_days = s.quote_valid_days,
+    }
+end
+
+--- Delivery settings from a body: (values table, nil) or (nil, message). Only keys present are returned.
+function Q.cleanDelivery(body, current)
+    local out, any = {}, false
+    for _, k in ipairs(DELIVERY_KEYS) do
+        local v = body[k]
+        if v ~= nil and v ~= U.null then
+            local n = tonumber(v)
+            local lim = DELIVERY_LIMITS[k]
+            if not n or n ~= math.floor(n) or n < lim[1] or n > lim[2] then
+                return nil, ("%s must be a whole number from %d to %d"):format(k, lim[1], lim[2])
+            end
+            out[k] = n
+            any = true
+        end
+    end
+    local function eff(k) return out[k] or (current and current[k]) or Q.DELIVERY_DEFAULTS[k] end
+    if eff("delivery_handling_min_days") > eff("delivery_handling_max_days") then
+        return nil, "delivery_handling_min_days must not be more than delivery_handling_max_days"
+    end
+    if eff("delivery_transit_min_days") > eff("delivery_transit_max_days") then
+        return nil, "delivery_transit_min_days must not be more than delivery_transit_max_days"
+    end
+    return any and out or nil
+end
+
 --- body: { checkout_enabled?, po_bill_to?, order_alert_email?, customer_delivery_notifications?, deal_code_prefix?,
--- deal_code_length?, po_deliver_to? } (at least one).
+-- deal_code_length?, po_deliver_to?, delivery_*?, quote_valid_days? } (at least one).
 function Q.update(ns_id, body)
     local has_checkout, has_bill = body.checkout_enabled ~= nil, body.po_bill_to ~= nil
     local has_alert = body.order_alert_email ~= nil
     local has_notify = body.customer_delivery_notifications ~= nil
     local has_prefix, has_length = body.deal_code_prefix ~= nil, body.deal_code_length ~= nil
     local has_deliver = body.po_deliver_to ~= nil
+    local delivery, delivery_err = Q.cleanDelivery(body, Q.get(ns_id))
+    if delivery_err then return nil, U.err(400, "VALIDATION_ERROR", delivery_err) end
     if not has_checkout and not has_bill and not has_alert and not has_notify and not has_prefix and not has_length
-        and not has_deliver then
+        and not has_deliver and not delivery then
         return nil, U.err(400, "VALIDATION_ERROR", "Nothing to update (checkout_enabled, po_bill_to, "
-            .. "order_alert_email, customer_delivery_notifications, deal_code_prefix, deal_code_length or po_deliver_to)")
+            .. "order_alert_email, customer_delivery_notifications, deal_code_prefix, deal_code_length, po_deliver_to, "
+            .. "delivery settings or quote_valid_days)")
     end
     local prefix, length, deliver
     if has_prefix then
@@ -189,7 +260,25 @@ function Q.update(ns_id, body)
         db.query("UPDATE shop_settings SET po_deliver_to = ?::jsonb, updated_at = NOW() WHERE namespace_id = ?",
             deliver == U.null and db.NULL or U.enc(deliver), ns_id)
     end
+    if delivery then
+        local sets, vals = {}, {}
+        for _, k in ipairs(DELIVERY_KEYS) do
+            if delivery[k] ~= nil then
+                sets[#sets + 1] = k .. " = ?"
+                vals[#vals + 1] = delivery[k]
+            end
+        end
+        vals[#vals + 1] = ns_id
+        db.query("UPDATE shop_settings SET " .. table.concat(sets, ", ") .. ", updated_at = NOW() WHERE namespace_id = ?",
+            unpack(vals))
+    end
     return Q.get(ns_id)
+end
+
+--- How long a new quote holds its price, in days.
+function Q.quoteValidDays(ns_id)
+    local ok, s = pcall(Q.get, ns_id)
+    return ok and s and s.quote_valid_days or Q.DELIVERY_DEFAULTS.quote_valid_days
 end
 
 return Q
