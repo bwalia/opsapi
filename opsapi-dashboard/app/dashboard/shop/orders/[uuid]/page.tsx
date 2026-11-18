@@ -31,8 +31,7 @@ import {
   ShopError,
   ShopLoading,
   TotalsBlock,
-  formatAddress,
-} from '@/components/shop/shared';
+  formatAddress, shopOrigin } from '@/components/shop/shared';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { formatMoney, humanize, stripePaymentUrl, stripeSessionUrl } from '@/lib/shop';
 import type { ShopOrder, ShopOrderStatus, ShopTracking } from '@/types/shop';
@@ -268,7 +267,7 @@ function OrderDetail() {
           <CustomerUpdates order={order} editable={editable} onChanged={reload} />
           <Card>
             <SectionTitle>Lines</SectionTitle>
-            <LinesTable lines={order.lines} currency={cur} />
+            <LinesTable lines={order.lines} currency={cur} shopUrl={shopOrigin(order.public_url)} />
             <div className="mt-4 border-t border-secondary-200 pt-4">
               <TotalsBlock totals={order} />
             </div>

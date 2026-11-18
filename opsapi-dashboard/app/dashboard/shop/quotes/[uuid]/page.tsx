@@ -20,8 +20,7 @@ import {
   SectionTitle,
   ShopError,
   ShopLoading,
-  TotalsBlock,
-} from '@/components/shop/shared';
+  TotalsBlock, shopOrigin } from '@/components/shop/shared';
 import { QuoteLinesEditor, draftsToPayload, lineToDraft, type LineDraft } from '@/components/shop/QuoteLinesEditor';
 import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type CustomerDraft } from '@/components/shop/CustomerForm';
 import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
@@ -417,7 +416,7 @@ function QuoteDetail() {
                 </p>
               </>
             ) : (
-              <LinesTable lines={quote.lines} currency={cur} />
+              <LinesTable lines={quote.lines} currency={cur} shopUrl={shopOrigin(quote.public_url)} />
             )}
             <div className="mt-4 border-t border-secondary-200 pt-4">
               <TotalsBlock totals={quote} />

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, X, History, Minus, Plus } from 'lucide-react';
+import { Loader2, AlertTriangle, X, History, Minus, Plus, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Badge, Button, Input, Modal, Select, Textarea } from '@/components/ui';
 import { shopService } from '@/services/shop.service';
@@ -148,7 +148,21 @@ export function Money({
 // Lines + totals
 // ============================================================
 
-export function LinesTable({ lines, currency = 'GBP' }: { lines: ShopLine[]; currency?: string }) {
+/** The shop's address (https://shop.example) from a quote's or order's public link, so product links follow the env. */
+export function shopOrigin(publicUrl?: string | null): string | null {
+  if (!publicUrl) return null;
+  try {
+    return new URL(publicUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lines of a quote or order. With `shopUrl` (see shopOrigin) each product links to its page in the shop, so staff
+ * can check exactly what the customer chose; free-text lines (no product) stay plain.
+ */
+export function LinesTable({ lines, currency = 'GBP', shopUrl }: { lines: ShopLine[]; currency?: string; shopUrl?: string | null }) {
   if (!lines?.length) {
     return <p className="py-6 text-center text-sm text-secondary-500">No lines.</p>;
   }
@@ -169,7 +183,20 @@ export function LinesTable({ lines, currency = 'GBP' }: { lines: ShopLine[]; cur
           {lines.map((l, i) => (
             <tr key={l.uuid || i} className="align-top">
               <td className="py-3 pr-4">
-                <p className="font-medium text-secondary-900">{l.product_name || l.label}</p>
+                {shopUrl && l.product_slug ? (
+                  <a
+                    href={`${shopUrl}/p/${encodeURIComponent(l.product_slug)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-center gap-1 font-medium text-secondary-900 hover:text-primary-600 hover:underline"
+                    title="Open this product in the shop (new tab)"
+                  >
+                    {l.product_name || l.label}
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-secondary-400 group-hover:text-primary-600 print:hidden" aria-label="(opens the shop)" />
+                  </a>
+                ) : (
+                  <p className="font-medium text-secondary-900">{l.product_name || l.label}</p>
+                )}
                 {l.sku && <p className="text-xs text-secondary-500">SKU {l.sku}</p>}
                 {l.label && l.label !== l.product_name && (
                   <p className="text-xs text-secondary-500">{l.label}</p>
