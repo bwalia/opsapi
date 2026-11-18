@@ -75,36 +75,28 @@ function E.title(p)
     return brand .. " " .. name
 end
 
---- The message. p: product row; s: supplier row; t: { qty, note, company, sender }.
+--- The message. p: product row; s: supplier row; t: { qty, note, company, sender, sender_email, template }
+-- (template: { subject, body }, default the built-in stock_enquiry wording).
 -- Their own code only when the product is linked to this supplier's price file; the part number always.
+function E.vars(p, s, t)
+    t = t or {}
+    local T = require("lib.message-templates")
+    local own = s.id and p.item_supplier_id and tonumber(p.item_supplier_id) == tonumber(s.id) and text(p.supplier_sku, 120)
+    return {
+        ["supplier.name"] = s.name, ["supplier.contact"] = text(s.contact_name, 160) or s.name,
+        ["sender.name"] = text(t.sender, 200) or "", ["sender.email"] = text(t.sender_email, 254) or "",
+        ["company"] = text(t.company, 200) or "", ["date"] = os.date("!%d %B %Y"),
+        ["product"] = E.title(p), ["qty"] = whole(t.qty, 1, E.MAX_QTY) or 1,
+        ["product.code"] = own or "", ["product.mpn"] = text(p.mpn, 120) or "", ["note"] = T.note_text(text(t.note, 2000)),
+    }
+end
+
 function E.message(p, s, t)
     t = t or {}
-    local title = E.title(p)
-    local qty = whole(t.qty, 1, E.MAX_QTY) or 1
-    local out = {}
-    out[#out + 1] = "Hello " .. (text(s.contact_name, 160) or s.name) .. ","
-    out[#out + 1] = ""
-    out[#out + 1] = "Do you have the following in stock?"
-    out[#out + 1] = ""
-    out[#out + 1] = qty .. " x " .. title
-    if s.id and p.item_supplier_id and tonumber(p.item_supplier_id) == tonumber(s.id) and text(p.supplier_sku, 120) then
-        out[#out + 1] = "   - Your code: " .. p.supplier_sku
-    end
-    if text(p.mpn, 120) then out[#out + 1] = "   - Part number: " .. p.mpn end
-    local note = text(t.note, 2000)
-    if note then
-        for line in (note .. "\n"):gmatch("([^\n]*)\n") do
-            if line:match("%S") then out[#out + 1] = "   - " .. line:gsub("^%s*%-?%s*", "") end
-        end
-    end
-    out[#out + 1] = ""
-    out[#out + 1] = "Please let us know how many you have in stock (or the lead time), your trade price ex VAT, "
-        .. "when you could deliver, and how long the price is valid."
-    out[#out + 1] = ""
-    out[#out + 1] = "Thank you,"
-    if text(t.sender, 200) then out[#out + 1] = t.sender end
-    if text(t.company, 200) then out[#out + 1] = t.company end
-    return { subject = "Stock enquiry: " .. title, body = table.concat(out, "\n") }
+    local T = require("lib.message-templates")
+    local tpl = t.template or T.DEFAULTS.stock_enquiry
+    local vars = E.vars(p, s, t)
+    return { subject = T.render(tpl.subject, vars), body = T.render(tpl.body, vars) }
 end
 
 local function public_supplier(s)
@@ -122,16 +114,21 @@ local function brand_of(ns_id)
 end
 
 function E.draft(ns_id, product_uuid, opts, user)
-    opts = type(opts) == "table" and opts or {}
+    opts, user = type(opts) == "table" and opts or {}, user or {}
     local p = product_of(ns_id, product_uuid)
     if not p then return nil, U.err(404, "NOT_FOUND", "Product not found") end
     local s = supplier_of(ns_id, opts.supplier)
     if not s then return nil, U.err(404, "SUPPLIER_NOT_FOUND", "Choose a supplier") end
     local qty = whole(opts.qty or 1, 1, E.MAX_QTY)
     if not qty then return nil, U.err(400, "VALIDATION_ERROR", "Quantity must be a whole number from 1") end
-    local mail = E.message(p, s, { qty = qty, note = opts.note, company = brand_of(ns_id), sender = sender_of(user) })
+    local Templates = require("queries.ShopMessageTemplateQueries")
+    local tpl, terr = Templates.pick(ns_id, "stock_enquiry", { template_uuid = opts.template, supplier_id = s.id })
+    if not tpl then return nil, terr end
+    local mail = E.message(p, s, { qty = qty, note = opts.note, company = brand_of(ns_id), sender = sender_of(user),
+                                   sender_email = user.email, template = tpl })
     return { product = { uuid = p.uuid, name = p.name, title = E.title(p) }, supplier = public_supplier(s), qty = qty,
-             subject = mail.subject, body = mail.body }
+             subject = mail.subject, body = mail.body, template = { uuid = tpl.uuid, name = tpl.name, builtin = tpl.builtin },
+             templates = Templates.choices(ns_id, "stock_enquiry", s.id) }
 end
 
 local function send_email(ns_id, s, subject, message, user)

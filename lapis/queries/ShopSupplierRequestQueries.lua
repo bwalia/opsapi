@@ -83,20 +83,31 @@ local function sender_of(user)
     return U.nz(U.join(" ", U.nz(user.first_name), U.nz(user.last_name)))
 end
 
-function R.draft(ns_id, quote_uuid, supplier_uuid, user)
+--- template_uuid: a price_request template (lib/message-templates.lua); nil = this supplier's own, else the
+-- workspace default, else the built-in wording.
+function R.draft(ns_id, quote_uuid, supplier_uuid, user, template_uuid)
     user = user or {}
     local q, code = quote_of(ns_id, quote_uuid, user.id)
     if not q then return nil, code end
     local s = supplier_of(ns_id, supplier_uuid)
     if not s then return nil, U.err(404, "SUPPLIER_NOT_FOUND", "Choose a supplier") end
-    local brand = require("queries.ShopSettingsQueries").brandName(ns_id)
+    local Templates = require("queries.ShopMessageTemplateQueries")
+    local tpl, terr = Templates.pick(ns_id, "price_request", { template_uuid = template_uuid, supplier_id = s.id })
+    if not tpl then return nil, terr end
+    local T = require("lib.message-templates")
     -- "Hello Sam" (their contact), else "Hello Boston".
-    local mail = Codes.request_email({ deal_code = code, contact_name = U.nz(s.contact_name) or s.name, lines = R.lines(q) },
-        { company = brand, sender = sender_of(user) })
+    local vars = {
+        ["supplier.name"] = s.name, ["supplier.contact"] = U.nz(s.contact_name) or s.name,
+        ["sender.name"] = sender_of(user) or "", ["sender.email"] = U.nz(user.email) or "",
+        ["company"] = require("queries.ShopSettingsQueries").brandName(ns_id) or "", ["date"] = os.date("!%d %B %Y"),
+        ["deal.code"] = code, ["lines"] = T.lines_text(R.lines(q)),
+    }
+    local mail = { subject = T.render(tpl.subject, vars), body = T.render(tpl.body, vars) }
     -- Shown either way (staff can edit it); sending refuses while it shows the customer.
     local found = Codes.leaks(mail, Deal.customerMarkers(ns_id, code))
     return { deal_code = code, supplier = public_supplier(s), subject = mail.subject, body = mail.body,
-             customer_details = U.arr(found) }
+             customer_details = U.arr(found), template = { uuid = tpl.uuid, name = tpl.name, builtin = tpl.builtin },
+             templates = Templates.choices(ns_id, "price_request", s.id) }
 end
 
 local function html_of(message)

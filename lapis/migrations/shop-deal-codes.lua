@@ -28,7 +28,14 @@
         a product, with no customer and no deal. shop_supplier_requests.kind price|stock (default price),
         product_id, and deal_code may be NULL, only for a stock enquiry. Deal screens never show them.
 
-    Registered in migrations.lua as zzs55–zzs57, zzs65 and zzs66. Idempotent.
+    [6] Supplier introductions (queries/ShopSupplierIntroQueries.lua): shop_supplier_requests.kind may also be
+        'intro', a customer introduced to a supplier from a quote, with the customer's agreement. Recorded on the deal.
+
+    [7] Message templates (lib/message-templates.lua, queries/ShopMessageTemplateQueries.lua): shop_message_templates,
+        pre-written subjects and bodies per kind (price_request | stock_enquiry | supplier_intro), optionally for one
+        supplier (picked automatically when that supplier is chosen), one default per kind.
+
+    Registered in migrations.lua as zzs55–zzs57 and zzs65–zzs68. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -138,5 +145,47 @@ return {
         END $$]])
         db.query([[CREATE INDEX IF NOT EXISTS shop_supplier_requests_stock_idx
                    ON shop_supplier_requests (namespace_id, product_id, created_at) WHERE kind = 'stock']])
+    end,
+    [6] = function()
+        if not table_exists("shop_supplier_requests") then return end
+        -- The kind CHECK from [5] is unnamed (Postgres calls it shop_supplier_requests_kind_check): replace it.
+        db.query([[DO $$
+        DECLARE c text;
+        BEGIN
+            FOR c IN SELECT conname FROM pg_constraint
+                      WHERE conrelid = 'shop_supplier_requests'::regclass AND contype = 'c'
+                        AND pg_get_constraintdef(oid) LIKE '%kind%' AND conname <> 'shop_supplier_requests_deal_or_stock'
+            LOOP
+                EXECUTE format('ALTER TABLE shop_supplier_requests DROP CONSTRAINT %I', c);
+            END LOOP;
+            ALTER TABLE shop_supplier_requests ADD CONSTRAINT shop_supplier_requests_kind_check
+                CHECK (kind IN ('price', 'stock', 'intro'));
+        END $$]])
+    end,
+
+    [7] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS shop_message_templates (
+                id serial PRIMARY KEY,
+                uuid varchar(64) NOT NULL UNIQUE,
+                namespace_id integer NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                kind varchar(32) NOT NULL CHECK (kind IN ('price_request', 'stock_enquiry', 'supplier_intro')),
+                name varchar(160) NOT NULL,
+                subject varchar(200) NOT NULL,
+                body text NOT NULL CHECK (char_length(body) <= 8000),
+                supplier_id integer REFERENCES shop_suppliers(id) ON DELETE SET NULL,
+                is_default boolean NOT NULL DEFAULT false,
+                is_active boolean NOT NULL DEFAULT true,
+                created_by_user_id integer,
+                updated_by_user_id integer,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[CREATE INDEX IF NOT EXISTS shop_message_templates_kind_idx
+                   ON shop_message_templates (namespace_id, kind, is_active)]])
+        -- At most one default per kind per workspace.
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS shop_message_templates_one_default
+                   ON shop_message_templates (namespace_id, kind) WHERE is_default]])
     end,
 }
