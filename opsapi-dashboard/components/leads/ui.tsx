@@ -32,9 +32,12 @@ export function StageBadge({ stage, label, className }: { stage: LeadStage; labe
 export function ScoreBadge({ score, className }: { score: number | null | undefined; className?: string }) {
   if (score === null || score === undefined) return null;
   const tone = score >= 70 ? 'bg-emerald-600 text-white' : score >= 40 ? 'bg-amber-100 text-amber-800' : 'bg-secondary-100 text-secondary-600';
+  // Shown out of 10 (the AI scores 0-100; the PDF report and lead email use the same rounding).
+  const rating = Math.max(0, Math.min(10, Math.round(score / 10)));
   return (
-    <span title={`AI fit score: ${score} out of 100`} className={cn('inline-flex h-6 min-w-[2.25rem] items-center justify-center rounded-md px-1.5 text-xs font-bold tabular-nums', tone, className)}>
-      {score}
+    <span title={`AI rating: ${rating} out of 10 (fit score ${score} out of 100)`} aria-label={`AI rating ${rating} out of 10`}
+      className={cn('inline-flex h-6 min-w-[2.25rem] items-center justify-center rounded-md px-1.5 text-xs font-bold tabular-nums', tone, className)}>
+      {rating}/10
     </span>
   );
 }

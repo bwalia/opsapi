@@ -395,6 +395,10 @@ function P.after_created(ns, uuid)
         local ok, err = pcall(require("lib.crm.lead-ai").enqueue, ns, lead.id, "created")
         if not ok then ngx.log(ngx.WARN, "[crm-leads] AI enqueue: ", tostring(err)) end
     end
+    -- No analysis coming (AI off, or it couldn't be queued): a new-lead email held for it goes now.
+    if not settings.ai_enabled or U.null((U.one("SELECT ai_status FROM crm_leads WHERE id = ?", lead.id) or {}).ai_status) then
+        pcall(require("lib.crm.lead-report").release, lead.id)
+    end
 
     lead = P.find(ns, uuid) or lead
     local Notify = require("lib.crm.lead-notify")

@@ -186,8 +186,9 @@ local function do_sends(p)
         end)
     end
 
-    -- 2) "You got a lead" to the namespace owner/admin
-    if s.notify_admin ~= false and p.admin_email and p.admin_email ~= "" then
+    -- 2) "You got a lead" to the namespace owner/admin. A fresh lead's email can wait for the AI report
+    -- (p.hold_admin: lib/crm/lead-report.lua sends it with the rating and the PDF link via sendHeld).
+    if not p.hold_admin and s.notify_admin ~= false and p.admin_email and p.admin_email ~= "" then
         pcall(function()
             if not can_send then return end
             Mail.send(sender({
@@ -203,6 +204,12 @@ local function do_sends(p)
                     app_name = brand,
                     headline = p.staff and p.staff.headline or nil,
                     intro = p.staff and p.staff.intro or nil,
+                    -- The AI analysis (held alerts only): rating, summary, origin, next step, report link.
+                    ai_rating = p.ai and p.ai.ai_rating or nil, ai_summary = p.ai and p.ai.ai_summary or nil,
+                    ai_origin = p.ai and p.ai.ai_origin or nil, ai_next = p.ai and p.ai.ai_next or nil,
+                    ai_spam = p.ai and p.ai.ai_spam or nil, ai_note = p.ai and p.ai.ai_note or nil,
+                    ai_report_url = p.ai and p.ai.ai_report_url or nil, ai_report_days = p.ai and p.ai.ai_report_days or nil,
+                    lead_url = p.ai and p.ai.lead_url or nil,
                 },
             }))
         end)
@@ -261,6 +268,19 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
                 source = lead.source, notes = lead.notes,
             },
         }
+        -- A fresh lead (not a staff alert) in a workspace whose AI analyses leads: its "new lead" email
+        -- waits for the AI report (lib/crm/lead-report.lua); the confirmation and Telegram still go now.
+        if not to and not payload.staff and lead.id and payload.admin_email then
+            local Report = require("lib.crm.lead-report")
+            if Report.should_hold(namespace.id) then
+                local hok, herr = pcall(Report.hold, lead.id)
+                if hok then
+                    payload.hold_admin = true
+                else
+                    ngx.log(ngx.WARN, "[lead-notify] could not hold the lead email: ", tostring(herr))
+                end
+            end
+        end
         local tok, terr = ngx.timer.at(0, function(premature)
             if premature then return end
             do_sends(payload)
@@ -272,6 +292,29 @@ function CrmLeadNotificationQueries.notify(namespace, lead, opts)
     if not ok then
         ngx.log(ngx.WARN, "[lead-notify] notify() error: ", tostring(err))
     end
+end
+
+--- The held "new lead" email, now with the AI's part (lib/crm/lead-report.lua release()). Runs in a
+-- timer (synchronous SMTP is fine there). Only the admin email: the rest went when the lead came in.
+function CrmLeadNotificationQueries.sendHeld(namespace, lead, ai)
+    local settings = CrmLeadNotificationQueries.getEffective(namespace.id)
+    if settings.notify_admin == false then return end
+    local admin_email = CrmLeadNotificationQueries.resolveAdminEmail(namespace.id, settings)
+    if not admin_email then return end
+    do_sends({
+        namespace = { id = namespace.id, name = namespace.name },
+        admin_email = admin_email,
+        smtp = require("helper.namespace-mail").smtp(namespace.id, "leads"),
+        ai = ai,
+        settings = { notify_admin = true, send_confirmation = false, telegram_enabled = false },
+        staff = { subject = "New lead: " .. require("lib.crm.lead-report").name_of(lead)
+            .. ((ai and ai.ai_rating) and (" (" .. ai.ai_rating:match("^%d+/10") .. ")") or "") },
+        lead = {
+            first_name = lead.first_name, last_name = lead.last_name, email = lead.email,
+            phone = lead.phone, company_name = lead.company_name, job_title = lead.job_title,
+            source = lead.source, notes = lead.notes,
+        },
+    })
 end
 
 --- Send a test Telegram message for the "Send test" button. Returns (ok, err).
