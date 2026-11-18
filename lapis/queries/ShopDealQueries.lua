@@ -318,6 +318,7 @@ local function line_description(l)
     if U.nz(l.sku) then s = s .. " (SKU " .. l.sku .. ")" end
     return s
 end
+D.line_description = line_description
 
 --- Our customer lines for the compare table and new supplier requests: the newest live quote of the
 -- deal (not cancelled or superseded), else the newest order.
@@ -338,7 +339,7 @@ end
 
 local REQUEST_COLS = [[r.uuid, r.deal_code, r.supplier_name, r.contact_name, r.contact_email, r.sent_at::text AS sent_at,
     r.spec, r.lines::text AS lines, r.supplier_quote_ref, r.lead_time, r.valid_until::text AS valid_until, r.notes,
-    r.created_at, r.updated_at, s.uuid AS supplier_uuid]]
+    r.created_at, r.updated_at, s.uuid AS supplier_uuid, r.channel]]
 
 local function request_shape(r)
     return {
@@ -346,7 +347,7 @@ local function request_shape(r)
         contact_name = r.contact_name or U.null, contact_email = r.contact_email or U.null, sent_at = r.sent_at or U.null,
         spec = r.spec or U.null, lines = U.arr(U.dec(r.lines, {})), supplier_quote_ref = r.supplier_quote_ref or U.null,
         lead_time = r.lead_time or U.null, valid_until = r.valid_until or U.null, notes = r.notes or U.null,
-        created_at = r.created_at, updated_at = r.updated_at,
+        created_at = r.created_at, updated_at = r.updated_at, channel = r.channel or U.null,
     }
 end
 

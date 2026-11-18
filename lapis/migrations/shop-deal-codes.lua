@@ -20,7 +20,11 @@
         shop orders that deliver to the customer are legacy drop-ships: logged in the deal's audit trail,
         left as they are. Only fills NULLs and logs each legacy PO once, so running it again changes nothing.
 
-    Registered in migrations.lua as zzs55–zzs57. Idempotent.
+    [4] A supplier's contact person (shop_suppliers.contact_name: "Hello Sam" in a price request) and how a
+        request was sent (shop_supplier_requests.channel email|whatsapp|sms, message = what was sent), for
+        "Ask a supplier" on the quote page (queries/ShopSupplierRequestQueries.lua).
+
+    Registered in migrations.lua as zzs55–zzs57 and zzs65. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -97,5 +101,16 @@ return {
         print(("[ShopDealCodes] backfill: %d new code(s); %d lead(s), %d quote(s), %d order(s), %d PO(s) linked; "
             .. "%d legacy drop-ship PO(s) logged"):format(summary.codes, summary.leads, summary.quotes, summary.orders,
             summary.purchase_orders, summary.legacy_drop_ship))
+    end,
+
+    [4] = function()
+        if table_exists("shop_suppliers") then
+            db.query("ALTER TABLE shop_suppliers ADD COLUMN IF NOT EXISTS contact_name varchar(160)")
+        end
+        if not table_exists("shop_supplier_requests") then return end
+        db.query([[ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS channel varchar(16)
+                   CHECK (channel IS NULL OR channel IN ('email', 'whatsapp', 'sms'))]])
+        db.query([[ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS message text
+                   CHECK (message IS NULL OR char_length(message) <= 8000)]])
     end,
 }

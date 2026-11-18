@@ -283,7 +283,8 @@ end
 M.money = money
 
 --- The draft email to a supplier for a price request: subject "Price request: <code>", the spec and the
--- lines. Nothing about the customer. req: { deal_code, contact_name, lines = {{description, qty}}, spec, notes? }
+-- lines (a configured line lists its parts). Nothing about the customer, and never our prices.
+-- req: { deal_code, contact_name, lines = {{description, qty, parts? = { "1 x 9950X", ... }}}, spec, notes? }
 -- t: { company (our name), sender (staff name) }
 function M.request_email(req, t)
     t = t or {}
@@ -297,6 +298,9 @@ function M.request_email(req, t)
         local qty = tonumber(l.qty) or 1
         local desc = tostring(l.description or ""):gsub("\n+", "; ")
         lines[#lines + 1] = i .. ". " .. qty .. " x " .. desc
+        for _, part in ipairs(type(l.parts) == "table" and l.parts or {}) do
+            lines[#lines + 1] = "   - " .. tostring(part):gsub("\n+", "; ")
+        end
     end
     if nz(req.spec) then
         lines[#lines + 1] = ""
@@ -304,7 +308,8 @@ function M.request_email(req, t)
         lines[#lines + 1] = tostring(req.spec)
     end
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "Please include for each line: your price ex VAT, stock or lead time, and how long the price is valid."
+    lines[#lines + 1] = "For each line, please let us know: whether it is available (in stock, or the lead time), your price ex VAT, "
+        .. "when you could deliver, and how long the price is valid."
     lines[#lines + 1] = ""
     lines[#lines + 1] = "Thank you,"
     if nz(t.sender) then lines[#lines + 1] = t.sender end
@@ -313,6 +318,32 @@ function M.request_email(req, t)
         subject = "Price request: " .. tostring(req.deal_code),
         body = table.concat(lines, "\n"),
     }
+end
+
+--- A phone number as international digits for WhatsApp and text links: "07700 900123" → "447700900123",
+-- "+1 (415) 555-0100" → "14155550100". nil when it can't be a phone number.
+-- ponytail: a national number (leading 0) is taken as UK (+44); other countries need the + or 00 form.
+function M.intl_phone(phone)
+    if type(phone) ~= "string" then return nil end
+    local d = phone:gsub("%D", "")
+    if phone:match("^%s*00") then
+        d = d:sub(3)
+    elseif not phone:match("^%s*%+") and d:sub(1, 1) == "0" then
+        d = "44" .. d:sub(2)
+    end
+    if #d < 8 or #d > 15 then return nil end
+    return d
+end
+
+local function uri(s)
+    return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", c:byte()) end))
+end
+
+--- Links that open WhatsApp or the phone's text messages with `text` ready to send → { whatsapp, sms } | nil
+function M.message_links(phone, text)
+    local d = M.intl_phone(phone)
+    if not d then return nil end
+    return { whatsapp = "https://wa.me/" .. d .. "?text=" .. uri(text), sms = "sms:+" .. d .. "?&body=" .. uri(text) }
 end
 
 --- Our customer price vs each supplier's price, per line of our quote.

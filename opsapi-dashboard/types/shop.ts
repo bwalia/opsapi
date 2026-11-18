@@ -1015,6 +1015,8 @@ export interface ShopSupplier {
   last_summary: ShopSupplierSummary | null;
   item_counts: { active: number; total: number; linked: number };
   contact_email?: string | null;
+  /** The person we deal with there ("Hello Sam" in a price request). */
+  contact_name?: string | null;
   /** How we raise purchase orders with them. */
   po_email?: string | null;
   po_phone?: string | null;
@@ -1521,11 +1523,34 @@ export interface ShopSupplierRequest {
   lead_time: string | null;
   valid_until: string | null;
   notes: string | null;
+  /** How it was sent from a quote's "Ask a supplier" (null = recorded by hand). */
+  channel?: ShopAskChannel | null;
   created_at: string;
   updated_at: string;
 }
 
-export type ShopSupplierRequestInput = Partial<Omit<ShopSupplierRequest, 'uuid' | 'deal_code' | 'created_at' | 'updated_at'>>;
+export type ShopSupplierRequestInput = Partial<Omit<ShopSupplierRequest, 'uuid' | 'deal_code' | 'created_at' | 'updated_at' | 'channel'>>;
+
+export type ShopAskChannel = 'email' | 'whatsapp' | 'sms';
+
+/** "Ask a supplier" from a quote: the message ready to send (GET /quotes/:uuid/supplier-request). */
+export interface ShopSupplierAsk {
+  deal_code: string;
+  supplier: { uuid: string; name: string; contact_name: string | null; email: string | null; phone: string | null; phone_intl: string | null };
+  subject: string;
+  body: string;
+  /** Customer details found in the draft (e.g. "organisation"): sending is refused until they are removed. */
+  customer_details: string[];
+}
+
+export interface ShopSupplierAskResult {
+  channel: ShopAskChannel;
+  request: ShopSupplierRequest | null;
+  sent_to?: string;
+  /** WhatsApp / text message link to open (nothing is sent by us). */
+  link?: string;
+  not_recorded?: string;
+}
 
 export interface ShopSupplierRequestDraft {
   to: string | null;

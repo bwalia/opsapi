@@ -2800,6 +2800,7 @@ local _migrations = {
     ['zzs55_shop_deal_codes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 1),
     ['zzs56_shop_supplier_requests'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 2),
     ['zzs57_shop_deal_codes_backfill'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 3),
+    ['zzs65_supplier_request_channels'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_deal_code_migrations, 4),
     -- Never price below cost: product/option costs, blocked price changes (migrations/shop-cost-floor.lua)
     ['zzs54_shop_cost_floor'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_cost_floor_migrations, 1),
     -- Membership offer v2 (Trade Account + Pro): offer_version / offer_v2_since / pro_discount_pct settings,
