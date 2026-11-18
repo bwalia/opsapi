@@ -414,6 +414,8 @@ end
 
 --- The sweep: leads held longer than HOLD_MINUTES go out without waiting any longer.
 function Report.release_overdue()
+    -- Before migration zzcrmc (a deploy rolling out) there is nothing to release.
+    if not require("helper.table-exists")("crm_leads", "alert_held_at") then return end
     local db = require("lapis.db")
     for _, l in ipairs(db.query([[SELECT id FROM crm_leads WHERE alert_held_at IS NOT NULL
         AND alert_held_at < NOW() - make_interval(mins => ?) ORDER BY alert_held_at LIMIT 50]], Report.HOLD_MINUTES)) do

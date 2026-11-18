@@ -6,10 +6,10 @@ import { Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, SearchableSelect, Switch, Textarea } from '@/components/ui';
 import { storesService } from '@/services/stores.service';
-import { productsService } from '@/services/products.service';
+import { posService, type PosProduct } from '@/services/pos.service';
 import { ordersService } from '@/services/orders.service';
 import { extractApiError } from '@/lib/utils';
-import type { Store, StoreProduct } from '@/types';
+import type { Store } from '@/types';
 
 type Line = { key: number; product_uuid: string; quantity: string };
 
@@ -36,7 +36,7 @@ export function CreateOrderModal({ open, onClose, onCreated, hasShop }: {
 }) {
   const [stores, setStores] = useState<Store[] | null>(null);
   const [storeUuid, setStoreUuid] = useState('');
-  const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [products, setProducts] = useState<PosProduct[]>([]);
   const [lines, setLines] = useState<Line[]>([{ key: 1, product_uuid: '', quantity: '1' }]);
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -72,9 +72,10 @@ export function CreateOrderModal({ open, onClose, onCreated, hasShop }: {
   useEffect(() => {
     if (!storeUuid) return;
     let active = true;
-    productsService
-      .getStoreProducts({ storeUuid, perPage: 200, status: 'active' })
-      .then((r) => active && setProducts(r.data))
+    // The store's active products (store-scoped, with stock), the same list the till uses.
+    posService
+      .products(storeUuid)
+      .then((r) => active && setProducts(r.products))
       .catch((e) => active && setError(extractApiError(e, 'Could not load the products')));
     return () => {
       active = false;
@@ -86,7 +87,7 @@ export function CreateOrderModal({ open, onClose, onCreated, hasShop }: {
   const taxRate = Number((store as (Store & { tax_rate?: number | string }) | undefined)?.tax_rate ?? 0) || 0;
   const byUuid = useMemo(() => new Map(products.map((p) => [p.uuid, p])), [products]);
   const options = useMemo(
-    () => products.map((p) => ({ value: p.uuid, label: p.name, hint: [p.sku, money(Number(p.price) || 0, currency)].filter(Boolean).join(' · ') })),
+    () => products.map((p) => ({ value: p.uuid, label: p.name, hint: [p.sku, money(Number(p.price) || 0, currency), p.stock === null ? null : p.stock > 0 ? `${p.stock} in stock` : 'out of stock'].filter(Boolean).join(' · ') })),
     [products, currency]
   );
 

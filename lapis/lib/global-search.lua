@@ -282,6 +282,28 @@ Search.provider("shop_orders", {
     end,
 })
 
+Search.provider("store_orders", {
+    label = "Store orders", order = 33, permission = { "orders", "read" },
+    needs = { "orders.namespace_id", "stores.namespace_id", "customers" },
+    run = function(ctx)
+        local channel = require("helper.table-exists")("orders", "source") and "o.source" or "NULL"
+        local out = {}
+        for _, r in ipairs(db.query([[SELECT o.uuid, o.order_number, o.status, o.total_amount, o.currency, ]] .. channel .. [[ AS source,
+                c.first_name, c.last_name, c.email, s.name AS store
+            FROM orders o JOIN stores s ON s.id = o.store_id LEFT JOIN customers c ON c.id = o.customer_id
+            WHERE COALESCE(o.namespace_id, s.namespace_id) = ?
+              AND (o.order_number ILIKE ? OR c.email ILIKE ? OR c.first_name ILIKE ? OR c.last_name ILIKE ?
+                   OR concat_ws(' ', c.first_name, c.last_name) ILIKE ?)
+            ORDER BY o.created_at DESC LIMIT ?]], ctx.ns_id, ctx.like, ctx.like, ctx.like, ctx.like, ctx.like, ctx.limit + 1)) do
+            out[#out + 1] = { title = r.order_number,
+                subtitle = join(" · ", name(r.first_name, r.last_name, r.email) or (r.source == "pos" and "Walk-in customer" or nil),
+                    r.store, r.status, money(r.total_amount, r.currency)),
+                path = "/dashboard/orders?order=" .. r.uuid }
+        end
+        return out
+    end,
+})
+
 Search.provider("shop_quotes", {
     label = "Quotes", order = 32, permission = { "shop", "read" }, needs = { "shop_quotes.deal_code", "shop_quotes.superseded_by_id" },
     run = function(ctx)

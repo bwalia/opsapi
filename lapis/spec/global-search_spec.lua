@@ -43,14 +43,15 @@ check("join skips blanks and NULL", Search.join(" · ", "a", nil, "", NULL, "b")
 -- built-ins registered, every one namespace-scoped
 local keys = {}
 for _, p in ipairs(Search.providers()) do keys[p.key] = p end
-for _, k in ipairs({ "deals", "customers", "leads", "crm_accounts", "crm_contacts", "crm_deals", "invoices", "shop_orders",
+for _, k in ipairs({ "deals", "customers", "leads", "crm_accounts", "crm_contacts", "crm_deals", "invoices", "shop_orders", "store_orders",
     "shop_quotes", "shop_products", "shop_suppliers", "purchase_orders", "purchase_invoices", "employees", "projects" }) do
     check("provider " .. k .. " is registered with a permission", keys[k] ~= nil and (keys[k].permission or keys[k].any) ~= nil)
 end
 local src = assert(io.open("lapis/lib/global-search.lua")):read("*a")
 local scoped = true
 for body in src:gmatch('Search%.provider%("[%w_]+", {(.-)\n}%)') do
-    if not body:find("namespace_id = ?", 1, true) and not body:find("ShopDealQueries", 1, true) then scoped = false end
+    if not body:find("namespace_id = ?", 1, true) and not body:find("namespace_id) = ?", 1, true)
+        and not body:find("ShopDealQueries", 1, true) then scoped = false end
 end
 check("every built-in query filters by namespace", scoped)
 check("leads use the row rule (own + unassigned for members)", src:find('require("lib.crm.lead-access").scope(ctx.self, "l")', 1, true) ~= nil)

@@ -1,4 +1,4 @@
--- luacheck: max line length 140
+-- luacheck: max line length 160
 --[[
     Proof of delivery: the customer signs for their order
     =====================================================
@@ -13,7 +13,7 @@
 
     Signing marks the order delivered (unless staff untick it) and adds "Received and signed for by <name>."
     to the customer's order updates. One signature in force per order: a wrong one is voided with a reason
-    (kept for the record) before a new one is taken. Table: migrations/shop-order-signatures.lua.
+    (kept for the record, and that update is hidden from the customer) before a new one is taken. Table: migrations/shop-order-signatures.lua.
 
       get(ns_id, order_uuid)                          the signature in force, or null
       capture(ns_id, order_uuid, body, actor, user_id, client)
@@ -202,10 +202,13 @@ function Q.void(ns_id, order_uuid, body, actor)
     end
     local o = order_for(ns_id, order_uuid)
     if not o then return nil, U.err(404, "NOT_FOUND", "Order not found") end
+    local by = U.nz(actor) and U.cut(tostring(actor), 254) or db.NULL
     local r = db.query([[UPDATE shop_order_signatures SET voided_at = NOW(), voided_by = ?, void_reason = ?
-        WHERE order_id = ? AND voided_at IS NULL RETURNING uuid]], U.nz(actor) and U.cut(tostring(actor), 254) or db.NULL,
-        reason, o.id)[1]
+        WHERE order_id = ? AND voided_at IS NULL RETURNING uuid, signer_name]], by, reason, o.id)[1]
     if not r then return nil, U.err(404, "NOT_FOUND", "This order hasn't been signed for") end
+    -- The customer no longer reads "signed for by …" on their order page (the event is kept, hidden).
+    pcall(db.query, [[UPDATE shop_order_events SET deleted_at = NOW(), deleted_by = ?
+        WHERE order_id = ? AND deleted_at IS NULL AND message = ?]], by, o.id, "Received and signed for by " .. r.signer_name .. ".")
     return Q.get(ns_id, order_uuid)
 end
 

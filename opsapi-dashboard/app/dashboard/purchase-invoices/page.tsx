@@ -252,23 +252,23 @@ function PurchaseInvoicesContent() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatsCard
           title="To pay"
-          value={sum ? fmtMoney(sum.owed, cur) : '—'}
-          description={sum ? `${sum.owed_count} invoice${sum.owed_count === 1 ? '' : 's'}` : undefined}
+          value={data ? fmtMoney(sum?.owed ?? '0', cur) : '—'}
+          description={data ? `${sum?.owed_count ?? 0} invoice${sum?.owed_count === 1 ? '' : 's'}` : undefined}
           icon={<Wallet className="h-5 w-5" />}
           isLoading={loading && !data}
           href="/dashboard/purchase-invoices?state=owed"
         />
         <StatsCard
           title="Overdue"
-          value={sum ? fmtMoney(sum.overdue, cur) : '—'}
-          description={sum ? `${sum.overdue_count} past the due date` : undefined}
+          value={data ? fmtMoney(sum?.overdue ?? '0', cur) : '—'}
+          description={data ? `${sum?.overdue_count ?? 0} past the due date` : undefined}
           icon={<AlertTriangle className="h-5 w-5" />}
           isLoading={loading && !data}
           href="/dashboard/purchase-invoices?state=overdue"
         />
         <StatsCard
           title="Paid"
-          value={sum ? fmtMoney(sum.paid, cur) : '—'}
+          value={data ? fmtMoney(sum?.paid ?? '0', cur) : '—'}
           description="On the invoices listed"
           icon={<CheckCircle2 className="h-5 w-5" />}
           isLoading={loading && !data}
