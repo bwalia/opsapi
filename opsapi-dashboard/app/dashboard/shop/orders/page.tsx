@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Landmark, Plus, Search, ShoppingCart, Truck } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Landmark, Plus, Search, ShoppingCart, Truck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Pagination, Table } from '@/components/ui';
@@ -18,14 +18,31 @@ import { SHOP_ORDER_STATUSES, type ShopOrder, type ShopOrderStatus, type TableCo
 
 const PER_PAGE = 25;
 
+/** A whole number of days from the URL (the shop dashboard's links), else null. */
+function urlDays(v: string | null): number | null {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 && n <= 3660 ? n : null;
+}
+
 function OrdersContent() {
   const router = useRouter();
+  const params = useSearchParams();
   const [rows, setRows] = useState<ShopOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState<ShopOrderStatus | ''>('');
+  const [status, setStatus] = useState<ShopOrderStatus | ''>(() => {
+    const v = params.get('status');
+    return v && (SHOP_ORDER_STATUSES as readonly string[]).includes(v) ? (v as ShopOrderStatus) : '';
+  });
+  // "Placed / paid in the last N days" from the dashboard's numbers; cleared with its chip.
+  const [period, setPeriod] = useState<{ kind: 'days' | 'paid_days'; n: number } | null>(() => {
+    const paid = urlDays(params.get('paid_days'));
+    if (paid) return { kind: 'paid_days', n: paid };
+    const placed = urlDays(params.get('days'));
+    return placed ? { kind: 'days', n: placed } : null;
+  });
   const [page, setPage] = useState(1);
   // "Bank transfer due": orders awaiting a bank transfer, oldest first.
   const [btDue, setBtDue] = useState(false);
@@ -50,6 +67,8 @@ function OrdersContent() {
         q: q || undefined,
         bank_transfer_due: btDue,
         filter: dcPending ? 'delivery_change_pending' : '',
+        days: period?.kind === 'days' ? period.n : undefined,
+        paid_days: period?.kind === 'paid_days' ? period.n : undefined,
         limit: PER_PAGE,
         offset: (page - 1) * PER_PAGE,
       })
@@ -65,7 +84,7 @@ function OrdersContent() {
     return () => {
       active = false;
     };
-  }, [status, q, page, btDue, dcPending]);
+  }, [status, q, page, btDue, dcPending, period]);
 
   const vips = useVipStatus(rows.map((o) => o.email));
 
@@ -189,6 +208,21 @@ function OrdersContent() {
               {dcPendingCount}
             </span>
           </button>
+          {period && (
+            <button
+              type="button"
+              onClick={() => {
+                setPeriod(null);
+                setPage(1);
+                router.replace('/dashboard/shop/orders');
+              }}
+              className="inline-flex items-center gap-2 rounded-lg border border-primary-300 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-800"
+              aria-label="Show all dates"
+            >
+              {period.kind === 'paid_days' ? 'Paid' : 'Placed'} in the last {period.n} day{period.n === 1 ? '' : 's'}
+              <X className="h-4 w-4" />
+            </button>
+          )}
           <FilterSelect
             aria-label="Status"
             disabled={btDue}
@@ -225,7 +259,9 @@ function OrdersContent() {
 export default function ShopOrdersPage() {
   return (
     <ProtectedPage module="shop" title="Shop Orders">
-      <OrdersContent />
+      <Suspense fallback={null}>
+        <OrdersContent />
+      </Suspense>
     </ProtectedPage>
   );
 }

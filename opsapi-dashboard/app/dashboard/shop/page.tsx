@@ -129,6 +129,7 @@ function OverviewContent() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatsCard
           title="Orders"
+          href="/dashboard/shop/orders?days=30"
           value={kpis ? kpis.orders_30d : '—'}
           description={kpis ? `${kpis.orders_today} today · ${kpis.orders_7d} in 7 days · 30 days` : undefined}
           icon={<ShoppingCart className="h-5 w-5" />}
@@ -136,6 +137,7 @@ function OverviewContent() {
         />
         <StatsCard
           title="Revenue (paid, 30d)"
+          href="/dashboard/shop/orders?paid_days=30"
           value={kpis ? formatMoney(kpis.revenue_paid_30d_minor, cur) : '—'}
           description="Inc VAT"
           icon={<PoundSterling className="h-5 w-5" />}
@@ -143,6 +145,7 @@ function OverviewContent() {
         />
         <StatsCard
           title="Open quotes"
+          href="/dashboard/shop/quotes?filter=open"
           value={kpis ? kpis.open_quotes : '—'}
           description={kpis ? `${formatMoney(kpis.open_quotes_value_minor, cur)} pipeline` : undefined}
           icon={<FileText className="h-5 w-5" />}
@@ -150,6 +153,7 @@ function OverviewContent() {
         />
         <StatsCard
           title="Quote → order"
+          href="/dashboard/shop/quotes?status=converted"
           value={kpis ? `${(kpis.quote_conversion_rate * 100).toFixed(1)}%` : '—'}
           description="Conversion"
           icon={<TrendingUp className="h-5 w-5" />}
@@ -157,6 +161,7 @@ function OverviewContent() {
         />
         <StatsCard
           title="Low stock"
+          href="/dashboard/shop/stock?low=1"
           value={kpis ? kpis.low_stock_count : '—'}
           description="Items at or below threshold"
           icon={<AlertTriangle className="h-5 w-5" />}
@@ -164,6 +169,7 @@ function OverviewContent() {
         />
         <StatsCard
           title="AI chats (7d)"
+          href="/dashboard/shop/chats"
           value={kpis ? kpis.chats_7d : '—'}
           description="Assistant sessions"
           icon={<MessageSquare className="h-5 w-5" />}

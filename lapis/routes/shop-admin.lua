@@ -39,6 +39,11 @@
                                                internal notes; open drop-ship supplier POs follow unless
                                                update_purchase_orders is false → { order, purchase_orders[] }
       POST              /orders/:uuid/updates   { message } an update the customer sees on their order page (201)
+      GET               /orders/:uuid/signature          proof of delivery { signature | null, can_sign, status }
+      GET               /orders/:uuid/signature/image    the signature (PNG)
+      POST              /orders/:uuid/signature          { signer_name, image (PNG data URL), note?, mark_delivered? }
+                                               the customer signs for the order (marks it delivered by default)
+      POST              /orders/:uuid/signature/void     { reason } take a wrong signature back (kept for the record)
       DELETE            /orders/:uuid/updates/:event_uuid   hide an update from the customer. The order (GET) has
                                                customer_updates; status changes and staff address changes are
                                                logged there automatically
@@ -84,6 +89,7 @@
     Deal codes (queries/ShopDealQueries.lua: private, staff and suppliers only; every view and change is logged)
       GET               /deals/search?q=        by deal code, WSQ number, order number, supplier quote ref or
                                                customer email → { exact, results:[{ deal_code, matched_by, match }] }
+      GET               /deals                    the newest deals { results:[{ deal_code, created_at, customer, quotes, orders, purchase_orders }] }
       GET               /deals/:code            the deal page: customer, quotes, orders, POs, supplier requests,
                                                notes, compare table, audit trail
       POST              /deals/:code/supplier-requests   { supplier_uuid? | supplier_name, contact_name?, contact_email?,
@@ -364,6 +370,10 @@ return function(app)
     -- deal codes ---------------------------------------------------------------------
     local Deal = require("queries.ShopDealQueries")
 
+    app:get(BASE .. "/deals", guard("read", function(self, ns_id)
+        return U.ok(Deal.recent(ns_id, self.params.limit))
+    end))
+
     app:get(BASE .. "/deals/search", guard("read", function(self, ns_id)
         return U.ok(Deal.search(ns_id, self.params.q))
     end))
@@ -451,6 +461,37 @@ return function(app)
         local u = self.current_user or {}
         return result(OrderEvents.remove(ns_id, self.params.uuid, self.params.event_uuid,
             u.email or u.uuid or (u.api_key and "api-key") or nil))
+    end))
+
+    -- proof of delivery: the customer signs for the order (queries/ShopOrderSignatureQueries.lua) -----------
+    local Signatures = require("queries.ShopOrderSignatureQueries")
+
+    app:get(BASE .. "/orders/:uuid/signature", guard("read", function(self, ns_id)
+        return result(Signatures.get(ns_id, self.params.uuid))
+    end))
+
+    app:get(BASE .. "/orders/:uuid/signature/image", guard("read", function(self, ns_id)
+        local png, err = Signatures.image(ns_id, self.params.uuid)
+        if not png then return U.from_err(err) end
+        return { status = 200, layout = false, content_type = "image/png",
+                 headers = { ["Cache-Control"] = "no-store, private", ["X-Content-Type-Options"] = "nosniff" }, png }
+    end))
+
+    app:post(BASE .. "/orders/:uuid/signature", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        local name = U.nz(table.concat({ U.nz(u.first_name) or "", U.nz(u.last_name) or "" }, " "):match("^%s*(.-)%s*$"))
+        return created(Signatures.capture(ns_id, self.params.uuid, body,
+            name or u.email or u.uuid or (u.api_key and "api-key") or nil, user_id(self),
+            { ip = require("middleware.rate-limit").getClientIP(), user_agent = ngx.var.http_user_agent }))
+    end))
+
+    app:post(BASE .. "/orders/:uuid/signature/void", guard("update", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        local u = self.current_user or {}
+        return result(Signatures.void(ns_id, self.params.uuid, body, u.email or u.uuid or (u.api_key and "api-key") or nil))
     end))
 
     -- order update emails to the customer ("Email the customer" on the order page) ----------------

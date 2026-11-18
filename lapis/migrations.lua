@@ -196,6 +196,7 @@ local shop_customer_po_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP,
 local shop_delivery_change_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-delivery-changes") or {}
 local shop_order_email_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-emails") or {}
 local shop_order_event_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-events") or {}
+local shop_order_signature_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-order-signatures") or {}
 local shop_deal_code_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-deal-codes") or {}
 local shop_cost_floor_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-cost-floor") or {}
 local shop_seo_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-seo") or {}
@@ -389,6 +390,7 @@ local crm_leads_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "m
 local crm_lead_notif_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-lead-notifications") or {}
 -- Lead pipeline (core: crm_leads is in every deployment; CRM-only steps skip themselves).
 local crm_lead_pipeline_migrations = require("migrations.crm-lead-pipeline")
+local sales_order_migrations = require("migrations.sales-orders")
 
 -- Leads are a CORE capability: the crm_leads table is created for EVERY
 -- PROJECT_CODE (lead capture is generic), so this module loads unconditionally.
@@ -2781,8 +2783,11 @@ local _migrations = {
     -- off until switched on (migrations/supplier-portal.lua; skipped without purchase orders)
     ['zzs60_supplier_portal_tables'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 1),
     ['zzs61_supplier_portal_settings'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 2),
+    ['zzs64_purchase_invoices_menu'] = conditional_array(ProjectConfig.FEATURES.SHOP, supplier_portal_migrations, 3),
     -- Order updates on the customer's order page: staff comments + status/address events (migrations/shop-order-events.lua)
     ['zzs62_shop_order_events'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_event_migrations, 1),
+    -- Proof of delivery: the customer's signature on an order (migrations/shop-order-signatures.lua)
+    ['zzs63_shop_order_signatures'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_order_signature_migrations, 1),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
@@ -2939,6 +2944,9 @@ local _migrations = {
     -- Letters after 9: keys sort as strings ('zzcrm10' would run before 'zzcrm2').
     ['zzcrma_lead_pipeline_partner_profiles'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 10),
     ['zzcrmb_lead_pipeline_deal_referrals'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 11),
+    ['zzcrmc_lead_pipeline_ai_report'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 12),
+    -- Sales orders across modules: how a store order came in (migrations/sales-orders.lua)
+    ['zzso1_orders_source'] = conditional_array(ProjectConfig.FEATURES.CORE, sales_order_migrations, 1),
     -- Media library (migrations/media-library.lua): images reused across content
     ['zzmed1_media_assets'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 1),
     ['zzmed2_media_backfill'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 2),

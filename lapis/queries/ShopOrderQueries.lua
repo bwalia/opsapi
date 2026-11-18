@@ -999,6 +999,9 @@ end
 local PENDING_CHANGE_SQL = [[EXISTS (SELECT 1 FROM shop_delivery_change_requests dcr
                                       WHERE dcr.order_id = o.id AND dcr.status = 'pending')]]
 
+--- Orders that count as paid (the shop dashboard's revenue uses the same set).
+ShopOrderQueries.PAID_SQL = "('paid','processing','shipped','delivered')"
+
 function ShopOrderQueries.adminList(ns_id, params)
     params = params or {}
     local limit = U.clamp(U.int(params.limit, 25), 1, 200)
@@ -1007,6 +1010,17 @@ function ShopOrderQueries.adminList(ns_id, params)
     if U.nz(params.status) then
         where[#where + 1] = "o.status = ?"
         vals[#vals + 1] = params.status
+    end
+    -- The dashboard's numbers open the list they count: days = placed in the last N days,
+    -- paid_days = paid in the last N days.
+    local days, paid_days = U.int(params.days, nil), U.int(params.paid_days, nil)
+    if days then
+        where[#where + 1] = "o.created_at >= NOW() - make_interval(days => ?)"
+        vals[#vals + 1] = U.clamp(days, 1, 3660)
+    end
+    if paid_days then
+        where[#where + 1] = "o.status IN " .. ShopOrderQueries.PAID_SQL .. " AND o.paid_at >= NOW() - make_interval(days => ?)"
+        vals[#vals + 1] = U.clamp(paid_days, 1, 3660)
     end
     -- "Bank transfer due": awaiting a bank transfer, oldest first.
     local due = params.bank_transfer_due == "true" or params.bank_transfer_due == "1" or params.bank_transfer_due == true

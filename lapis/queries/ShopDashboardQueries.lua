@@ -11,7 +11,7 @@ local Quote = require("queries.ShopQuoteQueries")
 
 local ShopDashboardQueries = {}
 
-local PAID = "('paid','processing','shipped','delivered')"
+local PAID = Orders.PAID_SQL
 
 function ShopDashboardQueries.kpis(ns_id)
     local o = db.query([[

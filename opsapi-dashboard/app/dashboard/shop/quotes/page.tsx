@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { FileText, Plus, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -20,6 +20,7 @@ import type { ShopQuoteQuickFilter } from '@/types/shop';
 import { quoteNextStep } from '@/components/shop/workflow';
 
 const QUICK_FILTERS: { key: ShopQuoteQuickFilter; label: string; empty: string }[] = [
+  { key: 'open', label: 'Open', empty: 'No open quotes: nothing in draft, sent or accepted that is still valid.' },
   { key: 'awaiting_authorisation', label: 'Awaiting authorisation', empty: 'Nothing waiting for a customer to authorise. Sent Order Authorisations show here until the customer confirms.' },
   { key: 'awaiting_payment', label: 'Awaiting payment', empty: 'No authorised orders waiting for payment.' },
   { key: 'needs_supplier_po', label: 'Needs supplier PO', empty: 'Every paid order has its supplier PO. Nothing to raise.' },
@@ -30,14 +31,22 @@ const PER_PAGE = 25;
 
 function QuotesContent() {
   const router = useRouter();
+  const params = useSearchParams();
   const { canCreate } = usePermissions();
   const [rows, setRows] = useState<ShopQuote[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState<ShopQuoteStatus | ''>('');
-  const [filter, setFilter] = useState<ShopQuoteQuickFilter | ''>('');
+  // The shop dashboard's numbers link here with ?status= or ?filter=.
+  const [status, setStatus] = useState<ShopQuoteStatus | ''>(() => {
+    const v = params.get('status');
+    return v && (SHOP_QUOTE_STATUSES as readonly string[]).includes(v) ? (v as ShopQuoteStatus) : '';
+  });
+  const [filter, setFilter] = useState<ShopQuoteQuickFilter | ''>(() => {
+    const v = params.get('filter');
+    return QUICK_FILTERS.some((f) => f.key === v) ? (v as ShopQuoteQuickFilter) : '';
+  });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [page, setPage] = useState(1);
@@ -224,7 +233,9 @@ function QuotesContent() {
 export default function ShopQuotesPage() {
   return (
     <ProtectedPage module="shop" title="Shop Quotes">
-      <QuotesContent />
+      <Suspense fallback={null}>
+        <QuotesContent />
+      </Suspense>
     </ProtectedPage>
   );
 }
