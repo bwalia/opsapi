@@ -7,11 +7,16 @@
     unauthenticated, so this is honoured ONLY for the BFF (otherwise anyone could
     mail our branded email, with their own words, to any address), and every
     field is checked here: plain strings, bounded lengths, https links only.
+
+    kind = "product_details": the shop's "Email me the details" on a product page. The email then shows the
+    product instead of survey answers: name, price, availability, up to 12 spec rows, and links to the product
+    page and its PDF sheet (product_url, sheet_url).
 ]]
 
 local LeadConfirmation = {}
 
 local MAX_HIGHLIGHTS = 8
+local MAX_SPECS = 12
 
 local function text(v, max)
     if type(v) ~= "string" then return nil end
@@ -51,6 +56,26 @@ function LeadConfirmation.sanitize(c)
     if not out.call_phone then out.call_url = nil end
     out.book_url = https_url(c.book_url)
     out.subject = text(c.subject, 120)
+    if c.kind == "product_details" then
+        out.kind = "product_details"
+        out.product_name = text(c.product_name, 200)
+        if not out.product_name then return nil end
+        out.price = text(c.price, 120)
+        out.availability = text(c.availability, 160)
+        out.summary = text(c.summary, 400)
+        out.product_url = https_url(c.product_url)
+        out.sheet_url = https_url(c.sheet_url)
+        out.specs = {}
+        if type(c.specs) == "table" then
+            for _, row in ipairs(c.specs) do
+                if #out.specs >= MAX_SPECS then break end
+                local k = type(row) == "table" and text(row.label, 80)
+                local v = type(row) == "table" and text(row.value, 240)
+                if k and v then out.specs[#out.specs + 1] = { label = k, value = v } end
+            end
+        end
+        return out
+    end
     if #out.highlights == 0 and not out.intro and not out.handover and not out.call_phone and not out.book_url then return nil end
     return out
 end
