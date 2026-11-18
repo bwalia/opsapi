@@ -36,7 +36,7 @@ local Research = require("lib.crm.lead-research")
 
 local AI = {}
 
-AI.PROMPT_VERSION = "lead_analysis.v2"
+AI.PROMPT_VERSION = "lead_analysis.v3"
 -- One analysis may take this long (the email waits up to Report.HOLD_MINUTES for it).
 AI.TIMEOUT_MS = 300000
 AI.ACTIONS = {
@@ -160,7 +160,8 @@ local function prompt(lead, ctx, settings)
     for k in pairs(AI.ACTIONS) do actions[#actions + 1] = k end
     table.sort(actions)
     return table.concat({
-        "Business: " .. ctx.workspace .. ". Currency: " .. settings.currency .. ".",
+        -- The model doesn't know today's date: without it, "in January" became a deadline in 2024.
+        "Business: " .. ctx.workspace .. ". Currency: " .. settings.currency .. ". Today's date: " .. os.date("!%Y-%m-%d") .. ".",
         partner_block(ctx),
         "Questions the business asks to qualify a lead: " .. (function()
             local t = {}
@@ -216,6 +217,13 @@ local function list_of_strings(v, max_items, max_len)
     return U.array(out)
 end
 
+--- A deadline the lead could still mean: a real date, today or later (a past one is a model guess).
+function AI.future_date(v, today)
+    local d = type(v) == "string" and U.date(v)
+    if not d or d < (today or os.date("!%Y-%m-%d")) then return nil end
+    return d
+end
+
 --- Keep only what we expect, in range. @return result table
 function AI.clean(raw, ctx)
     raw = type(raw) == "table" and raw or {}
@@ -226,7 +234,7 @@ function AI.clean(raw, ctx)
             and tonumber(raw.quantity) or cjson.null,
         intent = AI.INTENTS[raw.intent] and raw.intent or "other",
         urgency = (raw.urgency == "low" or raw.urgency == "medium" or raw.urgency == "high") and raw.urgency or "medium",
-        deadline = (type(raw.deadline) == "string" and U.date(raw.deadline)) or cjson.null,
+        deadline = AI.future_date(raw.deadline) or cjson.null,
         estimated_value = num(raw.estimated_value), value_low = num(raw.value_low), value_high = num(raw.value_high),
         value_basis = str(raw.value_basis, 300),
         score_reasons = list_of_strings(raw.score_reasons, 5, 160),
