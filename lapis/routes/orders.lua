@@ -262,12 +262,29 @@ return function(app)
             }
         end),
 
-        POST = AuthMiddleware.requireAuth(function(self)
-            local timestamp = require("helper.global").getCurrentTimestamp()
-            self.params.created_at = timestamp
-            self.params.updated_at = timestamp
-            return { json = OrderQueries.create(self.params), status = 201 }
-        end)
+        -- Staff create an order in their workspace (queries/ManualOrderQueries.lua): a store of this workspace, the
+        -- customer by email, products of that store (prices from the product), stock checked and taken. Needs
+        -- orders.create. An Idempotency-Key header makes a retried click safe. (It used to save any fields sent.)
+        POST = AuthMiddleware.requireAuth(require("middleware.namespace").requirePermission("orders", "create", function(self)
+            ngx.req.read_body()
+            local raw = ngx.req.get_body_data()
+            if not raw then
+                local path = ngx.req.get_body_file()
+                local f = path and io.open(path, "rb")
+                if f then raw = f:read("*a"); f:close() end
+            end
+            local okj, body = pcall(cjson.decode, raw or "")
+            if not okj or type(body) ~= "table" then
+                return { status = 400, json = { success = false, error = "Send the order as JSON", code = "INVALID_JSON" } }
+            end
+            return require("helper.idempotency").run(self, self.namespace.id, self.current_user.uuid, function()
+                local order, err = require("queries.ManualOrderQueries").create(self.namespace.id, body)
+                if not order then
+                    return { status = err.status or 422, json = { success = false, error = err.message, code = err.code, fields = err.fields } }
+                end
+                return { status = 201, json = { success = true, data = order } }
+            end)
+        end))
     }))
 
     -- Get order statistics for dashboard (MUST be before :id route)

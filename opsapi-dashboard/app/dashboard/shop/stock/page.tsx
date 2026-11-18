@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Boxes, History, Minus, Plus, RefreshCw, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -21,7 +22,9 @@ const rowLabel = (r: ShopStockRow) =>
 function StockContent() {
   const { canUpdate } = usePermissions();
   const [rows, setRows] = useState<ShopStockRow[] | null>(null);
-  const [lowOnly, setLowOnly] = useState(false);
+  // ?low=1: the shop dashboard's "Low stock" number.
+  const lowFromUrl = useSearchParams().get('low') === '1';
+  const [lowOnly, setLowOnly] = useState(lowFromUrl);
   const [kind, setKind] = useState<'all' | 'product' | 'option'>('all');
   const [search, setSearch] = useState('');
   const [version, setVersion] = useState(0);
@@ -211,7 +214,9 @@ function StockContent() {
 export default function ShopStockPage() {
   return (
     <ProtectedPage module="shop" title="Shop Stock">
-      <StockContent />
+      <Suspense fallback={null}>
+        <StockContent />
+      </Suspense>
     </ProtectedPage>
   );
 }

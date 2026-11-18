@@ -19,9 +19,27 @@
   <% if source and source ~= "" then %><p><strong>Source:</strong> <%= source %></p><% end %>
 </div>
 
+<% if ai_rating or ai_summary or ai_note then %>
+<h3 style="margin-top:20px">AI analysis</h3>
+<div class="info-box">
+  <% if ai_rating then %><p><strong>Rating:</strong> <%= ai_rating %></p><% end %>
+  <% if ai_spam then %><p><strong>Warning:</strong> this looks like spam.</p><% end %>
+  <% if ai_origin then %><p><strong>Where it came from:</strong> <%= ai_origin %></p><% end %>
+  <% if ai_summary then %><p><strong>Summary:</strong> <%= ai_summary %></p><% end %>
+  <% if ai_next then %><p><strong>Suggested next step:</strong> <%= ai_next %></p><% end %>
+  <% if ai_note then %><p><%= ai_note %></p><% end %>
+</div>
+<% if ai_report_url then %>
+<p><a href="<%= ai_report_url %>" class="btn">Open the AI report (PDF)</a></p>
+<p style="font-size:12px;color:#6b7280">The link works for <%= ai_report_days or 30 %> days. After that, download the report from the lead's page.</p>
+<% end %>
+<% end %>
+
 <% if notes and notes ~= "" then %>
   <p><strong>Message:</strong></p>
   <div class="info-box" style="white-space:pre-line"><%= notes %></div>
 <% end %>
+
+<% if lead_url then %><p><a href="<%= lead_url %>">Open the lead</a></p><% end %>
 
 <p>This is an automated notification from <%= app_name %>. You can turn these off or add a Telegram alert under Leads → Notifications.</p>

@@ -13,7 +13,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, Copy, ExternalLink, Globe2, Loader2, Mail, MessageCircle, RefreshCw, Sparkles, Wand2,
+  AlertTriangle, Copy, ExternalLink, FileDown, Globe2, Loader2, Mail, MessageCircle, RefreshCw, Sparkles, Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -38,6 +38,33 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
   const a = lead.analysis;
   const r = a?.result ?? null;
   const running = a && (a.status === 'pending' || a.status === 'running');
+
+  const [downloading, setDownloading] = useState(false);
+  // The PDF report of the latest finished analysis (the same one the new-lead email links to).
+  const download = async () => {
+    setDownloading(true);
+    try {
+      const blob = await leadsService.report(lead.uuid);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `lead-report-${lead.uuid.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      let message = leadError(e).message;
+      // An error comes back as a JSON blob when we asked for a file.
+      const data = (e as { response?: { data?: unknown } })?.response?.data;
+      if (data instanceof Blob) {
+        try { message = JSON.parse(await data.text()).error ?? message; } catch { /* keep the generic one */ }
+      }
+      toast.error(message);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const rerun = async () => {
     setBusy(true);
@@ -108,10 +135,14 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
       {header}
       <div className="mt-3 flex items-start gap-3">
         <ScoreBadge score={r.score} className="h-9 min-w-[3rem] text-base" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {r.summary && <p className="text-sm text-secondary-800">{r.summary}</p>}
           {r.wants && <p className="mt-1 text-xs text-secondary-500">Wants: <span className="font-medium text-secondary-700">{r.wants}</span></p>}
+          {r.origin && <p className="mt-1 text-xs text-secondary-500">Where it came from: <span className="text-secondary-700">{r.origin}</span></p>}
         </div>
+        <Button variant="outline" size="sm" onClick={download} isLoading={downloading} leftIcon={<FileDown className="h-3.5 w-3.5" />}>
+          Report (PDF)
+        </Button>
       </div>
 
       {flags.length > 0 && (

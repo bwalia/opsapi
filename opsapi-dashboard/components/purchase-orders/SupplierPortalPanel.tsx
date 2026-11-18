@@ -80,7 +80,7 @@ import {
   type StaffPanel,
 } from '@/services/supplier-portal.service';
 
-const KIND_DOC_TYPE: Record<InvoiceKind, PortalDocType> = {
+export const KIND_DOC_TYPE: Record<InvoiceKind, PortalDocType> = {
   proforma: 'proforma',
   invoice: 'vat_invoice',
   credit_note: 'credit_note',
@@ -210,7 +210,7 @@ function UploadModal({
 // Record a proforma / invoice / credit note
 // ============================================
 
-function InvoiceModal({
+export function InvoiceModal({
   isOpen,
   onClose,
   onSubmit,

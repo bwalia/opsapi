@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 
@@ -15,6 +16,8 @@ export interface StatsCardProps {
   description?: string;
   className?: string;
   isLoading?: boolean;
+  /** Makes the whole card a link to the list behind the number. */
+  href?: string;
 }
 
 const StatsCard: React.FC<StatsCardProps> = memo(function StatsCard({
@@ -25,16 +28,17 @@ const StatsCard: React.FC<StatsCardProps> = memo(function StatsCard({
   description,
   className,
   isLoading = false,
+  href,
 }) {
-  return (
-    <div
-      className={cn(
-        'group relative overflow-hidden bg-surface rounded-2xl border border-secondary-200/70',
-        'p-4 sm:p-6 shadow-sm transition-all duration-300',
-        'hover:shadow-xl hover:shadow-secondary-900/5 hover:-translate-y-0.5 hover:border-primary-200',
-        className
-      )}
-    >
+  const classes = cn(
+    'group relative block overflow-hidden bg-surface rounded-2xl border border-secondary-200/70',
+    'p-4 sm:p-6 shadow-sm transition-all duration-300',
+    'hover:shadow-xl hover:shadow-secondary-900/5 hover:-translate-y-0.5 hover:border-primary-200',
+    href && 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
+    className
+  );
+  const body = (
+    <>
       {/* Top accent bar — reveals on hover */}
       <div className="absolute inset-x-0 top-0 h-1 gradient-primary opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       {/* Soft brand glow in the corner */}
@@ -85,7 +89,14 @@ const StatsCard: React.FC<StatsCardProps> = memo(function StatsCard({
           <div className="[&>svg]:w-5 [&>svg]:h-5 sm:[&>svg]:w-6 sm:[&>svg]:h-6">{icon}</div>
         </div>
       </div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className={classes} aria-label={`${title}: ${isLoading ? 'loading' : value}. Open the list`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={classes}>{body}</div>
   );
 });
 

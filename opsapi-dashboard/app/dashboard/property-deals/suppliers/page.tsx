@@ -52,7 +52,7 @@ function Suppliers() {
   ];
   return (
     <div className="space-y-6">
-      <PageHeader title="Suppliers" description="EPC assessors, surveyors, solicitors and more — with how fast they really are." icon={<Wrench className="h-6 w-6" />}
+      <PageHeader title="Property suppliers" description="Trades and firms for property deals: EPC assessors, surveyors, solicitors and more, with how fast they really are. Suppliers of goods are under Shop → Suppliers." icon={<Wrench className="h-6 w-6" />}
         actions={<>
           <Button variant="outline" leftIcon={<Navigation className="h-4 w-4" />} onClick={() => setNearest(true)} data-tour="book-nearest">Book nearest</Button>
           {can('suppliers', 'create') && <Button leftIcon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>Add supplier</Button>}

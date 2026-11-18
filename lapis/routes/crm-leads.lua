@@ -392,6 +392,25 @@ return function(app)
         return Api.ok(full(self, lead.uuid))
     end))
 
+    -- The AI's PDF report for this lead (the latest finished analysis, or ?analysis=<uuid>). Made now when an
+    -- older analysis has none yet. lib/crm/lead-report.lua.
+    app:get("/api/v2/crm/leads/:uuid/report", H("crm_leads", "read", function(self)
+        local lead, res = visible_lead(self)
+        if not lead then return res end
+        local analysis = type(self.params.analysis) == "string" and self.params.analysis:match("^[%x%-]+$") or nil
+        local bytes, name_or_status, message = require("lib.crm.lead-report").bytes(lead.id, analysis)
+        if not bytes then return Api.fail({ status = name_or_status, code = "LEAD_REPORT_UNAVAILABLE", message = message }) end
+        return {
+            status = 200, layout = false, content_type = "application/pdf",
+            headers = {
+                ["Content-Disposition"] = 'inline; filename="' .. name_or_status .. '"',
+                ["Cache-Control"] = "no-store, private",
+                ["X-Content-Type-Options"] = "nosniff",
+            },
+            bytes,
+        }
+    end))
+
     app:get("/api/v2/crm/leads/:uuid/timeline", H("crm_leads", "read", function(self)
         local lead, res = visible_lead(self)
         if not lead then return res end

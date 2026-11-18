@@ -840,7 +840,7 @@ export interface ShopQuoteRevise {
 }
 
 /** Quick filters on the quotes list. */
-export type ShopQuoteQuickFilter = 'awaiting_authorisation' | 'awaiting_payment' | 'needs_supplier_po' | 'bank_transfer_due';
+export type ShopQuoteQuickFilter = 'open' | 'awaiting_authorisation' | 'awaiting_payment' | 'needs_supplier_po' | 'bank_transfer_due';
 
 export interface ShopQuoteSendResult {
   to: string;
@@ -1580,6 +1580,31 @@ export interface ShopDealSearchResult {
   matched_by: 'deal_code' | 'quote_number' | 'order_number' | 'supplier_quote_ref' | 'customer_email';
   match: string;
   customer?: string | null;
+}
+
+export interface ShopOrderSignature {
+  uuid: string;
+  signer_name: string;
+  note: string | null;
+  signed_at: string;
+  captured_by: string | null;
+  image_sha256: string;
+  image_bytes: number;
+}
+
+export interface ShopOrderSignatureState {
+  signature: ShopOrderSignature | null;
+  can_sign: boolean;
+  status: string;
+}
+
+export interface ShopRecentDeal {
+  deal_code: string;
+  created_at: string;
+  customer: string | null;
+  quotes: number;
+  orders: number;
+  purchase_orders: number;
 }
 
 export interface ShopDealSearch {

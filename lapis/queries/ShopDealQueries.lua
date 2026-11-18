@@ -16,6 +16,7 @@
       get(ns_id, code, user)        the deal page: customer, quotes, orders, POs, supplier requests, notes,
                                     compare table, audit trail (the view is logged)
       search(ns_id, q)              by deal code, WSQ number, order number, supplier quote ref, customer email
+      recent(ns_id, limit)          the newest deals, for the Deals page before anyone types
       supplier requests             list / create / update / delete / emailDraft (a draft only: never sent)
       audit(ns_id, code, action, user_id, detail)   namespace_audit_logs, entity_type 'shop_deal'
       backfill()                    every lead / quote / order / PO without a code (idempotent)
@@ -567,6 +568,37 @@ function D.search(ns_id, q)
         if r.customer == "" then r.customer = U.null end
     end
     return { exact = U.null, results = U.arr(out) }
+end
+
+--- GET /deals — the newest deals (the Deals page before anyone types), with who each is for.
+-- { results = [{ deal_code, created_at, customer, quotes, orders, purchase_orders }] }.
+function D.recent(ns_id, limit)
+    if not D.enabled() then return { results = U.arr({}) } end
+    limit = U.clamp(U.int(limit, 20), 1, 100)
+    local po_count = has_pos() and [[(SELECT COUNT(*) FROM purchase_orders p WHERE p.namespace_id = c.namespace_id
+                                          AND p.deal_code = c.code AND p.deleted_at IS NULL)]] or "0"
+    local rows = db.query([[
+        SELECT c.code, c.created_at,
+               (SELECT COUNT(*) FROM shop_quotes q WHERE q.namespace_id = c.namespace_id AND q.deal_code = c.code)::int AS quotes,
+               (SELECT COUNT(*) FROM shop_orders o WHERE o.namespace_id = c.namespace_id AND o.deal_code = c.code)::int AS orders,
+               ]] .. po_count .. [[::int AS purchase_orders,
+               COALESCE((SELECT NULLIF(concat_ws(', ', NULLIF(q.customer->>'name', ''), NULLIF(q.customer->>'company', '')), '')
+                           FROM shop_quotes q WHERE q.namespace_id = c.namespace_id AND q.deal_code = c.code
+                          ORDER BY q.created_at DESC LIMIT 1),
+                        (SELECT NULLIF(concat_ws(', ', NULLIF(o.customer->>'name', ''), NULLIF(o.customer->>'company', '')), '')
+                           FROM shop_orders o WHERE o.namespace_id = c.namespace_id AND o.deal_code = c.code
+                          ORDER BY o.created_at DESC LIMIT 1)) AS customer
+          FROM shop_deal_codes c
+         WHERE c.namespace_id = ?
+         ORDER BY c.created_at DESC, c.code
+         LIMIT ?]], ns_id, limit)
+    local out = {}
+    for _, r in ipairs(rows) do
+        out[#out + 1] = { deal_code = r.code, created_at = r.created_at, customer = U.nz(r.customer) or U.null,
+                          quotes = tonumber(r.quotes) or 0, orders = tonumber(r.orders) or 0,
+                          purchase_orders = tonumber(r.purchase_orders) or 0 }
+    end
+    return { results = U.arr(out) }
 end
 
 -- ---------------------------------------------------------------------------

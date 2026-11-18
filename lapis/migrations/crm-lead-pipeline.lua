@@ -26,6 +26,9 @@
     [10] crm_partner_profiles (CRM only): companies we pass deals to.
     [11] crm_deal_referrals (CRM only): a deal passed to a partner, through
          to the commission being paid.
+    [12] The AI's PDF report per analysis (crm_lead_analyses.report_key, the
+         file in MinIO) and the new-lead email held until it is ready
+         (crm_leads.alert_held_at). lib/crm/lead-report.lua.
 
     crm_leads is a core table, so [1]-[5] and [8] run in every deployment;
     [6], [7] and [9] skip themselves where their tables don't exist. Every step
@@ -372,5 +375,13 @@ return {
         db.query([[CREATE UNIQUE INDEX IF NOT EXISTS crm_deal_referrals_one_live ON crm_deal_referrals
             (COALESCE(deal_id, 0), COALESCE(lead_id, 0), partner_account_id)
             WHERE status NOT IN ('declined', 'lost', 'cancelled')]])
+    end,
+
+    -- [12] The analysis's PDF report (stored in MinIO) and the new-lead email waiting for it.
+    [12] = function()
+        db.query("ALTER TABLE crm_lead_analyses ADD COLUMN IF NOT EXISTS report_key TEXT")
+        db.query("ALTER TABLE crm_lead_analyses ADD COLUMN IF NOT EXISTS report_bytes INTEGER")
+        db.query("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS alert_held_at TIMESTAMPTZ")
+        db.query("CREATE INDEX IF NOT EXISTS crm_leads_alert_held_idx ON crm_leads (alert_held_at) WHERE alert_held_at IS NOT NULL")
     end,
 }

@@ -46,7 +46,37 @@ export interface StoreOption {
   owner_name?: string;
 }
 
+/** Staff create an order (lapis/queries/ManualOrderQueries.lua): prices come from the products. */
+export interface CreateOrderInput {
+  store_uuid: string;
+  customer: { email: string; first_name?: string; last_name?: string; phone?: string };
+  items: { product_uuid: string; quantity: number }[];
+  shipping_amount?: string;
+  discount_amount?: string;
+  shipping_address?: { name?: string; line1?: string; line2?: string; city?: string; postcode?: string; country?: string; phone?: string };
+  customer_notes?: string;
+  internal_notes?: string;
+  paid?: boolean;
+  /** How they ordered (kept so Sales Orders can tell a phone order from a counter sale). */
+  channel?: 'phone' | 'in_person' | 'email';
+}
+
+export interface CreatedOrder {
+  uuid: string;
+  order_number: string;
+  total_amount: number;
+  currency: string;
+}
+
 export const ordersService = {
+  /** Create an order; the same idempotency key makes a retried click safe. */
+  async createOrder(input: CreateOrderInput, idempotencyKey: string): Promise<CreatedOrder> {
+    const res = await apiClient.post('/api/v2/orders', input, {
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    });
+    return (res.data?.data ?? res.data) as CreatedOrder;
+  },
+
   /**
    * Get orders with server-side pagination, filtering, and role-based access
    */

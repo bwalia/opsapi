@@ -34,6 +34,8 @@ export interface LeadResearch {
 
 export interface LeadAnalysisResult {
   summary: string | null;
+  /** Where the lead came from and what that tells us (analyses from Nov 2026 on). */
+  origin?: string | null;
   wants: string | null;
   intent: string;
   urgency: 'low' | 'medium' | 'high';
@@ -461,6 +463,11 @@ export const leadsService = {
     currency?: string; expected_close_date?: string | null; move?: boolean }) =>
     call<Lead>(apiClient.post(`${L}/${uuid}/qualify`, body, JSON_BODY)),
   analyse: (uuid: string) => call<{ queued: boolean; message: string }>(apiClient.post(`${L}/${uuid}/analyse`, {}, JSON_BODY)),
+  /** The AI's PDF report for the lead (the latest finished analysis). */
+  report: async (uuid: string): Promise<Blob> => {
+    const res = await apiClient.get(`${L}/${uuid}/report`, { responseType: 'blob' });
+    return res.data as Blob;
+  },
   convert: (uuid: string, body: { name?: string; value?: number; currency?: string; expected_close_date?: string }) =>
     call<ConvertResult>(apiClient.post(`${L}/${uuid}/convert`, body, JSON_BODY)),
   bookMeeting: (uuid: string, body: Record<string, unknown>) =>

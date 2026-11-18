@@ -9,26 +9,28 @@
  * header search box dispatches. Keyboard: ↑/↓ to move, ↵ to open, Esc to close.
  * Hand-rolled (no cmdk dependency) — it's just a filtered list + key handling.
  *
- * Shop staff also find deals here: a deal code, WSQ quote number, order number, supplier quote reference or
- * customer email lists the matching deals first, and typing a whole deal code opens its deal page.
+ * It also finds records (GET /api/v2/search, lapis/lib/global-search.lua): customers, leads, accounts, contacts,
+ * invoices, shop orders, quotes, deals, products and stock, suppliers, purchase orders and invoices, employees,
+ * projects... each only for people allowed to see it. Records come first, grouped, then matching pages. Typing a
+ * whole deal code opens its deal page.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, CornerDownLeft, Lock } from 'lucide-react';
+import {
+  Search, CornerDownLeft, Lock, Users, UserPlus, Building2, Contact, Briefcase, FileText, ShoppingCart, FileSignature,
+  Package, Truck, ClipboardCheck, Receipt, UserRound, KanbanSquare, Loader2, type LucideIcon,
+} from 'lucide-react';
 import { useMenu, type MenuItemWithIcon } from '@/hooks';
-import { usePermissions } from '@/contexts/PermissionsContext';
-import { shopService } from '@/services/shop.service';
-import type { ShopDealSearchResult } from '@/types/shop';
+import { searchService } from '@/services/search.service';
 
-type SearchItem = MenuItemWithIcon & { subtitle?: string };
+type SearchItem = MenuItemWithIcon & { subtitle?: string; section?: string };
 
-const DEAL_MATCH: Record<ShopDealSearchResult['matched_by'], string> = {
-  deal_code: 'Deal code',
-  quote_number: 'Quote',
-  order_number: 'Order',
-  supplier_quote_ref: 'Supplier quote ref',
-  customer_email: 'Customer email',
+/** An icon per kind of record (anything new falls back to the search icon). */
+const GROUP_ICON: Record<string, LucideIcon> = {
+  deals: Lock, customers: Users, leads: UserPlus, crm_accounts: Building2, crm_contacts: Contact, crm_deals: Briefcase,
+  invoices: FileText, shop_orders: ShoppingCart, shop_quotes: FileSignature, shop_products: Package, shop_suppliers: Truck,
+  purchase_orders: ClipboardCheck, purchase_invoices: Receipt, employees: UserRound, projects: KanbanSquare,
 };
 
 /** All chars of `q` appear in order in `s` (cheap fuzzy match). */
@@ -57,9 +59,10 @@ function scoreMatch(q: string, it: MenuItemWithIcon): number {
 export function GlobalSearch() {
   const router = useRouter();
   const { allMenu } = useMenu();
-  const { hasPermission } = usePermissions();
-  const canSeeDeals = hasPermission('shop', 'read');
-  const [deals, setDeals] = useState<SearchItem[]>([]);
+  // Records found for `searched` (never shown under a newer query); `searching` while the API answers.
+  const [records, setRecords] = useState<SearchItem[]>([]);
+  const [searched, setSearched] = useState('');
+  const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -99,45 +102,53 @@ export function GlobalSearch() {
     return () => clearTimeout(t);
   }, [open]);
 
-  // Deals (shop staff only): debounced; a whole deal code opens the deal page straight away.
+  // Records (debounced; the API checks what this person may see). A whole deal code opens the deal straight away.
   useEffect(() => {
     const term = query.trim();
-    if (!open || !canSeeDeals || term.length < 3) return;
-    let active = true;
+    if (!open || term.length < 2) return;
+    const ctrl = new AbortController();
     const t = setTimeout(() => {
-      shopService
-        .searchDeals(term)
+      setSearching(true);
+      searchService
+        .search(term, ctrl.signal)
         .then((r) => {
-          if (!active) return;
-          if (r.exact) {
+          if (r.open) {
             setOpen(false);
-            router.push(`/dashboard/shop/deals/${encodeURIComponent(r.exact)}`);
+            router.push(r.open);
             return;
           }
-          setDeals(
-            r.results.map(
-              (d) =>
-                ({
-                  key: `deal:${d.deal_code}`,
-                  name: `Deal ${d.deal_code}`,
-                  path: `/dashboard/shop/deals/${encodeURIComponent(d.deal_code)}`,
-                  module: 'shop',
-                  IconComponent: Lock,
-                  subtitle: `${DEAL_MATCH[d.matched_by] ?? d.matched_by}: ${d.match}${d.customer ? ` · ${d.customer}` : ''}`,
-                }) as unknown as SearchItem,
+          const items: SearchItem[] = [];
+          r.groups.forEach((g) =>
+            g.items.forEach((hit, i) =>
+              items.push({
+                key: `rec:${g.key}:${i}:${hit.path}`,
+                name: hit.title,
+                path: hit.path,
+                module: g.key,
+                IconComponent: GROUP_ICON[g.key] ?? Search,
+                subtitle: hit.subtitle ?? undefined,
+                section: g.label,
+              } as unknown as SearchItem),
             ),
           );
+          setRecords(items);
+          setSearched(term);
         })
-        .catch(() => active && setDeals([]));
+        .catch(() => {
+          if (ctrl.signal.aborted) return;
+          setRecords([]);
+          setSearched(term);
+        })
+        .finally(() => !ctrl.signal.aborted && setSearching(false));
     }, 250);
     return () => {
-      active = false;
+      ctrl.abort();
       clearTimeout(t);
     };
-  }, [query, open, canSeeDeals, router]);
+  }, [query, open, router]);
 
   const results = useMemo<SearchItem[]>(() => {
-    const items = allMenu || [];
+    const items: SearchItem[] = allMenu || [];
     const q = query.trim().toLowerCase();
     if (!q) return items;
     const pages = items
@@ -145,10 +156,10 @@ export function GlobalSearch() {
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((x) => x.it);
-    // Deals only while they still match what is typed (a stale answer is dropped).
-    const live = canSeeDeals && q.length >= 3 ? deals : [];
-    return [...live, ...pages];
-  }, [query, allMenu, deals, canSeeDeals]);
+    // Records only while they still match what is typed (a stale answer is dropped); pages after them.
+    const live = q.length >= 2 && searched.toLowerCase() === q ? records : [];
+    return [...live, ...pages.map((p) => ({ ...p, section: 'Pages' }) as SearchItem)];
+  }, [query, allMenu, records, searched]);
 
   // Keep the highlighted row visible.
   useEffect(() => {
@@ -205,7 +216,7 @@ export function GlobalSearch() {
               setActive(0);
             }}
             onKeyDown={onKeyDown}
-            placeholder={canSeeDeals ? 'Search pages, or find a deal (code, WSQ number, order, email)…' : 'Search pages and modules…'}
+            placeholder="Search customers, orders, invoices, stock, deals, pages…"
             // The palette itself signals focus; the global input focus ring would
             // be clipped by the rounded panel (looked like a cut-off red box).
             style={{ outline: 'none', boxShadow: 'none', border: 'none' }}
@@ -217,6 +228,11 @@ export function GlobalSearch() {
         </div>
 
         <div ref={listRef} className="scrollbar-hidden max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain p-2">
+          {searching && query.trim().length >= 2 && searched.toLowerCase() !== query.trim().toLowerCase() && (
+            <p className="flex items-center gap-2 px-3 py-2 text-xs text-secondary-400" role="status">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Searching records…
+            </p>
+          )}
           {results.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-secondary-400">
               No matches{query ? ` for “${query}”` : ''}.
@@ -225,9 +241,13 @@ export function GlobalSearch() {
             results.map((it, i) => {
               const Icon = it.IconComponent;
               const activeRow = i === active;
+              const heading = query.trim() && it.section && (i === 0 || results[i - 1].section !== it.section) ? it.section : null;
               return (
+                <React.Fragment key={it.key}>
+                {heading && (
+                  <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-secondary-400 first:pt-1">{heading}</p>
+                )}
                 <button
-                  key={it.key}
                   data-idx={i}
                   type="button"
                   onMouseMove={() => setActive(i)}
@@ -249,6 +269,7 @@ export function GlobalSearch() {
                   </span>
                   {activeRow && <CornerDownLeft className="h-4 w-4 shrink-0 text-secondary-300" aria-hidden="true" />}
                 </button>
+                </React.Fragment>
               );
             })
           )}

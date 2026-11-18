@@ -12,6 +12,7 @@
     so every step claims its row with a conditional UPDATE ... RETURNING
     before it notifies anyone: nothing is sent twice.
       every 30 s   next steps due soon / overdue (owner), escalations (managers),
+                   held new-lead emails past their wait (lib/crm/lead-report.lua),
                    nurture dates reached, meeting reminders and outcome prompts
       every 10 s   AI analyses waiting in the queue
       every 6 h    web research older than two years is removed (Google's terms)
@@ -146,6 +147,8 @@ local ai_busy = false
 function Jobs.tick()
     Jobs.due_steps()
     Jobs.nurture_returns()
+    -- New-lead emails that waited too long for the AI report go out without it.
+    require("lib.crm.lead-report").release_overdue()
     if U.crm() then require("lib.crm.lead-meetings").tick() end
 end
 

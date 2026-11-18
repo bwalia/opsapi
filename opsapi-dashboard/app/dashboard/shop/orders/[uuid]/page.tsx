@@ -13,6 +13,7 @@ import { DELIVERY_WINDOW_LABEL, DeliveryChangeRequests, formatDeliveryDate } fro
 import { OrderPaymentNextStep } from '@/components/shop/OrderPaymentActions';
 import { OrderUpdateEmail } from '@/components/shop/OrderUpdateEmail';
 import { CustomerUpdates } from '@/components/shop/CustomerUpdates';
+import { ProofOfDelivery } from '@/components/shop/ProofOfDelivery';
 import { MoreMenu, NextStepPanel, PoNumberField, StatusTimeline, activePurchaseOrder, orderNextStep, orderTimeline, type PanelAction } from '@/components/shop/workflow';
 import { purchaseOrdersService } from '@/services/purchase-orders.service';
 import { Button, Card, ConfirmDialog, Input, Modal, Textarea } from '@/components/ui';
@@ -302,6 +303,8 @@ function OrderDetail() {
             <SectionTitle>Progress</SectionTitle>
             <StatusTimeline items={orderTimeline(order)} />
           </Card>
+
+          <ProofOfDelivery order={order} editable={editable} onChanged={reload} />
 
           <Card>
             <SectionTitle>Customer PO number</SectionTitle>

@@ -28,6 +28,9 @@
       GET  /api/v2/public/supplier-portal/files/:token
 
     Staff routes — RBAC purchase_orders (read / update / delete); supplier logins refused
+      GET  /api/v2/purchase-invoices                                  every supplier invoice / proforma / credit note
+                                                                      across POs: paid, owed, overdue (?q=&state=&kind=
+                                                                      &supplier=&from=&to=&limit=&offset=)
       GET  /api/v2/purchase-orders/:uuid/portal                       the PO page's supplier panels
       POST /api/v2/purchase-orders/:uuid/portal/link                  { supplier_id, confirm? } link to a shop supplier
       POST /api/v2/purchase-orders/:uuid/portal/stage                 { to: acknowledged|cancelled|closed, reason?, force? }
@@ -224,6 +227,15 @@ return function(app)
     -- =====================================================================
     -- staff: the PO page
     -- =====================================================================
+
+    -- Purchase invoices: every supplier invoice, proforma and credit note across POs, with what is paid and owed
+    -- (queries/PurchaseInvoiceQueries.lua). ?q=&state=owed|overdue|paid|unpaid|part_paid|proforma|credit&kind=
+    -- &supplier=&from=&to=&limit=&offset=
+    app:get("/api/v2/purchase-invoices", staff("purchase_orders", "read", function(self, ns_id)
+        local rows, meta = require("queries.PurchaseInvoiceQueries").list(ns_id, self.params)
+        if not rows then return U.from_err(meta) end
+        return U.ok(rows, 200, meta)
+    end))
 
     app:get(PO, staff("purchase_orders", "read", function(self, ns_id)
         return result(Q.staffPanel(ns_id, self.params.uuid))

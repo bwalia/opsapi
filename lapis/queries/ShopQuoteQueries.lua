@@ -901,7 +901,9 @@ end
 
 --- Quick filters for the back office (GET /quotes?filter=…).
 local function quick_filter_sql(name)
-    if name == "awaiting_authorisation" then
+    if name == "open" then -- the shop dashboard's "Open quotes"
+        return "q.status IN ('draft','sent','accepted') AND q.valid_until > NOW()"
+    elseif name == "awaiting_authorisation" then
         return "q.status = 'sent' AND q.order_id IS NULL"
     elseif name == "awaiting_payment" then
         return "q.status = 'accepted' AND (q.order_id IS NULL OR o.status = 'pending_payment')"
@@ -913,7 +915,7 @@ local function quick_filter_sql(name)
     end
     return nil
 end
-ShopQuoteQueries.QUICK_FILTERS = { "awaiting_authorisation", "awaiting_payment", "needs_supplier_po", "bank_transfer_due" }
+ShopQuoteQueries.QUICK_FILTERS = { "open", "awaiting_authorisation", "awaiting_payment", "needs_supplier_po", "bank_transfer_due" }
 
 function ShopQuoteQueries.adminList(ns_id, params)
     params = params or {}

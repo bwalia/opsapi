@@ -72,6 +72,8 @@ import type {
   ShopStockRow,
   ShopDeal,
   ShopDealSearch,
+  ShopRecentDeal,
+  ShopOrderSignatureState,
   ShopSupplierRequest,
   ShopSupplierRequestDraft,
   ShopSupplierRequestInput,
@@ -166,6 +168,10 @@ export interface ShopOrderListParams {
   bank_transfer_due?: boolean;
   /** Paid with no supplier PO yet | a customer's delivery change request is waiting. */
   filter?: 'needs_supplier_po' | 'delivery_change_pending' | '';
+  /** Placed in the last N days. */
+  days?: number;
+  /** Paid in the last N days (the dashboard's revenue). */
+  paid_days?: number;
   limit?: number;
   offset?: number;
 }
@@ -352,6 +358,8 @@ export const shopService = {
       status: params.status,
       q: params.q,
       filter: params.filter || undefined,
+      days: params.days || undefined,
+      paid_days: params.paid_days || undefined,
       limit: params.limit,
       offset: params.offset,
       bank_transfer_due: params.bank_transfer_due ? 'true' : undefined,
@@ -456,11 +464,40 @@ export const shopService = {
     return unwrap<ShopOrder>(res);
   },
 
+  // ---------------- Proof of delivery (the customer's signature) ----------------
+  async getSignature(orderUuid: string): Promise<ShopOrderSignatureState> {
+    const res = await apiClient.get(`${BASE}/orders/${orderUuid}/signature`);
+    return unwrap<ShopOrderSignatureState>(res);
+  },
+
+  /** The signature image (PNG). */
+  async getSignatureImage(orderUuid: string): Promise<Blob> {
+    const res = await apiClient.get(`${BASE}/orders/${orderUuid}/signature/image`, { responseType: 'blob' });
+    return res.data as Blob;
+  },
+
+  /** The customer signs for the order; marks it delivered unless mark_delivered is false. */
+  async signForOrder(orderUuid: string, body: { signer_name: string; image: string; note?: string; mark_delivered?: boolean }): Promise<ShopOrderSignatureState> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/signature`, body, JSON_BODY);
+    return unwrap<ShopOrderSignatureState>(res);
+  },
+
+  async voidSignature(orderUuid: string, reason: string): Promise<ShopOrderSignatureState> {
+    const res = await apiClient.post(`${BASE}/orders/${orderUuid}/signature/void`, { reason }, JSON_BODY);
+    return unwrap<ShopOrderSignatureState>(res);
+  },
+
   // ---------------- Deal codes (private) ----------------
   /** The deal page: customer, quotes, orders, POs, supplier requests, notes, compare table, audit. Logged. */
   async getDeal(code: string): Promise<ShopDeal> {
     const res = await apiClient.get(`${BASE}/deals/${encodeURIComponent(code)}`);
     return unwrap<ShopDeal>(res);
+  },
+
+  /** The newest deals (the Deals page before anyone types). */
+  async recentDeals(limit = 20): Promise<ShopRecentDeal[]> {
+    const res = await apiClient.get(`${BASE}/deals${buildQueryString({ limit })}`);
+    return unwrap<{ results: ShopRecentDeal[] }>(res)?.results ?? [];
   },
 
   /** By deal code, WSQ number, order number, supplier quote reference or customer email. */

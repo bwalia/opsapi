@@ -4,7 +4,8 @@
 
     Runs by itself on every new lead (lib/crm/lead-pipeline.lua after_created)
     and again after a real conversation (a call with notes, a meeting) or when
-    someone asks. It works out:
+    someone asks. Each finished run is also drawn as a PDF report kept in MinIO
+    and linked from the new-lead email (lib/crm/lead-report.lua). It works out:
 
       * what the customer wants, in plain words, and a 0-100 fit score with reasons
       * how big the deal is: an estimated value and range — from a web price
@@ -35,7 +36,7 @@ local Research = require("lib.crm.lead-research")
 
 local AI = {}
 
-AI.PROMPT_VERSION = "lead_analysis.v1"
+AI.PROMPT_VERSION = "lead_analysis.v2"
 AI.ACTIONS = {
     call_now = "Call now", call = "Call", email = "Email them", book_meeting = "Book a meeting",
     qualify = "Qualify", send_quote = "Send a quote", refer_to_partner = "Pass to a partner",
@@ -114,6 +115,7 @@ local function lead_block(lead, ctx)
         "Source: " .. (U.nz(lead.source) or "unknown") .. (U.nz(lead.channel) and (" / " .. lead.channel) or "")
             .. (U.nz(lead.campaign) and (" / campaign " .. lead.campaign) or ""),
         "Landing page: " .. (U.nz(lead.landing_page_url) or "unknown"),
+        "Came from site: " .. (require("lib.crm.lead-report").host(lead.referrer_url) or "unknown"),
         "Already a contact of ours: " .. (ctx.existing_contact and "yes" or "no")
             .. "; earlier enquiries from them: " .. tostring(ctx.earlier_leads),
         "Current stage: " .. tostring(lead.status) .. "; calls so far: " .. tostring(lead.contact_attempts or 0),
@@ -170,6 +172,7 @@ local function prompt(lead, ctx, settings)
         "Return this JSON (keep every key; use null when unknown):",
         [[{
  "summary": "two plain sentences: who they are and what they want",
+ "origin": "one sentence: where this lead came from (website form, email, shop chat, phone, referral, ...) and what that tells us",
  "wants": "what they want to buy or get, in a few words",
  "search_query": "a web search for the typical price of what they want: the product or service and its spec only, NO names, company, email or phone",
  "quantity": number or null,
@@ -215,7 +218,8 @@ end
 function AI.clean(raw, ctx)
     raw = type(raw) == "table" and raw or {}
     local r = {
-        summary = str(raw.summary, 600), wants = str(raw.wants, 300), search_query = str(raw.search_query, 300),
+        summary = str(raw.summary, 600), origin = str(raw.origin, 300), wants = str(raw.wants, 300),
+        search_query = str(raw.search_query, 300),
         quantity = (tonumber(raw.quantity) and tonumber(raw.quantity) > 0 and tonumber(raw.quantity) < 1e9)
             and tonumber(raw.quantity) or cjson.null,
         intent = AI.INTENTS[raw.intent] and raw.intent or "other",
@@ -380,7 +384,7 @@ function AI.run(run)
             or require("lib.crm.lead-access").managers(ns, settings)
         require("lib.crm.lead-notify").send(ns, who, {
             kind = "hot_lead", lead_uuid = lead.uuid,
-            title = "Hot lead (" .. result.score .. "/100): " .. (U.full_name(lead.first_name, lead.last_name) or "new lead"),
+            title = "Hot lead (" .. require("lib.crm.lead-report").rating(result.score) .. "/10): " .. (U.full_name(lead.first_name, lead.last_name) or "new lead"),
             body = (result.summary ~= cjson.null and result.summary or "") .. " Suggested: "
                 .. result.next_best_action.label .. ".",
         })
@@ -406,6 +410,9 @@ function AI.process(limit)
             ngx.log(ngx.ERR, "[crm-leads] analysis ", run.uuid, " failed: ", tostring(err))
             pcall(finish, run, run.lead_id, "failed", { error = "Something went wrong while analysing. Try again." })
         end
+        -- Its PDF report (lib/crm/lead-report.lua), then the new-lead email that was waiting for it.
+        local rok, rerr = pcall(require("lib.crm.lead-report").after_run, run)
+        if not rok then ngx.log(ngx.ERR, "[crm-leads] report for ", run.uuid, ": ", tostring(rerr)) end
     end
     return #claimed
 end

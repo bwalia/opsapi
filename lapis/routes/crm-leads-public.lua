@@ -7,6 +7,8 @@
 
     Endpoints:
     - POST /api/v2/public/leads/:namespace_slug - Submit a lead (no auth required)
+    - GET  /api/v2/public/crm/lead-reports/:token - The AI lead report PDF behind the link in the
+      new-lead email (an HMAC-signed, expiring token: lib/crm/lead-report.lua)
 
     Notifications:
     On a fresh capture, CrmLeadNotificationQueries.notify() fires the configured
@@ -28,6 +30,42 @@ local LeadConfirmation = require("lib.crm.lead-confirmation")
 local ShopUtil = require("lib.shop-util")
 
 return function(app)
+    -- GET /api/v2/public/crm/lead-reports/:token - the AI report linked from the new-lead email.
+    app:get("/api/v2/public/crm/lead-reports/:token",
+        RateLimit.wrap({ rate = 30, window = 60, prefix = "lead_report" }, function(self)
+            local Report = require("lib.crm.lead-report")
+            local function fail(status, message)
+                return { status = status, json = { success = false, error = message } }
+            end
+            local ok, t, why = pcall(Report.verify, self.params.token, ngx.time(), Report.linkKey(),
+                require("lib.supplier-portal-files").hmac)
+            if not ok then
+                ngx.log(ngx.ERR, "[lead-report] verify: ", tostring(t))
+                return fail(503, "Reports aren't available right now")
+            end
+            if not t then
+                return fail(why == "expired" and 410 or 404, why == "expired"
+                    and "This link has expired. Open the lead in OpsAPI to download the report."
+                    or "Report not found")
+            end
+            local lead = db.query("SELECT id FROM crm_leads WHERE uuid::text = ? AND deleted_at IS NULL", t.lead_uuid)[1]
+            if not lead then return fail(404, "Report not found") end
+            local bytes, name_or_status, message = Report.bytes(lead.id, t.analysis_uuid)
+            if not bytes then return fail(name_or_status == 404 and 404 or 503, message) end
+            return {
+                status = 200, layout = false, content_type = "application/pdf",
+                headers = {
+                    ["Content-Disposition"] = 'inline; filename="' .. name_or_status .. '"',
+                    ["Cache-Control"] = "no-store, private",
+                    ["X-Content-Type-Options"] = "nosniff",
+                    ["X-Robots-Tag"] = "noindex, nofollow",
+                    ["Referrer-Policy"] = "no-referrer",
+                },
+                bytes,
+            }
+        end)
+    )
+
     -- POST /api/v2/public/leads/:namespace_slug - Public lead submission
     app:post("/api/v2/public/leads/:namespace_slug",
         RateLimit.wrap({ rate = 10, window = 60, prefix = "public_lead" }, function(self)

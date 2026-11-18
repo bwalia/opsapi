@@ -284,8 +284,21 @@ function PdPageBody({ module, children }: { module?: PdModule; children: React.R
     const canSetup = can('settings', 'manage');
     return (
       <Card className="mx-auto mt-10 max-w-xl text-center">
-        <h2 className="text-lg font-semibold text-secondary-900">Set up Property Deals</h2>
-        <p className="mt-1 text-sm text-secondary-500">This creates the deals board, the roles, the two workflow templates and the bank holidays.</p>
+        <h2 className="text-lg font-semibold text-secondary-900">Property Deals isn’t in use here yet</h2>
+        <p className="mt-1 text-sm text-secondary-500">
+          Property Deals is an add-on for buying, renovating and selling property. Nothing is set up for it in this workspace,
+          so this page is empty.
+        </p>
+        <p className="mt-2 text-sm text-secondary-500">
+          Looking for suppliers of goods or services? They’re under{' '}
+          <Link href="/dashboard/shop/suppliers" className="font-medium text-primary-600 hover:underline">Shop → Suppliers</Link>
+          {' '}and on{' '}
+          <Link href="/dashboard/purchase-orders" className="font-medium text-primary-600 hover:underline">Purchase Orders</Link>.
+          If your business doesn’t deal in property, a workspace admin can turn this add-on off in Apps.
+        </p>
+        {canSetup && (
+          <p className="mt-4 text-sm text-secondary-600">Do you deal in property? Setting it up creates the deals board, the roles, the two workflow templates and the bank holidays.</p>
+        )}
         {canSetup ? (
           <Button
             className="mt-4"
@@ -303,10 +316,10 @@ function PdPageBody({ module, children }: { module?: PdModule; children: React.R
               }
             }}
           >
-            Set up now
+            Set up Property Deals
           </Button>
         ) : (
-          <p className="mt-3 text-sm text-secondary-500">Ask a manager to set it up.</p>
+          <p className="mt-3 text-sm text-secondary-500">A manager can set it up if your business deals in property.</p>
         )}
       </Card>
     );

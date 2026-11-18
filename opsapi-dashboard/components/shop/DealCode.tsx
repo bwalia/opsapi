@@ -116,7 +116,7 @@ export function DealCodeBar({
           <Input
             label="Deal code"
             id="deal-code-link"
-            placeholder="WS-DT5Z-994X"
+            placeholder="The deal code, e.g. WS-…"
             value={value}
             autoFocus
             onChange={(e) => setValue(e.target.value)}
