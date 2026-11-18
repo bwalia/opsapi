@@ -51,6 +51,18 @@ check("from with markup is refused",
 check("over-long from is refused",
     HostedSignin.resolve({ frontend_url = "https://hello-java.demo.opsapi.org", from = ("a"):rep(257) }, trusted) == nil)
 
+print("resolve: prompt=login (fresh sign-in, e.g. before deleting the account)")
+local APP = "https://hello-java.demo.opsapi.org"
+check("no prompt by default", ctx.prompt == nil)
+check("prompt=login is kept", HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "login" }, trusted).prompt
+    == "login")
+check("empty prompt is the same as none",
+    HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "" }, trusted).prompt == nil)
+check("any other prompt is refused", HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "none" }, trusted)
+    == nil and HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "<script>" }, trusted) == nil)
+check("a repeated prompt (table) is refused",
+    HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = { "login", "login" } }, trusted) == nil)
+
 print("headers: nonce CSP, no framing, no caching")
 local h = HostedSignin.headers("abc123")
 check("CSP allows only the nonce'd script", h["Content-Security-Policy"]:find("script-src 'nonce-abc123'", 1, true)
@@ -77,6 +89,22 @@ check("script returns to <app>/auth/callback?token=&redirect=",
     html:find("cfg.frontend + '/auth/callback?token='", 1, true) and html:find("'&redirect='", 1, true))
 check("no Google button when Google isn't configured",
     not HostedSignin.render({ mode = "signin", ctx = ctx, nonce = "n" }):find("/auth/google", 1, true))
+
+print("render: prompt=login skips the single sign-on")
+local fresh_ctx = HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "login" }, trusted)
+local fresh = HostedSignin.render({ mode = "signin", ctx = fresh_ctx, nonce = "n", google = true })
+check("prompt rides in the page config", fresh:find('"prompt":"login"', 1, true))
+check("no prompt in the config without it", not html:find('"prompt"', 1, true))
+local login_branch = fresh:match("if %(cfg%.prompt === 'login'%) {(.-)} else {")
+check("the prompt=login branch has no /auth/refresh call", login_branch ~= nil
+    and not login_branch:find("/auth/refresh", 1, true) and login_branch:find("show('signin')", 1, true))
+check("the SSO call sits only in the else branch",
+    fresh:find("} else {\n    // Single sign-on: an OpsAPI session", 1, true)
+    and select(2, fresh:gsub("'/auth/refresh'", "")) == 1)
+check("still nonce CSP for prompt=login",
+    HostedSignin.headers("q")["Content-Security-Policy"]:find("'nonce-q'", 1, true))
+check("route passes the request params (incl. prompt) to resolve",
+    read("lapis/routes/auth-signin.lua"):find("HostedSignin.resolve(self.params, trusted)", 1, true))
 
 print("render: nothing user-supplied escapes its context")
 local hostile = { frontend = "https://x</script><script>alert(1)</script>", from = "/", app_host = "<b>x</b>" }

@@ -108,12 +108,36 @@ function RefreshToken.create(user_id, device_info)
     -- Generate a family ID for rotation tracking
     local family_id = Global.generateUUID()
 
-    db.query([[
-        INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at)
-        VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW())
+    -- auth_time = this sign-in (migration 440a). Before that migration has
+    -- run the column is missing: store the token without it.
+    local ok = pcall(db.query, [[
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at, auth_time)
+        VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW(), NOW())
     ]], user_id, token_hash, family_id, device_info or db.NULL)
+    if not ok then
+        db.query([[
+            INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at)
+            VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW())
+        ]], user_id, token_hash, family_id, device_info or db.NULL)
+    end
 
     return raw_token
+end
+
+-- When the family's sign-in happened, as epoch seconds: the stored auth_time,
+-- else (rows from before migration 440a) the family's oldest row.
+local FAMILY_START = "(SELECT MIN(f.created_at) FROM refresh_tokens f WHERE f.family_id = ?)::timestamptz"
+
+--- Epoch seconds of the sign-in that started this token's family, or nil.
+-- @param token_id number  refresh_tokens.id
+-- @param family_id string
+function RefreshToken.authTime(token_id, family_id)
+    local ok, rows = pcall(db.query, "SELECT EXTRACT(EPOCH FROM COALESCE(auth_time, " .. FAMILY_START
+        .. "))::bigint AS t FROM refresh_tokens WHERE id = ?", family_id, token_id)
+    if not ok then
+        ok, rows = pcall(db.query, "SELECT EXTRACT(EPOCH FROM " .. FAMILY_START .. ")::bigint AS t", family_id)
+    end
+    return ok and rows and rows[1] and tonumber(rows[1].t) or nil
 end
 
 --- Validate a refresh token and return user info.
@@ -166,6 +190,8 @@ function RefreshToken.validate(raw_token)
         id = row.id,
         user_id = row.user_id,
         family_id = row.family_id,
+        -- The sign-in's time, for the access JWT /auth/refresh mints from this.
+        auth_time = RefreshToken.authTime(row.id, row.family_id),
     }
 end
 
@@ -184,10 +210,19 @@ function RefreshToken.rotate(old_token_id, user_id, family_id, device_info)
     local raw_token = generate_opaque_token()
     local token_hash = hash_token(raw_token)
 
-    db.query([[
-        INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at)
-        VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW())
-    ]], user_id, token_hash, family_id, device_info or db.NULL)
+    -- The new token keeps the family's sign-in time (not NOW(): rotating is
+    -- not signing in). Falls back to the plain insert before migration 440a.
+    local ok = pcall(db.query, [[
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at, auth_time)
+        VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW(),
+            COALESCE((SELECT auth_time FROM refresh_tokens WHERE id = ?), ]] .. FAMILY_START .. [[))
+    ]], user_id, token_hash, family_id, device_info or db.NULL, old_token_id, family_id)
+    if not ok then
+        db.query([[
+            INSERT INTO refresh_tokens (user_id, token_hash, family_id, device_info, expires_at, created_at)
+            VALUES (?, ?, ?, ?, NOW() + INTERVAL ']] .. EXPIRY_SECONDS .. [[ seconds', NOW())
+        ]], user_id, token_hash, family_id, device_info or db.NULL)
+    end
 
     return raw_token
 end

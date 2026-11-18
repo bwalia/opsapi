@@ -154,6 +154,9 @@ function _M.authenticate()
     end
 
     -- Store user info in ngx.ctx
+    -- When this token's sign-in happened (tokens minted before auth_time
+    -- existed: their iat). Recent-sign-in checks read it (lib/account-deletion.lua).
+    ngx.ctx.auth_time = tonumber(jwt_obj.payload.auth_time) or tonumber(jwt_obj.payload.iat)
     ngx.ctx.user = jwt_obj.payload.userinfo
     require("helper.request-context").refresh()
     ngx.log(ngx.NOTICE, "Authentication successful for user: ", tostring(ngx.ctx.user and ngx.ctx.user.uuid or "unknown"))

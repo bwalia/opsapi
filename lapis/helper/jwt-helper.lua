@@ -190,7 +190,10 @@ function JWTHelper.generateNamespaceToken(user, namespace, membership, options)
         namespace_permissions = options.namespace_permissions,
         is_namespace_owner = membership.is_owner,
         namespace_landing_path = namespace_landing_path,
-        expiration = options.expiration
+        expiration = options.expiration,
+        -- Keep the sign-in's time when re-minting (refresh, namespace switch);
+        -- nil = a sign-in happening now.
+        auth_time = options.auth_time,
     })
 end
 

@@ -22,6 +22,12 @@
         POST /auth/2fa/verify   the emailed code
         GET  /auth/google       Google, with the same frontend_url / from
 
+    GET /auth/signin?...&prompt=login skips the single sign-on and always shows
+    the form: the app needs a fresh sign-in (e.g. before deleting the account,
+    which wants an access JWT whose auth_time is under 10 minutes old; a token
+    from /auth/refresh keeps the original sign-in's auth_time, while
+    /auth/login, /auth/2fa/verify and the Google callback mint a new one).
+
     GET /auth/signout?frontend_url=<app origin> ends the OpsAPI session
     (POST /auth/logout) and returns to the app, so the next sign-in prompts.
 
@@ -41,11 +47,13 @@ local HostedSignin = {}
 -- URL and back, so keep it to URL-safe characters and a sane length.
 local FROM_PATTERN = "^[%w%-%._~/]+$"
 local FROM_MAX = 256
+-- `prompt`: absent, or "login" (OpenID Connect's value for "re-authenticate").
+local PROMPTS = { login = true }
 
 --- Validate the request.
--- @param params table  request params (frontend_url, from)
+-- @param params table  request params (frontend_url, from, prompt)
 -- @param trusted function(url) -> origin|nil  (middleware.cors.trustedFrontend)
--- @return { frontend = origin, from = string, app_host = string } | nil, error message
+-- @return { frontend = origin, from = string, app_host = string, prompt = "login"|nil } | nil, error message
 function HostedSignin.resolve(params, trusted)
     local frontend = trusted(params.frontend_url)
     if not frontend then
@@ -58,7 +66,12 @@ function HostedSignin.resolve(params, trusted)
     if type(from) ~= "string" or #from > FROM_MAX or not from:match(FROM_PATTERN) then
         return nil, "The sign-in request is malformed."
     end
-    return { frontend = frontend, from = from, app_host = frontend:match("^https?://(.+)$") }
+    local prompt = params.prompt
+    if prompt == "" then prompt = nil end
+    if prompt ~= nil and not (type(prompt) == "string" and PROMPTS[prompt]) then
+        return nil, "The sign-in request is malformed."
+    end
+    return { frontend = frontend, from = from, app_host = frontend:match("^https?://(.+)$"), prompt = prompt }
 end
 
 local function escape(s)
@@ -175,16 +188,22 @@ local SCRIPT = [[
     return;
   }
 
-  // Single sign-on: an OpsAPI session (refresh cookie) means no prompt at all.
-  post('/auth/refresh', {}).then(function (r) {
-    if (r.ok && r.body.token) {
-      $('checking-text').textContent = 'You are already signed in to OpsAPI. Returning you to ' + cfg.appHost + '…';
-      back(r.body.token);
-    } else {
-      show('signin');
-      $('email').focus();
-    }
-  }, function () { show('signin'); });
+  // prompt=login: the app needs a fresh sign-in, so no single sign-on.
+  if (cfg.prompt === 'login') {
+    show('signin');
+    $('email').focus();
+  } else {
+    // Single sign-on: an OpsAPI session (refresh cookie) means no prompt at all.
+    post('/auth/refresh', {}).then(function (r) {
+      if (r.ok && r.body.token) {
+        $('checking-text').textContent = 'You are already signed in to OpsAPI. Returning you to ' + cfg.appHost + '…';
+        back(r.body.token);
+      } else {
+        show('signin');
+        $('email').focus();
+      }
+    }, function () { show('signin'); });
+  }
 
   var session = null;
   $('signin-form').addEventListener('submit', function (ev) {
@@ -235,7 +254,7 @@ function HostedSignin.render(opts)
 
     -- JSON in a data block: "<" escaped so a value can never close the script tag.
     local cfg = (cjson.encode({
-        mode = opts.mode, frontend = ctx.frontend, from = ctx.from, appHost = ctx.app_host,
+        mode = opts.mode, frontend = ctx.frontend, from = ctx.from, appHost = ctx.app_host, prompt = ctx.prompt,
     }) or "{}"):gsub("<", "\\u003c")
     local scripts = '<script type="application/json" id="cfg">' .. cfg .. '</script>'
         .. '<script nonce="' .. nonce .. '">' .. SCRIPT .. '</script>'

@@ -27,11 +27,14 @@ local APPLE_ISSUER = "https://appleid.apple.com"
 local APPLE_AUTH_URL = "https://appleid.apple.com/auth/authorize"
 local APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 local APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+local APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
 
 local jwks_cache = { keys = nil, fetched_at = 0 }
 local JWKS_TTL = 3600
 
-local client_secret_cache = { jwt = nil, exp = 0 }
+-- client_secret JWTs, one per client_id (the web Services ID and the iOS
+-- bundle ID each need their own: sub = the client_id being used).
+local client_secret_cache = {}
 
 local function base64url_encode(input)
     local b64 = ngx.encode_base64(input)
@@ -336,15 +339,18 @@ function AppleSignIn.verify_identity_token(token)
     return payload, nil
 end
 
-function AppleSignIn.generate_client_secret()
+--- The ES256 client_secret JWT Apple wants on /auth/token and /auth/revoke.
+-- @param client_id string|nil  defaults to APPLE_CLIENT_ID (the web Services ID)
+function AppleSignIn.generate_client_secret(client_id)
+    client_id = (client_id and client_id ~= "") and client_id or Global.getEnvVar("APPLE_CLIENT_ID")
     local now = ngx.time()
-    if client_secret_cache.jwt and now < (client_secret_cache.exp - 60) then
-        return client_secret_cache.jwt
+    local cached = client_id and client_secret_cache[client_id]
+    if cached and now < (cached.exp - 60) then
+        return cached.jwt
     end
 
     local team_id = Global.getEnvVar("APPLE_TEAM_ID")
     local key_id = Global.getEnvVar("APPLE_KEY_ID")
-    local client_id = Global.getEnvVar("APPLE_CLIENT_ID")
     if not team_id or not key_id or not client_id then
         return nil, "APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_CLIENT_ID required"
     end
@@ -386,8 +392,7 @@ function AppleSignIn.generate_client_secret()
     end
 
     local jwt = signing_input .. "." .. base64url_encode(raw_sig)
-    client_secret_cache.jwt = jwt
-    client_secret_cache.exp = exp
+    client_secret_cache[client_id] = { jwt = jwt, exp = exp }
     return jwt
 end
 
@@ -417,7 +422,7 @@ function AppleSignIn.exchange_code(code)
         return nil, "APPLE_CLIENT_ID / APPLE_REDIRECT_URI required"
     end
 
-    local client_secret, secret_err = AppleSignIn.generate_client_secret()
+    local client_secret, secret_err = AppleSignIn.generate_client_secret(client_id)
     if not client_secret then
         return nil, secret_err
     end
@@ -453,6 +458,51 @@ function AppleSignIn.exchange_code(code)
     end
 
     return body
+end
+
+--- Revoke a user's Apple token (account deletion, App Store guideline 5.1.1(v)).
+-- https://developer.apple.com/documentation/sign_in_with_apple/revoke_tokens
+-- @param token string  the refresh (or access) token; never logged
+-- @param token_type_hint string|nil  "refresh_token" (default) or "access_token"
+-- @param client_id string|nil  the client_id the token was issued to (default APPLE_CLIENT_ID)
+-- @return true on HTTP 200, else nil, reason
+function AppleSignIn.revoke_token(token, token_type_hint, client_id)
+    if type(token) ~= "string" or token == "" then
+        return nil, "token required"
+    end
+    client_id = (client_id and client_id ~= "") and client_id or Global.getEnvVar("APPLE_CLIENT_ID")
+    if not client_id then
+        return nil, "APPLE_CLIENT_ID required"
+    end
+    local client_secret, secret_err = AppleSignIn.generate_client_secret(client_id)
+    if not client_secret then
+        return nil, secret_err
+    end
+
+    local httpc = http.new()
+    httpc:set_timeout(10000)
+    local res, err = httpc:request_uri(APPLE_REVOKE_URL, {
+        method = "POST",
+        body = ngx.encode_args({
+            client_id = client_id,
+            client_secret = client_secret,
+            token = token,
+            token_type_hint = token_type_hint or "refresh_token",
+        }),
+        headers = {
+            ["Content-Type"] = "application/x-www-form-urlencoded",
+        },
+        ssl_verify = true,
+    })
+    if not res then
+        return nil, "Apple revoke request failed: " .. tostring(err)
+    end
+    if res.status ~= 200 then
+        local body = cjson.decode(res.body or "")
+        local msg = type(body) == "table" and (body.error_description or body.error) or nil
+        return nil, "Apple revoke error: status " .. tostring(res.status) .. (msg and (" " .. tostring(msg)) or "")
+    end
+    return true
 end
 
 --- Parse the one-time `user` JSON Apple posts on first authorization.

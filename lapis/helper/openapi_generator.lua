@@ -1179,7 +1179,61 @@ local function get_manual_paths()
                         },
                     },
                 },
-                ["401"] = { description = "Unauthorized" },
+                ["401"] = { description = "Not signed in, or the account is deactivated or gone" },
+            },
+        },
+    }
+
+    -- Auth: delete (deactivate) own account. lib/account-deletion.lua
+    paths["/auth/delete-account"] = {
+        post = {
+            tags = { "Authentication" },
+            summary = "Delete (deactivate) the signed-in user's account",
+            description = "Allowed with the account password, or without one when the access token's "
+                .. "auth_time is under 600 seconds old (a recent sign-in; OAuth users have no password). "
+                .. "Otherwise 403 with code reauth_required: sign in again (hosted sign-in: "
+                .. "GET /auth/signin?prompt=login) and retry. Deactivates the user, revokes every session, "
+                .. "revokes the user's Sign in with Apple tokens with Apple and deletes their push device tokens.",
+            operationId = "post_auth_delete_account",
+            security = { { BearerAuth = {} } },
+            requestBody = {
+                required = false,
+                content = {
+                    ["application/json"] = {
+                        schema = {
+                            type = "object",
+                            properties = {
+                                password = { type = "string", description = "Optional with a recent sign-in" },
+                                current_password = { type = "string", description = "Alias of password" },
+                            },
+                        },
+                    },
+                },
+            },
+            responses = {
+                ["200"] = {
+                    description = "Account deactivated",
+                    content = {
+                        ["application/json"] = {
+                            schema = {
+                                type = "object",
+                                properties = {
+                                    message = { type = "string" },
+                                    apple_revoked = {
+                                        type = "boolean",
+                                        nullable = true,
+                                        description = "true: Apple tokens revoked; false: a revoke failed or none "
+                                            .. "was on file for an Apple user; null: not an Apple user",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                ["401"] = { description = "Not signed in" },
+                ["403"] = { description = "code reauth_required (sign in again) or password_incorrect" },
+                ["404"] = { description = "User not found" },
+                ["429"] = { description = "Rate limited" },
             },
         },
     }
