@@ -20,6 +20,8 @@
         namespace_audit_logs index       (namespace_id, entity_type, entity_id): the PO history
     [2] shop_settings.supplier_portal_enabled and supplier_portal_emails_enabled, both default false: the portal
         is off until staff switch it on, and nothing is emailed to suppliers until that is switched on too.
+    [3] "Purchase Invoices" in the menu (Finance, next to Purchase Orders, same RBAC module purchase_orders):
+        every supplier invoice, proforma and credit note across POs (queries/PurchaseInvoiceQueries.lua).
 
     Idempotent: IF NOT EXISTS everywhere, so running it again changes nothing.
 ]]
@@ -227,5 +229,28 @@ return {
             ADD COLUMN IF NOT EXISTS supplier_portal_enabled BOOLEAN NOT NULL DEFAULT false,
             ADD COLUMN IF NOT EXISTS supplier_portal_emails_enabled BOOLEAN NOT NULL DEFAULT false
         ]])
+    end,
+
+    [3] = function()
+        if not table_exists("purchase_order_supplier_invoices") or not table_exists("menu_items") then return end
+        db.query([[
+            INSERT INTO menu_items (uuid, key, name, icon, path, module, required_action, priority, is_active,
+                                    is_admin_only, always_show, settings, created_at, updated_at)
+            SELECT gen_random_uuid()::text, 'purchase_invoices', 'Purchase Invoices', 'Receipt', '/dashboard/purchase-invoices',
+                   'purchase_orders', 'read', 42, true, false, false, '{}', NOW(), NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE key = 'purchase_invoices')
+        ]])
+        -- On wherever Purchase Orders is on.
+        if table_exists("namespace_menu_config") then
+            db.query([[
+                INSERT INTO namespace_menu_config (uuid, namespace_id, menu_item_id, is_enabled, created_at, updated_at)
+                SELECT gen_random_uuid()::text, c.namespace_id, pi.id, c.is_enabled, NOW(), NOW()
+                  FROM namespace_menu_config c
+                  JOIN menu_items po ON po.id = c.menu_item_id AND po.key = 'purchase_orders'
+                  CROSS JOIN menu_items pi
+                 WHERE pi.key = 'purchase_invoices'
+                   AND NOT EXISTS (SELECT 1 FROM namespace_menu_config x WHERE x.namespace_id = c.namespace_id AND x.menu_item_id = pi.id)
+            ]])
+        end
     end,
 }
