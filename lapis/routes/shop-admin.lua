@@ -103,6 +103,15 @@
                                                email is sent from here; WhatsApp / text return the link to open.
                                                Recorded on the deal (queries/ShopSupplierRequestQueries.lua)
       POST              /quotes/:uuid/deal-code | /orders/:uuid/deal-code   { deal_code } or { new: true }: link by hand
+
+    Stock enquiries (queries/ShopStockEnquiryQueries.lua: "have you got this in stock?" from a product; no deal)
+      GET               /products/:uuid/stock-enquiry?supplier=&qty=&note=   the message ready to send
+                                               { product, supplier, qty, subject, body }
+      POST              /products/:uuid/stock-enquiry   { supplier_uuid, channel email|whatsapp|sms, qty?, subject?, message }
+                                               email is sent from here; WhatsApp / text return the link to open
+      GET               /stock-enquiries        (?product=&supplier=&limit=) newest first
+      PUT/DELETE        /stock-enquiries/:uuid  the answer { stock_qty, lead_time, unit_price_minor (ex VAT), valid_until,
+                                               supplier_quote_ref, notes }
 ]]
 
 local U = require("lib.shop-util")
@@ -431,6 +440,38 @@ return function(app)
         if not body then return bad end
         return result(SupplierRequest.send(ns_id, self.params.uuid, body, me(self)))
     end))
+
+    -- Stock enquiries from a product (no customer, no deal): the message ready, then send (email) or open (WhatsApp / text).
+    local StockEnquiry = require("queries.ShopStockEnquiryQueries")
+    app:get(BASE .. "/products/:uuid/stock-enquiry", guard("update", function(self, ns_id)
+        return result(StockEnquiry.draft(ns_id, self.params.uuid,
+            { supplier = self.params.supplier, qty = self.params.qty, note = self.params.note }, me(self)))
+    end))
+
+    app:post(BASE .. "/products/:uuid/stock-enquiry", guard("create", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return result(StockEnquiry.send(ns_id, self.params.uuid, body, me(self)))
+    end))
+
+    app:get(BASE .. "/stock-enquiries", guard("read", function(self, ns_id)
+        return U.ok(StockEnquiry.list(ns_id, { product_uuid = self.params.product, supplier_uuid = self.params.supplier,
+            limit = self.params.limit }))
+    end))
+
+    app:match(BASE .. "/stock-enquiries/:uuid", function(self)
+        local m = ngx.req.get_method()
+        if m == "PUT" or m == "PATCH" then
+            return guard("update", function(s, ns_id)
+                local body, bad = body_or_400()
+                if not body then return bad end
+                return result(StockEnquiry.update(ns_id, s.params.uuid, body, user_id(s)))
+            end)(self)
+        elseif m == "DELETE" then
+            return guard("delete", function(s, ns_id) return result(StockEnquiry.delete(ns_id, s.params.uuid, user_id(s))) end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
 
     for _, kind in ipairs({ "quote", "order" }) do
         app:post(BASE .. "/" .. kind .. "s/:uuid/deal-code", guard("update", function(self, ns_id)

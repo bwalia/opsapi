@@ -535,7 +535,7 @@ function D.search(ns_id, q)
         [[SELECT deal_code, 'order_number', order_number, created_at FROM shop_orders
            WHERE namespace_id = ? AND deal_code IS NOT NULL AND order_number ILIKE ?]],
         [[SELECT deal_code, 'supplier_quote_ref', supplier_quote_ref, created_at FROM shop_supplier_requests
-           WHERE namespace_id = ? AND supplier_quote_ref ILIKE ?]],
+           WHERE namespace_id = ? AND deal_code IS NOT NULL AND supplier_quote_ref ILIKE ?]],
         [[SELECT deal_code, 'customer_email', customer->>'email', created_at FROM shop_quotes
            WHERE namespace_id = ? AND deal_code IS NOT NULL AND customer->>'email' ILIKE ?]],
         [[SELECT deal_code, 'customer_email', email, created_at FROM shop_orders
@@ -697,7 +697,8 @@ end
 
 local function get_request(ns_id, uuid)
     return db.query("SELECT r.id, " .. REQUEST_COLS .. [[ FROM shop_supplier_requests r
-        LEFT JOIN shop_suppliers s ON s.id = r.supplier_id WHERE r.namespace_id = ? AND r.uuid = ?]], ns_id, uuid)[1]
+        LEFT JOIN shop_suppliers s ON s.id = r.supplier_id
+        WHERE r.namespace_id = ? AND r.uuid = ? AND r.deal_code IS NOT NULL]], ns_id, uuid)[1] -- stock enquiries: ShopStockEnquiryQueries
 end
 
 function D.createRequest(ns_id, raw_code, body, user_id)

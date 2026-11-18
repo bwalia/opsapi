@@ -24,7 +24,11 @@
         request was sent (shop_supplier_requests.channel email|whatsapp|sms, message = what was sent), for
         "Ask a supplier" on the quote page (queries/ShopSupplierRequestQueries.lua).
 
-    Registered in migrations.lua as zzs55–zzs57 and zzs65. Idempotent.
+    [5] Stock enquiries (queries/ShopStockEnquiryQueries.lua): "have you got this in stock?" to a supplier from
+        a product, with no customer and no deal. shop_supplier_requests.kind price|stock (default price),
+        product_id, and deal_code may be NULL, only for a stock enquiry. Deal screens never show them.
+
+    Registered in migrations.lua as zzs55–zzs57, zzs65 and zzs66. Idempotent.
 ]]
 
 local db = require("lapis.db")
@@ -112,5 +116,27 @@ return {
                    CHECK (channel IS NULL OR channel IN ('email', 'whatsapp', 'sms'))]])
         db.query([[ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS message text
                    CHECK (message IS NULL OR char_length(message) <= 8000)]])
+    end,
+
+    [5] = function()
+        if not table_exists("shop_supplier_requests") then return end
+        db.query([[ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS kind varchar(16) NOT NULL DEFAULT 'price'
+                   CHECK (kind IN ('price', 'stock'))]])
+        if table_exists("shop_products") then
+            db.query([[ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS product_id integer
+                       REFERENCES shop_products(id) ON DELETE SET NULL]])
+        else
+            db.query("ALTER TABLE shop_supplier_requests ADD COLUMN IF NOT EXISTS product_id integer")
+        end
+        db.query("ALTER TABLE shop_supplier_requests ALTER COLUMN deal_code DROP NOT NULL")
+        -- A price request always belongs to a deal; only a stock enquiry may have none.
+        db.query([[DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shop_supplier_requests_deal_or_stock') THEN
+                ALTER TABLE shop_supplier_requests ADD CONSTRAINT shop_supplier_requests_deal_or_stock
+                    CHECK (deal_code IS NOT NULL OR kind = 'stock');
+            END IF;
+        END $$]])
+        db.query([[CREATE INDEX IF NOT EXISTS shop_supplier_requests_stock_idx
+                   ON shop_supplier_requests (namespace_id, product_id, created_at) WHERE kind = 'stock']])
     end,
 }
