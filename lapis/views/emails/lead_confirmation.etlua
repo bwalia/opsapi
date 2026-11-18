@@ -1,6 +1,41 @@
 <h2>Thank you<% if first_name and first_name ~= "" then %>, <%= first_name %><% end %>!</h2>
 
-<% if confirmation then %>
+<% if confirmation and confirmation.kind == "product_details" then %>
+  <p><%= confirmation.intro or "Here are the details you asked for." %></p>
+
+  <h3 style="margin: 16px 0 4px;"><%= confirmation.product_name %></h3>
+  <% if confirmation.summary then %><p style="margin: 0 0 8px;"><%= confirmation.summary %></p><% end %>
+  <% if confirmation.price then %><p style="margin: 0 0 4px;"><strong><%= confirmation.price %></strong></p><% end %>
+  <% if confirmation.availability then %><p style="margin: 0 0 12px;"><%= confirmation.availability %></p><% end %>
+
+  <% if confirmation.specs and #confirmation.specs > 0 then %>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 14px;">
+      <% for _, row in ipairs(confirmation.specs) do %>
+        <tr>
+          <td style="padding: 6px 12px 6px 0; border-bottom: 1px solid #e3e1ee; color: #5b5876; vertical-align: top; width: 38%;"><%= row.label %></td>
+          <td style="padding: 6px 0; border-bottom: 1px solid #e3e1ee; vertical-align: top;"><%= row.value %></td>
+        </tr>
+      <% end %>
+    </table>
+  <% end %>
+
+  <% if confirmation.product_url or confirmation.sheet_url then %>
+    <p style="margin: 0 0 16px;">
+      <% if confirmation.product_url then %><a href="<%= confirmation.product_url %>">View the product, with prices and options</a><% end %>
+      <% if confirmation.product_url and confirmation.sheet_url then %> · <% end %>
+      <% if confirmation.sheet_url then %><a href="<%= confirmation.sheet_url %>">Download the product sheet (PDF)</a><% end %>
+    </p>
+  <% end %>
+
+  <% if confirmation.handover then %>
+    <p><%= confirmation.handover %></p>
+  <% end %>
+  <% if confirmation.call_phone then %>
+    <p>Questions? Call us on <% if confirmation.call_url then %><a href="<%= confirmation.call_url %>"><%= confirmation.call_phone %></a><% else %><%= confirmation.call_phone %><% end %>, or just reply to this email.</p>
+  <% else %>
+    <p>Questions? Just reply to this email.</p>
+  <% end %>
+<% elseif confirmation then %>
   <p><%= confirmation.intro or "We've got your build and one of our engineers is looking at it now." %></p>
 
   <% if confirmation.highlights and #confirmation.highlights > 0 then %>

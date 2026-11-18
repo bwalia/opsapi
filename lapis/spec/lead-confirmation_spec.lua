@@ -54,11 +54,33 @@ check("nil input", LC.sanitize(nil) == nil)
 check("string input", LC.sanitize("x") == nil)
 check("only blanks", LC.sanitize({ highlights = { "", "   " }, call_url = "ftp://x" }) == nil)
 
+print("product details (the shop's \"Email me the details\")")
+local specs = {}
+for i = 1, 15 do specs[i] = { label = "Row " .. i, value = "Value " .. i } end
+local pd = LC.sanitize({
+    kind = "product_details", subject = "Your product details: Dell PowerEdge XE9785", product_name = "  Dell PowerEdge XE9785  ",
+    price = "Price on request", availability = "Usually dispatched in 10 working days", summary = "8x AMD Instinct MI355X",
+    product_url = "https://shop.workstation.co.uk/p/dell-poweredge-xe9785",
+    sheet_url = "https://shop.workstation.co.uk/api/products/dell-poweredge-xe9785/sheet",
+    specs = specs,
+})
+check("kind kept", pd and pd.kind == "product_details")
+check("name trimmed", pd and pd.product_name == "Dell PowerEdge XE9785")
+check("links kept", pd and pd.product_url and pd.sheet_url)
+check("at most 12 spec rows", pd and #pd.specs == 12, pd and #pd.specs)
+check("a product email with no name is dropped", LC.sanitize({ kind = "product_details", product_url = "https://x.example/p" }) == nil)
+local bad = LC.sanitize({ kind = "product_details", product_name = "X", product_url = "http://evil.example/p", sheet_url = "javascript:alert(1)",
+                          specs = { { label = "ok", value = "fine" }, { label = { "table" }, value = "dropped" }, "not a row" } })
+check("non-https links dropped", bad and bad.product_url == nil and bad.sheet_url == nil)
+check("malformed spec rows dropped", bad and #bad.specs == 1)
+
 print("wiring")
 local route = read("lapis/routes/crm-leads-public.lua")
 check("public route honours confirmation only for the shop BFF",
     route:find("secure_equals", 1, true) ~= nil and route:find("SHOP_BFF_KEY", 1, true) ~= nil and route:find("LeadConfirmation.sanitize", 1, true) ~= nil)
 local tpl = read("lapis/views/emails/lead_confirmation.etlua")
+check("template has the product layout", tpl:find('confirmation.kind == "product_details"', 1, true) ~= nil
+    and tpl:find("Download the product sheet (PDF)", 1, true) ~= nil)
 check("template no longer says no action is required", not tpl:lower():find("no action is required", 1, true))
 check("template escapes highlights (<%= not <%-)", tpl:find("<%= h %>", 1, true) ~= nil)
 
