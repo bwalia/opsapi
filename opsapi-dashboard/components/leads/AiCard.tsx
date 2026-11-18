@@ -13,9 +13,9 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, Copy, ExternalLink, FileDown, Globe2, Loader2, Mail, MessageCircle, RefreshCw, Sparkles, Wand2,
+  AlertTriangle, Copy, ExternalLink, FileDown, FileText, Globe2, Loader2, Mail, MessageCircle, RefreshCw, Sparkles, Wand2,
 } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Modal } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { leadError, leadsService, type Lead, type NextAction } from '@/services/leads.service';
 import { money, ScoreBadge } from './ui';
@@ -39,20 +39,14 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
   const r = a?.result ?? null;
   const running = a && (a.status === 'pending' || a.status === 'running');
 
-  const [downloading, setDownloading] = useState(false);
-  // The PDF report of the latest finished analysis (the same one the new-lead email links to).
-  const download = async () => {
-    setDownloading(true);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [reportUrl, setReportUrl] = useState<string | null>(null);
+  // Preview the PDF report of the latest finished analysis (the same one the new-lead email links to).
+  const openReport = async () => {
+    setLoadingReport(true);
     try {
       const blob = await leadsService.report(lead.uuid);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `lead-report-${lead.uuid.slice(0, 8)}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setReportUrl(URL.createObjectURL(new Blob([blob], { type: 'application/pdf' })));
     } catch (e) {
       let message = leadError(e).message;
       // An error comes back as a JSON blob when we asked for a file.
@@ -62,8 +56,12 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
       }
       toast.error(message);
     } finally {
-      setDownloading(false);
+      setLoadingReport(false);
     }
+  };
+  const closeReport = () => {
+    if (reportUrl) URL.revokeObjectURL(reportUrl);
+    setReportUrl(null);
   };
 
   const rerun = async () => {
@@ -140,8 +138,8 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
           {r.wants && <p className="mt-1 text-xs text-secondary-500">Wants: <span className="font-medium text-secondary-700">{r.wants}</span></p>}
           {r.origin && <p className="mt-1 text-xs text-secondary-500">Where it came from: <span className="text-secondary-700">{r.origin}</span></p>}
         </div>
-        <Button variant="outline" size="sm" onClick={download} isLoading={downloading} leftIcon={<FileDown className="h-3.5 w-3.5" />}>
-          Report (PDF)
+        <Button variant="outline" size="sm" onClick={openReport} isLoading={loadingReport} leftIcon={<FileText className="h-3.5 w-3.5" />}>
+          View report
         </Button>
       </div>
 
@@ -257,6 +255,29 @@ export function AiCard({ lead, canWork, onAction, onRefresh }: {
       <p className="mt-4 text-[11px] text-secondary-400">
         {a.model ? `${a.provider_name ?? 'AI'} · ${a.model}` : 'AI'} · {a.finished_at ? new Date(a.finished_at).toLocaleString() : ''}. Suggestions only — check before acting.
       </p>
+
+      <Modal
+        isOpen={!!reportUrl}
+        onClose={closeReport}
+        size="3xl"
+        title="AI lead report"
+        description="The same PDF the new-lead email links to."
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeReport}>Close</Button>
+            {reportUrl && (
+              <a href={reportUrl} download={`lead-report-${lead.uuid.slice(0, 8)}.pdf`}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700">
+                <FileDown className="h-4 w-4" aria-hidden="true" />Download
+              </a>
+            )}
+          </>
+        }
+      >
+        <div className="h-[70vh] w-full overflow-hidden rounded-lg border border-secondary-200 bg-secondary-50">
+          {reportUrl && <iframe src={reportUrl} title="AI lead report" className="h-full w-full" />}
+        </div>
+      </Modal>
     </section>
   );
 }

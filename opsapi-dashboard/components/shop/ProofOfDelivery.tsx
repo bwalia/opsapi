@@ -104,6 +104,7 @@ export function ProofOfDelivery({ order, editable, onChanged }: { order: ShopOrd
       await shopService.voidSignature(order.uuid, reason.trim());
       toast.success('Signature taken back');
       await load();
+      onChanged(); // its "signed for" update is no longer shown to the customer
     } catch (e) {
       toast.error(extractApiError(e, 'Could not take the signature back'));
     } finally {

@@ -14,48 +14,28 @@ cjson.encode_empty_table_as_object(false)
 
 return function(app)
 
-    -- Helper function to get user's role
-    local function getUserRole(user_uuid)
-        local result = db.query([[
-            SELECT r.role_name
-            FROM user__roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN users u ON ur.user_id = u.id
-            WHERE u.uuid = ?
-            LIMIT 1
-        ]], user_uuid)
-        return result and result[1] and result[1].role_name or nil
-    end
+    local NamespaceMiddleware = require("middleware.namespace")
 
-    -- Helper function to get user's stores (for sellers)
-    local function getUserStores(user_uuid)
-        local result = db.query([[
-            SELECT s.id, s.uuid, s.name
-            FROM stores s
-            JOIN users u ON s.user_id = u.id
-            WHERE u.uuid = ?
-        ]], user_uuid)
-        return result or {}
+    -- Every route here works on the current workspace's orders (X-Namespace-*) and needs the workspace's
+    -- `orders` permission. Orders placed by checkout before orders had a workspace belong to their store's.
+    -- (It used to go by platform role: a platform admin saw every tenant's orders, a seller their own stores'.)
+    local function guard(action, handler)
+        return AuthMiddleware.requireAuth(NamespaceMiddleware.requirePermission("orders", action, handler))
+    end
+    local function scope(self)
+        return "COALESCE(o.namespace_id, s.namespace_id) = " .. math.floor(tonumber(self.namespace.id))
+    end
+    -- Platform admins still see who the seller is.
+    local function role_of(self) return self.is_platform_admin and "administrative" or "member" end
+    -- The order when it belongs to this workspace (else nil: answered as 404, never "not yours").
+    local function workspace_order(self, uuid)
+        return db.query("SELECT o.* FROM orders o LEFT JOIN stores s ON s.id = o.store_id WHERE o.uuid = ? AND "
+            .. scope(self), tostring(uuid or ""))[1]
     end
 
     -- Helper function to build WHERE clause for filters
-    local function buildWhereClause(params, user_role, user_stores)
-        local conditions = {}
-
-        -- Role-based filtering
-        if user_role ~= "administrative" then
-            -- Seller: only see orders from their stores
-            if #user_stores > 0 then
-                local store_ids = {}
-                for _, store in ipairs(user_stores) do
-                    table.insert(store_ids, store.id)
-                end
-                table.insert(conditions, "o.store_id IN (" .. table.concat(store_ids, ",") .. ")")
-            else
-                -- No stores, return no orders
-                table.insert(conditions, "1 = 0")
-            end
-        end
+    local function buildWhereClause(params, self)
+        local conditions = { scope(self) }
 
         -- Status filter
         if params.status and params.status ~= "" and params.status ~= "all" then
@@ -104,10 +84,8 @@ return function(app)
 
     -- Get orders with role-based access control and server-side pagination
     app:match("orders", "/api/v2/orders", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
-            local user_uuid = self.current_user.uuid
-            local user_role = getUserRole(user_uuid)
-            local user_stores = getUserStores(user_uuid)
+        GET = guard("read", function(self)
+            local user_role = role_of(self)
 
             -- Pagination params
             local page = Global.pageParam(self.params.page)
@@ -131,7 +109,7 @@ return function(app)
             order_dir = order_dir == "asc" and "ASC" or "DESC"
 
             -- Build WHERE clause
-            local where_clause = buildWhereClause(self.params, user_role, user_stores)
+            local where_clause = buildWhereClause(self.params, self)
 
             -- Get total count
             local count_query = [[
@@ -289,42 +267,18 @@ return function(app)
 
     -- Get order statistics for dashboard (MUST be before :id route)
     app:match("order_stats", "/api/v2/orders/stats", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
-            local user_role = getUserRole(self.current_user.uuid)
-            local user_stores = getUserStores(self.current_user.uuid)
-
-            local where_clause = ""
-            if user_role ~= "administrative" then
-                if #user_stores > 0 then
-                    local store_ids = {}
-                    for _, store in ipairs(user_stores) do
-                        table.insert(store_ids, store.id)
-                    end
-                    where_clause = "WHERE store_id IN (" .. table.concat(store_ids, ",") .. ")"
-                else
-                    return {
-                        json = {
-                            total_orders = 0,
-                            pending_orders = 0,
-                            processing_orders = 0,
-                            delivered_orders = 0,
-                            total_revenue = 0
-                        }
-                    }
-                end
-            end
-
+        GET = guard("read", function(self)
             local stats = db.query([[
                 SELECT
                     COUNT(*) as total_orders,
-                    COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
-                    COUNT(CASE WHEN status IN ('confirmed', 'processing') THEN 1 END) as processing_orders,
-                    COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered_orders,
-                    COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_orders,
-                    COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total_amount ELSE 0 END), 0) as total_revenue,
-                    COALESCE(SUM(CASE WHEN status = 'pending' THEN total_amount ELSE 0 END), 0) as pending_revenue
-                FROM orders
-            ]] .. where_clause)
+                    COUNT(CASE WHEN o.status = 'pending' THEN 1 END) as pending_orders,
+                    COUNT(CASE WHEN o.status IN ('confirmed', 'processing') THEN 1 END) as processing_orders,
+                    COUNT(CASE WHEN o.status = 'delivered' THEN 1 END) as delivered_orders,
+                    COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_orders,
+                    COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total_amount ELSE 0 END), 0) as total_revenue,
+                    COALESCE(SUM(CASE WHEN o.status = 'pending' THEN o.total_amount ELSE 0 END), 0) as pending_revenue
+                FROM orders o LEFT JOIN stores s ON s.id = o.store_id
+                WHERE ]] .. scope(self))
 
             return {
                 json = stats and stats[1] or {
@@ -340,43 +294,24 @@ return function(app)
 
     -- Get all stores for filter dropdown (MUST be before :id route)
     app:match("orders_stores", "/api/v2/orders/stores", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
-            local user_role = getUserRole(self.current_user.uuid)
-            local user_stores = getUserStores(self.current_user.uuid)
-
-            local stores
-            if user_role == "administrative" then
-                -- Admin sees all stores
-                stores = db.query([[
-                    SELECT s.uuid, s.name, u.first_name || ' ' || u.last_name as owner_name
-                    FROM stores s
-                    LEFT JOIN users u ON s.user_id = u.id
-                    ORDER BY s.name
-                ]])
-            else
-                -- Seller sees only their stores
-                stores = user_stores
-            end
-
-            return { json = { data = stores or {} } }
+        GET = guard("read", function(self)
+            local stores = db.query([[
+                SELECT s.uuid, s.name, u.first_name || ' ' || u.last_name as owner_name
+                FROM stores s
+                LEFT JOIN users u ON s.user_id = u.id
+                WHERE s.namespace_id = ?
+                ORDER BY s.name
+            ]], self.namespace.id)
+            return { json = { data = setmetatable(stores or {}, cjson.array_mt) } }
         end)
     }))
 
     -- Get orders for a specific store (store owner or admin)
     app:match("store_orders", "/api/v2/stores/:store_id/orders", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
+        GET = guard("read", function(self)
             local store_id = self.params.store_id
-
-            -- Get user's store ownership or admin status
-            local user_stores = db.select("id from stores where uuid = ? and user_id = (select id from users where uuid = ?)",
-                store_id, self.current_user.uuid)
-
-            if not user_stores or #user_stores == 0 then
-                -- Check if user is admin
-                local user_role = getUserRole(self.current_user.uuid)
-                if user_role ~= "administrative" then
-                    return { json = { error = "Access denied - not your store" }, status = 403 }
-                end
+            if not db.query("SELECT 1 AS ok FROM stores WHERE uuid = ? AND namespace_id = ?", store_id, self.namespace.id)[1] then
+                return { json = { error = "Store not found" }, status = 404 }
             end
 
             -- Pagination
@@ -438,10 +373,9 @@ return function(app)
 
     -- Get single order with details (includes delivery partner info)
     app:match("order_details", "/api/v2/orders/:id", respond_to({
-        GET = AuthMiddleware.requireAuth(function(self)
+        GET = guard("read", function(self)
             local order_id = self.params.id
-            local user_role = getUserRole(self.current_user.uuid)
-            local user_stores = getUserStores(self.current_user.uuid)
+            local user_role = role_of(self)
 
             -- Get order with store and delivery partner info
             local orders = db.query([[
@@ -455,6 +389,7 @@ return function(app)
                        s.name as store_name,
                        s.uuid as store_uuid,
                        s.user_id as store_owner_id,
+                       s.namespace_id as store_namespace_id,
                        u.uuid as seller_uuid,
                        u.first_name as seller_first_name,
                        u.last_name as seller_last_name,
@@ -492,18 +427,10 @@ return function(app)
 
             local order = orders[1]
 
-            -- Access control: admin can see all, seller can only see their store orders
-            if user_role ~= "administrative" then
-                local has_access = false
-                for _, store in ipairs(user_stores) do
-                    if store.id == order.store_id then
-                        has_access = true
-                        break
-                    end
-                end
-                if not has_access then
-                    return { json = { error = "Access denied" }, status = 403 }
-                end
+            -- Only this workspace's orders (an older checkout order by its store's workspace).
+            local order_ns = tonumber(order.namespace_id) or tonumber(order.store_namespace_id)
+            if order_ns ~= tonumber(self.namespace.id) then
+                return { json = { error = "Order not found" }, status = 404 }
             end
 
             -- Get order items with product details
@@ -539,8 +466,8 @@ return function(app)
             -- Get order history
             local history = db.query([[
                 SELECT
-                    id, uuid, action, previous_status, new_status,
-                    notes, tracking_number, tracking_url, created_at
+                    id, action, old_status AS previous_status, new_status, old_financial_status, new_financial_status,
+                    notes, tracking_number, carrier, created_at
                 FROM order_history
                 WHERE order_id = ?
                 ORDER BY created_at DESC
@@ -644,30 +571,10 @@ return function(app)
             return { json = order }
         end),
 
-        PUT = AuthMiddleware.requireAuth(function(self)
+        PUT = guard("update", function(self)
             local order_id = self.params.id
-            local user_role = getUserRole(self.current_user.uuid)
-            local user_stores = getUserStores(self.current_user.uuid)
-
-            -- Get order
-            local order = db.query("SELECT * FROM orders WHERE uuid = ?", order_id)
-            if not order or #order == 0 then
+            if not workspace_order(self, order_id) then
                 return { json = { error = "Order not found" }, status = 404 }
-            end
-            order = order[1]
-
-            -- Access control
-            if user_role ~= "administrative" then
-                local has_access = false
-                for _, store in ipairs(user_stores) do
-                    if store.id == order.store_id then
-                        has_access = true
-                        break
-                    end
-                end
-                if not has_access then
-                    return { json = { error = "Access denied" }, status = 403 }
-                end
             end
 
             -- Only the order's notes, addresses and delivery tracking change here. Status and payment go through
@@ -678,13 +585,10 @@ return function(app)
             return { json = OrderQueries.update(order_id, changes), status = 200 }
         end),
 
-        DELETE = AuthMiddleware.requireAuth(function(self)
+        DELETE = guard("delete", function(self)
             local order_id = self.params.id
-            local user_role = getUserRole(self.current_user.uuid)
-
-            -- Only admin can delete orders
-            if user_role ~= "administrative" then
-                return { json = { error = "Access denied - admin only" }, status = 403 }
+            if not workspace_order(self, order_id) then
+                return { json = { error = "Order not found" }, status = 404 }
             end
 
             return { json = OrderQueries.destroy(order_id), status = 200 }
@@ -693,42 +597,17 @@ return function(app)
 
     -- Update order status with validation and audit trail
     app:match("update_order_status", "/api/v2/orders/:id/status", respond_to({
-        PUT = AuthMiddleware.requireAuth(function(self)
+        PUT = guard("update", function(self)
             local order_id = self.params.id
-            local user_role = getUserRole(self.current_user.uuid)
-            local user_stores = getUserStores(self.current_user.uuid)
 
             local new_status = self.params.status
             local new_financial_status = self.params.financial_status
             local new_fulfillment_status = self.params.fulfillment_status
             local notes = self.params.notes
 
-            -- Get order
-            local orders = db.query([[
-                SELECT o.*, s.id as store_id_check
-                FROM orders o
-                LEFT JOIN stores s ON o.store_id = s.id
-                WHERE o.uuid = ?
-            ]], order_id)
-
-            if not orders or #orders == 0 then
+            local order = workspace_order(self, order_id)
+            if not order then
                 return { json = { error = "Order not found" }, status = 404 }
-            end
-
-            local order = orders[1]
-
-            -- Access control
-            if user_role ~= "administrative" then
-                local has_access = false
-                for _, store in ipairs(user_stores) do
-                    if store.id == order.store_id then
-                        has_access = true
-                        break
-                    end
-                end
-                if not has_access then
-                    return { json = { error = "Access denied" }, status = 403 }
-                end
             end
 
             -- Validate status transitions
@@ -752,15 +631,20 @@ return function(app)
             db.update("orders", update_data, "uuid = ?", order_id)
 
             -- Create audit trail entry
-            if new_status and new_status ~= previous_status then
-                local Global = require("helper.global")
+            -- (order_history: migrations/order-management-enhancement.lua; it has no uuid column.)
+            if (new_status and new_status ~= previous_status)
+                or (new_financial_status and new_financial_status ~= order.financial_status) then
+                local me = self.current_user and self.current_user.uuid
+                    and db.query("SELECT id FROM users WHERE uuid = ?", self.current_user.uuid)[1]
                 db.insert("order_history", {
-                    uuid = Global.generateUUID(),
                     order_id = order.id,
+                    user_id = me and me.id or db.NULL,
                     action = "status_change",
-                    previous_status = previous_status,
-                    new_status = new_status,
-                    notes = notes,
+                    old_status = previous_status,
+                    new_status = new_status or previous_status,
+                    old_financial_status = order.financial_status or db.NULL,
+                    new_financial_status = new_financial_status or order.financial_status or db.NULL,
+                    notes = type(notes) == "string" and notes:sub(1, 2000) or db.NULL,
                     created_at = db.format_date()
                 })
             end

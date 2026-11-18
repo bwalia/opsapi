@@ -1,0 +1,24 @@
+<h2>Thank you for your purchase<% if store_name and store_name ~= "" then %> at <%= store_name %><% end %></h2>
+<p>Here is your receipt for order <strong><%= order_number %></strong> on <%= sold_at %>.</p>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+  <% for _, l in ipairs(lines or {}) do %>
+  <tr>
+    <td style="padding:6px 0;border-bottom:1px solid #e5e7eb"><%= l.quantity %> × <%= l.name %></td>
+    <td style="padding:6px 0;border-bottom:1px solid #e5e7eb;text-align:right"><%= l.total %></td>
+  </tr>
+  <% end %>
+  <tr><td style="padding:6px 0">Subtotal</td><td style="padding:6px 0;text-align:right"><%= subtotal %></td></tr>
+  <% if discount then %><tr><td style="padding:6px 0">Discount</td><td style="padding:6px 0;text-align:right">−<%= discount %></td></tr><% end %>
+  <% if tax then %><tr><td style="padding:6px 0">Tax</td><td style="padding:6px 0;text-align:right"><%= tax %></td></tr><% end %>
+  <tr><td style="padding:6px 0;font-weight:bold">Total</td><td style="padding:6px 0;text-align:right;font-weight:bold"><%= total %></td></tr>
+</table>
+
+<div class="info-box">
+  <p><strong>Paid by:</strong> <%= payment_method %></p>
+  <% if tendered then %><p><strong>Cash given:</strong> <%= tendered %> · <strong>Change:</strong> <%= change %></p><% end %>
+  <% if reference then %><p><strong>Reference:</strong> <%= reference %></p><% end %>
+</div>
+
+<% if store_contact and store_contact ~= "" then %><p><%= store_contact %></p><% end %>
+<p>Please keep this email as your receipt.</p>

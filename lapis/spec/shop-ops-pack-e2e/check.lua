@@ -62,6 +62,19 @@ function db.query(sql, ...)
     return res
 end
 function db.select(sql, ...) return db.query("SELECT " .. sql, ...) end
+function db.insert(tbl, vals, opts)
+    local cols, marks, args = {}, {}, {}
+    for k, v in pairs(vals) do cols[#cols + 1] = k; marks[#marks + 1] = "?"; args[#args + 1] = v end
+    local ret = opts and opts.returning and (" RETURNING " .. (opts.returning == "*" and "*" or table.concat(opts.returning, ", "))) or ""
+    return db.query("INSERT INTO " .. tbl .. " (" .. table.concat(cols, ", ") .. ") VALUES (" .. table.concat(marks, ", ") .. ")" .. ret,
+        unpack(args))
+end
+function db.update(tbl, vals, cond)
+    local sets, args, wh = {}, {}, {}
+    for k, v in pairs(vals) do sets[#sets + 1] = k .. " = ?"; args[#args + 1] = v end
+    for k, v in pairs(cond) do wh[#wh + 1] = k .. " = ?"; args[#args + 1] = v end
+    return db.query("UPDATE " .. tbl .. " SET " .. table.concat(sets, ", ") .. " WHERE " .. table.concat(wh, " AND "), unpack(args))
+end
 package.loaded["lapis.db"] = db
 
 -- Permission stub: per test, the permissions of "the person".
@@ -287,11 +300,17 @@ check("another workspace sees none of them", #D.recent(2, 10).results == 0)
 print("create order (stores)")
 db.query([[
 CREATE TABLE stores (id serial PRIMARY KEY, uuid text, namespace_id integer, user_id integer, name text, tax_rate numeric DEFAULT 0,
-  currency varchar DEFAULT 'USD');
+  currency varchar DEFAULT 'USD', timezone varchar DEFAULT 'UTC', address text, city varchar, postal_code varchar, contact_email varchar,
+  contact_phone varchar);
 INSERT INTO stores (uuid, namespace_id, name, tax_rate, currency) VALUES ('st-1', 1, 'Workstation Store', 0.2, 'GBP'),
   ('st-2', 2, 'Other Store', 0, 'GBP');
-CREATE TABLE storeproducts (id serial PRIMARY KEY, uuid text, store_id integer, name text, sku text, price numeric, track_inventory boolean DEFAULT true,
-  inventory_quantity integer DEFAULT 0, is_active boolean DEFAULT true, updated_at timestamp);
+CREATE TABLE storeproducts (id serial PRIMARY KEY, uuid text, store_id integer, name text, sku text, barcode varchar, price numeric,
+  track_inventory boolean DEFAULT true, inventory_quantity integer DEFAULT 0, is_active boolean DEFAULT true, images text DEFAULT '[]',
+  sort_order integer, category_id integer, namespace_id integer, updated_at timestamp);
+CREATE TABLE categories (id serial PRIMARY KEY, uuid text, store_id integer, name text);
+CREATE TABLE product_variants (id serial PRIMARY KEY, uuid text UNIQUE, product_id integer, title text, option1 text, option2 text,
+  option3 text, sku text, price numeric, compare_price numeric, inventory_quantity integer DEFAULT 0, is_active boolean DEFAULT true,
+  position integer DEFAULT 0, created_at timestamp, updated_at timestamp);
 INSERT INTO storeproducts (uuid, store_id, name, sku, price, track_inventory, inventory_quantity, is_active) VALUES
   ('sp-1', 1, 'GPU Workstation', 'GW-1', 1999.99, true, 3, true),
   ('sp-2', 1, 'Setup service', 'SET', 150, false, 0, true),
@@ -301,13 +320,15 @@ CREATE TABLE orders (id serial PRIMARY KEY, uuid text, namespace_id integer, sto
   status varchar DEFAULT 'pending', financial_status varchar DEFAULT 'pending', fulfillment_status varchar, subtotal numeric, tax_amount numeric,
   shipping_amount numeric, discount_amount numeric, total_amount numeric, currency varchar DEFAULT 'USD', billing_address text,
   shipping_address text, customer_notes text, internal_notes text, processed_at timestamp, created_at timestamp, updated_at timestamp,
-  source varchar(30));
+  source varchar(30), payment_method varchar(30), payment_details jsonb);
 CREATE TABLE orderitems (id serial PRIMARY KEY, uuid text, order_id integer, product_id integer, variant_id text, quantity integer,
   price numeric, total numeric, product_title text, variant_title text, sku text, created_at timestamp, updated_at timestamp);
 -- an online checkout order from before orders had a workspace (its store's counts)
 INSERT INTO orders (uuid, namespace_id, store_id, order_number, status, financial_status, total_amount, currency, created_at)
   VALUES ('so-old', NULL, 1, 'ORD-OLD-1', 'delivered', 'paid', 99.50, 'GBP', NOW() - interval '2 days');
 ]])
+-- helper.table-exists remembers a missing table for a minute: forget what the search checks saw before these existed.
+package.loaded["helper.table-exists"] = nil
 local M = require("queries.ManualOrderQueries")
 local ord, oerr = M.create(1, { store_uuid = "st-1", customer = { email = "Buyer@Example.co.uk", first_name = "Bea" },
     items = { { product_uuid = "sp-1", quantity = 2 }, { product_uuid = "sp-2", quantity = 1 }, { product_uuid = "sp-1", quantity = 1 } },
@@ -343,13 +364,98 @@ local _, e5 = M.create(1, { store_uuid = "st-1", customer = { email = "a@b.co" }
 check("a discount bigger than the order → 422", e5 and e5.status == 422)
 check("no transaction left open", pcall(db.query, "SELECT 1"))
 
+print("point of sale")
+db.query("UPDATE storeproducts SET inventory_quantity = 5, barcode = '5012345678900' WHERE uuid = 'sp-1'")
+db.query("UPDATE stores SET timezone = 'Europe/London', address = '1 High St', city = 'Hemel', contact_phone = '01234' WHERE uuid = 'st-1'")
+local Pos = require("queries.PosQueries")
+local catalogue = Pos.products(1, "st-1", "5012345678900")
+check("a scanned barcode finds the product", #catalogue.products == 1 and catalogue.products[1].uuid == "sp-1"
+    and catalogue.products[1].stock == 5 and catalogue.products[1].available == true)
+check("inactive products never at the till", #Pos.products(1, "st-1", "Old model").products == 0)
+local _, perr = Pos.products(1, "st-2", "")
+check("another workspace's store → 404", perr and perr.status == 404)
+local r, serr = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-2", quantity = 2 } },
+    payment = { method = "cash", tendered = "400" } })
+check("a walk-in cash sale", r ~= nil and r.channel == "pos", serr and serr.message)
+if r then
+    check("tax at the store's rate and the total", r.subtotal == "300.00" and r.tax == "60.00" and r.total == "360.00", r.total)
+    check("change given", r.payment.method == "cash" and r.payment.tendered == "400.00" and r.payment.change == "40.00")
+    check("store details on the receipt", r.store.address == "1 High St, Hemel" and r.store.contact == "01234")
+    local row = db.query("SELECT status, financial_status, fulfillment_status, customer_id FROM orders WHERE uuid = ?", r.uuid)[1]
+    check("paid and handed over, no customer needed", row.status == "delivered" and row.financial_status == "paid"
+        and row.fulfillment_status == "fulfilled" and row.customer_id == nil)
+end
+local _, e7 = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-2", quantity = 1 } }, payment = { method = "cash", tendered = "5" } })
+check("too little cash → 422, nothing saved", e7 and e7.status == 422 and #db.query("SELECT 1 FROM orders WHERE source = 'pos'") == 1)
+local _, e8 = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-2", quantity = 1 } }, payment = { method = "iou" } })
+check("an unknown payment method → 422", e8 and e8.status == 422)
+local card = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-1", quantity = 1 } }, payment = { method = "card", reference = "AUTH 1234" },
+    customer = { email = "till@example.co.uk" } })
+check("a card sale with a customer", card and card.payment.reference == "AUTH 1234" and card.customer_email == "till@example.co.uk")
+check("stock taken at the till", db.query("SELECT inventory_quantity FROM storeproducts WHERE uuid = 'sp-1'")[1].inventory_quantity == 4)
+local sum = Pos.summary(1, "st-1")
+check("the till's day: 2 sales, by method", sum.sales == 2 and #sum.by_method == 2 and sum.timezone == "Europe/London", sum.total)
+check("the till's total", sum.total == string.format("%.2f", 360 + 2399.99), sum.total)
+check("another day is empty", Pos.summary(1, "st-1", "2001-01-01").sales == 0)
+local again = Pos.receipt(1, r and r.uuid)
+check("the receipt prints again", again and again.order_number == (r and r.order_number))
+check("not another workspace's receipt", Pos.receipt(2, r and r.uuid) == nil)
+
+print("variations at the till")
+db.query([[INSERT INTO categories (uuid, store_id, name) VALUES ('cat-1', 1, 'Clothing');
+INSERT INTO storeproducts (uuid, store_id, name, sku, price, track_inventory, inventory_quantity, is_active, category_id)
+  VALUES ('sp-tee', 1, 'Tee', 'TEE', 10, true, 0, true, (SELECT id FROM categories WHERE uuid = 'cat-1'));
+INSERT INTO product_variants (uuid, product_id, title, sku, price, inventory_quantity, is_active, position) VALUES
+  ('v-s', (SELECT id FROM storeproducts WHERE uuid = 'sp-tee'), 'Small', 'TEE-S', NULL, 2, true, 1),
+  ('v-l', (SELECT id FROM storeproducts WHERE uuid = 'sp-tee'), 'Large', 'TEE-L', 12, 0, true, 2),
+  ('v-off', (SELECT id FROM storeproducts WHERE uuid = 'sp-tee'), 'Old', 'TEE-O', 1, 9, false, 3);]])
+local cat = Pos.products(1, "st-1", "")
+local tee
+for _, p in ipairs(cat.products) do if p.uuid == "sp-tee" then tee = p end end
+check("the till lists variations (active only) with their own price and stock", tee and #tee.variants == 2
+    and tee.variants[1].price == "10.00" and tee.variants[2].price == "12.00" and tee.variants[2].available == false)
+check("a product with variations is in stock while one is", tee and tee.available == true and tee.stock == 2)
+check("categories for the till's tabs", #cat.categories == 1 and cat.categories[1].name == "Clothing" and tee.category == "Clothing")
+check("a variation's SKU finds its product", #Pos.products(1, "st-1", "TEE-L").products == 1)
+local _, ev = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-tee", quantity = 1 } }, payment = { method = "card" } })
+check("a product with variations needs one chosen", ev and ev.code == "CHOOSE_VARIANT", ev and ev.message)
+local _, ev2 = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-tee", variant_uuid = "v-l", quantity = 1 } }, payment = { method = "card" } })
+check("an out-of-stock variation is refused", ev2 and ev2.code == "NOT_ENOUGH_STOCK", ev2 and ev2.message)
+local _, ev3 = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-tee", variant_uuid = "v-off", quantity = 1 } }, payment = { method = "card" } })
+check("an inactive variation is refused", ev3 and ev3.code == "VARIANT_NOT_AVAILABLE")
+local vs = Pos.sale(1, { store_uuid = "st-1", items = { { product_uuid = "sp-tee", variant_uuid = "v-s", quantity = 2 } }, payment = { method = "card" } })
+check("a variation sells at its price", vs and vs.subtotal == "20.00" and vs.items[1].name == "Tee — Small", vs and vs.items[1].name)
+check("the variation's stock is taken, not the product's",
+    db.query("SELECT inventory_quantity FROM product_variants WHERE uuid = 'v-s'")[1].inventory_quantity == 0
+    and db.query("SELECT inventory_quantity FROM storeproducts WHERE uuid = 'sp-tee'")[1].inventory_quantity == 0)
+check("the order line keeps the variation", db.query("SELECT variant_title FROM orderitems WHERE variant_id = 'v-s'")[1].variant_title == "Small")
+local sum2 = Pos.summary(1, "st-1")
+check("recent sales for reprinting", #sum2.recent == 3 and sum2.recent[1].order_number == vs.order_number)
+
+print("variations (staff)")
+local CV = require("queries.CatalogVariantQueries")
+local made = CV.create(1, "sp-tee", { option1 = "Medium", option2 = "Blue", sku = "TEE-MB", price = "11.50", stock = 4 })
+check("a variation is named from its options", made and made.title == "Medium / Blue" and made.price == "11.50" and made.stock == 4)
+local _, dup = CV.create(1, "sp-tee", { title = "Again", sku = "tee-mb" })
+check("a SKU is unique within the workspace", dup and dup.status == 409)
+local _, other = CV.create(2, "sp-tee", { title = "X" })
+check("another workspace's product → 404", other and other.status == 404)
+local up = CV.update(1, made.uuid, { price = "", stock = 7, is_active = false })
+check("price cleared falls back to the product's; stock and on/off change", up.price == require("cjson").null
+    and up.effective_price == "10.00" and up.stock == 7 and up.is_active == false)
+local _, bad = CV.update(1, made.uuid, { stock = -1 })
+check("negative stock refused", bad and bad.status == 422)
+check("listed for staff (inactive too)", #CV.list(1, "sp-tee").variants == 4)
+check("removed", CV.remove(1, made.uuid).deleted == true and #CV.list(1, "sp-tee").variants == 3)
+
 print("sales orders (shop + stores)")
 local SO = require("queries.SalesOrderQueries")
 perms = { ["shop.read"] = true, ["orders.read"] = true }
 local list, lm = SO.list(self, 1, {})
 local bysrc = {}
 for _, r in ipairs(list) do bysrc[r.source] = (bysrc[r.source] or 0) + 1 end
-check("shop and store orders together", bysrc.shop == 1 and bysrc.store == 2 and lm.total == 3, (bysrc.shop or 0) .. "/" .. (bysrc.store or 0))
+check("shop and store orders together", bysrc.shop == 1 and bysrc.store == 5 and lm.total == 6, (bysrc.shop or 0) .. "/" .. (bysrc.store or 0))
+check("point of sale channel", #SO.list(self, 1, { channel = "pos" }) == 3)
 check("both sources used", #lm.sources == 2)
 check("newest first", list[1].order_number:find("^ORD%-%d") ~= nil, list[1].order_number)
 local staff = SO.list(self, 1, { channel = "in_person" })
@@ -358,13 +464,14 @@ local shopo = SO.list(self, 1, { source = "shop" })
 check("shop orders link to the shop order page", #shopo == 1 and shopo[1].path == "/dashboard/shop/orders/o-1" and shopo[1].stage == "delivered")
 check("totals in pounds", shopo[1].total == "6307.98")
 check("another workspace's orders never show", #SO.list(self, 2, {}) == 0)
-check("stats: delivered and revenue", lm.stats.delivered == 2 and lm.stats.revenue.GBP == "13802.44", lm.stats.revenue.GBP)
+check("stats: delivered and revenue", lm.stats.delivered == 5 and lm.stats.revenue.GBP == string.format("%.2f", 13802.44 + 360 + 2399.99 + 24),
+    lm.stats.revenue.GBP)
 check("stage in_progress", #SO.list(self, 1, { stage = "in_progress" }) == 1)
 check("search by customer email", #SO.list(self, 1, { q = "buyer@" }) == 1)
-check("date filter", #SO.list(self, 1, { from = os.date("!%Y-%m-%d") }) == 2)
+check("date filter", #SO.list(self, 1, { from = os.date("!%Y-%m-%d") }) == 5)
 perms = { ["orders.read"] = true }
 local only, om = SO.list(self, 1, {})
-check("without shop access: store orders only", #only == 2 and #om.sources == 1)
+check("without shop access: store orders only", #only == 5 and #om.sources == 1)
 local bad, berr = SO.list(self, 1, { stage = "nonsense" })
 check("a bad stage → 400", bad == nil and berr.status == 400)
 

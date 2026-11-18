@@ -329,9 +329,12 @@ function Report.make(analysis)
     return key_or_err, why
 end
 
---- The PDF bytes of an analysis (made now when it has none yet). → bytes, filename | nil, status, message
+--- The PDF bytes of an analysis (made now when it has none yet): the one asked for, else the latest that
+-- finished (a later failed or skipped run doesn't hide it). → bytes, filename | nil, status, message
 function Report.bytes(lead_id, analysis_uuid)
-    local a = analysis_row(lead_id, analysis_uuid)
+    local a = analysis_uuid and analysis_row(lead_id, analysis_uuid) or require("lapis.db").query([[
+        SELECT id, uuid, lead_id, namespace_id, status, result, model, report_key, error, finished_at
+        FROM crm_lead_analyses WHERE lead_id = ? AND status = 'done' ORDER BY created_at DESC, id DESC LIMIT 1]], lead_id)[1]
     if not a or a.status ~= "done" then return nil, 404, "This lead has no finished AI analysis yet" end
     if not v(a.report_key) then
         local key, why = Report.make(a)
@@ -414,6 +417,8 @@ end
 
 --- The sweep: leads held longer than HOLD_MINUTES go out without waiting any longer.
 function Report.release_overdue()
+    -- Before migration zzcrmc (a deploy rolling out) there is nothing to release.
+    if not require("helper.table-exists")("crm_leads", "alert_held_at") then return end
     local db = require("lapis.db")
     for _, l in ipairs(db.query([[SELECT id FROM crm_leads WHERE alert_held_at IS NOT NULL
         AND alert_held_at < NOW() - make_interval(mins => ?) ORDER BY alert_held_at LIMIT 50]], Report.HOLD_MINUTES)) do

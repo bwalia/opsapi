@@ -78,6 +78,17 @@ function money(v: string | number, currency = 'GBP') {
   }
 }
 
+/** For the cards: whole pounds once it's in the thousands, so it fits (£7,319 rather than £7,318.80). */
+function cardMoney(v: string | number, currency = 'GBP') {
+  const n = Number(v) || 0;
+  if (Math.abs(n) < 1000) return money(n, currency);
+  try {
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return money(n, currency);
+  }
+}
+
 const selectClass =
   'rounded-lg border border-secondary-300 bg-surface px-3 py-2 text-sm text-secondary-800 focus:outline-none focus:ring-2 focus:ring-primary-500/30';
 
@@ -159,6 +170,16 @@ function SalesOrdersContent() {
     [router]
   );
 
+  // ?order=<uuid> (from ⌘K search): open that store order straight away.
+  const linked = params.get('order');
+  useEffect(() => {
+    if (!linked) return;
+    ordersService
+      .getOrder(linked)
+      .then(setStoreOrder)
+      .catch((e) => toast.error(extractApiError(e, 'Could not open the order')));
+  }, [linked]);
+
   const sources = data?.sources ?? [];
   const canShopOrder = hasShop && canCreate('shop');
   const canStoreOrder = sources.includes('store') && canCreate('orders');
@@ -167,7 +188,7 @@ function SalesOrdersContent() {
   const isAdmin = !!user?.roles?.some((r) => r.role_name === 'administrative');
 
   const createOrder = () => {
-    if (canShopOrder && canStoreOrder) setChooser((v) => !v);
+    if (canStoreOrder) setChooser((v) => !v);
     else if (canShopOrder) router.push('/dashboard/shop/quotes/new');
     else setCreating(true);
   };
@@ -181,7 +202,7 @@ function SalesOrdersContent() {
           <div>
             <p className="font-mono font-medium text-secondary-900">{o.order_number}</p>
             <p className="text-xs text-secondary-500">
-              {o.source === 'shop' ? 'Shop' : 'Online store'} · {CHANNEL_LABEL[o.channel] ?? o.channel}
+              {o.source === 'shop' ? 'Shop' : 'Store'} · {CHANNEL_LABEL[o.channel] ?? o.channel}
             </p>
           </div>
         ),
@@ -191,7 +212,7 @@ function SalesOrdersContent() {
         header: 'Customer',
         render: (o) => (
           <div className="min-w-0">
-            <p className="truncate text-secondary-900">{o.company || o.customer_name || o.customer_email || '—'}</p>
+            <p className="truncate text-secondary-900">{o.company || o.customer_name || o.customer_email || (o.channel === 'pos' || o.channel === 'in_person' ? 'Walk-in customer' : '—')}</p>
             <p className="truncate text-xs text-secondary-500">{o.company ? o.customer_name || o.customer_email : o.customer_name ? o.customer_email : ''}</p>
           </div>
         ),
@@ -224,7 +245,7 @@ function SalesOrdersContent() {
     <div className="space-y-6">
       <PageHeader
         title="Sales Orders"
-        description="Every order in one place, however it came in: online, by phone, by email or in person, from your shop and your online stores."
+        description="Every order in one place, however it came in: online, by phone, by email, in person or at the till, from your shop and your stores."
         icon={<ShoppingCart className="h-5 w-5" />}
         actions={
           <div className="flex items-center gap-2">
@@ -235,24 +256,31 @@ function SalesOrdersContent() {
               <div className="relative" ref={chooserRef}>
                 <Button
                   leftIcon={<Plus className="h-4 w-4" />}
-                  rightIcon={canShopOrder && canStoreOrder ? <ChevronDown className="h-4 w-4" /> : undefined}
+                  rightIcon={canStoreOrder ? <ChevronDown className="h-4 w-4" /> : undefined}
                   onClick={createOrder}
-                  aria-haspopup={canShopOrder && canStoreOrder ? 'menu' : undefined}
-                  aria-expanded={canShopOrder && canStoreOrder ? chooser : undefined}
+                  aria-haspopup={canStoreOrder ? 'menu' : undefined}
+                  aria-expanded={canStoreOrder ? chooser : undefined}
                 >
                   Create order
                 </Button>
                 {chooser && (
-                  <div role="menu" className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-lg">
-                    <button role="menuitem" type="button" className="block w-full px-4 py-3 text-left hover:bg-secondary-50"
-                      onClick={() => router.push('/dashboard/shop/quotes/new')}>
-                      <span className="block text-sm font-medium text-secondary-900">Shop order</span>
-                      <span className="block text-xs text-secondary-500">For a customer on the phone or by email: they confirm it and pay online or by bank transfer.</span>
-                    </button>
-                    <button role="menuitem" type="button" className="block w-full border-t border-secondary-100 px-4 py-3 text-left hover:bg-secondary-50"
+                  <div role="menu" className="absolute right-0 z-20 mt-2 w-80 overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-lg">
+                    {canShopOrder && (
+                      <button role="menuitem" type="button" className="block w-full whitespace-normal! px-4 py-3 text-left hover:bg-secondary-50"
+                        onClick={() => router.push('/dashboard/shop/quotes/new')}>
+                        <span className="block text-sm font-medium text-secondary-900">Shop order</span>
+                        <span className="block text-xs text-secondary-500">For a customer on the phone or by email: they confirm it and pay online or by bank transfer.</span>
+                      </button>
+                    )}
+                    <button role="menuitem" type="button" className="block w-full whitespace-normal! border-t border-secondary-100 px-4 py-3 text-left hover:bg-secondary-50"
                       onClick={() => { setChooser(false); setCreating(true); }}>
-                      <span className="block text-sm font-medium text-secondary-900">Online store order</span>
-                      <span className="block text-xs text-secondary-500">Products from one of your online stores; mark it paid if they already paid.</span>
+                      <span className="block text-sm font-medium text-secondary-900">Store order</span>
+                      <span className="block text-xs text-secondary-500">Products from one of your stores, taken by phone, email or in person. For a sale at the counter, use Point of Sale.</span>
+                    </button>
+                    <button role="menuitem" type="button" className="block w-full whitespace-normal! border-t border-secondary-100 px-4 py-3 text-left hover:bg-secondary-50"
+                      onClick={() => router.push('/dashboard/pos')}>
+                      <span className="block text-sm font-medium text-secondary-900">Sale at the counter</span>
+                      <span className="block text-xs text-secondary-500">Open the Point of Sale till: scan, take cash or card, print a receipt.</span>
                     </button>
                   </div>
                 )}
@@ -270,8 +298,8 @@ function SalesOrdersContent() {
           isLoading={loading && !data} href="/dashboard/orders?stage=in_progress" />
         <StatsCard title="Delivered" value={data ? data.stats.delivered : '—'} icon={<CheckCircle2 className="h-5 w-5" />} isLoading={loading && !data}
           href="/dashboard/orders?stage=delivered" />
-        <StatsCard title="Paid" value={mainRevenue ? money(mainRevenue[1], mainRevenue[0]) : data ? money(0) : '—'}
-          description={revenue.length > 1 ? revenue.filter((r) => r !== mainRevenue).map(([c, v]) => money(v, c)).join(' · ') : 'Orders paid'}
+        <StatsCard title="Paid" value={mainRevenue ? cardMoney(mainRevenue[1], mainRevenue[0]) : data ? money(0) : '—'}
+          description={revenue.length > 1 ? revenue.filter((r) => r !== mainRevenue).map(([c, v]) => money(v, c)).join(' · ') : mainRevenue ? money(mainRevenue[1], mainRevenue[0]) : 'Orders paid'}
           icon={<PoundSterling className="h-5 w-5" />} isLoading={loading && !data} />
       </div>
 
@@ -289,9 +317,9 @@ function SalesOrdersContent() {
           </select>
           {sources.length > 1 && (
             <select aria-label="Where from" className={selectClass} value={source} onChange={(e) => { setSource(e.target.value as 'shop' | 'store' | ''); setPage(1); }}>
-              <option value="">Shop and online stores</option>
+              <option value="">Shop and stores</option>
               <option value="shop">Shop only</option>
-              <option value="store">Online stores only</option>
+              <option value="store">Stores only</option>
             </select>
           )}
           <label className="flex items-center gap-2 text-sm text-secondary-600">

@@ -19,6 +19,7 @@ import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { productsService } from '@/services';
 import type { StoreProductDetail } from '@/services/products.service';
+import { VariationsCard } from '@/components/products/VariationsCard';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 
 /** The images column can be a JSON array, a single URL, or the odd "'[]'". */
@@ -41,6 +42,8 @@ function firstImage(p: StoreProductDetail): string | null {
 type EditForm = {
   name: string;
   sku: string;
+  barcode: string;
+  track_inventory: string;
   price: string;
   compare_price: string;
   cost_price: string;
@@ -57,6 +60,8 @@ function formFrom(p: StoreProductDetail): EditForm {
   return {
     name: p.name || '',
     sku: s(p.sku),
+    barcode: s(p.barcode),
+    track_inventory: p.track_inventory === false ? 'false' : 'true',
     price: s(p.price),
     compare_price: s(p.compare_price),
     cost_price: s(p.cost_price),
@@ -138,6 +143,8 @@ function ProductDetailContent() {
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
         sku: form.sku.trim(),
+        barcode: form.barcode.trim(),
+        track_inventory: form.track_inventory,
         price: form.price.trim(),
         compare_price: form.compare_price.trim() || 'null',
         cost_price: form.cost_price.trim() || '0',
@@ -291,6 +298,9 @@ function ProductDetailContent() {
               <p className="text-sm text-secondary-400">No description.</p>
             )}
           </Card>
+
+          <VariationsCard productUuid={product.uuid} productPrice={Number(product.price) || 0}
+            tracked={product.track_inventory !== false} canEdit={canUpdate('products')} />
         </div>
 
         {/* Sidebar */}
@@ -324,6 +334,10 @@ function ProductDetailContent() {
             <h2 className="text-sm font-semibold text-secondary-800 mb-3">Inventory</h2>
             {editing ? (
               <div className="space-y-3">
+                <Select label="Track stock" value={form.track_inventory} onChange={setField('track_inventory')}>
+                  <option value="true">Yes: count what is left and stop selling at zero</option>
+                  <option value="false">No: always available (e.g. a service)</option>
+                </Select>
                 <Input label="Quantity" inputMode="numeric" value={form.inventory_quantity} onChange={setField('inventory_quantity')} />
                 <Input label="Low-stock threshold" inputMode="numeric" value={form.low_stock_threshold} onChange={setField('low_stock_threshold')} />
                 <Select label="Featured" value={form.is_featured} onChange={setField('is_featured')}>
@@ -344,8 +358,13 @@ function ProductDetailContent() {
 
           <Card padding="lg">
             <h2 className="text-sm font-semibold text-secondary-800 mb-3">Details</h2>
+            {editing && (
+              <div className="mb-3">
+                <Input label="Barcode (to scan at the till)" value={form.barcode} onChange={setField('barcode')} placeholder="e.g. 5012345678900" />
+              </div>
+            )}
             <dl className="space-y-3">
-              {product.barcode && <Field label="Barcode">{product.barcode}</Field>}
+              {!editing && product.barcode && <Field label="Barcode">{product.barcode}</Field>}
               {product.weight != null && product.weight > 0 && <Field label="Weight">{product.weight}</Field>}
               {product.tags && <Field label="Tags">{product.tags}</Field>}
               {product.created_at && <Field label="Created">{formatDateTime(product.created_at)}</Field>}

@@ -69,7 +69,8 @@ local function join(sep, ...)
     local out = {}
     for i = 1, select("#", ...) do
         local v = select(i, ...)
-        if v ~= nil and v ~= db.NULL and tostring(v):match("%S") then out[#out + 1] = tostring(v) end
+        -- NULL from the database or from cjson is userdata: never "userdata: NULL" in a subtitle.
+        if v ~= nil and type(v) ~= "userdata" and v ~= db.NULL and tostring(v):match("%S") then out[#out + 1] = tostring(v) end
     end
     return table.concat(out, sep)
 end
@@ -149,7 +150,7 @@ Search.provider("deals", {
         local out = {}
         for _, r in ipairs(res.results or {}) do
             out[#out + 1] = { title = "Deal " .. r.deal_code, path = "/dashboard/shop/deals/" .. ngx.escape_uri(r.deal_code),
-                subtitle = join(" · ", r.customer ~= db.NULL and r.customer or nil,
+                subtitle = join(" · ", r.customer,
                     tostring(r.matched_by):gsub("_", " ") .. ": " .. tostring(r.match)) }
         end
         return out
@@ -277,6 +278,28 @@ Search.provider("shop_orders", {
             out[#out + 1] = { title = r.order_number, subtitle = join(" · ", r.company or r.name, r.email,
                 tostring(r.status):gsub("_", " "), money((tonumber(r.total_minor) or 0) / 100, r.currency)),
                 path = "/dashboard/shop/orders/" .. r.uuid }
+        end
+        return out
+    end,
+})
+
+Search.provider("store_orders", {
+    label = "Store orders", order = 33, permission = { "orders", "read" },
+    needs = { "orders.namespace_id", "stores.namespace_id", "customers" },
+    run = function(ctx)
+        local channel = require("helper.table-exists")("orders", "source") and "o.source" or "NULL"
+        local out = {}
+        for _, r in ipairs(db.query([[SELECT o.uuid, o.order_number, o.status, o.total_amount, o.currency, ]] .. channel .. [[ AS source,
+                c.first_name, c.last_name, c.email, s.name AS store
+            FROM orders o JOIN stores s ON s.id = o.store_id LEFT JOIN customers c ON c.id = o.customer_id
+            WHERE COALESCE(o.namespace_id, s.namespace_id) = ?
+              AND (o.order_number ILIKE ? OR c.email ILIKE ? OR c.first_name ILIKE ? OR c.last_name ILIKE ?
+                   OR concat_ws(' ', c.first_name, c.last_name) ILIKE ?)
+            ORDER BY o.created_at DESC LIMIT ?]], ctx.ns_id, ctx.like, ctx.like, ctx.like, ctx.like, ctx.like, ctx.limit + 1)) do
+            out[#out + 1] = { title = r.order_number,
+                subtitle = join(" · ", name(r.first_name, r.last_name, r.email) or (r.source == "pos" and "Walk-in customer" or nil),
+                    r.store, r.status, money(r.total_amount, r.currency)),
+                path = "/dashboard/orders?order=" .. r.uuid }
         end
         return out
     end,

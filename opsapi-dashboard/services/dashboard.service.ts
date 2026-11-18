@@ -10,7 +10,8 @@ export const dashboardService = {
     try {
       const [healthRes, ordersRes, productsRes] = await Promise.all([
         apiClient.get('/health', { params: { detailed: 'true' } }),
-        apiClient.get('/api/v2/orders', { params: { limit: 10 } }),
+        // Store orders need the workspace's orders permission (and the module): without it the rest still loads.
+        apiClient.get('/api/v2/orders', { params: { limit: 10 } }).catch(() => ({ data: { data: [], total: 0 } })),
         apiClient.get('/api/v2/products', { params: { limit: 1 } }),
       ]);
 

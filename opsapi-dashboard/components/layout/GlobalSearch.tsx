@@ -29,7 +29,7 @@ type SearchItem = MenuItemWithIcon & { subtitle?: string; section?: string };
 /** An icon per kind of record (anything new falls back to the search icon). */
 const GROUP_ICON: Record<string, LucideIcon> = {
   deals: Lock, customers: Users, leads: UserPlus, crm_accounts: Building2, crm_contacts: Contact, crm_deals: Briefcase,
-  invoices: FileText, shop_orders: ShoppingCart, shop_quotes: FileSignature, shop_products: Package, shop_suppliers: Truck,
+  invoices: FileText, shop_orders: ShoppingCart, store_orders: ShoppingCart, shop_quotes: FileSignature, shop_products: Package, shop_suppliers: Truck,
   purchase_orders: ClipboardCheck, purchase_invoices: Receipt, employees: UserRound, projects: KanbanSquare,
 };
 

@@ -155,7 +155,9 @@ end
 function Jobs.ai_tick()
     if ai_busy then return end
     ai_busy = true
-    local ok, err = pcall(require("lib.crm.lead-ai").process, 2)
+    -- One at a time: a run can take minutes on a self-hosted model, and a claimed run waiting
+    -- behind it would sit in "running" while its held email waits.
+    local ok, err = pcall(require("lib.crm.lead-ai").process, 1)
     ai_busy = false
     if not ok then error(err, 0) end
 end

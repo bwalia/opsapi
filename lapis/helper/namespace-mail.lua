@@ -195,6 +195,8 @@ K("invoices", { group = "Sales", name = "Invoices", feature = "invoicing",
     description = "Invoices sent to your customers." })
 K("purchase_orders", { group = "Sales", name = "Purchase orders", feature = "invoicing",
     description = "Purchase orders sent to your suppliers." })
+K("receipts", { group = "Sales", name = "Receipts", feature = "ecommerce",
+    description = "Receipts emailed to customers who buy in person (Point of Sale)." })
 -- Shop
 K("shop_orders", { group = "Shop", name = "Order updates", feature = "shop",
     description = "Order updates and delivery changes sent to shop customers." })
