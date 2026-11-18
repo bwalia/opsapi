@@ -104,6 +104,16 @@
                                                Recorded on the deal (queries/ShopSupplierRequestQueries.lua)
       POST              /quotes/:uuid/deal-code | /orders/:uuid/deal-code   { deal_code } or { new: true }: link by hand
 
+    Supplier introductions (queries/ShopSupplierIntroQueries.lua: shares the customer's details, needs their agreement)
+      GET               /quotes/:uuid/supplier-intro?supplier=&template=   the message ready to send
+      POST              /quotes/:uuid/supplier-intro   { supplier_uuid, channel, subject, message, customer_agreed: true,
+                                               cc_customer? (default true), template_uuid? }; recorded on the deal
+    Message templates (lib/message-templates.lua, queries/ShopMessageTemplateQueries.lua)
+      GET               /message-templates/placeholders   kinds, their placeholders and built-in wording
+      GET/POST          /message-templates   (?kind=)  { kind, name, subject, body, supplier_uuid?, is_default?, is_active? }
+      GET/PUT/DELETE    /message-templates/:uuid
+      (?template=<uuid|builtin> on the supplier-request, supplier-intro and stock-enquiry drafts)
+
     Stock enquiries (queries/ShopStockEnquiryQueries.lua: "have you got this in stock?" from a product; no deal)
       GET               /products/:uuid/stock-enquiry?supplier=&qty=&note=   the message ready to send
                                                { product, supplier, qty, subject, body }
@@ -432,7 +442,7 @@ return function(app)
     end
 
     app:get(BASE .. "/quotes/:uuid/supplier-request", guard("update", function(self, ns_id)
-        return result(SupplierRequest.draft(ns_id, self.params.uuid, self.params.supplier, me(self)))
+        return result(SupplierRequest.draft(ns_id, self.params.uuid, self.params.supplier, me(self), self.params.template))
     end))
 
     app:post(BASE .. "/quotes/:uuid/supplier-request", guard("create", function(self, ns_id)
@@ -441,11 +451,67 @@ return function(app)
         return result(SupplierRequest.send(ns_id, self.params.uuid, body, me(self)))
     end))
 
+    -- Introduce the customer to a supplier from a quote (shares the customer's details: needs their agreement).
+    local SupplierIntro = require("queries.ShopSupplierIntroQueries")
+    app:get(BASE .. "/quotes/:uuid/supplier-intro", guard("update", function(self, ns_id)
+        return result(SupplierIntro.draft(ns_id, self.params.uuid,
+            { supplier = self.params.supplier, template = self.params.template }, me(self)))
+    end))
+
+    app:post(BASE .. "/quotes/:uuid/supplier-intro", guard("create", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return result(SupplierIntro.send(ns_id, self.params.uuid, body, me(self)))
+    end))
+
+    -- Message templates for supplier messages (lib/message-templates.lua).
+    local MsgTemplates = require("queries.ShopMessageTemplateQueries")
+    app:get(BASE .. "/message-templates/placeholders", guard("read", function()
+        return U.ok(MsgTemplates.placeholders())
+    end))
+
+    app:get(BASE .. "/message-templates/preview", guard("read", function(self)
+        local T = require("lib.message-templates")
+        local ok, msg = T.validate(self.params.kind, self.params.subject or "", self.params.body or "")
+        return U.ok({ valid = ok == true, error = ok and U.null or msg })
+    end))
+
+    app:match(BASE .. "/message-templates", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(s, ns_id) return result(MsgTemplates.list(ns_id, { kind = s.params.kind })) end)(self)
+        elseif m == "POST" then
+            return guard("create", function(s, ns_id)
+                local body, bad = body_or_400()
+                if not body then return bad end
+                return created(MsgTemplates.create(ns_id, body, user_id(s)))
+            end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
+    app:match(BASE .. "/message-templates/:uuid", function(self)
+        local m = ngx.req.get_method()
+        if m == "GET" then
+            return guard("read", function(s, ns_id) return result(MsgTemplates.get(ns_id, s.params.uuid)) end)(self)
+        elseif m == "PUT" or m == "PATCH" then
+            return guard("update", function(s, ns_id)
+                local body, bad = body_or_400()
+                if not body then return bad end
+                return result(MsgTemplates.update(ns_id, s.params.uuid, body, user_id(s)))
+            end)(self)
+        elseif m == "DELETE" then
+            return guard("delete", function(s, ns_id) return result(MsgTemplates.delete(ns_id, s.params.uuid)) end)(self)
+        end
+        return U.fail(405, "METHOD_NOT_ALLOWED", "Method not allowed")
+    end)
+
     -- Stock enquiries from a product (no customer, no deal): the message ready, then send (email) or open (WhatsApp / text).
     local StockEnquiry = require("queries.ShopStockEnquiryQueries")
     app:get(BASE .. "/products/:uuid/stock-enquiry", guard("update", function(self, ns_id)
         return result(StockEnquiry.draft(ns_id, self.params.uuid,
-            { supplier = self.params.supplier, qty = self.params.qty, note = self.params.note }, me(self)))
+            { supplier = self.params.supplier, qty = self.params.qty, note = self.params.note, template = self.params.template },
+            me(self)))
     end))
 
     app:post(BASE .. "/products/:uuid/stock-enquiry", guard("create", function(self, ns_id)

@@ -1525,6 +1525,8 @@ export interface ShopSupplierRequest {
   notes: string | null;
   /** How it was sent from a quote's "Ask a supplier" (null = recorded by hand). */
   channel?: ShopAskChannel | null;
+  /** price = a price request; intro = the customer introduced to the supplier (with their agreement). */
+  kind?: 'price' | 'intro' | 'stock';
   created_at: string;
   updated_at: string;
 }
@@ -1532,6 +1534,64 @@ export interface ShopSupplierRequest {
 export type ShopSupplierRequestInput = Partial<Omit<ShopSupplierRequest, 'uuid' | 'deal_code' | 'created_at' | 'updated_at' | 'channel'>>;
 
 export type ShopAskChannel = 'email' | 'whatsapp' | 'sms';
+
+/** Message templates for supplier messages (lib/message-templates.lua). */
+export type ShopTemplateKind = 'price_request' | 'stock_enquiry' | 'supplier_intro';
+
+export const SHOP_TEMPLATE_KINDS: { kind: ShopTemplateKind; label: string; help: string }[] = [
+  { kind: 'price_request', label: 'Price request', help: '"Email supplier" on a quote. Never names the customer.' },
+  { kind: 'stock_enquiry', label: 'Stock enquiry', help: '"Ask suppliers" on a product. Never names the customer.' },
+  { kind: 'supplier_intro', label: 'Supplier introduction', help: '"Introduce to supplier" on a quote. Shares the customer\'s details, with their agreement.' },
+];
+
+export interface ShopMessageTemplate {
+  /** null for the built-in wording. */
+  uuid: string | null;
+  kind: ShopTemplateKind;
+  kind_label?: string;
+  name: string;
+  subject: string;
+  body: string;
+  supplier_uuid: string | null;
+  supplier_name: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  builtin: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type ShopMessageTemplateInput = Partial<Pick<ShopMessageTemplate, 'kind' | 'name' | 'subject' | 'body' | 'supplier_uuid' | 'is_default' | 'is_active'>>;
+
+export interface ShopTemplatePlaceholders {
+  kind: ShopTemplateKind;
+  label: string;
+  placeholders: { name: string; description: string }[];
+  builtin: ShopMessageTemplate;
+}
+
+/** Which template a draft used, and the ones the send window can switch to. */
+export interface ShopTemplateChoice {
+  template?: { uuid: string | null; name: string; builtin: boolean };
+  templates?: ShopMessageTemplate[];
+}
+
+/** "Introduce to supplier" from a quote (GET /quotes/:uuid/supplier-intro). Shares the customer's details. */
+export interface ShopSupplierIntroDraft extends ShopTemplateChoice {
+  deal_code: string;
+  supplier: ShopSupplierAsk['supplier'];
+  customer: { name: string | null; company: string | null; email: string | null; phone: string | null };
+  subject: string;
+  body: string;
+}
+
+export interface ShopSupplierIntroResult {
+  channel: ShopAskChannel;
+  sent_to?: string;
+  cc?: string | null;
+  link?: string;
+  not_recorded?: string;
+}
 
 /** "Ask a supplier" from a quote: the message ready to send (GET /quotes/:uuid/supplier-request). */
 export interface ShopSupplierAsk {
@@ -1541,6 +1601,8 @@ export interface ShopSupplierAsk {
   body: string;
   /** Customer details found in the draft (e.g. "organisation"): sending is refused until they are removed. */
   customer_details: string[];
+  template?: ShopTemplateChoice['template'];
+  templates?: ShopMessageTemplate[];
 }
 
 export interface ShopSupplierAskResult {
@@ -1553,7 +1615,7 @@ export interface ShopSupplierAskResult {
 }
 
 /** A stock enquiry to a supplier from a product (no customer, no deal): GET/POST /products/:uuid/stock-enquiry. */
-export interface ShopStockEnquiryDraft {
+export interface ShopStockEnquiryDraft extends ShopTemplateChoice {
   product: { uuid: string; name: string; title: string };
   supplier: ShopSupplierAsk['supplier'];
   qty: number;

@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { Check, Mail, MessageCircle, MessageSquare, PackageSearch, Pencil, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Card, Input, Modal, Select, Textarea } from '@/components/ui';
+import { TemplatePicker, templateValue } from './TemplatePicker';
 import { shopService } from '@/services/shop.service';
 import { extractApiError } from '@/lib/utils';
 import { formatMoney, minorToPounds, poundsToMinor } from '@/lib/shop';
@@ -32,6 +33,7 @@ export function StockEnquiryModal({ productUuid, productName, open, onClose, onS
   const [supplierUuid, setSupplierUuid] = useState('');
   const [qty, setQty] = useState('1');
   const [note, setNote] = useState('');
+  const [template, setTemplate] = useState('');
   const [draft, setDraft] = useState<ShopStockEnquiryDraft | null>(null);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -50,14 +52,15 @@ export function StockEnquiryModal({ productUuid, productName, open, onClose, onS
   const qtyNum = Math.max(1, Math.floor(Number(qty) || 1));
 
   // The message follows the supplier, quantity and note until it is edited by hand.
-  const redraft = useCallback(async (uuid: string, n: number, spec: string) => {
+  const redraft = useCallback(async (uuid: string, n: number, spec: string, tpl: string) => {
     if (!uuid) { setDraft(null); return; }
     const mine = ++seq.current;
     setLoading(true);
     try {
-      const d = await shopService.stockEnquiryDraft(productUuid, uuid, n, spec);
+      const d = await shopService.stockEnquiryDraft(productUuid, uuid, n, spec, tpl || undefined);
       if (mine !== seq.current) return;
       setDraft(d);
+      setTemplate(templateValue(d.template));
       setSubject(d.subject);
       setMessage(d.body);
       setEdited(false);
@@ -70,12 +73,14 @@ export function StockEnquiryModal({ productUuid, productName, open, onClose, onS
 
   useEffect(() => {
     if (!open || !supplierUuid || edited) return;
-    const t = setTimeout(() => { void redraft(supplierUuid, qtyNum, note); }, 300);
+    const t = setTimeout(() => { void redraft(supplierUuid, qtyNum, note, template); }, 300);
     return () => clearTimeout(t);
+    // template is read when the supplier, quantity or spec change; picking one redrafts directly below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, supplierUuid, qtyNum, note, edited, redraft]);
 
   const reset = () => {
-    setSupplierUuid(''); setQty('1'); setNote(''); setDraft(null); setSubject(''); setMessage(''); setEdited(false);
+    setSupplierUuid(''); setQty('1'); setNote(''); setTemplate(''); setDraft(null); setSubject(''); setMessage(''); setEdited(false);
   };
   const close = () => { if (sending) return; reset(); onClose(); };
 
@@ -147,7 +152,7 @@ export function StockEnquiryModal({ productUuid, productName, open, onClose, onS
         {suppliers && suppliers.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
             <Select label="Supplier" id="stock-supplier" value={supplierUuid}
-              onChange={(e) => { setSupplierUuid(e.target.value); setEdited(false); if (!e.target.value) setDraft(null); }}
+              onChange={(e) => { setSupplierUuid(e.target.value); setTemplate(''); setEdited(false); if (!e.target.value) setDraft(null); }}
               disabled={!!sending}>
               <option value="">Choose a supplier…</option>
               {suppliers.map((x) => (
@@ -157,6 +162,10 @@ export function StockEnquiryModal({ productUuid, productName, open, onClose, onS
             <Input label="Quantity" id="stock-qty" value={qty} onChange={(e) => setQty(e.target.value.replace(/[^\d]/g, ''))}
               inputMode="numeric" disabled={!!sending} />
           </div>
+        )}
+        {draft && (
+          <TemplatePicker id="stock-template" templates={draft.templates} value={template} disabled={!!sending}
+            onChange={(v) => { setTemplate(v); setEdited(false); void redraft(supplierUuid, qtyNum, note, v); }} />
         )}
         {supplierUuid && (
           <Textarea label="Spec you need (optional)" id="stock-note" rows={2} value={note} maxLength={2000}

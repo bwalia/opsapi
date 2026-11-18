@@ -28,6 +28,7 @@ const AUDIT_LABEL: Record<string, string> = {
   'supplier_request.deleted': 'Supplier request deleted',
   'supplier_request.email_drafted': 'Supplier email drafted',
   'supplier_request.sent': 'Price request sent to the supplier (email, WhatsApp or text)',
+  'supplier_intro.sent': 'Customer introduced to the supplier, with their agreement',
 };
 
 interface LineDraft {
@@ -336,6 +337,9 @@ function DealDetail() {
                     <div className="min-w-0">
                       <p className="font-medium text-secondary-900">
                         {r.supplier_name}
+                        {r.kind === 'intro' && (
+                          <span className="ml-2 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-800">Customer introduced</span>
+                        )}
                         {r.supplier_quote_ref && <span className="ml-2 font-mono text-xs text-secondary-500">{r.supplier_quote_ref}</span>}
                       </p>
                       <p className="text-xs text-secondary-500">

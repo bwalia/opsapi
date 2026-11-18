@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { AlertTriangle, Mail, MessageCircle, MessageSquare } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Input, Modal, Select, Textarea } from '@/components/ui';
+import { TemplatePicker, templateValue } from './TemplatePicker';
 import { shopService } from '@/services/shop.service';
 import { extractApiError } from '@/lib/utils';
 import type { ShopAskChannel, ShopSupplier, ShopSupplierAsk } from '@/types/shop';
@@ -21,6 +22,7 @@ const LABEL: Record<ShopAskChannel, string> = { email: 'email', whatsapp: 'Whats
 export function AskSupplierModal({ quoteUuid, open, onClose }: { quoteUuid: string; open: boolean; onClose: () => void }) {
   const [suppliers, setSuppliers] = useState<ShopSupplier[] | null>(null);
   const [supplierUuid, setSupplierUuid] = useState('');
+  const [template, setTemplate] = useState('');
   const [draft, setDraft] = useState<ShopSupplierAsk | null>(null);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -34,14 +36,15 @@ export function AskSupplierModal({ quoteUuid, open, onClose }: { quoteUuid: stri
       .catch((e) => { setSuppliers([]); toast.error(extractApiError(e, 'Could not load your suppliers')); });
   }, [open, suppliers]);
 
-  const choose = async (uuid: string) => {
+  const choose = async (uuid: string, tpl?: string) => {
     setSupplierUuid(uuid);
     setDraft(null);
     if (!uuid) return;
     setLoading(true);
     try {
-      const d = await shopService.askSupplierDraft(quoteUuid, uuid);
+      const d = await shopService.askSupplierDraft(quoteUuid, uuid, tpl);
       setDraft(d);
+      setTemplate(templateValue(d.template));
       setSubject(d.subject);
       setMessage(d.body);
     } catch (e) {
@@ -113,12 +116,18 @@ export function AskSupplierModal({ quoteUuid, open, onClose }: { quoteUuid: stri
           </p>
         )}
         {suppliers && suppliers.length > 0 && (
-          <Select label="Supplier" id="ask-supplier" value={supplierUuid} onChange={(e) => choose(e.target.value)} disabled={!!sending}>
-            <option value="">Choose a supplier…</option>
-            {suppliers.map((x) => (
-              <option key={x.uuid} value={x.uuid}>{x.contact_name ? `${x.name} (${x.contact_name})` : x.name}</option>
-            ))}
-          </Select>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select label="Supplier" id="ask-supplier" value={supplierUuid} onChange={(e) => choose(e.target.value)} disabled={!!sending}>
+              <option value="">Choose a supplier…</option>
+              {suppliers.map((x) => (
+                <option key={x.uuid} value={x.uuid}>{x.contact_name ? `${x.name} (${x.contact_name})` : x.name}</option>
+              ))}
+            </Select>
+            {draft && (
+              <TemplatePicker id="ask-template" templates={draft.templates} value={template} disabled={loading || !!sending}
+                onChange={(v) => { setTemplate(v); void choose(supplierUuid, v); }} />
+            )}
+          </div>
         )}
 
         {loading && <p className="text-sm text-secondary-500">Getting the message ready…</p>}

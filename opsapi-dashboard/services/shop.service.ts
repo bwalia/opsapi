@@ -78,6 +78,12 @@ import type {
   ShopSupplierRequestDraft,
   ShopSupplierRequestInput,
   ShopStockEnquiry,
+  ShopMessageTemplate,
+  ShopMessageTemplateInput,
+  ShopTemplateKind,
+  ShopTemplatePlaceholders,
+  ShopSupplierIntroDraft,
+  ShopSupplierIntroResult,
   ShopStockEnquiryAnswer,
   ShopStockEnquiryDraft,
   ShopStockEnquiryResult,
@@ -540,8 +546,8 @@ export const shopService = {
   },
 
   /** "Ask a supplier" from a quote: the message ready to send to that supplier. */
-  async askSupplierDraft(quoteUuid: string, supplierUuid: string): Promise<ShopSupplierAsk> {
-    const res = await apiClient.get(`${BASE}/quotes/${quoteUuid}/supplier-request${buildQueryString({ supplier: supplierUuid })}`);
+  async askSupplierDraft(quoteUuid: string, supplierUuid: string, template?: string): Promise<ShopSupplierAsk> {
+    const res = await apiClient.get(`${BASE}/quotes/${quoteUuid}/supplier-request${buildQueryString({ supplier: supplierUuid, template: template || undefined })}`);
     return unwrap<ShopSupplierAsk>(res);
   },
 
@@ -552,8 +558,8 @@ export const shopService = {
   },
 
   /** Stock enquiry from a product: the message ready to send to that supplier. */
-  async stockEnquiryDraft(productUuid: string, supplierUuid: string, qty: number, note?: string): Promise<ShopStockEnquiryDraft> {
-    const res = await apiClient.get(`${BASE}/products/${productUuid}/stock-enquiry${buildQueryString({ supplier: supplierUuid, qty, note: note || undefined })}`);
+  async stockEnquiryDraft(productUuid: string, supplierUuid: string, qty: number, note?: string, template?: string): Promise<ShopStockEnquiryDraft> {
+    const res = await apiClient.get(`${BASE}/products/${productUuid}/stock-enquiry${buildQueryString({ supplier: supplierUuid, qty, note: note || undefined, template: template || undefined })}`);
     return unwrap<ShopStockEnquiryDraft>(res);
   },
 
@@ -576,6 +582,43 @@ export const shopService = {
 
   async deleteStockEnquiry(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/stock-enquiries/${uuid}`);
+  },
+
+  /** "Introduce to supplier" from a quote: the message ready to send (shares the customer's details). */
+  async supplierIntroDraft(quoteUuid: string, supplierUuid: string, template?: string): Promise<ShopSupplierIntroDraft> {
+    const res = await apiClient.get(`${BASE}/quotes/${quoteUuid}/supplier-intro${buildQueryString({ supplier: supplierUuid, template: template || undefined })}`);
+    return unwrap<ShopSupplierIntroDraft>(res);
+  },
+
+  async supplierIntroSend(quoteUuid: string, body: { supplier_uuid: string; channel: ShopAskChannel; subject: string; message: string;
+    customer_agreed: boolean; cc_customer: boolean; template_uuid?: string | null }): Promise<ShopSupplierIntroResult> {
+    const res = await apiClient.post(`${BASE}/quotes/${quoteUuid}/supplier-intro`, body, JSON_BODY);
+    return unwrap<ShopSupplierIntroResult>(res);
+  },
+
+  // ---------------- Message templates ----------------
+  async getMessageTemplates(kind?: ShopTemplateKind): Promise<ShopMessageTemplate[]> {
+    const res = await apiClient.get(`${BASE}/message-templates${buildQueryString({ kind })}`);
+    return unwrap<ShopMessageTemplate[]>(res);
+  },
+
+  async getTemplatePlaceholders(): Promise<ShopTemplatePlaceholders[]> {
+    const res = await apiClient.get(`${BASE}/message-templates/placeholders`);
+    return unwrap<ShopTemplatePlaceholders[]>(res);
+  },
+
+  async createMessageTemplate(body: ShopMessageTemplateInput): Promise<ShopMessageTemplate> {
+    const res = await apiClient.post(`${BASE}/message-templates`, body, JSON_BODY);
+    return unwrap<ShopMessageTemplate>(res);
+  },
+
+  async updateMessageTemplate(uuid: string, body: ShopMessageTemplateInput): Promise<ShopMessageTemplate> {
+    const res = await apiClient.put(`${BASE}/message-templates/${uuid}`, body, JSON_BODY);
+    return unwrap<ShopMessageTemplate>(res);
+  },
+
+  async deleteMessageTemplate(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/message-templates/${uuid}`);
   },
 
   // ---------------- Quotes ----------------
