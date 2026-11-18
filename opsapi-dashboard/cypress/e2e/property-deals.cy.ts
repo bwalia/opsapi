@@ -106,7 +106,7 @@ describe('Property Deals — SPEC §5 scenario in the browser', () => {
   it('Every page opens for a manager (smoke + screenshots)', () => {
     const pages: [string, string][] = [
       ['today', 'Today'], ['deals', 'Deals'], ['approvals', 'Approvals'], ['map', 'Deal finder'], ['buyers', 'Buyers'],
-      ['suppliers', 'Suppliers'], ['compliance', 'Compliance'], ['reports', 'Deal reports'], ['settings', 'Deals settings'],
+      ['suppliers', 'Property suppliers'], ['compliance', 'Compliance'], ['reports', 'Deal reports'], ['settings', 'Deals settings'],
     ];
     for (const [path, title] of pages) {
       visitAs(seed.manager, `/dashboard/property-deals/${path}`);
