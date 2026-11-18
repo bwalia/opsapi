@@ -77,6 +77,10 @@ import type {
   ShopSupplierRequest,
   ShopSupplierRequestDraft,
   ShopSupplierRequestInput,
+  ShopStockEnquiry,
+  ShopStockEnquiryAnswer,
+  ShopStockEnquiryDraft,
+  ShopStockEnquiryResult,
   ShopAskChannel,
   ShopSupplierAsk,
   ShopSupplierAskResult,
@@ -545,6 +549,33 @@ export const shopService = {
   async askSupplierSend(quoteUuid: string, body: { supplier_uuid: string; channel: ShopAskChannel; subject: string; message: string }): Promise<ShopSupplierAskResult> {
     const res = await apiClient.post(`${BASE}/quotes/${quoteUuid}/supplier-request`, body, JSON_BODY);
     return unwrap<ShopSupplierAskResult>(res);
+  },
+
+  /** Stock enquiry from a product: the message ready to send to that supplier. */
+  async stockEnquiryDraft(productUuid: string, supplierUuid: string, qty: number, note?: string): Promise<ShopStockEnquiryDraft> {
+    const res = await apiClient.get(`${BASE}/products/${productUuid}/stock-enquiry${buildQueryString({ supplier: supplierUuid, qty, note: note || undefined })}`);
+    return unwrap<ShopStockEnquiryDraft>(res);
+  },
+
+  /** Email it (sent from here) or get the WhatsApp / text link to open. Kept on the product either way. */
+  async stockEnquirySend(productUuid: string, body: { supplier_uuid: string; channel: ShopAskChannel; qty: number; subject: string; message: string }): Promise<ShopStockEnquiryResult> {
+    const res = await apiClient.post(`${BASE}/products/${productUuid}/stock-enquiry`, body, JSON_BODY);
+    return unwrap<ShopStockEnquiryResult>(res);
+  },
+
+  async getStockEnquiries(params: { product?: string; supplier?: string; limit?: number } = {}): Promise<ShopStockEnquiry[]> {
+    const res = await apiClient.get(`${BASE}/stock-enquiries${buildQueryString(params)}`);
+    return unwrap<ShopStockEnquiry[]>(res);
+  },
+
+  /** Record the supplier's answer (stock, lead time, price ex VAT, valid until). */
+  async updateStockEnquiry(uuid: string, body: ShopStockEnquiryAnswer): Promise<ShopStockEnquiry> {
+    const res = await apiClient.put(`${BASE}/stock-enquiries/${uuid}`, body, JSON_BODY);
+    return unwrap<ShopStockEnquiry>(res);
+  },
+
+  async deleteStockEnquiry(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/stock-enquiries/${uuid}`);
   },
 
   // ---------------- Quotes ----------------

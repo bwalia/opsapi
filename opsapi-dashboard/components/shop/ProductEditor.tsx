@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Archive, History, Package, Save, SlidersHorizontal, AlertTriangle, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Archive, History, Package, PackageSearch, Save, SlidersHorizontal, AlertTriangle, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, ConfirmDialog, Input, Select, Textarea, Switch } from '@/components/ui';
@@ -42,6 +42,7 @@ import { ProductPhotosEditor } from './ProductPhotosEditor';
 import { SeoContentEditor, cleanSeo } from './SeoContentEditor';
 import { RulesEditor, ruleToForm, rulesToPayload, type RuleForm } from './RulesEditor';
 import { MarginHint, MovementsDrawer, PriceVerifiedBadge, ProductStatusBadge, SHOP_MODULE, StockAdjustModal, type StockTarget } from './shared';
+import { StockEnquiriesCard, StockEnquiryModal } from './StockEnquiry';
 
 interface BasicsForm {
   name: string;
@@ -134,6 +135,8 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
   const [archiving, setArchiving] = useState(false);
   const [stockTarget, setStockTarget] = useState<StockTarget | null>(null);
   const [historyTarget, setHistoryTarget] = useState<StockTarget | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const [enquiriesVersion, setEnquiriesVersion] = useState(0);
 
   // Reset when a different product document is loaded (e.g. after save/reload).
   useEffect(() => {
@@ -581,6 +584,11 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
                     <Button size="sm" variant="ghost" leftIcon={<History className="h-4 w-4" />} onClick={() => setHistoryTarget(productTarget)}>
                       History
                     </Button>
+                    {canCreate(SHOP_MODULE) && (
+                      <Button size="sm" variant="ghost" leftIcon={<PackageSearch className="h-4 w-4" />} onClick={() => setAskOpen(true)}>
+                        Ask suppliers
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -596,6 +604,11 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
               />
             </div>
           </Card>
+
+          {!isNew && (
+            <StockEnquiriesCard productUuid={product.uuid} version={enquiriesVersion} onAsk={() => setAskOpen(true)}
+              canAsk={canCreate(SHOP_MODULE)} canEdit={canUpdate(SHOP_MODULE)} />
+          )}
 
           <Card>
             <h2 className="mb-4 text-base font-semibold text-secondary-900">Merchandising</h2>
@@ -639,6 +652,10 @@ export function ProductEditor({ product, onReload }: { product?: ShopProduct; on
       />
       <StockAdjustModal target={stockTarget} onClose={() => setStockTarget(null)} onDone={() => onReload?.()} />
       <MovementsDrawer target={historyTarget} onClose={() => setHistoryTarget(null)} />
+      {!isNew && (
+        <StockEnquiryModal productUuid={product.uuid} productName={product.name} open={askOpen} onClose={() => setAskOpen(false)}
+          onSent={() => setEnquiriesVersion((v) => v + 1)} />
+      )}
     </div>
   );
 }

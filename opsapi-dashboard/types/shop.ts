@@ -1552,6 +1552,51 @@ export interface ShopSupplierAskResult {
   not_recorded?: string;
 }
 
+/** A stock enquiry to a supplier from a product (no customer, no deal): GET/POST /products/:uuid/stock-enquiry. */
+export interface ShopStockEnquiryDraft {
+  product: { uuid: string; name: string; title: string };
+  supplier: ShopSupplierAsk['supplier'];
+  qty: number;
+  subject: string;
+  body: string;
+}
+
+export interface ShopStockEnquiry {
+  uuid: string;
+  supplier_uuid: string | null;
+  supplier_name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  product_uuid: string | null;
+  product_name: string | null;
+  qty: number;
+  sent_at: string | null;
+  channel: ShopAskChannel | null;
+  message: string | null;
+  /** Their answer. */
+  stock_qty: number | null;
+  lead_time: string | null;
+  /** Pence ex VAT, per unit. */
+  unit_price_minor: number | null;
+  valid_until: string | null;
+  supplier_quote_ref: string | null;
+  notes: string | null;
+  answered: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ShopStockEnquiryAnswer = Partial<Pick<ShopStockEnquiry,
+  'stock_qty' | 'lead_time' | 'unit_price_minor' | 'valid_until' | 'supplier_quote_ref' | 'notes'>>;
+
+export interface ShopStockEnquiryResult {
+  channel: ShopAskChannel;
+  enquiry: ShopStockEnquiry | null;
+  sent_to?: string;
+  link?: string;
+  not_recorded?: string;
+}
+
 export interface ShopSupplierRequestDraft {
   to: string | null;
   subject: string;
