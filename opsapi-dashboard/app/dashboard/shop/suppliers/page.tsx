@@ -73,6 +73,7 @@ interface FormState {
   is_active: boolean;
   po_email: string;
   po_phone: string;
+  contact_name: string;
   po_address: string;
   account_number: string;
   po_notes: string;
@@ -100,6 +101,7 @@ function toForm(s?: ShopSupplier): FormState {
     is_active: s?.is_active ?? true,
     po_email: s?.po_email ?? '',
     po_phone: s?.po_phone ?? '',
+    contact_name: s?.contact_name ?? '',
     po_address: s?.po_address ?? '',
     account_number: s?.account_number ?? '',
     po_notes: s?.po_notes ?? '',
@@ -142,6 +144,7 @@ function SupplierModal({ supplier, open, onClose, onSaved }: { supplier?: ShopSu
       is_active: f.is_active,
       po_email: f.po_email.trim() || null,
       po_phone: f.po_phone.trim() || null,
+      contact_name: f.contact_name.trim() || null,
       po_address: f.po_address.trim() || null,
       account_number: f.account_number.trim() || null,
       po_notes: f.po_notes.trim() || null,
@@ -241,11 +244,12 @@ function SupplierModal({ supplier, open, onClose, onSaved }: { supplier?: ShopSu
           </label>
         </div>
         <fieldset className="space-y-4 rounded-lg border border-secondary-200 p-4">
-          <legend className="px-1 text-sm font-semibold text-secondary-800">Purchase orders</legend>
-          <p className="text-xs text-secondary-500">Filled in on every supplier PO raised from a shop order. Leave blank if you don’t raise POs with them.</p>
+          <legend className="px-1 text-sm font-semibold text-secondary-800">Contact and purchase orders</legend>
+          <p className="text-xs text-secondary-500">Used for price requests from a quote (Email supplier) and on every supplier PO raised from a shop order.</p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input label="Send POs to (email)" id="sp-po-email" type="email" value={f.po_email} onChange={(e) => set('po_email', e.target.value)} />
-            <Input label="Phone" id="sp-po-phone" value={f.po_phone} onChange={(e) => set('po_phone', e.target.value)} />
+            <Input label="Contact name" id="sp-contact-name" placeholder="e.g. Sam" helperText="Price requests start “Hello Sam”" value={f.contact_name} onChange={(e) => set('contact_name', e.target.value)} />
+            <Input label="Email (price requests and POs)" id="sp-po-email" type="email" value={f.po_email} onChange={(e) => set('po_email', e.target.value)} />
+            <Input label="Phone (WhatsApp and text)" id="sp-po-phone" type="tel" placeholder="07700 900123 or +44…" value={f.po_phone} onChange={(e) => set('po_phone', e.target.value)} />
             <Input label="Our account number with them" id="sp-acc" value={f.account_number} onChange={(e) => set('account_number', e.target.value)} />
           </div>
           <Textarea label="Their address (printed on the PO)" id="sp-po-address" rows={3} value={f.po_address} onChange={(e) => set('po_address', e.target.value)} />

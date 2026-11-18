@@ -292,6 +292,33 @@ local mail = Codes.request_email({ deal_code = CODE, contact_name = "Sam at Bost
 check("supplier request email: subject 'Price request: <code>'", mail.subject == "Price request: " .. CODE, mail.subject)
 check("supplier request email: has the spec and the lines", mail.body:find("1TB RAM", 1, true) and mail.body:find("2 x RTX PRO 6000 Blackwell", 1, true))
 check("supplier request email: no customer details", #Codes.leaks(mail, markers) == 0)
+check("supplier request email: asks availability, price, delivery and validity",
+    mail.body:find("available", 1, true) and mail.body:find("price ex VAT", 1, true) and mail.body:find("when you could deliver", 1, true)
+        and mail.body:find("how long the price is valid", 1, true))
+local built = Codes.request_email({ deal_code = CODE, contact_name = "Sam", lines = { { description = "Custom AI Workstation", qty = 2,
+    parts = { "AMD Ryzen 9 9950X", "2 x RTX PRO 6000" } } } }, {})
+check("supplier request email: greets the contact by name", built.body:find("^Hello Sam,") ~= nil)
+check("supplier request email: a configured line lists its parts",
+    built.body:find("1. 2 x Custom AI Workstation\n   - AMD Ryzen 9 9950X\n   - 2 x RTX PRO 6000", 1, true) ~= nil, built.body)
+
+-- WhatsApp and text links (Ask a supplier)
+check("phone: UK national → 44", Codes.intl_phone("07700 900456") == "447700900456")
+check("phone: + form kept", Codes.intl_phone("+1 (415) 555-0100") == "14155550100")
+check("phone: 00 form", Codes.intl_phone("0044 7700 900456") == "447700900456")
+check("phone: junk refused", Codes.intl_phone("12") == nil and Codes.intl_phone(nil) == nil and Codes.intl_phone("call me") == nil)
+local links = Codes.message_links("07700 900456", "Price request: WS-1\n\nHello & thanks")
+check("links: WhatsApp with the text", links and links.whatsapp == "https://wa.me/447700900456?text=Price%20request%3A%20WS-1%0A%0AHello%20%26%20thanks")
+check("links: text message with the body", links and links.sms == "sms:+447700900456?&body=Price%20request%3A%20WS-1%0A%0AHello%20%26%20thanks")
+check("links: none without a phone", Codes.message_links("", "x") == nil)
+local rsrc = read("lapis/queries/ShopSupplierRequestQueries.lua")
+local send_fn = rsrc:match("function R%.send.-\nend\n") or ""
+check("ask a supplier: the customer check runs before anything is sent or recorded",
+    (send_fn:find("Codes.leaks", 1, true) or math.huge) < math.min(send_fn:find("send_email(", 1, true) or 0, send_fn:find("message_links", 1, true) or 0))
+check("ask a supplier: email goes through the workspace's supplier_requests account",
+    rsrc:find('NamespaceMail.prepare(ns_id, "supplier_requests"', 1, true) ~= nil
+        and read("lapis/helper/namespace-mail.lua"):find('K("supplier_requests"', 1, true) ~= nil)
+check("ask a supplier: recorded on the deal", send_fn:find("Deal.createRequest", 1, true) ~= nil)
+check("ask a supplier: never our prices in the message", not rsrc:find("unit_price_minor", 1, true))
 
 -- The database layer refuses to put the customer in front of a supplier, and the drop-ship needs the tick box.
 local create_po = osrc:match("function ShopOrderQueries%.createPurchaseOrder.-\nend\n") or ""

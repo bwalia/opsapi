@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Copy, Download, ExternalLink, FileText, GitBranch, Lock, Pencil, Printer, Save, Send, UserPlus, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Copy, Download, ExternalLink, FileText, GitBranch, Lock, PackageSearch, Pencil, Printer, Save, Send, UserPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Input, Select, Textarea, confirmDialog } from '@/components/ui';
@@ -27,6 +27,7 @@ import { CustomerForm, customerToDraft, draftToCustomer, validateCustomer, type 
 import { OrderTermsFields, draftToOrderFields, orderTermsToDraft, type OrderTermsDraft } from '@/components/shop/OrderTermsFields';
 import { NextStepPanel, PoNumberField, StatusTimeline, quoteNextStep, quoteTimeline, type PanelAction } from '@/components/shop/workflow';
 import { ReviseQuoteModal } from '@/components/shop/ReviseQuoteModal';
+import { AskSupplierModal } from '@/components/shop/AskSupplierModal';
 import { DealCodeBar } from '@/components/shop/DealCode';
 import { extractApiError, formatDateTime } from '@/lib/utils';
 import { humanize, minorToPounds, poundsToMinor, quotePdfUrl } from '@/lib/shop';
@@ -72,6 +73,7 @@ function QuoteDetail() {
   const [lineErrors, setLineErrors] = useState<string[]>([]);
   const [terms, setTerms] = useState<OrderTermsDraft | null>(null);
   const [reviseOpen, setReviseOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -329,7 +331,19 @@ function QuoteDetail() {
         </div>
       )}
 
-      <NextStepPanel step={step} primary={primary} more={more} tone={tone} />
+      <NextStepPanel
+        step={step}
+        primary={primary}
+        more={more}
+        tone={tone}
+        slot={mayCreate && quote.status !== 'cancelled' ? (
+          <Button variant="outline" leftIcon={<PackageSearch className="h-4 w-4" />} onClick={() => setAskOpen(true)}
+            title="Ask a supplier for availability, price and delivery by email, WhatsApp or text">
+            Email supplier
+          </Button>
+        ) : null}
+      />
+      {askOpen && <AskSupplierModal quoteUuid={quote.uuid} open={askOpen} onClose={() => setAskOpen(false)} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <QuoteStatusBadge status={quote.status} />

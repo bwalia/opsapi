@@ -97,6 +97,11 @@
                                                supplier_quote_ref?, lead_time?, valid_until?, notes? }
       PUT/DELETE        /supplier-requests/:uuid
       POST              /supplier-requests/:uuid/email-draft   { to, subject, body, mailto } a draft: nothing is sent
+      GET               /quotes/:uuid/supplier-request?supplier=   "Ask a supplier": the message ready to send
+                                               { deal_code, supplier, subject, body, customer_details }
+      POST              /quotes/:uuid/supplier-request   { supplier_uuid, channel email|whatsapp|sms, subject?, message }
+                                               email is sent from here; WhatsApp / text return the link to open.
+                                               Recorded on the deal (queries/ShopSupplierRequestQueries.lua)
       POST              /quotes/:uuid/deal-code | /orders/:uuid/deal-code   { deal_code } or { new: true }: link by hand
 ]]
 
@@ -407,6 +412,24 @@ return function(app)
         local uid = user_id(self)
         local u = uid and require("lapis.db").query("SELECT id, first_name, last_name FROM users WHERE id = ?", uid)[1]
         return result(Deal.emailDraft(ns_id, self.params.uuid, u or { id = uid }))
+    end))
+
+    -- "Ask a supplier" from a quote: the message ready to send, then send it (email) or record it (WhatsApp / text).
+    local SupplierRequest = require("queries.ShopSupplierRequestQueries")
+    local function me(self)
+        local uid = user_id(self)
+        return uid and require("lapis.db").query("SELECT id, first_name, last_name, email FROM users WHERE id = ?", uid)[1]
+            or { id = uid }
+    end
+
+    app:get(BASE .. "/quotes/:uuid/supplier-request", guard("update", function(self, ns_id)
+        return result(SupplierRequest.draft(ns_id, self.params.uuid, self.params.supplier, me(self)))
+    end))
+
+    app:post(BASE .. "/quotes/:uuid/supplier-request", guard("create", function(self, ns_id)
+        local body, bad = body_or_400()
+        if not body then return bad end
+        return result(SupplierRequest.send(ns_id, self.params.uuid, body, me(self)))
     end))
 
     for _, kind in ipairs({ "quote", "order" }) do

@@ -42,7 +42,7 @@ local SUPPLIER_COLS = [[
     filter::text AS filter, prices_include_vat, currency, default_margin_pct::float8 AS default_margin_pct,
     change_threshold_pct::float8 AS change_threshold_pct, update_lead_times, sync_hours, is_active, last_synced_at,
     last_status, last_error, last_summary::text AS last_summary, portal_enabled, contact_email, created_at, updated_at,
-    po_email, po_phone, po_address, account_number, po_notes
+    po_email, po_phone, po_address, account_number, po_notes, contact_name
 ]]
 
 local function supplier_view(r)
@@ -56,7 +56,8 @@ local function supplier_view(r)
     out.last_summary = U.dec(r.last_summary, U.null)
     out.has_auth_secret = r.has_auth_secret == true
     for _, k in ipairs({ "feed_url", "auth_username", "auth_header_name", "last_synced_at", "last_status", "last_error",
-                         "contact_email", "po_email", "po_phone", "po_address", "account_number", "po_notes" }) do
+                         "contact_email", "po_email", "po_phone", "po_address", "account_number", "po_notes",
+                         "contact_name" }) do
         if out[k] == nil then out[k] = U.null end
     end
     out.item_counts = db.query([[
@@ -166,7 +167,8 @@ local function supplier_fields(body, partial)
     end
     if body.contact_email ~= nil then f.contact_email = S.trim(body.contact_email) or db.NULL end
     -- How we raise purchase orders with them.
-    for k, max in pairs({ po_email = 254, po_phone = 64, po_address = 2000, account_number = 64, po_notes = 4000 }) do
+    for k, max in pairs({ po_email = 254, po_phone = 64, po_address = 2000, account_number = 64, po_notes = 4000,
+                          contact_name = 160 }) do
         if body[k] ~= nil then
             local v = body[k] ~= U.null and S.trim(body[k]) or nil
             if v and #v > max then return nil, k .. " must be " .. max .. " characters or fewer" end

@@ -27,6 +27,7 @@ const AUDIT_LABEL: Record<string, string> = {
   'supplier_request.updated': 'Supplier request changed',
   'supplier_request.deleted': 'Supplier request deleted',
   'supplier_request.email_drafted': 'Supplier email drafted',
+  'supplier_request.sent': 'Price request sent to the supplier (email, WhatsApp or text)',
 };
 
 interface LineDraft {
@@ -339,7 +340,7 @@ function DealDetail() {
                       </p>
                       <p className="text-xs text-secondary-500">
                         {[r.contact_name, r.contact_email].filter(Boolean).join(' · ') || 'No contact'}
-                        {r.sent_at && ` · sent ${r.sent_at}`}
+                        {r.sent_at && ` · sent ${r.sent_at}`}{r.channel && ` by ${({ email: 'email', whatsapp: 'WhatsApp', sms: 'text' } as const)[r.channel]}`}
                         {r.lead_time && ` · ${r.lead_time}`}
                         {r.valid_until && ` · valid until ${r.valid_until}`}
                       </p>

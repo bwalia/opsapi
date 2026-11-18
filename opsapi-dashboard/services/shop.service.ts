@@ -77,6 +77,9 @@ import type {
   ShopSupplierRequest,
   ShopSupplierRequestDraft,
   ShopSupplierRequestInput,
+  ShopAskChannel,
+  ShopSupplierAsk,
+  ShopSupplierAskResult,
 } from '@/types/shop';
 
 const BASE = '/api/v2/shop/admin';
@@ -530,6 +533,18 @@ export const shopService = {
   async supplierRequestEmailDraft(uuid: string): Promise<ShopSupplierRequestDraft> {
     const res = await apiClient.post(`${BASE}/supplier-requests/${uuid}/email-draft`, {}, JSON_BODY);
     return unwrap<ShopSupplierRequestDraft>(res);
+  },
+
+  /** "Ask a supplier" from a quote: the message ready to send to that supplier. */
+  async askSupplierDraft(quoteUuid: string, supplierUuid: string): Promise<ShopSupplierAsk> {
+    const res = await apiClient.get(`${BASE}/quotes/${quoteUuid}/supplier-request${buildQueryString({ supplier: supplierUuid })}`);
+    return unwrap<ShopSupplierAsk>(res);
+  },
+
+  /** Email it (sent from here) or get the WhatsApp / text link to open. Recorded on the deal either way. */
+  async askSupplierSend(quoteUuid: string, body: { supplier_uuid: string; channel: ShopAskChannel; subject: string; message: string }): Promise<ShopSupplierAskResult> {
+    const res = await apiClient.post(`${BASE}/quotes/${quoteUuid}/supplier-request`, body, JSON_BODY);
+    return unwrap<ShopSupplierAskResult>(res);
   },
 
   // ---------------- Quotes ----------------
