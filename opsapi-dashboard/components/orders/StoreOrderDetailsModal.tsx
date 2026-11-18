@@ -117,18 +117,22 @@ export const StoreOrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-secondary-200">
-                  {order.items.map((item) => (
-                    <tr key={item.uuid}>
-                      <td className="px-4 py-3 text-secondary-900">{item.product_name || 'Product'}</td>
-                      <td className="px-4 py-3 text-center text-secondary-600">{item.quantity}</td>
-                      <td className="px-4 py-3 text-right text-secondary-600">
-                        {formatCurrency(item.unit_price)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-secondary-900">
-                        {formatCurrency(item.total_price)}
-                      </td>
-                    </tr>
-                  ))}
+                  {order.items.map((item) => {
+                    // The API sends price / total / product_title (orderitems); older shapes used the other names.
+                    const raw = item as typeof item & { price?: number | string; total?: number | string; product_title?: string };
+                    return (
+                      <tr key={item.uuid}>
+                        <td className="px-4 py-3 text-secondary-900">{item.product_name || raw.product_title || 'Product'}</td>
+                        <td className="px-4 py-3 text-center text-secondary-600">{item.quantity}</td>
+                        <td className="px-4 py-3 text-right text-secondary-600">
+                          {formatCurrency(Number(item.unit_price ?? raw.price ?? 0), order.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-secondary-900">
+                          {formatCurrency(Number(item.total_price ?? raw.total ?? 0), order.currency)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -163,7 +167,7 @@ export const StoreOrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order
             )}
             <div className="flex justify-between pt-2 border-t border-secondary-300 font-semibold">
               <span className="text-secondary-900">Total</span>
-              <span className="text-primary-600">{formatCurrency(order.total)}</span>
+              <span className="text-primary-600">{formatCurrency(Number(order.total ?? (order as typeof order & { total_amount?: number | string }).total_amount ?? 0), order.currency)}</span>
             </div>
           </div>
         </div>
