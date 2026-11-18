@@ -57,6 +57,12 @@ local function run(l, trigger)
 end
 
 local ok, err = pcall(function()
+    -- A deadline in the past is the model guessing the year: dropped.
+    assert(AI.future_date("2024-01-31", "2026-11-18") == nil, "past deadline kept")
+    assert(AI.future_date("2027-01-31", "2026-11-18") == "2027-01-31", "future deadline lost")
+    assert(AI.future_date("2026-11-18", "2026-11-18") == "2026-11-18", "today lost")
+    assert(AI.future_date("2027-02-30") == nil and AI.future_date("soon") == nil and AI.future_date(nil) == nil, "junk kept")
+
     Settings.save(ns, owner, { ai_enabled = true, ai_daily_cost_usd = 5 })
 
     -- 1. A normal answer, with junk the cleaner must fix.
