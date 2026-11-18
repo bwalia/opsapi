@@ -37,6 +37,8 @@ local Research = require("lib.crm.lead-research")
 local AI = {}
 
 AI.PROMPT_VERSION = "lead_analysis.v2"
+-- One analysis may take this long (the email waits up to Report.HOLD_MINUTES for it).
+AI.TIMEOUT_MS = 300000
 AI.ACTIONS = {
     call_now = "Call now", call = "Call", email = "Email them", book_meeting = "Book a meeting",
     qualify = "Qualify", send_quote = "Send a quote", refer_to_partner = "Pass to a partner",
@@ -319,8 +321,10 @@ function AI.run(run)
     local messages = { { role = "system", content = SYSTEM }, { role = "user", content = prompt(lead, ctx, settings) } }
     local input_hash = ngx.md5(AI.PROMPT_VERSION .. messages[2].content)
     local Providers = require("lib.ai-providers")
+    -- A background job, so it can wait: a self-hosted 27B model on a busy box writes the ~600-token
+    -- answer at ~4 tokens/s (~155 s measured on hh193). Stays well inside the email hold (lead-report).
     local msg, info, attempts = Providers.chat(ns, chain, messages, nil, {
-        json = true, max_tokens = 1800, temperature = 0.2, timeout_ms = 120000,
+        json = true, max_tokens = 1800, temperature = 0.2, timeout_ms = AI.TIMEOUT_MS,
         feature = "crm_lead_analysis", run_uuid = run.uuid, user_uuid = U.nz(run.requested_by_uuid),
     })
     if not msg then

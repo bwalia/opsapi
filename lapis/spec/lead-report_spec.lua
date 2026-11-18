@@ -125,6 +125,10 @@ check("sendHeld sends the admin email only", notif:find("send_confirmation = fal
 local ai = read("lapis/lib/crm/lead-ai.lua")
 check("every run makes its report and releases the email", ai:find('require("lib.crm.lead-report").after_run', 1, true) ~= nil)
 check("the prompt asks where it came from", ai:find('"origin":', 1, true) ~= nil)
+check("a slow self-hosted model gets time to answer (and finishes inside the email hold)",
+    ai:find("timeout_ms = AI.TIMEOUT_MS", 1, true) and ai:find("AI.TIMEOUT_MS = 300000", 1, true)
+        and 300000 < Report.HOLD_MINUTES * 60000)
+check("analyses are claimed one at a time", read("lapis/lib/crm/lead-jobs.lua"):find('lead-ai").process, 1)', 1, true) ~= nil)
 check("the sweep runs", read("lapis/lib/crm/lead-jobs.lua"):find("release_overdue()", 1, true) ~= nil)
 check("AI off releases at once", read("lapis/lib/crm/lead-pipeline.lua"):find('require("lib.crm.lead-report").release', 1, true) ~= nil)
 check("release claims before sending (never twice)",
