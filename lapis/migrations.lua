@@ -2947,6 +2947,8 @@ local _migrations = {
     ['zzcrmc_lead_pipeline_ai_report'] = conditional_array(ProjectConfig.FEATURES.CORE, crm_lead_pipeline_migrations, 12),
     -- Sales orders across modules: how a store order came in (migrations/sales-orders.lua)
     ['zzso1_orders_source'] = conditional_array(ProjectConfig.FEATURES.CORE, sales_order_migrations, 1),
+    ['zzso2_orders_payment'] = conditional_array(ProjectConfig.FEATURES.CORE, sales_order_migrations, 2),
+    ['zzso3_pos_menu_item'] = conditional_array(ProjectConfig.FEATURES.CORE, sales_order_migrations, 3),
     -- Media library (migrations/media-library.lua): images reused across content
     ['zzmed1_media_assets'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 1),
     ['zzmed2_media_backfill'] = conditional_array(ProjectConfig.FEATURES.CMS, media_library_migrations, 2),

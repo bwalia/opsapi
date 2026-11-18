@@ -81,14 +81,16 @@ function Q.address(v)
     return any and out or nil
 end
 
---- Validate the request (no database). → clean | nil, err
-function Q.validate(body)
+--- Validate the request (no database). opts (internal callers only, e.g. the point of sale):
+-- { channel = "pos", walk_in = true (no customer needed) }. → clean | nil, err
+function Q.validate(body, opts)
+    opts = opts or {}
     if type(body) ~= "table" then return err(400, "INVALID_BODY", "Send the order as JSON") end
     local store_uuid = text(body.store_uuid, 64)
     if not store_uuid then return err(422, "VALIDATION_ERROR", "Choose the store", { store_uuid = "required" }) end
     local c = type(body.customer) == "table" and body.customer or {}
     local email = Q.email(c.email)
-    if not email then
+    if not email and (not opts.walk_in or text(c.email, 254)) then
         return err(422, "VALIDATION_ERROR", "Enter the customer's email address", { ["customer.email"] = "a valid email" })
     end
     if type(body.items) ~= "table" or #body.items == 0 then
@@ -115,8 +117,8 @@ function Q.validate(body)
     if s_bad then return err(422, "VALIDATION_ERROR", "Shipping must be an amount like 12.50", { shipping_amount = "amount" }) end
     local discount, d_bad = Q.amount(body.discount_amount)
     if d_bad then return err(422, "VALIDATION_ERROR", "Discount must be an amount like 5.00", { discount_amount = "amount" }) end
-    local channel = body.channel == nil and "phone" or body.channel
-    if not Q.CHANNELS[channel] then
+    local channel = opts.channel or (body.channel == nil and "phone" or body.channel)
+    if not opts.channel and not Q.CHANNELS[channel] then
         return err(422, "VALIDATION_ERROR", "How did they order? phone, in_person or email", { channel = "phone | in_person | email" })
     end
     return {
@@ -142,8 +144,11 @@ end
 
 local function nz(v) return v ~= nil and v ~= db.NULL and v ~= "" and v or nil end
 
-function Q.create(ns_id, body)
-    local o, verr = Q.validate(body)
+--- opts: as validate(), plus { completed = true (paid and handed over: delivered, fulfilled),
+-- payment = { method, details (table) } or function(total) → payment | nil, err (checked inside the transaction) }.
+function Q.create(ns_id, body, opts)
+    opts = opts or {}
+    local o, verr = Q.validate(body, opts)
     if not o then return nil, verr end
     local store = db.query([[SELECT id, uuid, name, tax_rate, currency FROM stores WHERE uuid = ? AND namespace_id = ?]],
         o.store_uuid, ns_id)[1]
@@ -177,11 +182,21 @@ function Q.create(ns_id, body)
             db.query("ROLLBACK")
             return nil, { status = 422, code = "VALIDATION_ERROR", message = "The discount is more than the order", fields = { discount_amount = "too big" } }
         end
+        -- The payment is checked against the locked prices (cash given, change due).
+        local payment = opts.payment
+        if type(payment) == "function" then
+            local perr
+            payment, perr = payment(t.total)
+            if not payment then
+                db.query("ROLLBACK")
+                return nil, perr
+            end
+        end
 
-        -- The customer: this workspace's, by email; otherwise a new one.
-        local customer = db.query([[SELECT id, uuid FROM customers WHERE namespace_id = ? AND lower(email) = ? ORDER BY id LIMIT 1]],
-            ns_id, o.customer.email)[1]
-        if not customer then
+        -- The customer: this workspace's, by email; otherwise a new one. A walk-in sale may have none.
+        local customer = o.customer.email and db.query([[SELECT id, uuid FROM customers WHERE namespace_id = ?
+            AND lower(email) = ? ORDER BY id LIMIT 1]], ns_id, o.customer.email)[1]
+        if not customer and o.customer.email then
             customer = db.query([[INSERT INTO customers (uuid, namespace_id, email, first_name, last_name, phone, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW()) RETURNING id, uuid]], Global.generateUUID(), ns_id, o.customer.email,
                 o.customer.first_name or db.NULL, o.customer.last_name or db.NULL, o.customer.phone or db.NULL)[1]
@@ -190,18 +205,31 @@ function Q.create(ns_id, body)
         local uuid = Global.generateUUID()
         local number = "ORD-" .. os.date("!%Y%m%d") .. "-" .. uuid:gsub("%-", ""):sub(1, 8):upper()
         local billing = o.billing_address or o.shipping_address
-        local order = db.query([[
-            INSERT INTO orders (]] .. (require("helper.table-exists")("orders", "source") and "source, " or "") .. [[uuid, namespace_id,
-                store_id, customer_id, order_number, status, financial_status, fulfillment_status,
-                subtotal, tax_amount, shipping_amount, discount_amount, total_amount, currency, billing_address, shipping_address,
-                customer_notes, internal_notes, processed_at, created_at, updated_at)
-            VALUES (]] .. (require("helper.table-exists")("orders", "source") and (db.escape_literal(o.channel) .. ", ") or "") .. [[?, ?, ?, ?, ?, ?, ?,
-                'unfulfilled', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
-            RETURNING id, uuid, order_number]], uuid, ns_id, store.id, customer.id, number,
-            o.paid and "confirmed" or "pending", o.paid and "paid" or "pending",
+        local status, financial, fulfillment = "pending", "pending", "unfulfilled"
+        if opts.completed then
+            status, financial, fulfillment = "delivered", "paid", "fulfilled"
+        elseif o.paid then
+            status, financial = "confirmed", "paid"
+        end
+        local cols = { "uuid", "namespace_id", "store_id", "customer_id", "order_number", "status", "financial_status",
+            "fulfillment_status", "subtotal", "tax_amount", "shipping_amount", "discount_amount", "total_amount", "currency",
+            "billing_address", "shipping_address", "customer_notes", "internal_notes" }
+        local vals = { uuid, ns_id, store.id, customer and customer.id or db.NULL, number, status, financial, fulfillment,
             t.subtotal, t.tax, t.shipping, t.discount, t.total, nz(store.currency) or "GBP",
             billing and cjson.encode(billing) or db.NULL, o.shipping_address and cjson.encode(o.shipping_address) or db.NULL,
-            o.customer_notes or db.NULL, o.internal_notes or db.NULL)[1]
+            o.customer_notes or db.NULL, o.internal_notes or db.NULL }
+        local function add(col, v) cols[#cols + 1] = col; vals[#vals + 1] = v end
+        local has = require("helper.table-exists")
+        if has("orders", "source") then add("source", o.channel) end
+        if payment and has("orders", "payment_method") then
+            add("payment_method", payment.method)
+            add("payment_details", db.raw(db.escape_literal(cjson.encode(payment.details or {})) .. "::jsonb"))
+        end
+        local marks = {}
+        for i = 1, #cols do marks[i] = "?" end
+        local order = db.query("INSERT INTO orders (" .. table.concat(cols, ", ") .. ", processed_at, created_at, updated_at) VALUES ("
+            .. table.concat(marks, ", ") .. ", NOW(), NOW(), NOW()) RETURNING id, uuid, order_number, created_at",
+            (table.unpack or unpack)(vals))[1] -- luacheck: ignore 113 143
         local items = {}
         for _, l in ipairs(lines) do
             db.query([[INSERT INTO orderitems (uuid, order_id, product_id, quantity, price, total, product_title, sku, created_at, updated_at)
@@ -215,8 +243,8 @@ function Q.create(ns_id, body)
         end
         db.query("COMMIT")
         return { uuid = order.uuid, order_number = order.order_number, store = { uuid = store.uuid, name = store.name },
-                 customer = { uuid = customer.uuid, email = o.customer.email }, status = o.paid and "confirmed" or "pending",
-                 financial_status = o.paid and "paid" or "pending", channel = o.channel, currency = nz(store.currency) or "GBP",
+                 customer = customer and { uuid = customer.uuid, email = o.customer.email } or cjson.null, status = status,
+                 financial_status = financial, channel = o.channel, currency = nz(store.currency) or "GBP",
                  subtotal = t.subtotal, tax_amount = t.tax, shipping_amount = t.shipping, discount_amount = t.discount,
                  total_amount = t.total, items = items }
     end)
