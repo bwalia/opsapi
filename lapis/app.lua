@@ -745,6 +745,10 @@ load_if("crm", "routes.crm-activities")
 -- answer 409 where CRM isn't deployed (lib/crm/util.lua U.crm()).
 safe_load_routes("routes.crm-leads")
 safe_load_routes("routes.crm-leads-public")
+-- ⌘K search across records (every module adds a provider in lib/global-search.lua)
+safe_load_routes("routes.global-search")
+-- Sales Orders: every order of the workspace (shop + online stores) in one list
+safe_load_routes("routes.sales-orders")
 -- Partners (pass a deal on for a commission) and their public answer link.
 load_if("crm", "routes.crm-partners")
 -- The link in a workspace invitation email (core: invitations are).

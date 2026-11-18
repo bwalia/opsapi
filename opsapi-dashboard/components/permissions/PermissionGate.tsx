@@ -169,7 +169,8 @@ export const AccessDenied: React.FC<{
  * Protected page wrapper - redirects/shows access denied if user lacks module access
  */
 export const ProtectedPage: React.FC<{
-  module: DashboardModule | NamespaceModule;
+  /** One module, or several: access to any of them opens the page (e.g. Sales Orders: orders or shop). */
+  module: DashboardModule | NamespaceModule | (DashboardModule | NamespaceModule)[];
   action?: PermissionAction;
   children: ReactNode;
   title?: string;
@@ -189,7 +190,8 @@ export const ProtectedPage: React.FC<{
   }
 
   // Check permission
-  const hasAccess = action ? hasPermission(module, action) : canAccess(module);
+  const modules = Array.isArray(module) ? module : [module];
+  const hasAccess = modules.some((m) => (action ? hasPermission(m, action) : canAccess(m)));
 
   if (!hasAccess) {
     // A caller can supply a friendlier fallback (e.g. an onboarding CTA) instead
@@ -200,7 +202,7 @@ export const ProtectedPage: React.FC<{
     return (
       <AccessDenied
         title={title ? `Cannot Access ${title}` : undefined}
-        message={`You don't have permission to access the ${module} module. Contact your administrator to request access.`}
+        message={`You don't have permission to access the ${modules.join(' or ')} module. Contact your administrator to request access.`}
       />
     );
   }
