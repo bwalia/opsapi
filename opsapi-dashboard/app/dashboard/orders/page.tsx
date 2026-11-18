@@ -78,6 +78,17 @@ function money(v: string | number, currency = 'GBP') {
   }
 }
 
+/** For the cards: whole pounds once it's in the thousands, so it fits (£7,319 rather than £7,318.80). */
+function cardMoney(v: string | number, currency = 'GBP') {
+  const n = Number(v) || 0;
+  if (Math.abs(n) < 1000) return money(n, currency);
+  try {
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return money(n, currency);
+  }
+}
+
 const selectClass =
   'rounded-lg border border-secondary-300 bg-surface px-3 py-2 text-sm text-secondary-800 focus:outline-none focus:ring-2 focus:ring-primary-500/30';
 
@@ -287,8 +298,8 @@ function SalesOrdersContent() {
           isLoading={loading && !data} href="/dashboard/orders?stage=in_progress" />
         <StatsCard title="Delivered" value={data ? data.stats.delivered : '—'} icon={<CheckCircle2 className="h-5 w-5" />} isLoading={loading && !data}
           href="/dashboard/orders?stage=delivered" />
-        <StatsCard title="Paid" value={mainRevenue ? money(mainRevenue[1], mainRevenue[0]) : data ? money(0) : '—'}
-          description={revenue.length > 1 ? revenue.filter((r) => r !== mainRevenue).map(([c, v]) => money(v, c)).join(' · ') : 'Orders paid'}
+        <StatsCard title="Paid" value={mainRevenue ? cardMoney(mainRevenue[1], mainRevenue[0]) : data ? money(0) : '—'}
+          description={revenue.length > 1 ? revenue.filter((r) => r !== mainRevenue).map(([c, v]) => money(v, c)).join(' · ') : mainRevenue ? money(mainRevenue[1], mainRevenue[0]) : 'Orders paid'}
           icon={<PoundSterling className="h-5 w-5" />} isLoading={loading && !data} />
       </div>
 

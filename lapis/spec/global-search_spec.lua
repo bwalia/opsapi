@@ -39,6 +39,7 @@ check("too short → nil", Search.clean("a") == nil and Search.clean("  ") == ni
 check("long query is cut", #Search.clean(("x"):rep(500)) == Search.MAX_QUERY)
 check("LIKE wildcards escaped", Search.like("50%_off\\") == "%50\\%\\_off\\\\%")
 check("join skips blanks and NULL", Search.join(" · ", "a", nil, "", NULL, "b") == "a · b")
+check("join skips any userdata null (cjson.null too)", Search.join(" · ", "a", newproxy and newproxy() or NULL, "b") == "a · b")
 
 -- built-ins registered, every one namespace-scoped
 local keys = {}

@@ -69,7 +69,8 @@ local function join(sep, ...)
     local out = {}
     for i = 1, select("#", ...) do
         local v = select(i, ...)
-        if v ~= nil and v ~= db.NULL and tostring(v):match("%S") then out[#out + 1] = tostring(v) end
+        -- NULL from the database or from cjson is userdata: never "userdata: NULL" in a subtitle.
+        if v ~= nil and type(v) ~= "userdata" and v ~= db.NULL and tostring(v):match("%S") then out[#out + 1] = tostring(v) end
     end
     return table.concat(out, sep)
 end
@@ -149,7 +150,7 @@ Search.provider("deals", {
         local out = {}
         for _, r in ipairs(res.results or {}) do
             out[#out + 1] = { title = "Deal " .. r.deal_code, path = "/dashboard/shop/deals/" .. ngx.escape_uri(r.deal_code),
-                subtitle = join(" · ", r.customer ~= db.NULL and r.customer or nil,
+                subtitle = join(" · ", r.customer,
                     tostring(r.matched_by):gsub("_", " ") .. ": " .. tostring(r.match)) }
         end
         return out

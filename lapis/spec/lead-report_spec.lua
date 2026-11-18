@@ -129,6 +129,8 @@ check("the sweep runs", read("lapis/lib/crm/lead-jobs.lua"):find("release_overdu
 check("AI off releases at once", read("lapis/lib/crm/lead-pipeline.lua"):find('require("lib.crm.lead-report").release', 1, true) ~= nil)
 check("release claims before sending (never twice)",
     read("lapis/lib/crm/lead-report.lua"):find("SET alert_held_at = NULL WHERE id = ? AND alert_held_at IS NOT NULL", 1, true) ~= nil)
+check("the staff download falls back to the latest finished analysis",
+    read("lapis/lib/crm/lead-report.lua"):find("WHERE lead_id = ? AND status = 'done' ORDER BY created_at DESC", 1, true) ~= nil)
 check("the template shows the report link", read("lapis/views/emails/lead_admin_notification.etlua"):find("ai_report_url", 1, true) ~= nil)
 local pub = read("lapis/routes/crm-leads-public.lua")
 check("the public download is rate limited and checks the lead", pub:find('prefix = "lead_report"', 1, true)

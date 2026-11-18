@@ -329,9 +329,12 @@ function Report.make(analysis)
     return key_or_err, why
 end
 
---- The PDF bytes of an analysis (made now when it has none yet). → bytes, filename | nil, status, message
+--- The PDF bytes of an analysis (made now when it has none yet): the one asked for, else the latest that
+-- finished (a later failed or skipped run doesn't hide it). → bytes, filename | nil, status, message
 function Report.bytes(lead_id, analysis_uuid)
-    local a = analysis_row(lead_id, analysis_uuid)
+    local a = analysis_uuid and analysis_row(lead_id, analysis_uuid) or require("lapis.db").query([[
+        SELECT id, uuid, lead_id, namespace_id, status, result, model, report_key, error, finished_at
+        FROM crm_lead_analyses WHERE lead_id = ? AND status = 'done' ORDER BY created_at DESC, id DESC LIMIT 1]], lead_id)[1]
     if not a or a.status ~= "done" then return nil, 404, "This lead has no finished AI analysis yet" end
     if not v(a.report_key) then
         local key, why = Report.make(a)
