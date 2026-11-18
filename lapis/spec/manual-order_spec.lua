@@ -86,5 +86,15 @@ check("walk-in with a bad email is refused", Mo.validate({ store_uuid = "s", cus
     items = { { product_uuid = "p", quantity = 1 } } }, { channel = "pos", walk_in = true }) == nil)
 check("a phone order still needs the email", Mo.validate({ store_uuid = "s", items = { { product_uuid = "p", quantity = 1 } } }) == nil)
 
+-- variations
+local cv = read("lapis/routes/catalog-variants.lua")
+check("variations need the products permission in the workspace", cv:find('requirePermission("products", action', 1, true)
+    and cv:find('app:get("/api/v2/catalog/products/:uuid/variants", guard("read"', 1, true)
+    and cv:find('app:post("/api/v2/catalog/products/:uuid/variants", guard("update"', 1, true))
+check("variations are the workspace's products only",
+    read("lapis/queries/CatalogVariantQueries.lua"):find("COALESCE(p.namespace_id, s.namespace_id) = ?", 1, true) ~= nil)
+check("the old variant create no longer takes any field", read("lapis/queries/ProductVariantQueries.lua"):find("Global.pick(request, CREATABLE)", 1, true) ~= nil)
+check("a product with variations needs one chosen", read("lapis/queries/ManualOrderQueries.lua"):find('"CHOOSE_VARIANT"', 1, true) ~= nil)
+
 if failures > 0 then print(failures .. " check(s) failed"); os.exit(1) end
 print("all checks passed")

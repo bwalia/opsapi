@@ -61,27 +61,67 @@ end
 function Q.products(ns_id, store_uuid, q, limit)
     local store = store_of(ns_id, store_uuid)
     if not store then return err(404, "STORE_NOT_FOUND", "That store isn't in this workspace") end
-    limit = math.min(500, math.max(1, math.floor(tonumber(limit) or 200)))
-    local where, vals = { "store_id = ?", "is_active" }, { store.id }
+    limit = math.min(500, math.max(1, math.floor(tonumber(limit) or 300)))
+    local where, vals = { "p.store_id = ?", "p.is_active" }, { store.id }
     q = type(q) == "string" and q:match("^%s*(.-)%s*$") or ""
     if q ~= "" then
         local like = "%" .. q:sub(1, 100):gsub("[%%_\\]", "\\%0") .. "%"
-        where[#where + 1] = "(name ILIKE ? OR sku ILIKE ? OR barcode ILIKE ?)"
-        vals[#vals + 1], vals[#vals + 2], vals[#vals + 3] = like, like, like
+        where[#where + 1] = [[(p.name ILIKE ? OR p.sku ILIKE ? OR p.barcode ILIKE ? OR EXISTS (SELECT 1 FROM product_variants v
+            WHERE v.product_id = p.id AND v.is_active AND v.sku ILIKE ?))]]
+        for _ = 1, 4 do vals[#vals + 1] = like end
     end
     vals[#vals + 1] = limit
     local unpack_ = table.unpack or unpack -- luacheck: ignore 113 143
-    local rows = db.query([[SELECT uuid, name, sku, barcode, price, images, track_inventory, inventory_quantity FROM storeproducts
-        WHERE ]] .. table.concat(where, " AND ") .. [[ ORDER BY sort_order NULLS LAST, name LIMIT ?]], unpack_(vals))
-    local out = {}
+    local rows = db.query([[SELECT p.id, p.uuid, p.name, p.sku, p.barcode, p.price, p.images, p.track_inventory, p.inventory_quantity,
+            c.uuid AS category_uuid, c.name AS category
+        FROM storeproducts p LEFT JOIN categories c ON c.id = p.category_id
+        WHERE ]] .. table.concat(where, " AND ") .. [[ ORDER BY c.name NULLS LAST, p.sort_order NULLS LAST, p.name LIMIT ?]], unpack_(vals))
+
+    -- Their variations (sizes, colours, …), each with its own price and stock.
+    local by_product, ids = {}, {}
+    for _, r in ipairs(rows) do ids[#ids + 1] = r.id end
+    if #ids > 0 then
+        for _, v in ipairs(db.query([[SELECT product_id, uuid, title, sku, price, inventory_quantity FROM product_variants
+            WHERE product_id IN ? AND is_active ORDER BY position, id]], db.list(ids))) do
+            by_product[v.product_id] = by_product[v.product_id] or {}
+            table.insert(by_product[v.product_id], v)
+        end
+    end
+
+    local out, categories, cat_seen = {}, {}, {}
     for _, r in ipairs(rows) do
-        local stock = r.track_inventory == true and (tonumber(r.inventory_quantity) or 0) or cjson.null
+        local tracked = r.track_inventory == true
+        local variants = {}
+        for _, v in ipairs(by_product[r.id] or {}) do
+            local vstock = tracked and (tonumber(v.inventory_quantity) or 0) or cjson.null
+            variants[#variants + 1] = { uuid = v.uuid, title = v.title, sku = nz(v.sku) or cjson.null,
+                price = string.format("%.2f", tonumber(v.price) or tonumber(r.price) or 0), stock = vstock,
+                available = vstock == cjson.null or vstock > 0 }
+        end
+        local stock, available
+        if #variants > 0 then
+            available, stock = false, tracked and 0 or cjson.null
+            for _, v in ipairs(variants) do
+                if v.available then available = true end
+                if tracked then stock = stock + v.stock end
+            end
+        else
+            stock = tracked and (tonumber(r.inventory_quantity) or 0) or cjson.null
+            available = stock == cjson.null or stock > 0
+        end
+        local cat = nz(r.category)
+        if cat and not cat_seen[cat] then
+            cat_seen[cat] = true
+            categories[#categories + 1] = { uuid = r.category_uuid, name = cat }
+        end
         out[#out + 1] = { uuid = r.uuid, name = r.name, sku = nz(r.sku) or cjson.null, barcode = nz(r.barcode) or cjson.null,
             price = string.format("%.2f", tonumber(r.price) or 0), image = first_image(r.images) or cjson.null, stock = stock,
-            available = stock == cjson.null or stock > 0 }
+            tracked = tracked, available = available, category = cat or cjson.null,
+            variants = setmetatable(variants, cjson.array_mt) }
     end
     return { store = { uuid = store.uuid, name = store.name, currency = nz(store.currency) or "GBP",
-        tax_rate = tonumber(store.tax_rate) or 0 }, products = setmetatable(out, cjson.array_mt) }
+        tax_rate = tonumber(store.tax_rate) or 0 }, products = setmetatable(out, cjson.array_mt),
+        categories = setmetatable(categories, cjson.array_mt) }
 end
 
 --- Payment from the till. → { method, details } | nil, err
@@ -137,8 +177,10 @@ function Q.receipt(ns_id, order_uuid)
         WHERE o.uuid = ? AND COALESCE(o.namespace_id, s.namespace_id) = ?]], tostring(order_uuid or ""), ns_id)[1]
     if not o then return err(404, "NOT_FOUND", "Sale not found") end
     local items = {}
-    for _, i in ipairs(db.query("SELECT product_title, sku, quantity, price, total FROM orderitems WHERE order_id = ? ORDER BY id", o.id)) do
-        items[#items + 1] = { name = i.product_title, sku = nz(i.sku) or cjson.null, quantity = tonumber(i.quantity),
+    for _, i in ipairs(db.query("SELECT product_title, variant_title, sku, quantity, price, total FROM orderitems WHERE order_id = ? ORDER BY id",
+        o.id)) do
+        items[#items + 1] = { name = nz(i.variant_title) and (i.product_title .. " — " .. i.variant_title) or i.product_title,
+            sku = nz(i.sku) or cjson.null, quantity = tonumber(i.quantity),
             price = string.format("%.2f", tonumber(i.price) or 0), total = string.format("%.2f", tonumber(i.total) or 0) }
     end
     local details = {}
@@ -229,8 +271,21 @@ function Q.summary(ns_id, store_uuid, date)
         sales = sales + (tonumber(r.sales) or 0)
         total = total + (tonumber(r.total) or 0)
     end
+    -- The day's latest sales, to print a receipt again.
+    local recent = {}
+    for _, r in ipairs(db.query([[SELECT o.uuid, o.order_number, o.total_amount, o.payment_method,
+            to_char(o.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS sold_at,
+            (SELECT COALESCE(SUM(quantity), 0) FROM orderitems WHERE order_id = o.id) AS items
+        FROM orders o WHERE o.store_id = ? AND o.source = 'pos'
+          AND o.created_at >= (?::date)::timestamp AT TIME ZONE ? AT TIME ZONE 'UTC'
+          AND o.created_at < (?::date + 1)::timestamp AT TIME ZONE ? AT TIME ZONE 'UTC'
+        ORDER BY o.created_at DESC LIMIT 8]], store.id, day, tz, day, tz)) do
+        recent[#recent + 1] = { uuid = r.uuid, order_number = r.order_number, sold_at = r.sold_at, items = tonumber(r.items) or 0,
+            total = string.format("%.2f", tonumber(r.total_amount) or 0), method = Q.METHODS[r.payment_method] or cjson.null }
+    end
     return { date = day, timezone = tz, currency = nz(store.currency) or "GBP", sales = sales,
-        total = string.format("%.2f", total), by_method = setmetatable(by, cjson.array_mt) }
+        total = string.format("%.2f", total), by_method = setmetatable(by, cjson.array_mt),
+        recent = setmetatable(recent, cjson.array_mt) }
 end
 
 return Q

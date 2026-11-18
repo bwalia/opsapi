@@ -357,7 +357,7 @@ function CreateProductModal({
   askCurrency: boolean;
 }) {
   const empty = {
-    name: '', sku: '', price: '', cost_price: '', inventory_quantity: '',
+    name: '', sku: '', barcode: '', price: '', cost_price: '', inventory_quantity: '',
     low_stock_threshold: '', short_description: '', description: '',
   };
   const [form, setForm] = useState(empty);
@@ -390,6 +390,7 @@ function CreateProductModal({
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
         sku: form.sku.trim(),
+        barcode: form.barcode.trim(),
         price: form.price.trim(),
         compare_price: 'null',
         cost_price: form.cost_price.trim() || '0',
@@ -419,8 +420,13 @@ function CreateProductModal({
       {isOpen && (
         <form onSubmit={submit} className="space-y-4">
           <Input label="Name *" value={form.name} onChange={set('name')} placeholder="e.g. Daikin FTXM50 Air Conditioner" autoFocus />
+          <p className="text-xs text-secondary-500">
+            Sizes, colours or other options? Save the product, then add them under Variations on its page: each with its own
+            SKU, price and stock.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="SKU" value={form.sku} onChange={set('sku')} placeholder="e.g. DAIKIN-FTXM50" />
+            <Input label="Barcode (to scan at the till)" value={form.barcode} onChange={set('barcode')} placeholder="e.g. 5012345678900" />
             <Input label="Price *" value={form.price} onChange={set('price')} inputMode="decimal" placeholder="0.00" />
             <Input label="Cost price" value={form.cost_price} onChange={set('cost_price')} inputMode="decimal" placeholder="0.00" />
             <div className="grid grid-cols-2 gap-2">

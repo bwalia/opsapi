@@ -4,15 +4,17 @@ local Global = require "helper.global"
 
 local ProductVariantQueries = {}
 
-function ProductVariantQueries.create(params)
-    if not params.uuid then
-        params.uuid = Global.generateUUID()
-    end
+-- What a request may set: never ids or another product (kept in step with UPDATABLE below).
+local CREATABLE = { "title", "option1", "option2", "option3", "sku", "price", "compare_price", "inventory_quantity",
+    "weight", "image_url", "is_active", "position" }
 
-    local product = StoreproductModel:find({ uuid = params.product_id })
+function ProductVariantQueries.create(request)
+    local product = StoreproductModel:find({ uuid = request.product_id })
     if not product then
         error("Product not found")
     end
+    local params = Global.pick(request, CREATABLE)
+    params.uuid = Global.generateUUID()
     params.product_id = product.id
 
     return ProductVariantModel:create(params, { returning = "*" })

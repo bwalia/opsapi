@@ -9,8 +9,9 @@
       store_uuid            a store of this workspace
       customer              { email (required), first_name?, last_name?, phone? }: found by email in this
                             workspace, else created
-      items                 [{ product_uuid, quantity }] (1..100 lines): active products of that store; prices come
-                            from the product, never from the request
+      items                 [{ product_uuid, variant_uuid?, quantity }] (1..100 lines): active products of that store
+                            (a product with variations needs one: its own price, SKU and stock); prices come from the
+                            product or variation, never from the request
       shipping_amount?, discount_amount?   pounds (≥ 0, at most 2 decimals)
       shipping_address?, billing_address?  { name?, line1?, line2?, city?, postcode?, country?, phone? }
       customer_notes?, internal_notes?
@@ -100,17 +101,19 @@ function Q.validate(body, opts)
     local items, seen = {}, {}
     for i, it in ipairs(body.items) do
         local p = type(it) == "table" and text(it.product_uuid, 64)
+        local v = type(it) == "table" and text(it.variant_uuid, 64) or nil
         local qty = type(it) == "table" and tonumber(it.quantity)
         if not p then return err(422, "VALIDATION_ERROR", "Line " .. i .. ": choose a product", { ["items." .. i] = "product" }) end
         if not qty or qty ~= math.floor(qty) or qty < 1 or qty > Q.MAX_QTY then
             return err(422, "VALIDATION_ERROR", "Line " .. i .. ": the quantity must be a whole number from 1",
                 { ["items." .. i] = "quantity" })
         end
-        if seen[p] then
-            items[seen[p]].quantity = items[seen[p]].quantity + qty -- the same product twice is one line
+        local key = p .. ":" .. (v or "")
+        if seen[key] then
+            items[seen[key]].quantity = items[seen[key]].quantity + qty -- the same product (and variation) twice is one line
         else
-            items[#items + 1] = { product_uuid = p, quantity = qty }
-            seen[p] = #items
+            items[#items + 1] = { product_uuid = p, variant_uuid = v, quantity = qty }
+            seen[key] = #items
         end
     end
     local shipping, s_bad = Q.amount(body.shipping_amount)
@@ -165,17 +168,34 @@ function Q.create(ns_id, body, opts)
                 return nil, { status = 422, code = "PRODUCT_NOT_AVAILABLE", message = "Line " .. i .. ": that product isn't sold in "
                     .. store.name, fields = { ["items." .. i] = "product" } }
             end
-            local price = tonumber(p.price)
+            -- A variation (size, colour, …): its own price (or the product's), SKU and stock.
+            local variant
+            if it.variant_uuid then
+                variant = db.query([[SELECT id, uuid, title, sku, price, inventory_quantity, is_active FROM product_variants
+                    WHERE uuid = ? AND product_id = ? FOR UPDATE]], it.variant_uuid, p.id)[1]
+                if not variant or variant.is_active == false then
+                    db.query("ROLLBACK")
+                    return nil, { status = 422, code = "VARIANT_NOT_AVAILABLE", message = "Line " .. i .. ": that option of "
+                        .. p.name .. " isn't available", fields = { ["items." .. i] = "variant" } }
+                end
+            elseif db.query("SELECT 1 AS x FROM product_variants WHERE product_id = ? AND is_active LIMIT 1", p.id)[1] then
+                db.query("ROLLBACK")
+                return nil, { status = 422, code = "CHOOSE_VARIANT", message = "Line " .. i .. ": choose which " .. p.name
+                    .. " (size, colour, …)", fields = { ["items." .. i] = "variant" } }
+            end
+            local price = tonumber(variant and variant.price) or tonumber(p.price)
             if not price or price < 0 then
                 db.query("ROLLBACK")
                 return nil, { status = 422, code = "PRODUCT_HAS_NO_PRICE", message = p.name .. " has no price. Set one on the product first." }
             end
-            if p.track_inventory == true and (tonumber(p.inventory_quantity) or 0) < it.quantity then
+            local name = variant and (p.name .. " — " .. variant.title) or p.name
+            local stock = variant and variant.inventory_quantity or p.inventory_quantity
+            if p.track_inventory == true and (tonumber(stock) or 0) < it.quantity then
                 db.query("ROLLBACK")
                 return nil, { status = 409, code = "NOT_ENOUGH_STOCK", message = ("Only %d of %s in stock"):format(
-                    math.max(0, tonumber(p.inventory_quantity) or 0), p.name), fields = { ["items." .. i] = "quantity" } }
+                    math.max(0, tonumber(stock) or 0), name), fields = { ["items." .. i] = "quantity" } }
             end
-            lines[#lines + 1] = { product = p, price = price, quantity = it.quantity }
+            lines[#lines + 1] = { product = p, variant = variant, name = name, price = price, quantity = it.quantity }
         end
         local t = Q.totals(lines, store.tax_rate, o.shipping, o.discount)
         if t.total < 0 then
@@ -232,14 +252,22 @@ function Q.create(ns_id, body, opts)
             (table.unpack or unpack)(vals))[1] -- luacheck: ignore 113 143
         local items = {}
         for _, l in ipairs(lines) do
-            db.query([[INSERT INTO orderitems (uuid, order_id, product_id, quantity, price, total, product_title, sku, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())]], Global.generateUUID(), order.id, l.product.id, l.quantity, l.price,
-                l.total, l.product.name, nz(l.product.sku) or db.NULL)
+            local v = l.variant
+            db.query([[INSERT INTO orderitems (uuid, order_id, product_id, variant_id, variant_title, quantity, price, total, product_title,
+                sku, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())]], Global.generateUUID(), order.id,
+                l.product.id, v and v.uuid or db.NULL, v and v.title or db.NULL, l.quantity, l.price, l.total, l.product.name,
+                nz(v and v.sku) or nz(l.product.sku) or db.NULL)
             if l.product.track_inventory == true then
-                db.query("UPDATE storeproducts SET inventory_quantity = inventory_quantity - ?, updated_at = NOW() WHERE id = ?",
-                    l.quantity, l.product.id)
+                if v then
+                    db.query("UPDATE product_variants SET inventory_quantity = inventory_quantity - ?, updated_at = NOW() WHERE id = ?",
+                        l.quantity, v.id)
+                else
+                    db.query("UPDATE storeproducts SET inventory_quantity = inventory_quantity - ?, updated_at = NOW() WHERE id = ?",
+                        l.quantity, l.product.id)
+                end
             end
-            items[#items + 1] = { product_uuid = l.product.uuid, name = l.product.name, quantity = l.quantity, price = l.price, total = l.total }
+            items[#items + 1] = { product_uuid = l.product.uuid, variant_uuid = v and v.uuid or cjson.null, name = l.name,
+                quantity = l.quantity, price = l.price, total = l.total }
         end
         db.query("COMMIT")
         return { uuid = order.uuid, order_number = order.order_number, store = { uuid = store.uuid, name = store.name },

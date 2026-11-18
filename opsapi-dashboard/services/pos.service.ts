@@ -4,6 +4,17 @@
  */
 import apiClient, { buildQueryString } from '@/lib/api-client';
 
+/** A variation (size, colour, …): its own SKU, price and stock. */
+export interface PosVariant {
+  uuid: string;
+  title: string;
+  sku: string | null;
+  price: string;
+  /** null when the product doesn't track stock. */
+  stock: number | null;
+  available: boolean;
+}
+
 export interface PosProduct {
   uuid: string;
   name: string;
@@ -11,21 +22,25 @@ export interface PosProduct {
   barcode: string | null;
   price: string;
   image: string | null;
-  /** null when the product doesn't track stock. */
+  /** null when the product doesn't track stock (for variations: their total). */
   stock: number | null;
+  tracked: boolean;
   available: boolean;
+  category: string | null;
+  variants: PosVariant[];
 }
 
 export interface PosCatalogue {
   store: { uuid: string; name: string; currency: string; tax_rate: number };
   products: PosProduct[];
+  categories: { uuid: string; name: string }[];
 }
 
 export type PosPaymentMethod = 'cash' | 'card' | 'other';
 
 export interface PosSaleInput {
   store_uuid: string;
-  items: { product_uuid: string; quantity: number }[];
+  items: { product_uuid: string; variant_uuid?: string; quantity: number }[];
   discount_amount?: string;
   customer?: { email?: string };
   payment: { method: PosPaymentMethod; tendered?: string; reference?: string };
@@ -54,6 +69,7 @@ export interface PosSummary {
   sales: number;
   total: string;
   by_method: { method: string; label: string; sales: number; total: string }[];
+  recent: { uuid: string; order_number: string; sold_at: string; items: number; total: string; method: string | null }[];
 }
 
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } };
