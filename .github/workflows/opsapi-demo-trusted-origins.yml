@@ -1,0 +1,65 @@
+# Apply the demo identity stack's trusted sign-in origins
+# (passwordResetAllowedOrigins in values-opsapi-demo.yaml) to the live
+# opsapi-demo Deployment, without a full helm upgrade (no migrate hook).
+# A rolling restart of the API only. The values file stays the source of
+# truth, so the next `helm upgrade opsapi-demo` sets the same value.
+name: opsapi-demo trusted origins
+
+on:
+  workflow_dispatch:
+    inputs:
+      CHECK_ORIGINS:
+        description: "Origins that must be accepted by /auth/signin afterwards (space-separated)"
+        default: "https://showcase.nebuladb.net https://sourcesupplies.nebuladb.net"
+        type: string
+
+concurrency:
+  group: opsapi-demo-trusted-origins
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      VALUES: devops/helm-charts/diytaxreturn-lapis/values-opsapi-demo.yaml
+      NS: demo
+      DEPLOY: opsapi-demo
+      IDENTITY: https://identity.demo.opsapi.org
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decode kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Set PASSWORD_RESET_ALLOWED_ORIGINS from the values file
+        run: |
+          set -euo pipefail
+          ORIGINS=$(sed -nE 's/^passwordResetAllowedOrigins:[[:space:]]*"([^"]*)".*/\1/p' "$VALUES")
+          [ -n "$ORIGINS" ] || { echo "::error::passwordResetAllowedOrigins not found in $VALUES"; exit 1; }
+          CURRENT=$(kubectl -n "$NS" get deploy "$DEPLOY" -o json \
+            | jq -r '[.spec.template.spec.containers[].env[]? | select(.name=="PASSWORD_RESET_ALLOWED_ORIGINS") | .value][0] // ""')
+          echo "current: $CURRENT"
+          echo "desired: $ORIGINS"
+          if [ "$CURRENT" = "$ORIGINS" ]; then echo "already up to date"; exit 0; fi
+          kubectl -n "$NS" set env deploy/"$DEPLOY" PASSWORD_RESET_ALLOWED_ORIGINS="$ORIGINS"
+          kubectl -n "$NS" rollout status deploy/"$DEPLOY" --timeout=10m
+
+      - name: Verify the hosted sign-in accepts each origin
+        env:
+          CHECK_ORIGINS: ${{ inputs.CHECK_ORIGINS }}
+        run: |
+          set -uo pipefail
+          fail=0
+          for o in $CHECK_ORIGINS; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              "$IDENTITY/auth/signin?frontend_url=$(jq -rn --arg u "$o" '$u|@uri')&from=check")
+            echo "$o -> /auth/signin HTTP $code"
+            [ "$code" = 200 ] || { echo "::error::$o is not accepted by $IDENTITY/auth/signin (HTTP $code)"; fail=1; }
+          done
+          exit $fail
