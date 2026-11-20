@@ -234,6 +234,19 @@ local SCRIPT = [[
 })();
 ]]
 
+--- Whether the page offers "Continue with Google".
+-- An app can ask for password sign-in only with `providers=password`: an iOS app
+-- that offers a third-party login must also offer Sign in with Apple (App Store
+-- guideline 4.8), so an app without Apple keys hides Google instead. Other apps
+-- on the same OpsAPI keep Google. Only hides the button: /auth/google itself is
+-- unchanged.
+-- @param params request params (`providers` read)
+-- @param configured bool, Google sign-in is configured on this OpsAPI
+function HostedSignin.offer_google(params, configured)
+    if not configured then return false end
+    return not (type(params) == "table" and params.providers == "password")
+end
+
 --- Render the page.
 -- @param opts { mode = "signin"|"signout"|"error", ctx = resolve() result, nonce = string,
 --               google = bool (Google sign-in configured), error = string }

@@ -62,7 +62,8 @@ return function(app)
         if not ctx then
             return page(400, { mode = "error", error = err })
         end
-        return page(200, { mode = "signin", ctx = ctx, google = google_configured() })
+        local google = HostedSignin.offer_google(self.params, google_configured())
+        return page(200, { mode = "signin", ctx = ctx, google = google })
     end))
 
     app:get("/auth/signout", RateLimit.wrap(SIGNIN_LIMIT, function(self)

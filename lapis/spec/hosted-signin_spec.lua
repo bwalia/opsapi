@@ -90,6 +90,16 @@ check("script returns to <app>/auth/callback?token=&redirect=",
 check("no Google button when Google isn't configured",
     not HostedSignin.render({ mode = "signin", ctx = ctx, nonce = "n" }):find("/auth/google", 1, true))
 
+print("offer_google: an app can ask for password sign-in only (providers=password)")
+check("Google offered by default when configured", HostedSignin.offer_google({}, true) == true)
+check("providers=password hides Google", HostedSignin.offer_google({ providers = "password" }, true) == false)
+check("any other providers value keeps Google", HostedSignin.offer_google({ providers = "google" }, true) == true)
+check("never offered when not configured", HostedSignin.offer_google({}, false) == false)
+check("nil params are safe", HostedSignin.offer_google(nil, true) == true)
+check("route passes the request params to offer_google",
+    read("lapis/routes/auth-signin.lua"):find("HostedSignin.offer_google(self.params, google_configured())", 1, true)
+        and read("lapis/routes/auth-signin.lua"):find("google = google }", 1, true))
+
 print("render: prompt=login skips the single sign-on")
 local fresh_ctx = HostedSignin.resolve({ frontend_url = APP, from = "x", prompt = "login" }, trusted)
 local fresh = HostedSignin.render({ mode = "signin", ctx = fresh_ctx, nonce = "n", google = true })
