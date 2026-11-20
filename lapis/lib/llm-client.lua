@@ -23,7 +23,11 @@ local OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://ollama:11434"
 -- corpus is stored as vector(384) from all-MiniLM-L6-v2, so query embeddings must
 -- land in that same 384-dim space. Ollama's `all-minilm` is that model.
 local OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL") or "all-minilm"
-local DEFAULT_EMBED_PROVIDER = os.getenv("AI_EMBED_PROVIDER") or os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
+-- The embedder is a deployment setting (AI_EMBED_PROVIDER), never a per-call choice: the stored vectors
+-- are vector(384), so a request's chat provider ("claude", "bedrock" …) must not move embeddings to
+-- Voyage (512-dim) or OpenAI (1536-dim) — every insert/search against that column would then fail.
+-- DEFAULT_LLM_PROVIDER is a chat setting and is no longer read here for the same reason.
+local DEFAULT_EMBED_PROVIDER = os.getenv("AI_EMBED_PROVIDER") or "ollama"
 
 local MAX_RETRIES = 3
 -- Total time for one model call (AI_REQUEST_TIMEOUT_MS — the same setting lib/agent/llm uses
@@ -121,16 +125,24 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---- The model these features use (one, from the env — see lib/agent/llm).
--- @return table Array of { id, name, models, is_default, available }
+--- The models tax classification tries, in order: the saved chain (dashboard) or the env one
+-- (AI_PROVIDER + AI_FALLBACK_CHAIN … — see lib/agent/llm). The first is the one that answers
+-- while it is up; a provider whose circuit is open is skipped for now (available = false).
+-- @return table Array of { id, name, models, is_default, available, position }
 function LLMClient.get_providers()
-    return { {
-        id = Llm.default.provider,
-        name = Llm.default.label,
-        models = { Llm.default.model },
-        is_default = true,
-        available = Llm.configured(),
-    } }
+    local plan = Llm.plan_for("tax_classify")
+    local out = {}
+    for i, c in ipairs(plan) do
+        out[i] = {
+            id = c.name or c.provider,
+            name = c.label or c.provider,
+            models = { c.model },
+            is_default = i == 1,
+            available = Llm.configured(c) and not Llm.is_down(c),
+            position = i,
+        }
+    end
+    return out
 end
 
 --- Classify a transaction using the selected LLM provider
@@ -331,12 +343,14 @@ Respond with valid JSON only.]]
     end)
 end
 
---- Generate embedding vector for text
--- @param opts table { text, provider, trace_id }
+--- Generate embedding vector for text (always the deployment's embedder: AI_EMBED_PROVIDER, default Ollama
+-- all-minilm, 384-dim)
+-- @param opts table { text, trace_id }
 -- @return table { embedding: number[] } | nil, error
 function LLMClient.generate_embedding(opts)
     opts = opts or {}
-    local provider = opts.provider or DEFAULT_EMBED_PROVIDER
+    -- opts.provider is accepted for old callers but ignored (see DEFAULT_EMBED_PROVIDER).
+    local provider = DEFAULT_EMBED_PROVIDER
     local text = opts.text
     if not text or #text == 0 then return nil, "text is required" end
 

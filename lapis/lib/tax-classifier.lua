@@ -584,8 +584,7 @@ function Classifier.classify_transaction(transaction, opts)
     else
         -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
         local embedding_result = opts.namespace_id and opts.user_id and LLMClient.generate_embedding({
-            text = cleaned,
-            provider = opts.llm_provider,
+            text = cleaned, -- always the deployment's embedder: the stored vectors are 384-dim
             trace_id = opts.trace_id,
         })
         if embedding_result and embedding_result.embedding then

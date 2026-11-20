@@ -12,6 +12,8 @@
       mistral            openai                         https://api.mistral.ai/v1
       azure_openai       openai (+ api-key header)      https://<resource>.openai.azure.com  (options.deployment,
                                                         options.api_version)
+      bedrock            bedrock (Converse, native)     https://bedrock-runtime.<options.region>.amazonaws.com with a
+                                                        Bedrock API key; or openai via a gateway when base_url is set
       openai_compatible  openai                         required: LM Studio, vLLM, llama.cpp server, LocalAI, …
       ollama             openai (Ollama's /v1)          http://localhost:11434/v1
       jobshout           —                              required (JobShout server; username + password, or a jsk_ API key)
@@ -58,8 +60,9 @@ Providers.TYPES = {
     gemini = { adapter = "openai", url = "https://generativelanguage.googleapis.com/v1beta/openai", key = true },
     mistral = { adapter = "openai", url = "https://api.mistral.ai/v1", key = true },
     azure_openai = { adapter = "openai", key = true, needs_url = true },
-    -- AWS Bedrock Runtime (OpenAI-compatible proxy URL, e.g. Bedrock Access Gateway / LiteLLM).
-    bedrock = { adapter = "openai", needs_url = true, key = true, stream = true },
+    -- AWS Bedrock Runtime, native (Converse API) with a Bedrock API key + options.region. A base_url
+    -- instead means an OpenAI-compatible gateway in front of Bedrock (Bedrock Access Gateway / LiteLLM).
+    bedrock = { adapter = "openai", key = true, stream = true, native_bedrock = true },
     -- xAI Grok
     xai = { adapter = "openai", url = "https://api.x.ai/v1", key = true },
     -- stream: local servers answer slowly; streaming keeps bytes flowing past proxies that cut silent connections.
@@ -243,7 +246,13 @@ function Providers.save(ns, actor, b, existing)
     if b.options ~= nil then
         if type(b.options) ~= "table" then errors.options = "object" else row.options = cjson.encode(b.options) end
     end
-    if ptype == "azure_openai" then
+    if ptype == "bedrock" and not url then
+        local opts = b.options or decode(existing and existing.options)
+        if not Providers.bedrock_region(opts.region) then
+            errors.options = "bedrock needs options.region (e.g. eu-west-2), or a gateway base_url"
+        end
+    end
+        if ptype == "azure_openai" then
         local opts = b.options or decode(existing and existing.options)
         if blank(opts.deployment) and blank(row.default_model or (existing and existing.default_model)) then
             errors.options = "azure_openai needs options.deployment (or default_model as the deployment name)"
@@ -329,6 +338,13 @@ function Providers.secret(row)
     return plain
 end
 
+--- An AWS region name (eu-west-2, us-gov-west-1 …) or nil: it becomes part of the Bedrock host.
+function Providers.bedrock_region(v)
+    if type(v) ~= "string" then return nil end
+    v = v:lower():gsub("^%s+", ""):gsub("%s+$", "")
+    return v:match("^[a-z][a-z]%-[a-z]+%-[a-z]*%-?%d$") and v or nil
+end
+
 --- Llm.chat config for a provider row (nil, err for jobshout or a missing key/model). It carries
 -- workspace_provider (the row's uuid): lib/agent/llm then never falls back to the platform's model and
 -- keeps its circuit breaker per provider; user_url: the URL is SSRF-checked and pinned on every call.
@@ -350,6 +366,15 @@ function Providers.cfg(row, model)
     if not key and not blank(row.secret_sealed) then
         return nil, row.name .. ": the stored key can't be opened (tampered, or the deployment key changed); "
             .. "save it again"
+    end
+    if spec.native_bedrock and blank(row.base_url) then
+        local region = Providers.bedrock_region(opts.region)
+        if not region then return nil, row.name .. " has no AWS region set" end
+        if not key then return nil, row.name .. " has no Bedrock API key" end
+        if not model then return nil, row.name .. " has no model set" end
+        return { provider = "bedrock", protocol = "bedrock", label = row.name, model = model, key = key,
+            region = region, aws = {}, url = "https://bedrock-runtime." .. region .. ".amazonaws.com",
+            workspace_provider = row.uuid, user_url = true }
     end
     local cfg = { provider = spec.adapter, label = row.name, model = model, key = key, url = url,
         workspace_provider = row.uuid, user_url = true, stream = spec.stream }
