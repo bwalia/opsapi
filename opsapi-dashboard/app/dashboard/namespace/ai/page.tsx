@@ -5,6 +5,8 @@
  *
  * The workspace's own AI providers (core, used by the AI assistant and by plugins) and which one
  * drives the AI assistant. namespace.read sees them; namespace.update changes them.
+ * Platform admins also see the platform fallback chain: the order of the platform's own models per
+ * AI feature (keys stay in the environment / Vault).
  */
 import React from 'react';
 import Link from 'next/link';
@@ -13,9 +15,11 @@ import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import AiProviders from '@/components/ai/AiProviders';
+import AiFallbackChain from '@/components/ai/AiFallbackChain';
 
 function AiModels() {
-  const canEdit = usePermissions().hasPermission('namespace', 'update');
+  const { hasPermission, isAdmin } = usePermissions();
+  const canEdit = hasPermission('namespace', 'update');
   return (
     <div className="space-y-6">
       <Link href="/dashboard/namespace" className="inline-flex items-center text-sm text-secondary-500 hover:text-secondary-800">
@@ -27,6 +31,7 @@ function AiModels() {
         icon={<Bot className="h-5 w-5" />}
       />
       <AiProviders canEdit={canEdit} />
+      {isAdmin && <AiFallbackChain />}
     </div>
   );
 }

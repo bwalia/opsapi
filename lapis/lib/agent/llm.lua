@@ -333,8 +333,9 @@ local function hop_field(name, f)
     return tostring(x)
 end
 
---- One named hop (configured or not; .missing says why not).
-function Llm.hop(name)
+--- One named hop (configured or not; .missing says why not). model: use this model instead of the
+-- hop's own (a saved chain may run one provider with several models, e.g. Bedrock Sonnet then Haiku).
+function Llm.hop(name, model)
     local raw = hop_field(name, "provider")
     local provider = normalise(raw or name)
     if not provider then
@@ -342,7 +343,10 @@ function Llm.hop(name)
             missing = "unknown provider '" .. tostring(raw or name) .. "' (set AI_HOP_" .. name:upper()
                 .. "_PROVIDER or AI_HOPS." .. name .. ".provider)" }
     end
-    local cfg = build(provider, function(f) return hop_field(name, f) end, normalise(name) == provider, true)
+    local cfg = build(provider, function(f)
+        if f == "model" and model then return model end
+        return hop_field(name, f)
+    end, normalise(name) == provider, true)
     cfg.name, cfg.hop = name, true
     cfg.tools = hop_field(name, "tools") ~= "false"
     cfg.enabled = hop_field(name, "enabled") ~= "false"
@@ -410,6 +414,153 @@ end
 function Llm.chain_for(feature)
     return feature and Llm.chain_by_feature[feature] or Llm.chain
 end
+
+-- ---------------------------------------------------------------------------
+-- Saved chains: the try-order set by platform admins in the dashboard
+-- (ai_chain_settings, routes/ai-chain-admin.lua). Keys stay in env / Vault: a
+-- saved chain only says which configured providers are tried, in what order,
+-- and with which model. A saved chain is the WHOLE order, its first enabled hop
+-- included, so it can also change which model answers first.
+--   scope "default"     every call that would use the main model (AI_PROVIDER)
+--   scope <feature>     calls for that usage feature (tax_classify, statement_extract,
+--                       assistant …), whatever model they would have used
+-- Precedence for one call: its feature's saved chain, then its feature's env chain
+-- (AI_FALLBACK_CHAIN_BY_FEATURE: main + those hops), then the saved "default"
+-- chain, then env (AI_PROVIDER + AI_FALLBACK_CHAIN). Never for a workspace's own
+-- provider (its data only goes where the workspace said) or a no_fallback call.
+-- Each worker caches the table for SAVED_TTL seconds; a save bumps a version in
+-- ngx.shared.cache so every worker re-reads on its next call.
+-- ---------------------------------------------------------------------------
+
+Llm.main_name = MAIN
+Llm.vision_name = VISION
+Llm.SAVED_VERSION_KEY = "ai:chain:saved:ver"
+local SAVED_TTL = 30
+local saved_cache = nil -- { at, ver, scopes = { [scope] = { { name, model?, enabled }, … } } }
+
+local function decode_hops(v)
+    if type(v) == "string" then v = cjson.decode(v) end
+    if type(v) ~= "table" then return nil end
+    local out = {}
+    for _, h in ipairs(v) do
+        if type(h) == "table" and type(h.name) == "string" then
+            out[#out + 1] = { name = h.name, model = type(h.model) == "string" and h.model ~= "" and h.model or nil,
+                enabled = h.enabled ~= false }
+        end
+    end
+    return out
+end
+
+--- Every saved chain, by scope (cached; {} when none are saved or the table doesn't exist yet).
+function Llm.saved_chains()
+    ngx.update_time()
+    local now = ngx.now()
+    local shared = ngx.shared and ngx.shared.cache
+    local ver = shared and shared:get(Llm.SAVED_VERSION_KEY) or 0
+    if saved_cache and saved_cache.ver == ver and now - saved_cache.at < SAVED_TTL then return saved_cache.scopes end
+    local scopes = {}
+    -- Two queries so a deployment that hasn't run the migration yet never sees an SQL error
+    -- (which would abort a caller's open transaction).
+    local ok, rows = pcall(function()
+        local db = require("lapis.db")
+        local t = db.query("SELECT to_regclass('ai_chain_settings') IS NOT NULL AS present")
+        if not (t and t[1] and t[1].present == true) then return {} end
+        return db.query("SELECT scope, hops FROM ai_chain_settings")
+    end)
+    if ok and type(rows) == "table" then
+        for _, r in ipairs(rows) do
+            local hops = decode_hops(r.hops)
+            if r.scope and hops and #hops > 0 then scopes[r.scope] = hops end
+        end
+    elseif not ok then
+        ngx.log(ngx.WARN, "[llm] saved AI chains not read: ", tostring(rows))
+        -- A failure (e.g. no database in this phase) keeps the last good copy rather than dropping it.
+        if saved_cache then return saved_cache.scopes end
+    end
+    saved_cache = { at = now, ver = ver, scopes = scopes }
+    return scopes
+end
+
+--- After a save: every worker re-reads the saved chains on its next call.
+function Llm.saved_changed()
+    saved_cache = nil
+    local shared = ngx.shared and ngx.shared.cache
+    if shared then
+        local _, err = shared:incr(Llm.SAVED_VERSION_KEY, 1, 0)
+        if err then shared:set(Llm.SAVED_VERSION_KEY, ngx.now()) end
+    end
+end
+
+local resolved_hops = {} -- name|model -> cfg (per worker: the env doesn't change while it runs)
+
+--- The settings for one entry of a saved chain: a built-in provider name (ollama, anthropic, openai,
+-- google, bedrock, azure, vertex — the main provider keeps its AI_* overrides) or a custom hop from
+-- AI_HOPS / AI_HOP_<NAME>_*, optionally with another model.
+function Llm.resolve_hop(name, model)
+    local k = tostring(name) .. "|" .. tostring(model or "")
+    if resolved_hops[k] then return resolved_hops[k] end
+    local cfg
+    if name == MAIN then
+        cfg = {}
+        for f, v in pairs(Llm.config(MAIN, model)) do cfg[f] = v end
+        cfg.name, cfg.tools, cfg.enabled = name, true, true
+    else
+        cfg = Llm.hop(name, model)
+    end
+    resolved_hops[k] = cfg
+    return cfg
+end
+
+--- Names a saved chain may use: every built-in provider, plus each custom hop named in AI_HOPS or in an
+-- env chain. (AI_HOP_<NAME>_* hops can't be listed from the environment: name them in AI_HOPS or a chain.)
+function Llm.known_hop_names()
+    local names, seen = {}, {}
+    local function add(n)
+        if type(n) == "string" and n ~= "" and not seen[n] then
+            seen[n] = true
+            names[#names + 1] = n
+        end
+    end
+    add(MAIN)
+    for _, p in ipairs({ "ollama", "anthropic", "openai", "google", "bedrock", "azure", "vertex" }) do add(p) end
+    if type(HOPS_JSON) == "table" then
+        local custom = {}
+        for n in pairs(HOPS_JSON) do custom[#custom + 1] = n end
+        table.sort(custom)
+        for _, n in ipairs(custom) do add(n) end
+    end
+    for _, n in ipairs(Llm.chain_names) do add(n) end
+    for n in pairs(Llm.hops) do add(n) end
+    return names
+end
+
+--- A hop the calls below can use: configured, not switched off, and able to call tools when the call has tools.
+local function usable(cfg, tools)
+    return Llm.configured(cfg) and cfg.enabled ~= false and (cfg.tools ~= false or not (tools and #tools > 0))
+end
+
+--- The saved chain that applies to one call (resolved, usable hops only), or nil to use the env chain.
+local function saved_plan(cfg, tools, opts)
+    if opts.no_fallback or cfg.workspace_provider then return nil end
+    local feature = opts.usage and opts.usage.feature
+    local scopes = Llm.saved_chains()
+    local hops = feature and scopes[feature]
+    if not hops then
+        if feature and Llm.chain_by_feature[feature] then return nil end -- the env's own chain for this task
+        if cfg ~= Llm.default then return nil end -- a call that asked for a particular model (vision, ATS …)
+        hops = scopes.default
+    end
+    if not hops then return nil end
+    local out = {}
+    for _, h in ipairs(hops) do
+        if h.enabled then
+            local c = Llm.resolve_hop(h.name, h.model)
+            if usable(c, tools) then out[#out + 1] = c end
+        end
+    end
+    return #out > 0 and out or nil
+end
+Llm.saved_plan = saved_plan
 
 local function text_of(v)
     if v == nil or v == cjson.null then return "" end
@@ -1130,8 +1281,16 @@ function Llm.chat(messages, tools, opts)
     local deadline = ngx.now() + budget
 
     -- Who to try, in order: the main provider unless its breaker is open, then every
-    -- chain hop whose breaker is closed (the legacy single fallback has none).
-    local hops = hops_for(cfg, tools, opts)
+    -- chain hop whose breaker is closed (the legacy single fallback has none). A saved
+    -- chain (dashboard) replaces both: its first usable hop leads, the rest follow.
+    local hops
+    local saved = saved_plan(cfg, tools, opts)
+    if saved then
+        cfg, hops = saved[1], {}
+        for i = 2, #saved do hops[#hops + 1] = saved[i] end
+    else
+        hops = hops_for(cfg, tools, opts)
+    end
     local order = {}
     if #hops == 0 or not is_open(cfg) then order[1] = cfg end
     for _, hop in ipairs(hops) do
@@ -1183,15 +1342,34 @@ end
 --- The configured chain, for operators (never a key or token): the main provider,
 -- every hop named in AI_FALLBACK_CHAIN / AI_FALLBACK_CHAIN_BY_FEATURE with whether
 -- it is configured (and why not), can call tools, and is down (circuit open).
-function Llm.chain_status()
-    local function row(c, role)
-        local host = tostring(c.chat_url or c.url or ""):match("^%a+://([^/?#]+)")
-        host = host and host:gsub("^.*@", "") -- never a user:password@ from the URL
-        return { name = c.name or role, provider = c.provider, label = c.label, model = c.model, host = host,
-            configured = Llm.configured(c), reason = c.missing,
-            enabled = c.enabled ~= false, tools = c.tools ~= false,
-            circuit_open = not c.legacy and is_open(c) or false }
+--- One provider / hop as operators may see it (never a key or token).
+function Llm.describe(c, role)
+    local host = tostring(c.chat_url or c.url or ""):match("^%a+://([^/?#]+)")
+    host = host and host:gsub("^.*@", "") -- never a user:password@ from the URL
+    return { name = c.name or role, provider = c.provider, label = c.label, model = c.model, host = host,
+        configured = Llm.configured(c), reason = c.missing,
+        enabled = c.enabled ~= false, tools = c.tools ~= false,
+        circuit_open = not c.legacy and is_open(c) or false }
+end
+
+--- What a call for this feature would try, in order, before breakers: cfg = the model the caller asks for
+-- (default Llm.default; statement reading asks for Llm.vision).
+-- @return { cfg, … }, source ("saved:<scope>" | "env")
+function Llm.plan_for(feature, cfg)
+    cfg = cfg or Llm.default
+    local opts = { usage = { feature = feature } }
+    local saved = saved_plan(cfg, nil, opts)
+    if saved then
+        local scopes = Llm.saved_chains()
+        return saved, (feature and scopes[feature]) and ("saved:" .. feature) or "saved:default"
     end
+    local out = { cfg }
+    for _, h in ipairs(hops_for(cfg, nil, opts)) do out[#out + 1] = h end
+    return out, "env"
+end
+
+function Llm.chain_status()
+    local row = Llm.describe
     local in_chain = {}
     for _, c in ipairs(Llm.chain) do in_chain[c.name] = true end
     local hops = {}
@@ -1217,7 +1395,7 @@ function Llm.chain_status()
         by_feature[feature] = names
     end
     return { main = row(Llm.default, "main"), source = Llm.chain_source, hops = hops,
-        by_feature = by_feature, breaker_seconds = BREAKER_SECONDS }
+        by_feature = by_feature, saved = Llm.saved_chains(), breaker_seconds = BREAKER_SECONDS }
 end
 
 return Llm

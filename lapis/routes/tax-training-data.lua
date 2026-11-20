@@ -36,7 +36,6 @@ return function(app)
                 return { status = 500, json = { error = "LLM client not available" } }
             end
 
-            local provider = self.params.provider
             local batch_size = math.min(tonumber(self.params.batch_size) or 50, 50)
 
             -- Process training data
@@ -48,8 +47,7 @@ return function(app)
                 local text = row.original_description or row.description or ""
                 if #text > 0 then
                     local result, err = LLMClient.generate_embedding({
-                        text = text,
-                        provider = provider,
+                        text = text, -- the deployment's embedder (AI_EMBED_PROVIDER), never a request choice
                     })
                     if result and result.embedding then
                         TrainingDataQueries.updateEmbedding(row.id, result.embedding)
@@ -69,8 +67,7 @@ return function(app)
                 local text = row.description or row.description_raw or ""
                 if #text > 0 then
                     local result, err = LLMClient.generate_embedding({
-                        text = text,
-                        provider = provider,
+                        text = text, -- the deployment's embedder (AI_EMBED_PROVIDER), never a request choice
                     })
                     if result and result.embedding then
                         TrainingDataQueries.updateReferenceEmbedding(row.id, result.embedding)
@@ -167,7 +164,6 @@ return function(app)
             -- Generate embedding for the search query
             local emb_result, emb_err = LLMClient.generate_embedding({
                 text = description,
-                provider = self.params.provider,
             })
 
             if not emb_result or not emb_result.embedding then

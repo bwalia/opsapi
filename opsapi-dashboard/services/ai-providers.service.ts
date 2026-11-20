@@ -11,7 +11,9 @@ const JSON_HDR = { headers: { 'Content-Type': 'application/json' } };
 export interface AiProvider {
   uuid: string;
   name: string;
-  provider_type: 'platform' | 'anthropic' | 'openai' | 'gemini' | 'azure_openai' | 'mistral' | 'openai_compatible' | 'ollama' | 'jobshout';
+  provider_type:
+    | 'platform' | 'anthropic' | 'openai' | 'gemini' | 'azure_openai' | 'mistral' | 'bedrock' | 'xai'
+    | 'openai_compatible' | 'ollama' | 'jobshout';
   base_url?: string;
   default_model?: string;
   models?: string[];

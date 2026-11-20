@@ -8,6 +8,10 @@
                                   (helper/secret-box.lua, D10) and never returned.
       [2] idempotency_keys        Idempotency-Key header → first response, per
                                   workspace + user, kept 24 h (helper/idempotency.lua).
+      [3] ai_chain_settings       the platform's AI try-order, set by platform admins in
+                                  the dashboard (routes/ai-chain-admin.lua): per scope
+                                  ("default" or a usage feature) an ordered list of
+                                  { name, model?, enabled }. No keys: those stay in env / Vault.
 ]]
 
 local db = require("lapis.db")
@@ -62,5 +66,16 @@ return {
             )
         ]])
         db.query("CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created ON idempotency_keys (created_at)")
+    end,
+
+    [3] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS ai_chain_settings (
+                scope VARCHAR(60) PRIMARY KEY,
+                hops JSONB NOT NULL DEFAULT '[]',
+                updated_by VARCHAR(255),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
     end,
 }

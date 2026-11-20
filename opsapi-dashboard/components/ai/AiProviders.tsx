@@ -23,6 +23,9 @@ export const PROVIDER_TYPES: { value: AiProvider['provider_type']; label: string
   { value: 'gemini', label: 'Google Gemini' },
   { value: 'azure_openai', label: 'Azure OpenAI' },
   { value: 'mistral', label: 'Mistral' },
+  // Native Converse API with a Bedrock API key + region; a base URL instead = an OpenAI-compatible gateway.
+  { value: 'bedrock', label: 'AWS Bedrock' },
+  { value: 'xai', label: 'xAI (Grok)' },
   { value: 'openai_compatible', label: 'OpenAI-compatible (LM Studio, vLLM, llama.cpp, LocalAI…)', local: true },
   { value: 'ollama', label: 'Ollama', url: 'http://localhost:11434/v1', local: true },
   { value: 'jobshout', label: 'JobShout link' },
@@ -135,6 +138,7 @@ function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClos
     username: p.username || '', is_local: p.is_local ?? false, enabled: p.enabled ?? true,
     input_cost_per_mtok: p.input_cost_per_mtok ?? '', output_cost_per_mtok: p.output_cost_per_mtok ?? '',
     deployment: (p.options as { deployment?: string } | undefined)?.deployment || '',
+    region: (p.options as { region?: string } | undefined)?.region || '',
   });
   const [replacing, setReplacing] = useState(!p.has_secret);
   const [secret, setSecret] = useState('');
@@ -154,9 +158,22 @@ function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClos
         {type === 'jobshout' ? (
           <Input label="JobShout service user (email)" value={String(f.username)} onChange={s('username')} />
         ) : (
-          <Input label={type === 'azure_openai' ? 'Model / deployment name' : 'Default model'} value={String(f.default_model)} onChange={s('default_model')} placeholder={type === 'anthropic' ? 'claude-sonnet-5-5' : type === 'ollama' ? 'qwen3:8b' : ''} />
+          <Input label={type === 'azure_openai' ? 'Model / deployment name' : 'Default model'} value={String(f.default_model)} onChange={s('default_model')} placeholder={type === 'anthropic' ? 'claude-sonnet-5-5' : type === 'ollama' ? 'qwen3:8b' : type === 'bedrock' ? 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0' : type === 'xai' ? 'grok-4' : ''} />
         )}
         {type === 'azure_openai' && <Input label="Deployment" value={String(f.deployment)} onChange={s('deployment')} />}
+        {type === 'bedrock' && (
+          <>
+            <Input label="AWS region" value={String(f.region)} onChange={s('region')} placeholder="eu-west-2"
+              helperText="Where your Bedrock API key and model access are (e.g. eu-west-2)." />
+            {!f.base_url && (
+              <p className="text-xs text-secondary-500 sm:col-span-2">
+                Paste a Bedrock API key below. The default model is a Bedrock model or inference-profile id, e.g.
+                eu.anthropic.claude-sonnet-4-5-20250929-v1:0. Using a gateway (LiteLLM, Bedrock Access Gateway)
+                instead? <button type="button" className="underline" onClick={() => setF({ ...f, base_url: 'https://' })}>Set its URL</button>.
+              </p>
+            )}
+          </>
+        )}
         {type !== 'jobshout' && (
           <>
             <Input label="Input cost (USD per million tokens)" type="number" step="any" min={0} value={String(f.input_cost_per_mtok)} onChange={s('input_cost_per_mtok')} />
@@ -190,6 +207,7 @@ function ProviderModal({ p, onClose, onSaved }: { p: Partial<AiProvider>; onClos
             if (!p.uuid) body.provider_type = f.provider_type;
             // options is replaced whole on save: keep the rest (e.g. the assistant flag).
             if (type === 'azure_openai') body.options = { ...providerOptions(p), deployment: f.deployment || f.default_model };
+            if (type === 'bedrock') body.options = { ...providerOptions(p), region: String(f.region).trim() };
             if (secret) body.secret = secret;
             await aiProvidersService.save(body, p.uuid);
             toast.success('Saved');

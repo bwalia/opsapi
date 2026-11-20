@@ -2947,6 +2947,8 @@ local _migrations = {
             END $$
         ]])
     end,
+    -- The platform's AI try-order, set by platform admins in the dashboard (no keys: env / Vault).
+    ['zzai4_ai_chain_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, ai_provider_migrations, 3),
     -- Delivery-partner phone codes in Postgres, hashed (migrations/delivery-partner-otp.lua)
     ['zzdp1_delivery_partner_otps'] = conditional_array(ProjectConfig.FEATURES.DELIVERY, delivery_otp_migrations, 1),
     -- Form builder: tables, then the RBAC module + menu (migrations/forms.lua)

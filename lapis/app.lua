@@ -504,6 +504,8 @@ safe_load_routes("routes.chat-agent")
 safe_load_routes("routes.voice")
 -- AI usage reports (ai_usage, metered by lib/agent/llm on every model call): CORE.
 safe_load_routes("routes.ai-usage")
+-- Platform AI fallback chain: the try-order per AI feature, set by platform admins (keys stay in env / Vault).
+safe_load_routes("routes.ai-chain-admin")
 -- Namespace template library ({{slot}} templates for CMS pages + domain sync).
 -- Always on (core): namespace-scoped, RBAC-gated on the "templates" module.
 safe_load_routes("routes.render-templates")
