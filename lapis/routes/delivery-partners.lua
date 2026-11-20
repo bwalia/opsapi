@@ -5,6 +5,19 @@ local cjson = require("cjson")
 local DeliveryPartnerQueries = require("queries.DeliveryPartnerQueries")
 local DeliveryPartnerAreaQueries = require("queries.DeliveryPartnerAreaQueries")
 local UserRolesQueries = require("queries.UserRoleQueries")
+local AdminCheck = require("helper.admin-check")
+
+-- What a store may see of a delivery partner it's choosing: never their bank details, verification
+-- documents or account ids. Search results reach any signed-in user across every workspace.
+local PRIVATE_PARTNER_FIELDS = {
+    "bank_account_number", "bank_name", "bank_ifsc_code", "verification_documents",
+    "user_id", "namespace_id", "notifications",
+}
+
+local function public_partner(partner)
+    for _, key in ipairs(PRIVATE_PARTNER_FIELDS) do partner[key] = nil end
+    return partner
+end
 
 return function(app)
     -- Helper function to parse JSON body
@@ -391,18 +404,23 @@ return function(app)
                     state = params.state,
                     service_type = params.service_type,
                     min_rating = params.min_rating and tonumber(params.min_rating) or nil,
-                    is_verified = params.is_verified == 'true',
+                    -- Stores are only offered verified partners; a platform admin may list the
+                    -- unverified ones (is_verified=false) to review them. (A missing parameter used
+                    -- to mean "unverified only".)
+                    is_verified = not (params.is_verified == 'false'
+                        and AdminCheck.isPlatformAdmin(self.current_user)),
                     limit = params.limit and tonumber(params.limit) or 20,
                     offset = params.offset and tonumber(params.offset) or 0
                 }
 
                 local partners = DeliveryPartnerQueries.search(search_params)
 
-                -- Parse JSON fields
+                -- Parse JSON fields; strip what other workspaces must not see
                 for _, partner in ipairs(partners) do
                     if partner.vehicle_types then
                         partner.vehicle_types = cjson.decode(partner.vehicle_types)
                     end
+                    public_partner(partner)
                 end
 
                 return { json = { delivery_partners = partners }, status = 200 }
@@ -437,6 +455,7 @@ return function(app)
                     if partner.vehicle_types then
                         partner.vehicle_types = cjson.decode(partner.vehicle_types)
                     end
+                    public_partner(partner)
                 end
 
                 return { json = { delivery_partners = partners }, status = 200 }

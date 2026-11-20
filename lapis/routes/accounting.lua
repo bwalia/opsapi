@@ -174,7 +174,7 @@ return function(app)
 
     -- GET /api/v2/accounting/accounts - List chart of accounts
     app:get("/api/v2/accounting/accounts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getAccounts(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -195,7 +195,7 @@ return function(app)
 
     -- POST /api/v2/accounting/accounts - Create account
     app:post("/api/v2/accounting/accounts", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "create", function(self)
             local data = parse_json_body()
 
             if not data.code or data.code == "" then
@@ -250,7 +250,7 @@ return function(app)
 
     -- GET /api/v2/accounting/accounts/:uuid - Get account
     app:get("/api/v2/accounting/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local account = AccountingQueries.getAccount(self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
@@ -266,7 +266,7 @@ return function(app)
 
     -- PUT /api/v2/accounting/accounts/:uuid - Update account
     app:put("/api/v2/accounting/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local account = AccountingQueries.getAccount(self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
@@ -318,7 +318,7 @@ return function(app)
 
     -- DELETE /api/v2/accounting/accounts/:uuid - Delete account
     app:delete("/api/v2/accounting/accounts/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "delete", function(self)
             local account = AccountingQueries.getAccount(self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
@@ -343,7 +343,7 @@ return function(app)
 
     -- GET /api/v2/accounting/journal-entries - List journal entries
     app:get("/api/v2/accounting/journal-entries", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getJournalEntries(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -365,7 +365,7 @@ return function(app)
 
     -- POST /api/v2/accounting/journal-entries - Create journal entry
     app:post("/api/v2/accounting/journal-entries", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "create", function(self)
             local data = parse_json_body()
 
             if not data.description or data.description == "" then
@@ -400,7 +400,7 @@ return function(app)
 
     -- GET /api/v2/accounting/journal-entries/:uuid - Get journal entry with lines
     app:get("/api/v2/accounting/journal-entries/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local entry = AccountingQueries.getJournalEntry(self.params.uuid)
             if not entry then
                 return api_response(404, nil, "Journal entry not found")
@@ -416,7 +416,7 @@ return function(app)
 
     -- POST /api/v2/accounting/journal-entries/:uuid/void - Void journal entry
     app:post("/api/v2/accounting/journal-entries/:uuid/void", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local data = parse_json_body()
 
             if not data.reason or data.reason == "" then
@@ -452,7 +452,7 @@ return function(app)
 
     -- GET /api/v2/accounting/bank-transactions - List bank transactions
     app:get("/api/v2/accounting/bank-transactions", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getBankTransactions(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -475,7 +475,7 @@ return function(app)
 
     -- POST /api/v2/accounting/bank-transactions/import - Bulk import
     app:post("/api/v2/accounting/bank-transactions/import", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "create", function(self)
             local data = parse_json_body()
 
             local transactions = data.transactions
@@ -526,7 +526,7 @@ return function(app)
 
     -- GET /api/v2/accounting/bank-transactions/:uuid - Get single
     app:get("/api/v2/accounting/bank-transactions/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local txn = AccountingQueries.getBankTransaction(self.params.uuid)
             if not txn then
                 return api_response(404, nil, "Bank transaction not found")
@@ -542,7 +542,7 @@ return function(app)
 
     -- PUT /api/v2/accounting/bank-transactions/:uuid - Update
     app:put("/api/v2/accounting/bank-transactions/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local txn = AccountingQueries.getBankTransaction(self.params.uuid)
             if not txn then
                 return api_response(404, nil, "Bank transaction not found")
@@ -580,7 +580,7 @@ return function(app)
 
     -- POST /api/v2/accounting/bank-transactions/:uuid/reconcile - Reconcile
     app:post("/api/v2/accounting/bank-transactions/:uuid/reconcile", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local data = parse_json_body()
 
             if not data.account_id then
@@ -616,7 +616,7 @@ return function(app)
 
     -- GET /api/v2/accounting/expenses - List expenses
     app:get("/api/v2/accounting/expenses", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getExpenses(self.namespace.id, {
                 page = self.params.page,
                 per_page = self.params.per_page,
@@ -640,7 +640,7 @@ return function(app)
 
     -- POST /api/v2/accounting/expenses - Create expense
     app:post("/api/v2/accounting/expenses", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "create", function(self)
             local data = parse_json_body()
 
             if not data.description or data.description == "" then
@@ -682,7 +682,7 @@ return function(app)
 
     -- GET /api/v2/accounting/expenses/:uuid - Get expense
     app:get("/api/v2/accounting/expenses/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local expense = AccountingQueries.getExpense(self.params.uuid)
             if not expense then
                 return api_response(404, nil, "Expense not found")
@@ -698,7 +698,7 @@ return function(app)
 
     -- PUT /api/v2/accounting/expenses/:uuid - Update expense
     app:put("/api/v2/accounting/expenses/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local expense = AccountingQueries.getExpense(self.params.uuid)
             if not expense then
                 return api_response(404, nil, "Expense not found")
@@ -742,7 +742,7 @@ return function(app)
 
     -- DELETE /api/v2/accounting/expenses/:uuid - Delete expense
     app:delete("/api/v2/accounting/expenses/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "delete", function(self)
             local expense = AccountingQueries.getExpense(self.params.uuid)
             if not expense then
                 return api_response(404, nil, "Expense not found")
@@ -763,7 +763,7 @@ return function(app)
 
     -- POST /api/v2/accounting/expenses/:uuid/approve - Approve expense
     app:post("/api/v2/accounting/expenses/:uuid/approve", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local expense = AccountingQueries.getExpense(self.params.uuid)
             if not expense then
                 return api_response(404, nil, "Expense not found")
@@ -788,7 +788,7 @@ return function(app)
 
     -- POST /api/v2/accounting/expenses/:uuid/reject - Reject expense
     app:post("/api/v2/accounting/expenses/:uuid/reject", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local data = parse_json_body()
 
             local expense = AccountingQueries.getExpense(self.params.uuid)
@@ -820,7 +820,7 @@ return function(app)
 
     -- GET /api/v2/accounting/vat-returns - List VAT returns
     app:get("/api/v2/accounting/vat-returns", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local vat_returns = AccountingQueries.getVatReturns(self.namespace.id)
 
             return {
@@ -835,7 +835,7 @@ return function(app)
 
     -- POST /api/v2/accounting/vat-returns - Calculate and create VAT return
     app:post("/api/v2/accounting/vat-returns", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "create", function(self)
             local data = parse_json_body()
 
             if not data.period_start or data.period_start == "" then
@@ -863,7 +863,7 @@ return function(app)
 
     -- GET /api/v2/accounting/vat-returns/:uuid - Get VAT return
     app:get("/api/v2/accounting/vat-returns/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local vat_return = AccountingQueries.getVatReturn(self.params.uuid)
             if not vat_return then
                 return api_response(404, nil, "VAT return not found")
@@ -879,7 +879,7 @@ return function(app)
 
     -- POST /api/v2/accounting/vat-returns/:uuid/submit - Submit VAT return
     app:post("/api/v2/accounting/vat-returns/:uuid/submit", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local vat_return = AccountingQueries.getVatReturn(self.params.uuid)
             if not vat_return then
                 return api_response(404, nil, "VAT return not found")
@@ -908,7 +908,7 @@ return function(app)
 
     -- GET /api/v2/accounting/reports/trial-balance - Trial balance
     app:get("/api/v2/accounting/reports/trial-balance", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getTrialBalance(
                 self.namespace.id,
                 self.params.as_of_date
@@ -920,7 +920,7 @@ return function(app)
 
     -- GET /api/v2/accounting/reports/balance-sheet - Balance sheet
     app:get("/api/v2/accounting/reports/balance-sheet", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getBalanceSheet(
                 self.namespace.id,
                 self.params.as_of_date
@@ -933,7 +933,7 @@ return function(app)
     -- GET /api/v2/accounting/reports/profit-loss - Profit & loss
     -- (also served at /reports/profit-and-loss to match the dashboard client)
     local profit_loss_handler = AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getProfitAndLoss(
                 self.namespace.id,
                 self.params.start_date,
@@ -948,7 +948,7 @@ return function(app)
 
     -- GET /api/v2/accounting/reports/expense-summary - Expense summary
     app:get("/api/v2/accounting/reports/expense-summary", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local result = AccountingQueries.getExpenseSummary(
                 self.namespace.id,
                 self.params.start_date,
@@ -962,7 +962,7 @@ return function(app)
     -- GET /api/v2/accounting/dashboard/stats - Dashboard statistics
     -- (also served at /reports/dashboard-stats to match the dashboard client)
     local dashboard_stats_handler = AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local stats = AccountingQueries.getDashboardStats(self.namespace.id)
             return api_response(200, stats)
         end)
@@ -976,7 +976,7 @@ return function(app)
 
     -- POST /api/v2/accounting/ai/categorize - Auto-categorise transaction
     app:post("/api/v2/accounting/ai/categorize", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local data = parse_json_body()
 
             if not data.description or data.description == "" then
@@ -1012,7 +1012,7 @@ return function(app)
     -- POST /api/v2/accounting/ai/vat-suggest - VAT suggestion
     -- (also served at /ai/suggest-vat to match the dashboard client)
     local vat_suggest_handler = AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local data = parse_json_body()
 
             if not data.description or data.description == "" then
@@ -1048,7 +1048,7 @@ return function(app)
 
     -- POST /api/v2/accounting/ai/query - Natural language query
     app:post("/api/v2/accounting/ai/query", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local data = parse_json_body()
 
             local question = data.question or data.query
@@ -1092,7 +1092,7 @@ return function(app)
 
     -- GET /api/v2/accounting/ai/status - Check AI service availability
     app:get("/api/v2/accounting/ai/status", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local ok_require, AIService = pcall(require, "lib.ai-service")
             if not ok_require then
                 return api_response(200, {
@@ -1118,7 +1118,7 @@ return function(app)
 
     -- GET /api/v2/accounting/hmrc-categories - List all HMRC SA103F categories
     app:get("/api/v2/accounting/hmrc-categories", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local categories = db.query([[
                 SELECT * FROM hmrc_expense_categories
                 WHERE (namespace_id = 0 OR namespace_id = ?) AND is_active = true
@@ -1130,7 +1130,7 @@ return function(app)
 
     -- PUT /api/v2/accounting/bank-transactions/:uuid/categorize - Set HMRC category and tags
     app:put("/api/v2/accounting/bank-transactions/:uuid/categorize", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "update", function(self)
             local data = parse_json_body()
             local uuid = self.params.uuid
 
@@ -1186,7 +1186,7 @@ return function(app)
 
     -- GET /api/v2/accounting/bank-transactions/by-category - Group transactions by HMRC category
     app:get("/api/v2/accounting/bank-transactions/by-category", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local start_date = self.params.start_date or "2026-01-01"
             local end_date = self.params.end_date or "2026-12-31"
 
@@ -1213,7 +1213,7 @@ return function(app)
 
     -- GET /api/v2/accounting/bank-transactions/by-tag - Search transactions by tag
     app:get("/api/v2/accounting/bank-transactions/by-tag", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("accounting", "read", function(self)
             local tag = self.params.tag
             if not tag then return api_response(400, nil, "tag parameter required") end
 

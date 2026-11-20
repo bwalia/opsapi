@@ -67,7 +67,11 @@ function HMRC.build_fraud_headers()
     local fwd = {}
     pcall(function() fwd = ngx.req.get_headers() or {} end)
 
-    headers["Gov-Client-Connection-Method"] = "WEB_APP_VIA_SERVER"
+    -- How the person reached us: the web dashboard in a browser (the default), or the iOS app,
+    -- which says so and sends its device's signals instead of a browser's (HMRC's
+    -- MOBILE_APP_VIA_SERVER method: Gov-Client-User-Agent, no Gov-Client-Browser-* headers).
+    local is_mobile_app = fwd["x-gov-client-connection-method"] == "MOBILE_APP_VIA_SERVER"
+    headers["Gov-Client-Connection-Method"] = is_mobile_app and "MOBILE_APP_VIA_SERVER" or "WEB_APP_VIA_SERVER"
 
     -- Device ID — prefer the browser-persisted id the frontend forwards (stable per device);
     -- fall back to a server-generated one so we always send something.
@@ -84,10 +88,16 @@ function HMRC.build_fraud_headers()
     end
     headers["Gov-Client-Device-ID"] = device_id
 
-    -- Browser-collected signals — forward only when present (don't fabricate).
+    -- Client-collected signals — forward only when present (don't fabricate).
     headers["Gov-Client-Timezone"] = fwd["x-gov-client-timezone"] or "UTC+00:00"
-    headers["Gov-Client-Browser-JS-User-Agent"] =
-        fwd["x-gov-client-browser-js-user-agent"] or ngx.var.http_user_agent or "OpsAPI/1.0"
+    if is_mobile_app then
+        -- `os-family=iOS&os-version=…&device-manufacturer=Apple&device-model=…`, from the app.
+        local agent = fwd["x-gov-client-user-agent"]
+        if agent and agent ~= "" then headers["Gov-Client-User-Agent"] = agent end
+    else
+        headers["Gov-Client-Browser-JS-User-Agent"] =
+            fwd["x-gov-client-browser-js-user-agent"] or ngx.var.http_user_agent or "OpsAPI/1.0"
+    end
     if fwd["x-gov-client-screens"] then headers["Gov-Client-Screens"] = fwd["x-gov-client-screens"] end
     if fwd["x-gov-client-window-size"] then headers["Gov-Client-Window-Size"] = fwd["x-gov-client-window-size"] end
     if fwd["x-gov-client-user-ids"] then headers["Gov-Client-User-IDs"] = fwd["x-gov-client-user-ids"] end

@@ -21,6 +21,7 @@ local http    = require("resty.http")
 local Global  = require("helper.global")
 local RateLimit = require("middleware.rate-limit")
 local HMRCTokenQueries = require("queries.HMRCTokenQueries")
+local HMRCReturn = require("helper.hmrc-return")
 
 local HMRC_LIMIT = { rate = 10, window = 60, prefix = "auth:hmrc" }
 
@@ -164,19 +165,22 @@ return function(app)
         -- redirect_url: the frontend origin to redirect back to after HMRC auth.
         -- Required for multi-tenant/multi-environment support (SaaS).
         -- Falls back to the Referer origin, then fallback_frontend().
-        local redirect_url = self.params.redirect_url
-        if not redirect_url or redirect_url == "" then
+        local requested = self.params.redirect_url
+        if not requested or requested == "" then
             local referer = ngx.req.get_headers()["referer"]
             if referer then
                 -- Extract origin from referer (e.g. https://acc.diytaxreturn.co.uk/settings → https://acc.diytaxreturn.co.uk)
-                redirect_url = referer:match("^(https?://[^/]+)")
+                requested = referer:match("^(https?://[^/]+)")
             end
         end
-        if not redirect_url or redirect_url == "" then
-            redirect_url = fallback_frontend()
+        -- Only the app or a trusted frontend; anything else gets the default frontend.
+        local redirect_url = HMRCReturn.safe(requested)
+        if not redirect_url then
+            if requested and requested ~= "" then
+                ngx.log(ngx.WARN, "[HMRC] untrusted redirect_url ignored: ", requested)
+            end
+            redirect_url = fallback_frontend():gsub("/$", "")
         end
-        -- Strip trailing slash
-        redirect_url = redirect_url:gsub("/$", "")
 
         -- current_user is set by the before_filter auth middleware
         local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id)
