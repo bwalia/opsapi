@@ -4,6 +4,11 @@
 # resource of every deployed Helm release in `demo` still exists. If any is missing, it re-applies
 # the release's current revision (helm rollback to itself recreates exactly what was deployed)
 # and logs what it restored. Nothing is changed when everything is present.
+# On 2026-11-19 ~08:22Z hello-java and hello-rust were scaled to 0 outside Helm (edge answered
+# 503 "no available server"; the Ingress was still there, so the check above saw nothing wrong).
+# So it also compares each Deployment/StatefulSet's live replicas with the release's manifest and
+# scales any that are below it back up. To park one on purpose, change replicaCount in the
+# release (helm upgrade), or annotate the workload `demo-selfheal/skip=true`.
 # Applied by .github/workflows/deploy-opsapi-showcase.yml (weekly), or by hand:
 #   kubectl apply -f devops/demo/selfheal.yaml
 #   kubectl -n demo logs -l app=demo-selfheal --tail=50     # what it did
@@ -50,7 +55,7 @@ spec:
               args:
                 - |
                   set -u
-                  healed=0
+                  healed=0; scaled=0; failed=0
                   for r in $(helm -n demo list --deployed -q); do
                     missing=$(helm -n demo get manifest "$r" | kubectl -n demo get -f - -o name 2>&1 | grep -i "not found" || true)
                     [ -z "$missing" ] && continue
@@ -60,4 +65,22 @@ spec:
                     if helm -n demo rollback "$r" "$rev" --wait --timeout 5m; then healed=$((healed + 1))
                     else echo "$(date -u +%FT%TZ) $r: re-apply FAILED"; exit 1; fi
                   done
-                  echo "$(date -u +%FT%TZ) checked $(helm -n demo list --deployed -q | wc -l) releases, restored $healed"
+                  # Replica drift: a workload scaled below what its release declares (e.g. to 0).
+                  # Only scales up, so it never fights a deliberate scale-out.
+                  for r in $(helm -n demo list --deployed -q); do
+                    helm -n demo get manifest "$r" | kubectl create --dry-run=client -o json -f - 2>/dev/null \
+                      | jq -r '(.items // [.])[] | select(.kind=="Deployment" or .kind=="StatefulSet")
+                               | "\(.kind | ascii_downcase)/\(.metadata.name) \(.spec.replicas // 1)"'
+                  done > /tmp/want
+                  while read -r obj want; do
+                    live=$(kubectl -n demo get "$obj" -o json 2>/dev/null \
+                      | jq -r 'if .metadata.annotations["demo-selfheal/skip"] == "true" then "skip" else (.spec.replicas // 1) end') || continue
+                    case "$live" in ''|skip) continue ;; esac
+                    [ "$live" -ge "$want" ] && continue
+                    echo "$(date -u +%FT%TZ) $obj: replicas $live, release declares $want, scaling up"
+                    if kubectl -n demo scale "$obj" --replicas="$want" \
+                       && kubectl -n demo rollout status "$obj" --timeout=5m; then scaled=$((scaled + 1))
+                    else echo "$(date -u +%FT%TZ) $obj: scale-up FAILED"; failed=1; fi
+                  done < /tmp/want
+                  echo "$(date -u +%FT%TZ) checked $(helm -n demo list --deployed -q | wc -l) releases, restored $healed, scaled up $scaled"
+                  exit $failed
