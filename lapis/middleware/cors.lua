@@ -68,7 +68,7 @@ local CORS_CONFIG = {
     allowed_origins = buildAllowedOrigins(),
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Idempotency-Key, X-Render-Token, X-User-Email, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug, X-Project-Code, X-Vault-Key, X-Gov-Client-Device-ID, X-Gov-Client-Browser-JS-User-Agent, X-Gov-Client-Screens, X-Gov-Client-Window-Size, X-Gov-Client-Timezone, X-Gov-Client-User-IDs",
+        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Idempotency-Key, X-Render-Token, X-User-Email, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug, X-Project-Code, X-Vault-Key, X-Gov-Client-Device-ID, X-Gov-Client-Browser-JS-User-Agent, X-Gov-Client-Screens, X-Gov-Client-Window-Size, X-Gov-Client-Timezone, X-Gov-Client-User-IDs, X-Gov-Client-Connection-Method, X-Gov-Client-User-Agent",
         max_age = "86400",
         credentials = "true"
     }
