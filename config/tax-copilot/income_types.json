@@ -6,7 +6,49 @@
       "description": "Gains from selling assets such as property or shares.",
       "display_name": "Capital gains",
       "display_order": 70,
+      "estimate_note": "Capital Gains Tax is worked out separately and isn't in this estimate yet.",
+      "estimator_mapping": {},
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "key": "disposals",
+                "label": "Number of disposals",
+                "min": 0,
+                "role": "info",
+                "type": "number"
+              },
+              {
+                "hmrc_box": "SA108",
+                "key": "proceeds",
+                "label": "Total sale proceeds",
+                "role": "info",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA108",
+                "key": "gains",
+                "label": "Total gains before losses",
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA108",
+                "key": "losses",
+                "label": "Losses in the year",
+                "role": "expense",
+                "type": "currency"
+              }
+            ],
+            "key": "gains",
+            "title": "Disposals in the tax year"
+          }
+        ]
+      },
+      "help_text": "Gains from selling or giving away things like shares, a second home or crypto. Each person has a small tax-free annual exempt amount. Selling your own main home is usually exempt.",
       "hmrc_mapping": {},
+      "icon": "BarChart3",
       "include_in_tax_preview": false,
       "income_type_key": "capital_gains",
       "is_active": true,
@@ -16,19 +58,17 @@
       "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "completion_statement",
           "label": "Completion statement",
           "required": false
         },
         {
-          "allows_upload": true,
           "key": "contract_notes",
           "label": "Contract notes (shares)",
           "required": false
         }
       ],
-      "uuid": "f9565df2-4a9f-44b8-96f3-04474c17f7ad"
+      "uuid": "4907e360-c2ee-4a74-88af-a26414ec6560"
     },
     {
       "allows_manual_entry": false,
@@ -36,23 +76,71 @@
       "description": "Dividends from UK companies, listed per holding.",
       "display_name": "Dividends",
       "display_order": 30,
+      "estimator_mapping": [
+        {
+          "field": "uk_dividends",
+          "input": "dividends"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "The amount you received — on your dividend vouchers or platform tax summary. Don't add any tax credit.",
+                "hmrc_box": "SA100 TR3 box 4",
+                "key": "uk_dividends",
+                "label": "Total dividends from UK companies",
+                "prefill": {
+                  "categories": [
+                    "income_dividend"
+                  ],
+                  "direction": "credit"
+                },
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "dividends",
+            "title": "UK dividends"
+          }
+        ]
+      },
+      "help_text": "Dividends you received from shares in UK companies in the tax year, including from your own limited company. The first £500 is tax-free (dividend allowance).",
       "hmrc_mapping": {},
+      "icon": "TrendingUp",
       "include_in_tax_preview": false,
       "income_type_key": "dividends",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "dividend_vouchers",
           "label": "Dividend vouchers",
           "required": false
         }
       ],
-      "uuid": "8cd67b87-e8d0-454e-8483-c4611de7c57e"
+      "uuid": "ff613f9d-d8dc-493c-8935-a5a457044770"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "New shares you subscribed for under the EIS or Seed EIS. You need the EIS3/EIS5 (or SEIS3) certificate before claiming.",
+      "display_name": "Enterprise Investment Scheme shares",
+      "display_order": 240,
+      "estimator_mapping": {},
+      "field_schema": {},
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "eis_subscriptions",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "These fields map to the 'Other tax reliefs' section on page Ai 2 of the SA101 form.",
+      "linked_form_title": "SA101 Ai2",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-additional-information-sa101",
+      "required_documents": {},
+      "uuid": "73291ebc-b3cb-4ded-9b24-0553d764054f"
     },
     {
       "allows_manual_entry": false,
@@ -60,29 +148,58 @@
       "description": "Dividends from companies based outside the UK.",
       "display_name": "Foreign dividends",
       "display_order": 31,
+      "estimator_mapping": [
+        {
+          "field": "gross",
+          "input": "dividends"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "Convert to pounds using the exchange rate on the date you were paid.",
+                "hmrc_box": "SA100 TR3 box 5 / SA106",
+                "key": "gross",
+                "label": "Total foreign dividends (in pounds, before foreign tax)",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "Recorded for your return. Foreign Tax Credit Relief isn't in the estimate yet, so the estimate may be slightly high.",
+                "key": "foreign_tax",
+                "label": "Foreign tax taken off",
+                "role": "info",
+                "type": "currency"
+              }
+            ],
+            "key": "dividends",
+            "title": "Foreign dividends"
+          }
+        ]
+      },
+      "help_text": "Dividends from companies based outside the UK. Up to £2,000 in total can go on the main return; above that, or if you want to claim relief for foreign tax, it goes on the Foreign pages (SA106).",
       "hmrc_mapping": {},
+      "icon": "Globe",
       "include_in_tax_preview": false,
       "income_type_key": "foreign_dividends",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "dividend_vouchers",
           "label": "Dividend vouchers",
           "required": false
         },
         {
-          "allows_upload": true,
           "key": "broker_statements",
           "label": "Broker / platform statements",
           "required": false
         }
       ],
-      "uuid": "128c2687-0394-4bf9-b3a8-fe3f7070a667"
+      "uuid": "26649aa8-7973-4379-a791-dacac9234ef1"
     },
     {
       "allows_manual_entry": false,
@@ -90,6 +207,8 @@
       "description": "Foreign savings interest, dividends above the £500 UK threshold, overseas pensions, and Foreign Tax Credit Relief. If you have foreign PROPERTY income use the 'Overseas property' section instead.",
       "display_name": "Foreign income (SA106)",
       "display_order": 40,
+      "estimator_mapping": {},
+      "field_schema": {},
       "hmrc_mapping": {
         "sa106_form": "F1-F2, F5"
       },
@@ -100,15 +219,8 @@
       "linked_form_description": "Foreign income and gains",
       "linked_form_title": "SA106",
       "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c94af6a03e18e2ca4a3f/SA106-2025.pdf",
-      "required_documents": [
-        {
-          "allows_upload": true,
-          "key": "income_source",
-          "label": "Income source",
-          "required": false
-        }
-      ],
-      "uuid": "511eaa4e-7d3e-4665-98cd-34e777ebad13"
+      "required_documents": {},
+      "uuid": "0d81f6df-176d-4ddf-a1c5-b2ccc63881d6"
     },
     {
       "allows_manual_entry": false,
@@ -116,29 +228,95 @@
       "description": "Interest from banks and savings accounts outside the UK.",
       "display_name": "Foreign interest",
       "display_order": 51,
+      "estimator_mapping": [
+        {
+          "field": "gross",
+          "input": "savings_interest"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "hmrc_box": "SA100 TR3 box 3 / SA106",
+                "key": "gross",
+                "label": "Total foreign interest (in pounds, before foreign tax)",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "Recorded for your return; relief for it isn't in the estimate yet.",
+                "key": "foreign_tax",
+                "label": "Foreign tax taken off",
+                "role": "info",
+                "type": "currency"
+              }
+            ],
+            "key": "interest",
+            "title": "Foreign interest"
+          }
+        ]
+      },
+      "help_text": "Interest from bank accounts outside the UK, converted to pounds. Up to £2,000 can go on the main return; above that it goes on the Foreign pages (SA106).",
       "hmrc_mapping": {},
+      "icon": "Landmark",
       "include_in_tax_preview": false,
       "income_type_key": "foreign_interest",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "interest_certificate",
           "label": "Interest certificate",
           "required": false
         },
         {
-          "allows_upload": false,
           "key": "broker_statements",
           "label": "Bank / broker statements",
           "required": false
         }
       ],
-      "uuid": "48f0e44e-6a50-42a6-ad07-9ed6406ec897"
+      "uuid": "c6060c96-0c1c-4c89-bf03-4bf834a01bb5"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Donations you made to charity under Gift Aid. Enter what you actually paid — HMRC works out the basic-rate relief on top.",
+      "display_name": "Gift Aid",
+      "display_order": 200,
+      "estimator_mapping": {},
+      "field_schema": {},
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "gift_aid",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "These fields map to the 'Tax reliefs' section on page TR4 of the SA100 form.",
+      "linked_form_title": "SA100 TR4",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-tax-return-sa100",
+      "required_documents": {},
+      "uuid": "64c8f904-6fee-4c15-b722-c4ced6b70c30"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Shares, securities, land or buildings you gifted (or sold at below market value) to charity.",
+      "display_name": "Gifts to charity",
+      "display_order": 210,
+      "estimator_mapping": {},
+      "field_schema": {},
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "gifts_to_charity",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "These fields map to the 'Tax reliefs' section on page TR4 of the SA100 form.",
+      "linked_form_title": "SA100 TR4",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-tax-return-sa100",
+      "required_documents": {},
+      "uuid": "7c414642-d1ea-4e0e-b476-ba10df408ce8"
     },
     {
       "allows_manual_entry": false,
@@ -146,29 +324,53 @@
       "description": "Interest from UK banks and building societies, listed per account.",
       "display_name": "Bank interest",
       "display_order": 50,
+      "estimator_mapping": [
+        {
+          "field": "uk_interest",
+          "input": "savings_interest"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "Your bank's annual interest statement shows it. Don't include ISAs.",
+                "hmrc_box": "SA100 TR3 box 2",
+                "key": "uk_interest",
+                "label": "Total interest from UK accounts",
+                "prefill": {
+                  "categories": [
+                    "interest_income",
+                    "income_interest"
+                  ],
+                  "direction": "credit"
+                },
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "interest",
+            "title": "UK interest"
+          }
+        ]
+      },
+      "help_text": "Interest from UK bank and building society accounts, savings bonds and similar. Most people pay no tax on it: the Personal Savings Allowance covers £1,000 for basic-rate taxpayers (£500 for higher rate). ISA interest is tax-free — leave it out.",
       "hmrc_mapping": {},
+      "icon": "PiggyBank",
       "include_in_tax_preview": false,
       "income_type_key": "interest",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "interest_certificate",
           "label": "Interest certificate",
           "required": false
-        },
-        {
-          "allows_upload": true,
-          "key": "bank_statements",
-          "label": "Bank statements",
-          "required": false
         }
       ],
-      "uuid": "990e4191-ffcb-4702-a2b8-0681467f9f2a"
+      "uuid": "def48cd2-b71a-453f-b15d-b3d8ef4dd140"
     },
     {
       "allows_manual_entry": true,
@@ -176,7 +378,63 @@
       "description": "Any other taxable income not covered by the categories above.",
       "display_name": "Other income",
       "display_order": 80,
+      "estimator_mapping": [
+        {
+          "field": "amount",
+          "input": "other_income"
+        },
+        {
+          "field": "expenses",
+          "input": "other_income",
+          "sign": -1
+        },
+        {
+          "field": "tax_taken_off",
+          "input": "tax_deducted_at_source"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "key": "description",
+                "label": "What was it?",
+                "placeholder": "e.g. Commission from a one-off referral",
+                "role": "info",
+                "type": "text"
+              },
+              {
+                "hmrc_box": "SA100 TR3 box 17",
+                "key": "amount",
+                "label": "Amount received",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA100 TR3 box 18",
+                "key": "expenses",
+                "label": "Allowable costs of earning it",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA100 TR3 box 19",
+                "key": "tax_taken_off",
+                "label": "Tax already taken off",
+                "role": "tax_paid",
+                "type": "currency"
+              }
+            ],
+            "key": "other",
+            "title": "Other income"
+          }
+        ]
+      },
+      "help_text": "Taxable income that doesn't fit anywhere else — for example casual earnings, commission or small one-off jobs that aren't a business.",
       "hmrc_mapping": {},
+      "icon": "Wallet",
       "include_in_tax_preview": false,
       "income_type_key": "other",
       "is_active": true,
@@ -184,15 +442,8 @@
       "linked_form_description": "These fields map directly to the SA101 Additional information form.",
       "linked_form_title": "SA101",
       "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-additional-information-sa101",
-      "required_documents": [
-        {
-          "allows_upload": true,
-          "key": "income_proof",
-          "label": "Income Proof",
-          "required": false
-        }
-      ],
-      "uuid": "274f9ac9-3099-4efa-acf8-358520befaf9"
+      "required_documents": {},
+      "uuid": "83718259-3078-4651-bb85-e0faee0b4eec"
     },
     {
       "allows_manual_entry": false,
@@ -200,29 +451,80 @@
       "description": "Dividends from authorised unit trusts, open-ended investment companies and other collective investments.",
       "display_name": "Other dividends",
       "display_order": 32,
+      "estimator_mapping": [
+        {
+          "field": "amount",
+          "input": "dividends"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "On your fund manager's annual tax voucher. Interest distributions from bond funds belong under Bank interest instead.",
+                "hmrc_box": "SA100 TR3 box 4",
+                "key": "amount",
+                "label": "Total dividend distributions",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "dividends",
+            "title": "Fund dividends"
+          }
+        ]
+      },
+      "help_text": "Dividend distributions from UK unit trusts, OEICs and other investment funds.",
       "hmrc_mapping": {},
+      "icon": "PieChart",
       "include_in_tax_preview": false,
       "income_type_key": "other_dividends",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "dividend_vouchers",
           "label": "Dividend vouchers",
           "required": false
         },
         {
-          "allows_upload": false,
           "key": "fund_statements",
           "label": "Unit trust / fund statements",
           "required": false
         }
       ],
-      "uuid": "f85e9592-7c00-4ec7-bc6f-7b04594714cc"
+      "uuid": "21557815-8090-4be1-a6cd-a0dcad89d0b2"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Workplace, personal and overseas pensions, retirement annuities and taxable triviality payments — one entry per payer.",
+      "display_name": "Other pensions",
+      "display_order": 61,
+      "estimator_mapping": {},
+      "field_schema": {},
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "other_pensions",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "The pensions and annuities boxes on page TR3 of your main tax return.",
+      "linked_form_title": "SA100 TR3",
+      "required_documents": [
+        {
+          "key": "pension_statement",
+          "label": "Pension statement / P60",
+          "required": false
+        },
+        {
+          "key": "annuity_certificate",
+          "label": "Annuity certificate",
+          "required": false
+        }
+      ],
+      "uuid": "6506e8c4-6092-463e-890c-74b516b34c7f"
     },
     {
       "allows_manual_entry": true,
@@ -230,7 +532,96 @@
       "description": "Rent from land and property outside the UK.",
       "display_name": "Overseas property",
       "display_order": 45,
+      "entity_label": "property abroad",
+      "entity_type": "overseas_property",
+      "estimator_mapping": [
+        {
+          "field": "rents",
+          "input": "property_rents",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "expenses",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "residential_finance_costs",
+          "input": "property_finance_costs",
+          "scale_by": "ownership_share"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "key": "country",
+                "label": "Country",
+                "required": true,
+                "role": "info",
+                "type": "text"
+              },
+              {
+                "default": 100,
+                "help": "If you own it on your own, leave this at 100%. If you own it jointly (for example 50% with a spouse), enter the figures for the WHOLE property below and your share here — we work out your part.",
+                "key": "ownership_share",
+                "label": "Your share of this property",
+                "role": "info",
+                "type": "percentage"
+              }
+            ],
+            "key": "about",
+            "title": "About this property"
+          },
+          {
+            "fields": [
+              {
+                "hmrc_box": "SA106 box 14",
+                "key": "rents",
+                "label": "Rent and other income (in pounds)",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "income",
+            "title": "Rent"
+          },
+          {
+            "fields": [
+              {
+                "help": "Repairs, agent's fees, insurance and so on. Not residential mortgage interest — that has its own box.",
+                "hmrc_box": "SA106 box 24",
+                "key": "expenses",
+                "label": "Allowable running costs (in pounds)",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "help": "Interest only, not capital. Gets a 20% tax credit like UK property.",
+                "hmrc_box": "SA106 box 24A",
+                "key": "residential_finance_costs",
+                "label": "Residential mortgage interest (in pounds)",
+                "role": "relief",
+                "type": "currency"
+              },
+              {
+                "help": "Recorded for your return; relief for it isn't in the estimate yet.",
+                "key": "foreign_tax",
+                "label": "Foreign tax paid on this income",
+                "role": "info",
+                "type": "currency"
+              }
+            ],
+            "key": "expenses",
+            "title": "Costs"
+          }
+        ]
+      },
+      "help_text": "Property you let outside the UK goes on the Foreign pages (SA106). Convert figures to pounds. If you paid tax abroad on the rent you may be able to claim Foreign Tax Credit Relief — that isn't in the estimate yet.",
       "hmrc_mapping": {},
+      "icon": "Plane",
       "include_in_tax_preview": false,
       "income_type_key": "overseas_property",
       "is_active": true,
@@ -240,51 +631,122 @@
       "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c9e963b78ce8bc3c2f78/SA106-2025.pdf",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "rental_statements",
           "label": "Rental / letting statements",
           "required": false
         },
         {
-          "allows_upload": true,
           "key": "overseas_tax_docs",
           "label": "Overseas tax paid — statements or certificates",
           "required": false
         }
       ],
-      "uuid": "7482ac90-75f0-4b6d-be19-7fbc83303dfa"
+      "uuid": "9aafd23d-3fb3-4bef-89b8-112e5a7294cb"
     },
     {
-      "allows_manual_entry": true,
+      "allows_manual_entry": false,
       "category_affinity": {},
-      "description": "Income drawn from a pension.",
-      "display_name": "Pension income",
+      "description": "State Pension, state benefits and statutory pay — the amounts on your award letters and P60s.",
+      "display_name": "State Pension",
       "display_order": 60,
+      "estimator_mapping": [
+        {
+          "field": "state_pension",
+          "input": "pension_income"
+        },
+        {
+          "field": "private_pensions",
+          "input": "pension_income"
+        },
+        {
+          "field": "tax_taken_off",
+          "input": "tax_deducted_at_source"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "The yearly total — the Department for Work and Pensions letter shows it.",
+                "hmrc_box": "SA100 TR3 box 8",
+                "key": "state_pension",
+                "label": "State Pension received",
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "Add up the gross amounts on the P60s from your pension providers.",
+                "hmrc_box": "SA100 TR3 box 11",
+                "key": "private_pensions",
+                "label": "Private and workplace pensions (before tax)",
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA100 TR3 box 12",
+                "key": "tax_taken_off",
+                "label": "Tax taken off your pensions",
+                "role": "tax_paid",
+                "type": "currency"
+              }
+            ],
+            "key": "pensions",
+            "title": "Pension income"
+          }
+        ]
+      },
+      "help_text": "Your State Pension and any private or workplace pensions you were paid in the tax year. Your pension provider's P60 shows the amount and tax taken off.",
       "hmrc_mapping": {},
+      "icon": "Sunrise",
       "include_in_tax_preview": false,
       "income_type_key": "pension",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "",
-      "linked_form_title": "",
-      "linked_form_weblink": "",
+      "linked_form_description": "The State Pension and benefits boxes on page TR3 of your main tax return.",
+      "linked_form_title": "SA100 TR3",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "pension_statement",
           "label": "Pension statement / P60",
           "required": false
         }
       ],
-      "uuid": "e6944f81-cff3-48e8-8055-c4fda14095b1"
+      "uuid": "0c480d1c-3cfb-4fd4-b5e8-c707c314e1b6"
     },
     {
       "allows_manual_entry": false,
       "category_affinity": {},
-      "description": "Payments you made INTO pension schemes that qualify for tax relief — not pension income.",
-      "display_name": "Pension payments (tax relief)",
-      "display_order": 65,
+      "description": "Payments you made INTO registered, employer or overseas pension schemes that qualify for tax relief — not pension income.",
+      "display_name": "Pension payments",
+      "display_order": 220,
+      "estimator_mapping": [
+        {
+          "field": "relief_at_source_net",
+          "input": "pension_ras"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "The amount you actually paid (for example £80, not £100). Leave out workplace pension deductions taken from your pay before tax.",
+                "hmrc_box": "SA100 TR4 box 1",
+                "key": "relief_at_source_net",
+                "label": "Payments where your provider added basic-rate tax relief",
+                "role": "relief",
+                "type": "currency"
+              }
+            ],
+            "key": "payments",
+            "title": "Pension payments"
+          }
+        ]
+      },
+      "help_text": "Payments YOU made into a personal pension. This isn't income — it can lower your tax. Most personal pensions use 'relief at source': you pay £80 and the provider adds £20. Higher-rate taxpayers claim the extra relief here.",
       "hmrc_mapping": {},
+      "icon": "ShieldCheck",
       "include_in_tax_preview": false,
       "income_type_key": "pension_payments",
       "is_active": true,
@@ -299,7 +761,7 @@
           "required": false
         }
       ],
-      "uuid": "61bc3372-39d3-43f1-bdd2-e5b249a71def"
+      "uuid": "c16b3cb9-3ec8-444e-aaac-3fce36a31c28"
     },
     {
       "allows_manual_entry": true,
@@ -307,7 +769,159 @@
       "description": "Rent received from letting out property.",
       "display_name": "Rental / Property income",
       "display_order": 40,
+      "entity_label": "property",
+      "entity_type": "property",
+      "estimator_mapping": [
+        {
+          "field": "rents",
+          "input": "property_rents",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "rates_insurance",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "repairs",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "professional_fees",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "services",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "other_expenses",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "commercial_finance",
+          "input": "property_expenses",
+          "scale_by": "ownership_share"
+        },
+        {
+          "field": "residential_finance_costs",
+          "input": "property_finance_costs",
+          "scale_by": "ownership_share"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "default": 100,
+                "help": "If you own it on your own, leave this at 100%. If you own it jointly (for example 50% with a spouse), enter the figures for the WHOLE property below and your share here — we work out your part.",
+                "key": "ownership_share",
+                "label": "Your share of this property",
+                "role": "info",
+                "type": "percentage"
+              }
+            ],
+            "key": "about",
+            "title": "About this property"
+          },
+          {
+            "fields": [
+              {
+                "help": "All rent due for the year, before any agent's fees.",
+                "hmrc_box": "SA105 box 20",
+                "key": "rents",
+                "label": "Rent and other income from this property",
+                "prefill": {
+                  "categories": [
+                    "rental_income",
+                    "income_rental"
+                  ],
+                  "direction": "credit"
+                },
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "income",
+            "title": "Rent"
+          },
+          {
+            "fields": [
+              {
+                "hmrc_box": "SA105 box 24",
+                "key": "rates_insurance",
+                "label": "Rent, rates, insurance and ground rent",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA105 box 25",
+                "key": "repairs",
+                "label": "Repairs and maintenance",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA105 box 27",
+                "key": "professional_fees",
+                "label": "Letting agent, legal and accountancy fees",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "help": "For example cleaning, gardening or utilities you pay for the tenant.",
+                "hmrc_box": "SA105 box 28",
+                "key": "services",
+                "label": "Services you provide, including wages",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "help": "For example travel to the property, phone calls, replacing furniture.",
+                "hmrc_box": "SA105 box 29",
+                "key": "other_expenses",
+                "label": "Other allowable costs",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "help": "Only for shops, offices and other non-residential lets — that interest is still a normal expense.",
+                "hmrc_box": "SA105 box 26",
+                "key": "commercial_finance",
+                "label": "Interest on loans for COMMERCIAL property",
+                "role": "expense",
+                "type": "currency"
+              }
+            ],
+            "help": "Only costs of letting the property. Improvements (an extension, a new kitchen that's better than the old one) aren't allowable here.",
+            "key": "expenses",
+            "title": "Running costs"
+          },
+          {
+            "fields": [
+              {
+                "help": "The INTEREST only — not the capital you paid back. Your lender's annual statement shows it. You get 20% of this back as a tax credit.",
+                "hmrc_box": "SA105 box 44",
+                "key": "residential_finance_costs",
+                "label": "Residential mortgage interest and finance fees",
+                "role": "relief",
+                "type": "currency"
+              }
+            ],
+            "key": "finance",
+            "title": "Mortgage interest on a home you let"
+          }
+        ]
+      },
+      "help_text": "Add each UK property you let out. Enter the rent and the running costs for the tax year. Mortgage interest on a home you let is not a normal expense: it gets a 20% tax credit instead (Section 24), so it has its own box.",
       "hmrc_mapping": {},
+      "icon": "Home",
       "include_in_tax_preview": false,
       "income_type_key": "rental",
       "is_active": true,
@@ -317,19 +931,26 @@
       "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c94af6a03e18e2ca4a3d/SA105-2025.pdf",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "rental_statements",
           "label": "Rental / letting statements",
           "required": false
         },
         {
-          "allows_upload": true,
           "key": "tenancy_agreement",
           "label": "Lease / tenancy agreement",
           "required": false
+        },
+        {
+          "allows_upload": true,
+          "doc_type_key": "bank_statement",
+          "key": "bank_statements",
+          "label": "Bank statements",
+          "required": false,
+          "requires_bank_account": true,
+          "tab": "bank-statements"
         }
       ],
-      "uuid": "20db92af-5114-4631-8717-6997a79fc3e7"
+      "uuid": "11aa0922-08ac-4135-a785-dd872074bed7"
     },
     {
       "allows_manual_entry": false,
@@ -337,6 +958,8 @@
       "description": "HMRC's SA109 supplementary form — residence status, split-year treatment, domicile and remittance basis claims. File this if you're non-UK resident, dual-resident, claiming split-year treatment, or opting into the remittance basis.",
       "display_name": "Residence, remittance basis etc. (SA109)",
       "display_order": 95,
+      "estimator_mapping": {},
+      "field_schema": {},
       "hmrc_mapping": {
         "sa109_form": "RR1-RR3"
       },
@@ -347,15 +970,8 @@
       "linked_form_description": "Residence and remittance basis",
       "linked_form_title": "SA109",
       "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c9e9d24a86df80b8ceb0/SA109-2025.pdf",
-      "required_documents": [
-        {
-          "allows_upload": true,
-          "key": "residence",
-          "label": "Residence",
-          "required": false
-        }
-      ],
-      "uuid": "f06321af-21e1-40d5-b35d-97cf6c124fa0"
+      "required_documents": {},
+      "uuid": "2c3dc5da-84c9-489b-909c-1d25e0c6ab2f"
     },
     {
       "allows_manual_entry": false,
@@ -363,6 +979,8 @@
       "description": "HMRC's SA110 supplementary form — enter the total tax, NICs, Student & Postgraduate Loan repayments, CGT, pension charges and any payments-on-account claims for the year. Use the working sheet in the 'Tax calculation summary notes' to derive the box values.",
       "display_name": "Tax calculation summary (SA110)",
       "display_order": 90,
+      "estimator_mapping": {},
+      "field_schema": {},
       "hmrc_mapping": {
         "sa110_form": "TC1-TC2"
       },
@@ -370,18 +988,8 @@
       "income_type_key": "sa110",
       "is_active": true,
       "keyword_rules": {},
-      "linked_form_description": "Your final tax calculation summary",
-      "linked_form_title": "SA110",
-      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/68af7c2fe1055f748d55c184/SA110-2026.pdf",
-      "required_documents": [
-        {
-          "allows_upload": true,
-          "key": "tax_income",
-          "label": "Tax Income",
-          "required": false
-        }
-      ],
-      "uuid": "11946d06-b34c-4bd4-9273-73d0d9b9d163"
+      "required_documents": {},
+      "uuid": "6d8782e2-312c-47ef-bddb-56a856a5f0e8"
     },
     {
       "allows_manual_entry": false,
@@ -389,7 +997,123 @@
       "description": "Wages or salary from employment, taxed through PAYE.",
       "display_name": "Salary / Employment (PAYE)",
       "display_order": 10,
-      "hmrc_mapping": {},
+      "entity_label": "job",
+      "entity_type": "employment",
+      "estimator_mapping": [
+        {
+          "field": "pay",
+          "input": "employment_income"
+        },
+        {
+          "field": "tips",
+          "input": "employment_income"
+        },
+        {
+          "field": "benefits",
+          "input": "employment_income"
+        },
+        {
+          "field": "expenses",
+          "input": "employment_expenses"
+        },
+        {
+          "field": "tax_taken_off",
+          "input": "paye_deducted"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "Your gross pay for the year — on your P60 under 'Pay in this employment'. Not your take-home pay.",
+                "hmrc_box": "SA102 box 1",
+                "key": "pay",
+                "label": "Pay from this job before tax",
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "On your P60 under 'Tax in this employment'.",
+                "hmrc_box": "SA102 box 2",
+                "key": "tax_taken_off",
+                "label": "UK tax taken off",
+                "role": "tax_paid",
+                "type": "currency"
+              },
+              {
+                "hmrc_box": "SA102 box 3",
+                "key": "tips",
+                "label": "Tips and other payments not on your P60",
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "help": "Copy these from your P60 or P45.",
+            "key": "pay",
+            "title": "Pay and tax"
+          },
+          {
+            "fields": [
+              {
+                "help": "Company car, fuel, private medical insurance, vouchers and so on. Leave out any benefits your employer already 'payrolled' — they're in your pay.",
+                "hmrc_box": "SA102 boxes 9–16",
+                "key": "benefits",
+                "label": "Taxable benefits (total from your P11D)",
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "For example professional subscriptions, uniform cleaning or business travel. Ordinary commuting doesn't count.",
+                "hmrc_box": "SA102 boxes 17–20",
+                "key": "expenses",
+                "label": "Work expenses you paid and weren't paid back for",
+                "role": "expense",
+                "type": "currency"
+              }
+            ],
+            "help": "Only if your employer gave you a P11D or you paid for work costs yourself.",
+            "key": "benefits",
+            "title": "Benefits and expenses"
+          },
+          {
+            "fields": [
+              {
+                "help": "On your P60 or payslip. Helps HMRC match this job.",
+                "key": "paye_reference",
+                "label": "Employer's PAYE reference",
+                "placeholder": "123/AB45678",
+                "role": "info",
+                "type": "text"
+              },
+              {
+                "key": "left_in_year",
+                "label": "Did this job end during the tax year?",
+                "role": "info",
+                "type": "boolean"
+              },
+              {
+                "key": "end_date",
+                "label": "Date it ended",
+                "role": "info",
+                "show_if": {
+                  "equals": true,
+                  "field": "left_in_year"
+                },
+                "type": "date"
+              }
+            ],
+            "key": "details",
+            "title": "Employer details"
+          }
+        ]
+      },
+      "help_text": "Add each job you had in the tax year (6 April to 5 April). Your P60 (or P45 if you left) shows your pay and the tax already taken off. Your employer's P11D lists any taxable benefits such as a company car or private medical insurance.",
+      "hmrc_mapping": {
+        "mtd_submission": "hmrc_held"
+      },
+      "icon": "Briefcase",
       "include_in_tax_preview": false,
       "income_type_key": "salary",
       "is_active": true,
@@ -399,28 +1123,17 @@
       "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874ca9c66bef7d5e5b60fc7/SA102-2025.pdf",
       "required_documents": [
         {
-          "allows_upload": true,
           "key": "p60",
           "label": "P60 end-of-year certificate",
-          "required": false,
-          "requires_bank_account": false
+          "required": false
         },
         {
-          "allows_upload": true,
           "key": "p45",
           "label": "P45 (if you left a job)",
-          "required": false,
-          "requires_bank_account": false
-        },
-        {
-          "allows_upload": true,
-          "key": "payslips",
-          "label": "Payslips",
-          "required": false,
-          "requires_bank_account": true
+          "required": false
         }
       ],
-      "uuid": "0f946d18-feb0-4699-904e-b4619725ff33"
+      "uuid": "ead542d3-9bac-4909-9d06-9d9264c05f22"
     },
     {
       "allows_manual_entry": true,
@@ -428,7 +1141,86 @@
       "description": "Income from your trade as a sole trader or self-employed individual.",
       "display_name": "Self-employment / Sole trader",
       "display_order": 20,
+      "entity_label": "business",
+      "entity_type": "business",
+      "estimator_mapping": [
+        {
+          "field": "turnover",
+          "input": "se_turnover"
+        },
+        {
+          "field": "other_business_income",
+          "input": "se_turnover"
+        },
+        {
+          "field": "expenses",
+          "input": "se_expenses"
+        },
+        {
+          "field": "capital_allowances",
+          "input": "se_capital_allowances"
+        }
+      ],
+      "field_schema": {
+        "sections": [
+          {
+            "fields": [
+              {
+                "help": "Everything your customers paid you for the year, before costs.",
+                "hmrc_box": "SA103S box 9 / SA103F box 15",
+                "key": "turnover",
+                "label": "Takings, fees and sales",
+                "prefill": {
+                  "categories": [
+                    "sales_income",
+                    "consulting_income",
+                    "income_sales"
+                  ],
+                  "direction": "credit"
+                },
+                "required": true,
+                "role": "income",
+                "type": "currency"
+              },
+              {
+                "help": "For example grants or commission that isn't from your main trade.",
+                "hmrc_box": "SA103S box 10 / SA103F box 16",
+                "key": "other_business_income",
+                "label": "Other business income",
+                "role": "income",
+                "type": "currency"
+              }
+            ],
+            "key": "income",
+            "title": "Business income"
+          },
+          {
+            "fields": [
+              {
+                "help": "Costs that are only for the business: stock, materials, travel, phone, insurance, accountancy fees… Not personal spending, and not the cost of equipment you'll keep (that's capital allowances).",
+                "hmrc_box": "SA103S box 20 / SA103F box 31",
+                "key": "expenses",
+                "label": "Allowable business expenses",
+                "role": "expense",
+                "type": "currency"
+              },
+              {
+                "help": "Tax relief for equipment, tools, vans and computers you bought for the business. Most small businesses claim the full cost (Annual Investment Allowance).",
+                "hmrc_box": "SA103 capital allowances boxes",
+                "key": "capital_allowances",
+                "label": "Capital allowances",
+                "role": "expense",
+                "type": "currency"
+              }
+            ],
+            "key": "costs",
+            "title": "Allowable costs"
+          }
+        ]
+      },
+      "help_text": "Add each business you run as a sole trader. Enter your takings and your allowable business costs for the tax year. If your takings are small, the £1,000 trading allowance may be better than claiming costs — the estimate uses whichever gives you the lower profit.",
       "hmrc_mapping": {},
+      "icon": "Store",
       "include_in_tax_preview": false,
       "income_type_key": "self_employment",
       "is_active": true,
@@ -439,20 +1231,39 @@
       "required_documents": [
         {
           "allows_upload": true,
+          "doc_type_key": "bank_statement",
           "key": "bank_statements",
           "label": "Business bank statements",
           "required": false,
-          "requires_bank_account": true
+          "requires_bank_account": true,
+          "tab": "bank-statements"
         },
         {
-          "allows_upload": true,
           "key": "sales_invoices",
           "label": "Sales invoices",
-          "required": false,
-          "requires_bank_account": false
+          "required": false
         }
       ],
-      "uuid": "d23649a1-04e2-48cb-89e6-7499470d5e70"
+      "uuid": "a99024df-5ac0-4642-a067-613ee04782e1"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "New VCT shares you subscribed for in the year. Relief is 30% of the amount subscribed, up to £200,000.",
+      "display_name": "Venture Capital Trust shares",
+      "display_order": 230,
+      "estimator_mapping": {},
+      "field_schema": {},
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "vct_subscriptions",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "These fields map to the 'Other tax reliefs' section on page Ai 2 of the SA101 form.",
+      "linked_form_title": "SA101 Ai2",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-additional-information-sa101",
+      "required_documents": {},
+      "uuid": "22dd5c40-8d13-40f6-8e24-44753049b609"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
