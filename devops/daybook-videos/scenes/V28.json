@@ -1,0 +1,213 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V28",
+  "title": "Client walkthrough: Tom Reid, IT consultant",
+  "targetLength": 240,
+  "login": "staff:ade",
+  "startPath": "/dashboard/tax/filing-requests",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 20,
+      "action": "Filing requests → Tom Reid (Reviewing)",
+      "caption": "Tom Reid: IT consultant, one account for everything",
+      "voice": "Tom is a self-employed IT consultant. He uses one bank account for business and personal spending.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Tom Reid"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 35,
+      "action": "Statements and summary: about 120 lines, two statements",
+      "caption": "Two statements, about 120 lines",
+      "voice": "He sent two statements, about a hundred and twenty lines. The AI has already sorted them.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 40,
+      "action": "All tab: client fees as Business income; software and train fares as costs; hover reasons",
+      "caption": "Income, costs, and why",
+      "voice": "Client fees are business income. Software, train fares and his phone bill are costs. Each line says how it was sorted.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^All \\(\\d+\\)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Known merchant"
+          },
+          "ms": 1800,
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Learned from your history"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 40,
+      "action": "Please check (6): supermarket and takeaway lines → Personal / transfer — exclude from return",
+      "caption": "Personal spending kept out",
+      "voice": "Six lines need a person. Supermarket shopping and takeaways are personal, so Ade keeps them off the return.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Change category",
+            "within": "tr:has-text('TESCO'), li:has-text('TESCO'), div.rounded-lg:has-text('TESCO')"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "placeholder": "Search categories…"
+          },
+          "value": "Personal / transfer",
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "option",
+            "name": "/^Personal / transfer/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 35,
+      "action": "Currys £640 line: Send question to Tom",
+      "caption": "One question for Tom",
+      "voice": "A six hundred and forty pound purchase at Currys could be a work laptop. Ade asks Tom rather than guess.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/Ask the customer|Needs info|Send question/"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "css": "textarea"
+          },
+          "value": "Was the £640 to Currys on 12 May a work laptop?",
+          "optional": true
+        },
+        {
+          "do": "cutStart"
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Send question"
+          },
+          "optional": true
+        },
+        {
+          "do": "cutEnd"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 40,
+      "action": "Summary panel: Allowable expenses, Personal allowance, Income Tax, Class 4 NIC",
+      "caption": "The figures, by rules",
+      "voice": "The summary shows income, allowable expenses, Income Tax and Class 4 National Insurance, all worked out by rules.",
+      "actions": [
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Allowable expenses"
+          },
+          "ms": 1800,
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Class 4 NIC"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "duration": 30,
+      "action": "History panel: Review started, question sent",
+      "caption": "Everything on record",
+      "voice": "Every step is on the record: who reviewed, what was asked, and when.",
+      "actions": [
+        {
+          "do": "scroll",
+          "y": 900,
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "History"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

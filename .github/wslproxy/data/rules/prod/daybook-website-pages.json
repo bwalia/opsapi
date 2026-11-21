@@ -1,0 +1,33 @@
+{
+  "id": "daybook-website-pages",
+  "name": "daybook-website-pages",
+  "profile_id": "prod",
+  "priority": 1,
+  "rules_tags": [
+    "daybook",
+    "prod",
+    "pages",
+    "website"
+  ],
+  "match": {
+    "rules": {
+      "path": "/",
+      "path_key": "starts_with"
+    },
+    "response": {
+      "code": 305,
+      "redirect_uri": "https://bwalia.github.io/daybook-website",
+      "message": "",
+      "strip_path": false,
+      "auto_redirect_https": false,
+      "allow": true,
+      "routing": {
+        "mode": "weighted"
+      },
+      "backends": {}
+    }
+  },
+  "servers": [
+    "host:daybook.co.uk"
+  ]
+}

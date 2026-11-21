@@ -1,0 +1,30 @@
+{
+  "id": "host:daybook.co.uk",
+  "server_name": "daybook.co.uk",
+  "proxy_server_name": "bwalia.github.io",
+  "root": "/var/www/html",
+  "index": "index.html",
+  "access_log": "logs/daybook.co.uk.access.log",
+  "error_log": "logs/daybook.co.uk.error.log",
+  "config_status": false,
+  "profile_id": "prod",
+  "rules": "daybook-website-pages",
+  "pop_ids": [
+    "lon1",
+    "pop0"
+  ],
+  "listens": [
+    {
+      "listen": "80"
+    }
+  ],
+  "ssl_enabled": true,
+  "ssl_force_https": true,
+  "ssl_staging": false,
+  "ssl_auto_renew": true,
+  "ssl_email": "admin@opsapi.org",
+  "cache_enabled": true,
+  "match_cases": {},
+  "custom_headers": [],
+  "cache_ttl": "3600"
+}

@@ -1,0 +1,99 @@
+# ── Daybook demo back office: API ──────────────────────────────────────────
+# Helm RELEASE: daybook-demo   Namespace: daybook-demo   Cluster: k3s1
+# Public host: https://demo-api.daybook.co.uk  (dashboard: https://demo.daybook.co.uk)
+#
+# OpsAPI's tax module only (PROJECT_CODE=tax_copilot), with one workspace per demo
+# vertical (devops/daybook-demo/verticals/*.lua) behind the public read-only login
+# demo@daybook.co.uk. Fictional data only; reset every 30 minutes
+# (devops/daybook-demo/reset.yaml). Run order: devops/daybook-demo/README.md.
+env: prod
+app: daybook-demo
+
+# Read by the DNS + wslproxy steps. MUST equal ingress.hosts[0].host below.
+host: demo-api.daybook.co.uk
+
+projectCode: tax_copilot
+
+frontendUrl: "https://demo.daybook.co.uk"
+
+# deploy-daybook-demo.yml pins the newest released image (--set image.tag=1.0.N).
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+redis:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Edge (wslproxy) terminates TLS and proxies plain HTTP to the k3s1 traefik-edge
+# entry, which routes by Host header: no cert-manager, no tls block.
+ingress:
+  enabled: true
+  className: traefik-edge
+  annotations: {}
+  hosts:
+    - host: demo-api.daybook.co.uk
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64
+
+database:
+  name: daybook_demo
+  host: daybook-demo-db.daybook-demo.svc.cluster.local
+
+postgresSsl: "false"
+
+# Own Vault path (devops/daybook-demo/seed-vault-daybook.sh): DB password, JWT and
+# encryption keys, ADMIN_PASSWORD; add HMRC_CLIENT_ID / HMRC_CLIENT_SECRET of the
+# HMRC SANDBOX application for "Connect to HMRC" in the demo.
+externalSecret:
+  enabled: true
+  secretStore: wslvault-backend
+  vaultPath: daybook-demo/config
+
+# The platform admin and its own workspace. Kept apart from the demo workspaces
+# (daybook-demo, daybook-landlords, …), so the public member lists show only
+# fictional people. Self sign-ups (if anyone finds the register endpoint) also land
+# here, never in a demo workspace: it's the first tax_copilot workspace created.
+setup:
+  adminEmail: "tenthmatrix.mailer@gmail.com"
+  adminPassword: ""
+  namespaceSlug: "daybook-admin"
+
+corsAllowedDomains: "daybook.co.uk"
+corsAllowedOrigins: "https://demo.daybook.co.uk"
+passwordResetAllowedOrigins: "https://demo.daybook.co.uk"
+
+# HMRC sends "Connect to HMRC" back to THIS release. Must be a redirect URI on the
+# HMRC Developer Hub sandbox application.
+hmrcRedirectUri: "https://demo-api.daybook.co.uk/auth/hmrc/callback"
+
+# Its own session key (Secret made once by deploy-daybook-demo.yml): no other
+# release's tokens are accepted here.
+extraEnvFromSecrets:
+  - daybook-demo-jwt
+extraEnv:
+  ALLOW_SELF_SERVICE_WORKSPACES: "false"
+  OPSAPI_PUBLIC_URL: "https://demo-api.daybook.co.uk"
+  # HMRC's test service only: nothing here reaches a real tax record.
+  HMRC_ENVIRONMENT: "sandbox"
+  VAT_FILING_ENABLED: "false"
+  # No local LLM in the demo: lines are already classified by the seed.
+  AI_FALLBACK_PROVIDER: "none"
+
+autoscaling:
+  enabled: false
+
+# Sample data: re-seed rather than restore.
+backup:
+  enabled: false

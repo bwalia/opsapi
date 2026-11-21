@@ -1,0 +1,30 @@
+# ── Daybook demo back office: dashboard ────────────────────────────────────
+# Helm RELEASE: daybook-demo-dashboard   Namespace: daybook-demo   Cluster: k3s1
+# Public host: https://demo.daybook.co.uk
+#   → calls the API at https://demo-api.daybook.co.uk (release daybook-demo)
+# The Daybook look (navy, gold, warm paper) is the workspace's theme, set by
+# devops/daybook-demo/seed-daybook.lua; the image is the stock dashboard.
+env: prod
+
+# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so the image
+# is built for this URL: bwalia/opsapi-dashboard:daybook-demo (deploy-daybook-demo.yml).
+apiUrl: https://demo-api.daybook.co.uk
+
+image:
+  repository: bwalia/opsapi-dashboard
+  tag: daybook-demo
+  pullPolicy: Always
+
+# MUST equal ingress.hostname below.
+host: demo.daybook.co.uk
+
+ingress:
+  enabled: true
+  className: traefik-edge
+  hostname: demo.daybook.co.uk
+  annotations: {}
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64

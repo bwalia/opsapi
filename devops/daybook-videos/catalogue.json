@@ -1,0 +1,5476 @@
+{
+  "about": "Daybook video catalogue: source of truth for every video. See README.md. Names and data per docs/plans/DAYBOOK_DEMO_SPEC.md; claims per §0 of docs/plans/PROMPT_DAYBOOK_SITE.md.",
+  "updated": "2026-11-21",
+  "statuses": {
+    "published": "on YouTube",
+    "planned": "script ready; film when the demo it needs exists",
+    "gated": "film only after the condition in `gate` is checked",
+    "roadmap": "the feature isn't built: script only, never film"
+  },
+  "playlists": [
+    "Feature clips",
+    "For practices",
+    "For your IT team",
+    "For your clients",
+    "Integrations",
+    "Making Tax Digital",
+    "Shorts"
+  ],
+  "verticals": [
+    "practice",
+    "landlords",
+    "trades",
+    "general",
+    "payroll",
+    "companies"
+  ],
+  "videos": [
+    {
+      "id": "V01",
+      "slug": "landlord-learns-from-last-year",
+      "title": "A landlord with 100 properties, and an AI that learns from last year (with voice)",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 298,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "last-year-memory",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        },
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "SN6tJKGKN1M",
+        "title": "A landlord with 100 properties, and an AI that learns from last year (with voice)",
+        "description": "Jordan files the 2025-26 return with the AI assistant and no accountant step. 274 of 275 transactions are sorted from what Jordan confirmed in 2024-25, with no AI model call; only 1 goes to the AI model and only 1 is flagged. The estimate includes the mortgage interest: £571,273 tax on £1,477,310 property profit, with no Class 4 National Insurance. Jordan confirms the year in one click, connects to HMRC and files. Narrated in a British voice, with subtitles.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V02",
+      "slug": "landlord-self-assessment-filed",
+      "title": "Landlord Self Assessment, filed with HMRC",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 355,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "ai-assistant",
+          "paths": [
+            "lapis/routes/tax-agent.lua",
+            "opsapi-dashboard/components/tax/TaxAgentChat.tsx",
+            "opsapi-dashboard/app/dashboard/tax/agent/page.tsx"
+          ]
+        },
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "Zw7udRqE8FQ",
+        "title": "Landlord Self Assessment, filed with HMRC",
+        "description": "A landlord tells the AI assistant about their lets, uploads twelve monthly statements and lets the agent sort 275 transactions. The tax is worked out, the landlord connects to HMRC and the return is filed through Making Tax Digital.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V03",
+      "slug": "landlord-vat-return",
+      "title": "Landlord VAT return under Making Tax Digital",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 153,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "vat-coding",
+          "paths": [
+            "lapis/lib/vat-classifier.lua",
+            "lapis/lib/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        },
+        {
+          "name": "vat-schemes",
+          "paths": [
+            "lapis/lib/vat-schemes.lua",
+            "opsapi-dashboard/components/vat/VatSchemesPanel.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "NoESPLppAlc",
+        "title": "Landlord VAT return under Making Tax Digital",
+        "description": "Every bank line gets a VAT treatment, a rules engine works out the 9 boxes (never the AI), and the return is submitted to HMRC. Partial exemption and the annual adjustment are included.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V04",
+      "slug": "ai-sorts-accountant-reviews",
+      "title": "The AI sorts, an accountant reviews",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 335,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "_N9YtS_jMKA",
+        "title": "The AI sorts, an accountant reviews",
+        "description": "After the agent has sorted the year, an accountant works through the lines it was unsure of. Each correction is explained on screen, so a practice keeps a qualified person in charge.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V05",
+      "slug": "bank-statements-to-hmrc-figures",
+      "title": "Bank statements to HMRC-ready figures",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 216,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "ai-assistant",
+          "paths": [
+            "lapis/routes/tax-agent.lua",
+            "opsapi-dashboard/components/tax/TaxAgentChat.tsx",
+            "opsapi-dashboard/app/dashboard/tax/agent/page.tsx"
+          ]
+        },
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "aK2fMdtoIUI",
+        "title": "Bank statements to HMRC-ready figures",
+        "description": "The landlord picks \"Do it with the AI assistant\". It asks about mortgage interest, treats residential and commercial loans differently, and updates the estimate as it reads the statements.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V06",
+      "slug": "sole-trader-ai-bookkeeping",
+      "title": "Sole trader: AI bookkeeping to HMRC filing",
+      "audience": "practice",
+      "vertical": "general",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 144,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "N3hxLIOb2FQ",
+        "title": "Sole trader: AI bookkeeping to HMRC filing",
+        "description": "A self-employed consultant uploads two statements. The agent keeps personal spending out of the business figures, HMRC works out the tax and the return is filed.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V07",
+      "slug": "your-branded-app",
+      "title": "Your own branded app for your end customers",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 27,
+      "status": "published",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "branding",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/settings/page.tsx",
+            "THEMING_GUIDE.md"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": "PEyJKsYIN-c",
+        "title": "Your own branded app for your end customers",
+        "description": "The same engine under your brand, for your end customers: sign in, upload, extract, classify, reconcile, calculate and file. Your clients see your name, not ours.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [],
+      "notes": "Recorded on OpsAPI int with the OpsAPI name on screen; client names differ from the Daybook spec. Re-upload under the Daybook channel (decision §1.4) or re-record with the Daybook theme."
+    },
+    {
+      "id": "V08",
+      "slug": "daybook-in-90-seconds",
+      "title": "Daybook in 90 seconds",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 90,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1",
+          "C3",
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "branding",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/settings/page.tsx",
+            "THEMING_GUIDE.md"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Daybook in 90 seconds",
+        "description": "What Daybook does for a UK accountancy practice, in 90 seconds: client statements in, an AI agent sorts every line, your team reviews and signs off, and the return goes to HMRC through Making Tax Digital.",
+        "tags": [
+          "AI bookkeeping",
+          "Daybook",
+          "MTD",
+          "MTD software for accountants",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "tax return software"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Harbour & Lane Accountants, on Daybook"
+        ],
+        [
+          "0:08",
+          "Every client, every return, one list"
+        ],
+        [
+          "0:22",
+          "The AI sorted every bank line, and says why"
+        ],
+        [
+          "0:38",
+          "Unsure lines come to your team"
+        ],
+        [
+          "0:52",
+          "The tax is worked out by rules and by HMRC, never by the AI"
+        ],
+        [
+          "1:04",
+          "VAT returns from coded lines"
+        ],
+        [
+          "1:14",
+          "Your clients see your brand"
+        ],
+        [
+          "1:24",
+          "Book a demo at daybook.co.uk"
+        ]
+      ],
+      "script": "scripts/V08.md",
+      "scene": "scenes/V08.json",
+      "thumbnail": {
+        "eyebrow": "For UK practices",
+        "title": "Daybook in 90 seconds",
+        "hl": "90 seconds",
+        "sub": "Statements in. AI sorts. You sign off.",
+        "chips": [
+          "MTD Income Tax",
+          "VAT",
+          "Your brand"
+        ]
+      }
+    },
+    {
+      "id": "V09",
+      "slug": "mtd-income-tax-for-your-practice",
+      "title": "MTD for Income Tax: what changes for your practice",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3",
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "obligations",
+          "paths": [
+            "lapis/lib/hmrc-mtd-client.lua",
+            "lapis/routes/tax-hmrc-data.lua"
+          ]
+        },
+        {
+          "name": "quarterly-update",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "final-declaration",
+          "paths": [
+            "lapis/routes/tax-hmrc-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx"
+          ]
+        }
+      ],
+      "sources": [
+        "https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/work-out-your-qualifying-income-for-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/sign-up-your-client-for-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/penalties-for-making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: what changes for your practice",
+        "description": "What Making Tax Digital for Income Tax means for a practice's workload, and how Daybook handles each step. Dates and thresholds are from GOV.UK; check them there: https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "Making Tax Digital for Income Tax",
+          "UK tax",
+          "accountants",
+          "quarterly updates"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "MTD for Income Tax: what changes for your practice"
+        ],
+        [
+          "0:20",
+          "Who's in, and when (check GOV.UK)"
+        ],
+        [
+          "0:55",
+          "Four updates and a final declaration"
+        ],
+        [
+          "1:30",
+          "Where the extra hours go"
+        ],
+        [
+          "2:10",
+          "Daybook fetches each client's quarters from HMRC"
+        ],
+        [
+          "3:10",
+          "HMRC works out the tax"
+        ],
+        [
+          "3:40",
+          "Check GOV.UK for the latest rules"
+        ]
+      ],
+      "script": "scripts/V09.md"
+    },
+    {
+      "id": "V10",
+      "slug": "a-morning-in-the-review-queue",
+      "title": "A morning in the review queue",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 300,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C2",
+          "C3",
+          "C5",
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "last-year-memory",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "A morning in the review queue",
+        "description": "An accountant clears flagged lines across four clients in one morning: why the AI was unsure, one-click corrections, a question sent to a client, and the AI remembering the answer next year.",
+        "tags": [
+          "AI bookkeeping",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountant workflow",
+          "accountants",
+          "review queue"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "9am: what needs a person today"
+        ],
+        [
+          "0:15",
+          "Priya Shah: two flats, three unsure lines"
+        ],
+        [
+          "1:00",
+          "See the AI's reason, then decide"
+        ],
+        [
+          "1:40",
+          "Tom Reid: personal spending kept out"
+        ],
+        [
+          "2:30",
+          "Ask the client, inside the same request"
+        ],
+        [
+          "3:10",
+          "Dan Kowalski: vans and tools"
+        ],
+        [
+          "3:55",
+          "Sam Rivers: a job and an Etsy shop"
+        ],
+        [
+          "4:30",
+          "Four clients reviewed before lunch"
+        ]
+      ],
+      "script": "scripts/V10.md",
+      "scene": "scenes/V10.json",
+      "thumbnail": {
+        "eyebrow": "For practices",
+        "title": "A morning in the review queue",
+        "hl": "review queue",
+        "sub": "Four clients. Every unsure line checked.",
+        "badge": "15",
+        "badgeSmall": "LINES TO CHECK"
+      }
+    },
+    {
+      "id": "V11",
+      "slug": "onboarding-a-client-in-five-minutes",
+      "title": "Onboarding a client in five minutes",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 180,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "members",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/members"
+          ]
+        },
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Onboarding a client in five minutes",
+        "description": "The practice invites a client, the client signs in to the practice's branded app, uploads bank statements, and the practice sees them sorted.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountancy practice",
+          "accountants",
+          "client onboarding"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "1 · Invite the client"
+        ],
+        [
+          "0:25",
+          "2 · The client signs in to your app"
+        ],
+        [
+          "0:50",
+          "3 · The client says what income they had"
+        ],
+        [
+          "1:10",
+          "4 · Upload bank statements"
+        ],
+        [
+          "1:50",
+          "5 · Send it to the practice"
+        ],
+        [
+          "2:20",
+          "6 · It arrives sorted"
+        ]
+      ],
+      "script": "scripts/V11.md",
+      "scene": "scenes/V11.json",
+      "thumbnail": {
+        "eyebrow": "For practices",
+        "title": "A new client in five minutes",
+        "hl": "five minutes",
+        "chips": [
+          "Invite",
+          "Upload",
+          "Sorted"
+        ]
+      }
+    },
+    {
+      "id": "V12",
+      "slug": "acting-as-agent-vat-for-clients",
+      "title": "Acting as agent: VAT for your clients",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 210,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "vat-agent",
+          "paths": [
+            "lapis/lib/hmrc-agent-client.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/clients/page.tsx",
+            "lapis/routes/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        },
+        {
+          "name": "vat-coding",
+          "paths": [
+            "lapis/lib/vat-classifier.lua",
+            "lapis/lib/vat.lua"
+          ]
+        },
+        {
+          "name": "hmrc-connect",
+          "paths": [
+            "lapis/routes/tax-hmrc-auth.lua",
+            "lapis/helper/hmrc.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Acting as agent: VAT for your clients",
+        "description": "How a practice works on a client's VAT under HMRC agent authorisation: the client list, coding the quarter, the nine boxes and filing. Filing in the demo uses HMRC's sandbox.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD VAT",
+          "Making Tax Digital",
+          "UK tax",
+          "VAT",
+          "accountants",
+          "agent services"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your VAT clients, under agent authorisation"
+        ],
+        [
+          "0:25",
+          "Corner Cup Café: one quarter ready"
+        ],
+        [
+          "0:55",
+          "Every bank line gets a VAT treatment"
+        ],
+        [
+          "1:40",
+          "The nine boxes, from coded lines"
+        ],
+        [
+          "2:20",
+          "Filed through Making Tax Digital (HMRC sandbox in this demo)"
+        ],
+        [
+          "3:00",
+          "Next client"
+        ]
+      ],
+      "script": "scripts/V12.md",
+      "scene": "scenes/V12.json",
+      "thumbnail": {
+        "eyebrow": "MTD for VAT",
+        "title": "VAT for your clients, as their agent",
+        "hl": "as their agent",
+        "chips": [
+          "Agent authorisation",
+          "9 boxes"
+        ]
+      }
+    },
+    {
+      "id": "V13",
+      "slug": "quarterly-updates-at-scale",
+      "title": "Quarterly updates at scale",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C2",
+          "C3",
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "obligations",
+          "paths": [
+            "lapis/lib/hmrc-mtd-client.lua",
+            "lapis/routes/tax-hmrc-data.lua"
+          ]
+        },
+        {
+          "name": "quarterly-update",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Quarterly updates at scale",
+        "description": "One practice, many MTD clients: which quarters are due, building each cumulative update from sorted lines, and sending it. Demo filing uses HMRC's sandbox.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "quarterly updates"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Who owes an update this quarter"
+        ],
+        [
+          "0:25",
+          "HMRC says which period is due"
+        ],
+        [
+          "1:15",
+          "Figures built from sorted lines, checked before sending"
+        ],
+        [
+          "2:05",
+          "Sent to HMRC (sandbox)"
+        ],
+        [
+          "3:00",
+          "Landlords file the property update"
+        ],
+        [
+          "3:40",
+          "Every quarter, every client"
+        ]
+      ],
+      "script": "scripts/V13.md"
+    },
+    {
+      "id": "V14",
+      "slug": "your-brand-your-colours",
+      "title": "Your brand, your domain, your colours",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "gated",
+      "gate": "Check which branding options the Daybook demo exposes (logo in Workspace → Settings is real; custom domain and colours depend on the white-label build) before filming.",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "branding",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/settings/page.tsx",
+            "THEMING_GUIDE.md"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Your brand, your domain, your colours",
+        "description": "Setting up the client app under your practice's brand: logo, colours and your own domain.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "branded client app",
+          "white label"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Add your logo"
+        ],
+        [
+          "0:30",
+          "Your colours"
+        ],
+        [
+          "1:10",
+          "What your clients see"
+        ],
+        [
+          "1:50",
+          "Your own web address"
+        ]
+      ],
+      "script": "scripts/V14.md"
+    },
+    {
+      "id": "V15",
+      "slug": "security-and-data-overview",
+      "title": "Security and data: what your IT person will ask",
+      "audience": "it",
+      "vertical": "practice",
+      "playlist": "For your IT team",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "tenancy",
+          "paths": [
+            "lapis/middleware/namespace.lua",
+            "NAMESPACE_IMPLEMENTATION_PLAN.md"
+          ]
+        },
+        {
+          "name": "roles",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/roles",
+            "lapis/middleware/namespace.lua"
+          ]
+        },
+        {
+          "name": "sso-2fa",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/sso",
+            "lapis/helper/otp.lua"
+          ]
+        },
+        {
+          "name": "activity-log",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/activity/page.tsx"
+          ]
+        },
+        {
+          "name": "fraud-headers",
+          "paths": [
+            "lapis/helper/hmrc.lua",
+            "opsapi-dashboard/lib/hmrc-fraud.ts"
+          ]
+        },
+        {
+          "name": "ai-providers",
+          "paths": [
+            "docs/AI_PROVIDERS.md",
+            "lapis/lib/llm-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Security and data: what your IT person will ask",
+        "description": "Where client data lives, how each practice's and each client's data is kept apart, roles, two-factor sign-in and SSO, the activity log, HMRC fraud-prevention headers, and which AI model sees what.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK GDPR",
+          "UK tax",
+          "accountants",
+          "data protection",
+          "security"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Each practice's data is kept apart"
+        ],
+        [
+          "0:30",
+          "Roles decide who can do what"
+        ],
+        [
+          "1:10",
+          "Two-factor sign-in and SSO for your staff"
+        ],
+        [
+          "1:50",
+          "Every change is recorded"
+        ],
+        [
+          "2:30",
+          "HMRC's fraud-prevention headers"
+        ],
+        [
+          "3:10",
+          "Which AI model sees what"
+        ]
+      ],
+      "script": "scripts/V15.md"
+    },
+    {
+      "id": "V16",
+      "slug": "upload-statements-from-your-phone",
+      "title": "Uploading your bank statements from your phone",
+      "audience": "client",
+      "vertical": "practice",
+      "playlist": "For your clients",
+      "format": "9:16",
+      "targetLength": 90,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Uploading your bank statements from your phone",
+        "description": "For your clients: how to upload bank statements from a phone's browser, including a photo of a paper statement.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "bank statements",
+          "for clients"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Sign in on your phone"
+        ],
+        [
+          "0:15",
+          "Upload a PDF statement"
+        ],
+        [
+          "0:40",
+          "Or take a photo of a paper one"
+        ],
+        [
+          "1:05",
+          "Done: your accountant takes it from here"
+        ]
+      ],
+      "script": "scripts/V16.md",
+      "notes": "Films the web app in a phone-sized browser. Native iPhone/Android apps are a separate gated item (V45)."
+    },
+    {
+      "id": "V17",
+      "slug": "answering-your-accountants-questions",
+      "title": "Answering your accountant's questions",
+      "audience": "client",
+      "vertical": "practice",
+      "playlist": "For your clients",
+      "format": "16:9",
+      "targetLength": 90,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Answering your accountant's questions",
+        "description": "For your clients: when your accountant asks about a transaction, how to see the question and reply.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "for clients"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your accountant has a question"
+        ],
+        [
+          "0:20",
+          "Read the question"
+        ],
+        [
+          "0:50",
+          "Reply in a sentence"
+        ],
+        [
+          "1:15",
+          "Done"
+        ]
+      ],
+      "script": "scripts/V17.md"
+    },
+    {
+      "id": "V18",
+      "slug": "your-tax-estimate-explained",
+      "title": "Your tax estimate, explained",
+      "audience": "client",
+      "vertical": "practice",
+      "playlist": "For your clients",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        },
+        {
+          "name": "reports",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/reports/page.tsx",
+            "lapis/lib/tax-report.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Your tax estimate, explained",
+        "description": "For your clients: reading your tax estimate, what changes it, and why HMRC's final figure can differ.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "for clients",
+          "tax estimate"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your estimate so far"
+        ],
+        [
+          "0:25",
+          "What goes into it"
+        ],
+        [
+          "1:00",
+          "Why HMRC's figure may differ"
+        ],
+        [
+          "1:35",
+          "Questions? Ask your accountant in the app"
+        ]
+      ],
+      "script": "scripts/V18.md"
+    },
+    {
+      "id": "V19",
+      "slug": "connecting-to-hmrc",
+      "title": "Connecting to HMRC (Income Tax and VAT)",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3",
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "hmrc-connect",
+          "paths": [
+            "lapis/routes/tax-hmrc-auth.lua",
+            "lapis/helper/hmrc.lua"
+          ]
+        },
+        {
+          "name": "fraud-headers",
+          "paths": [
+            "lapis/helper/hmrc.lua",
+            "opsapi-dashboard/lib/hmrc-fraud.ts"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Connecting to HMRC (Income Tax and VAT)",
+        "description": "Connecting a client's account to HMRC for Income Tax and for VAT. Demo uses HMRC's sandbox and test users.",
+        "tags": [
+          "Daybook",
+          "HMRC",
+          "MTD",
+          "Making Tax Digital",
+          "OAuth",
+          "UK tax",
+          "accountants",
+          "integration"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Step 1: the National Insurance number"
+        ],
+        [
+          "0:30",
+          "Step 2: sign in with HMRC"
+        ],
+        [
+          "1:10",
+          "VAT has its own connection"
+        ],
+        [
+          "1:45",
+          "Connected"
+        ]
+      ],
+      "script": "scripts/V19.md"
+    },
+    {
+      "id": "V20",
+      "slug": "statements-from-uk-banks",
+      "title": "Getting statements in: PDF, CSV and photos from UK banks",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3",
+          "C5"
+        ]
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Getting statements in: PDF, CSV and photos from UK banks",
+        "description": "Daybook reads PDF, CSV and photographed bank statements, and recognises UK bank CSV layouts.",
+        "tags": [
+          "CSV",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PDF",
+          "UK tax",
+          "accountants",
+          "bank statements"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "PDF statements"
+        ],
+        [
+          "0:40",
+          "CSV exports from UK banks"
+        ],
+        [
+          "1:20",
+          "Photos of paper statements"
+        ],
+        [
+          "1:55",
+          "Every line, ready to sort"
+        ]
+      ],
+      "script": "scripts/V20.md"
+    },
+    {
+      "id": "V21",
+      "slug": "e-invoices-with-peppol",
+      "title": "Sending e-invoices with Peppol",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "Confirm Peppol status (lib/vat-einvoice.lua builds UBL; check delivery and docs/plans/VAT_EINVOICING.md) before filming.",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "peppol",
+          "paths": [
+            "lapis/lib/vat-einvoice.lua",
+            "opsapi-dashboard/components/vat/VatInvoiceCheck.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Sending e-invoices with Peppol",
+        "description": "Building a Peppol UBL e-invoice and checking it's a valid VAT invoice.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "Peppol",
+          "UK tax",
+          "accountants",
+          "e-invoicing"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Is it a valid VAT invoice?"
+        ],
+        [
+          "0:40",
+          "Build the e-invoice"
+        ],
+        [
+          "1:20",
+          "What to fix first"
+        ]
+      ],
+      "script": "scripts/V21.md"
+    },
+    {
+      "id": "V22",
+      "slug": "api-and-webhooks-for-practice-systems",
+      "title": "Connecting Daybook to your practice systems: API and webhooks",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 180,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "api-webhooks",
+          "paths": [
+            "lapis/routes/api-keys.lua",
+            "lapis/routes/namespace-webhooks.lua",
+            "WEBHOOKS.md",
+            "sdk/typescript"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Connecting Daybook to your practice systems: API and webhooks",
+        "description": "For your IT person: API keys, signed webhooks and the TypeScript SDK, to connect Daybook to your own systems.",
+        "tags": [
+          "API",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "developers",
+          "webhooks"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "API keys"
+        ],
+        [
+          "0:40",
+          "Signed webhooks"
+        ],
+        [
+          "1:30",
+          "One REST API"
+        ],
+        [
+          "2:20",
+          "TypeScript SDK"
+        ]
+      ],
+      "script": "scripts/V22.md"
+    },
+    {
+      "id": "V23",
+      "slug": "ask-claude-about-a-clients-year",
+      "title": "Asking Claude about a client's year (MCP)",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "roadmap",
+      "gate": "ROADMAP: mcp/ today has kanban and website-content tools only, no tax tools. Script only; don't film.",
+      "scriptOnly": true,
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "api-webhooks",
+          "paths": [
+            "lapis/routes/api-keys.lua",
+            "lapis/routes/namespace-webhooks.lua",
+            "WEBHOOKS.md",
+            "sdk/typescript"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Asking Claude about a client's year (MCP)",
+        "description": "Script only until the MCP server has read-only tax tools.",
+        "tags": [
+          "Claude",
+          "Daybook",
+          "MCP",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Ask about a client in plain English"
+        ],
+        [
+          "0:50",
+          "Answers link back to the lines"
+        ],
+        [
+          "1:40",
+          "Read-only; a person signs off"
+        ]
+      ],
+      "script": "scripts/V23.md"
+    },
+    {
+      "id": "V24",
+      "slug": "moving-clients-off-xero-quickbooks",
+      "title": "Moving clients off Xero / QuickBooks",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 0,
+      "status": "roadmap",
+      "gate": "ROADMAP: no Xero/QuickBooks import exists. Script only; don't film.",
+      "scriptOnly": true,
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "youtube": {
+        "id": null,
+        "title": "Moving clients off Xero / QuickBooks",
+        "description": "Script only.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "QuickBooks",
+          "UK tax",
+          "Xero",
+          "accountants",
+          "migration"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Bring last year's history across"
+        ]
+      ],
+      "script": "scripts/V24.md"
+    },
+    {
+      "id": "V25",
+      "slug": "live-bank-feeds-open-banking",
+      "title": "Live bank feeds (Open Banking)",
+      "audience": "integration",
+      "vertical": "practice",
+      "playlist": "Integrations",
+      "format": "16:9",
+      "targetLength": 0,
+      "status": "roadmap",
+      "gate": "ROADMAP: no Open Banking feed exists. Script only; don't film.",
+      "scriptOnly": true,
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "youtube": {
+        "id": null,
+        "title": "Live bank feeds (Open Banking)",
+        "description": "Script only.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "Open Banking",
+          "UK tax",
+          "accountants",
+          "bank feeds"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Lines arrive without uploads"
+        ]
+      ],
+      "script": "scripts/V25.md"
+    },
+    {
+      "id": "V26",
+      "slug": "walkthrough-jordan-hale-100-properties",
+      "title": "Client walkthrough: Jordan Hale, 100 properties",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 300,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "last-year-memory",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        },
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "final-declaration",
+          "paths": [
+            "lapis/routes/tax-hmrc-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Jordan Hale, 100 properties",
+        "description": "A 100-property landlord's year in the practice view: 275 lines sorted, mostly from last year's confirmations, one flagged, mortgage interest treated correctly, and the return filed (HMRC sandbox).",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "Section 24",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "property income"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Jordan Hale: 100 residential lets"
+        ],
+        [
+          "0:30",
+          "274 of 275 from last year's answers"
+        ],
+        [
+          "1:30",
+          "One line for a person"
+        ],
+        [
+          "2:20",
+          "Mortgage interest: the 20% credit"
+        ],
+        [
+          "3:20",
+          "Filed (HMRC sandbox)"
+        ],
+        [
+          "4:20",
+          "Every step on record"
+        ]
+      ],
+      "script": "scripts/V26.md"
+    },
+    {
+      "id": "V27",
+      "slug": "walkthrough-priya-shah-two-flats",
+      "title": "Client walkthrough: Priya Shah, two flats",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C2"
+        ]
+      },
+      "features": [
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Priya Shah, two flats",
+        "description": "A small landlord with two flats and one residential mortgage: rent, letting costs, and three lines for review.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "small landlord"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Priya Shah: two flats"
+        ],
+        [
+          "0:30",
+          "Rent and running costs"
+        ],
+        [
+          "1:30",
+          "Three lines for a person"
+        ],
+        [
+          "2:30",
+          "The estimate"
+        ],
+        [
+          "3:30",
+          "Ready to file"
+        ]
+      ],
+      "script": "scripts/V27.md"
+    },
+    {
+      "id": "V28",
+      "slug": "walkthrough-tom-reid-sole-trader",
+      "title": "Client walkthrough: Tom Reid, IT consultant",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        },
+        {
+          "name": "file-my-tax",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx",
+            "lapis/routes/tax-hmrc-filing.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Tom Reid, IT consultant",
+        "description": "A sole-trader IT consultant with one account for everything: the AI keeps personal spending out, the accountant checks six lines, asks one question, and the figures are ready for HMRC.",
+        "tags": [
+          "Daybook",
+          "IT contractor",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "self-employed",
+          "sole trader"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Tom Reid: IT consultant, one account for everything"
+        ],
+        [
+          "0:20",
+          "Two statements, about 120 lines"
+        ],
+        [
+          "0:55",
+          "Income, costs, and why"
+        ],
+        [
+          "1:35",
+          "Personal spending kept out"
+        ],
+        [
+          "2:15",
+          "One question for Tom"
+        ],
+        [
+          "2:50",
+          "The figures, by rules"
+        ],
+        [
+          "3:30",
+          "Everything on record"
+        ]
+      ],
+      "script": "scripts/V28.md",
+      "scene": "scenes/V28.json",
+      "thumbnail": {
+        "eyebrow": "Client walkthrough",
+        "title": "Sole trader, one account for everything",
+        "hl": "one account",
+        "sub": "Tom Reid, IT consultant",
+        "chips": [
+          "Self-employment",
+          "MTD"
+        ]
+      }
+    },
+    {
+      "id": "V29",
+      "slug": "walkthrough-corner-cup-cafe-vat",
+      "title": "Client walkthrough: Corner Cup Café, VAT and Income Tax",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 270,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "vat-agent",
+          "paths": [
+            "lapis/lib/hmrc-agent-client.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/clients/page.tsx",
+            "lapis/routes/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-coding",
+          "paths": [
+            "lapis/lib/vat-classifier.lua",
+            "lapis/lib/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        },
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Corner Cup Café, VAT and Income Tax",
+        "description": "A VAT-registered café: coding a quarter's lines, the nine boxes from a rules engine, filing the VAT return (HMRC sandbox), and the Income Tax side in progress.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "VAT",
+          "accountants",
+          "café",
+          "hospitality"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Corner Cup Café: VAT-registered, quarterly"
+        ],
+        [
+          "0:25",
+          "Every line gets a VAT code"
+        ],
+        [
+          "1:05",
+          "Reclaimable VAT on purchases"
+        ],
+        [
+          "1:45",
+          "Five lines for a person"
+        ],
+        [
+          "2:25",
+          "Nine boxes, never by the AI"
+        ],
+        [
+          "3:05",
+          "Filed (HMRC sandbox)"
+        ],
+        [
+          "3:45",
+          "Income Tax: in progress"
+        ]
+      ],
+      "script": "scripts/V29.md",
+      "scene": "scenes/V29.json",
+      "thumbnail": {
+        "eyebrow": "Client walkthrough",
+        "title": "A café's VAT quarter, start to finish",
+        "hl": "VAT quarter",
+        "sub": "Corner Cup Café",
+        "chips": [
+          "MTD for VAT",
+          "Standard scheme"
+        ]
+      }
+    },
+    {
+      "id": "V30",
+      "slug": "walkthrough-dan-kowalski-builder",
+      "title": "Client walkthrough: Dan Kowalski, builder",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "gated",
+      "gate": "CIS deductions suffered (the tax taken off by contractors) aren't modelled in the Income Tax engine today; film only the sorting and review, or wait for CIS support. Don't claim CIS handling.",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C5"
+        ]
+      },
+      "features": [
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "capital-purchase-flag",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        },
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Dan Kowalski, builder",
+        "description": "A building subcontractor's statements just sorted: tools, fuel, materials, and a new van flagged for a person.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "builder",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Dan Kowalski: a builder"
+        ],
+        [
+          "0:30",
+          "Materials, fuel and tools"
+        ],
+        [
+          "1:40",
+          "Big purchases go to a person"
+        ],
+        [
+          "2:50",
+          "Four lines to check"
+        ]
+      ],
+      "script": "scripts/V30.md"
+    },
+    {
+      "id": "V31",
+      "slug": "walkthrough-sam-rivers-job-and-etsy",
+      "title": "Client walkthrough: Sam Rivers, a job and an Etsy shop",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 210,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "income-types",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/income/page.tsx",
+            "docs/MY_INCOME.md"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        },
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        },
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Client walkthrough: Sam Rivers, a job and an Etsy shop",
+        "description": "An employee with a craft business on the side: income types, Etsy payouts as business income, and the estimate.",
+        "tags": [
+          "Daybook",
+          "Etsy",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "employment",
+          "side business"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "A salary and a side business"
+        ],
+        [
+          "0:30",
+          "Etsy payouts are business income"
+        ],
+        [
+          "1:30",
+          "Two lines to check"
+        ],
+        [
+          "2:30",
+          "The full picture"
+        ]
+      ],
+      "script": "scripts/V31.md"
+    },
+    {
+      "id": "V32",
+      "slug": "clip-upload-statements",
+      "title": "Upload statements: PDF, CSV or photo",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Upload statements: PDF, CSV or photo",
+        "description": "Upload statements: PDF, CSV or photo: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Drop in PDF, CSV or photos"
+        ],
+        [
+          "0:22",
+          "Every line read"
+        ]
+      ],
+      "script": "scripts/V32.md"
+    },
+    {
+      "id": "V33",
+      "slug": "clip-why-this-category",
+      "title": "Why did the AI choose this category?",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Why did the AI choose this category?",
+        "description": "Why did the AI choose this category?: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Every line shows how it was sorted"
+        ],
+        [
+          "0:22",
+          "Best guesses come to a person"
+        ]
+      ],
+      "script": "scripts/V33.md"
+    },
+    {
+      "id": "V34",
+      "slug": "clip-remembers-last-year",
+      "title": "It remembers last year",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 40,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "last-year-memory",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "It remembers last year",
+        "description": "It remembers last year: a 40-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Sorted from last year's answers"
+        ],
+        [
+          "0:20",
+          "No AI call needed"
+        ]
+      ],
+      "script": "scripts/V34.md"
+    },
+    {
+      "id": "V35",
+      "slug": "clip-clearing-flagged-lines",
+      "title": "Clearing flagged lines in a minute",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C2"
+        ]
+      },
+      "features": [
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Clearing flagged lines in a minute",
+        "description": "Clearing flagged lines in a minute: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Filter to what needs a person"
+        ],
+        [
+          "0:30",
+          "Correct, and it's recorded"
+        ]
+      ],
+      "script": "scripts/V35.md"
+    },
+    {
+      "id": "V36",
+      "slug": "clip-estimate-vs-hmrc",
+      "title": "Our estimate and HMRC's figure",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "estimate",
+          "paths": [
+            "lapis/lib/tax-calc.lua",
+            "opsapi-dashboard/components/tax/EstimateVsHmrc.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Our estimate and HMRC's figure",
+        "description": "Our estimate and HMRC's figure: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Our estimate, by rules"
+        ],
+        [
+          "0:22",
+          "Why HMRC's figure may differ"
+        ]
+      ],
+      "script": "scripts/V36.md"
+    },
+    {
+      "id": "V37",
+      "slug": "clip-quarterly-update",
+      "title": "Sending a quarterly update",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "quarterly-update",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        },
+        {
+          "name": "obligations",
+          "paths": [
+            "lapis/lib/hmrc-mtd-client.lua",
+            "lapis/routes/tax-hmrc-data.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Sending a quarterly update",
+        "description": "Sending a quarterly update: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "HMRC says which quarter is due"
+        ],
+        [
+          "0:30",
+          "Built from sorted lines, sent"
+        ]
+      ],
+      "script": "scripts/V37.md"
+    },
+    {
+      "id": "V38",
+      "slug": "clip-final-declaration",
+      "title": "The final declaration",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "final-declaration",
+          "paths": [
+            "lapis/routes/tax-hmrc-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/file/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "The final declaration",
+        "description": "The final declaration: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "HMRC's calculation first"
+        ],
+        [
+          "0:30",
+          "A person declares"
+        ]
+      ],
+      "script": "scripts/V38.md"
+    },
+    {
+      "id": "V39",
+      "slug": "clip-vat-nine-boxes",
+      "title": "VAT: nine boxes from coded lines",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "VAT: nine boxes from coded lines",
+        "description": "VAT: nine boxes from coded lines: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Coded lines in"
+        ],
+        [
+          "0:22",
+          "Nine boxes out, never by the AI"
+        ]
+      ],
+      "script": "scripts/V39.md"
+    },
+    {
+      "id": "V40",
+      "slug": "clip-flat-rate-and-cash",
+      "title": "VAT schemes: flat rate and cash accounting",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C4"
+        ]
+      },
+      "features": [
+        {
+          "name": "vat-schemes",
+          "paths": [
+            "lapis/lib/vat-schemes.lua",
+            "opsapi-dashboard/components/vat/VatSchemesPanel.tsx"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "VAT schemes: flat rate and cash accounting",
+        "description": "VAT schemes: flat rate and cash accounting: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Pick the client's scheme"
+        ],
+        [
+          "0:30",
+          "The return follows the scheme"
+        ]
+      ],
+      "script": "scripts/V40.md"
+    },
+    {
+      "id": "V41",
+      "slug": "clip-partial-exemption",
+      "title": "Partial exemption: the annual adjustment",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "gated",
+      "gate": "Needs a partly-exempt client in a vertical demo (e.g. landlords with commercial lets).",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "vat-schemes",
+          "paths": [
+            "lapis/lib/vat-schemes.lua",
+            "opsapi-dashboard/components/vat/VatSchemesPanel.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Partial exemption: the annual adjustment",
+        "description": "Partial exemption: the annual adjustment: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Exempt and taxable supplies"
+        ],
+        [
+          "0:30",
+          "The annual adjustment"
+        ]
+      ],
+      "script": "scripts/V41.md"
+    },
+    {
+      "id": "V42",
+      "slug": "clip-mortgage-interest",
+      "title": "Landlords: residential vs commercial mortgage interest",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1"
+        ]
+      },
+      "features": [
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Landlords: residential vs commercial mortgage interest",
+        "description": "Landlords: residential vs commercial mortgage interest: a 60-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Residential: a 20% credit"
+        ],
+        [
+          "0:30",
+          "Commercial: deducted"
+        ]
+      ],
+      "script": "scripts/V42.md"
+    },
+    {
+      "id": "V43",
+      "slug": "clip-personal-vs-business",
+      "title": "Personal and business on one account",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Personal and business on one account",
+        "description": "Personal and business on one account: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Personal spending kept out"
+        ],
+        [
+          "0:22",
+          "You decide the edge cases"
+        ]
+      ],
+      "script": "scripts/V43.md"
+    },
+    {
+      "id": "V44",
+      "slug": "clip-messages-with-your-practice",
+      "title": "Clients and practice, talking in the app",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "practice-messages",
+          "paths": [
+            "lapis/routes/tax-support.lua",
+            "opsapi-dashboard/app/dashboard/chat/page.tsx"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Clients and practice, talking in the app",
+        "description": "Clients and practice, talking in the app: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Questions inside the request"
+        ],
+        [
+          "0:22",
+          "No email threads"
+        ]
+      ],
+      "script": "scripts/V44.md"
+    },
+    {
+      "id": "V45",
+      "slug": "clip-branded-mobile-upload",
+      "title": "Your branded app on iPhone and Android",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "gated",
+      "gate": "Native mobile apps aren't in this repo; confirm they exist under the enterprise licence before filming.",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C6"
+        ]
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "branding",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/settings/page.tsx",
+            "THEMING_GUIDE.md"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Your branded app on iPhone and Android",
+        "description": "Your branded app on iPhone and Android: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your app, on their phone"
+        ],
+        [
+          "0:22",
+          "Upload in seconds"
+        ]
+      ],
+      "script": "scripts/V45.md"
+    },
+    {
+      "id": "V46",
+      "slug": "clip-construction-reverse-charge",
+      "title": "VAT: the construction reverse charge",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "Feature clips",
+      "format": "16:9",
+      "targetLength": 45,
+      "status": "gated",
+      "gate": "Needs the trades vertical demo (daybook-trades).",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "reverse-charge-cis",
+          "paths": [
+            "lapis/lib/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-coding",
+          "paths": [
+            "lapis/lib/vat-classifier.lua",
+            "lapis/lib/vat.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "VAT: the construction reverse charge",
+        "description": "VAT: the construction reverse charge: a 45-second look at one Daybook feature.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "feature"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Reverse charge: construction (CIS)"
+        ],
+        [
+          "0:22",
+          "Boxes handled by the rules"
+        ]
+      ],
+      "script": "scripts/V46.md"
+    },
+    {
+      "id": "V47",
+      "slug": "pricing-your-mtd-service",
+      "title": "Pricing your MTD service",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Pricing your MTD service",
+        "description": "How practices are packaging quarterly updates: fixed fees, tiers by client type, and what to include. No savings figures are claimed; use your own numbers.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "practice management",
+          "pricing"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "What MTD adds per client"
+        ],
+        [
+          "0:40",
+          "Ways to package it"
+        ],
+        [
+          "1:40",
+          "Work out your own numbers"
+        ],
+        [
+          "2:40",
+          "The app as part of your service"
+        ],
+        [
+          "3:30",
+          "Book a demo"
+        ]
+      ],
+      "script": "scripts/V47.md",
+      "notes": "Talking-head + slides; any example prices are labelled as examples, not Daybook data."
+    },
+    {
+      "id": "V48",
+      "slug": "onboarding-50-clients",
+      "title": "Rolling out to 50 clients: a plan",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 240,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "members",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/members"
+          ]
+        },
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Rolling out to 50 clients: a plan",
+        "description": "A practical rollout plan: which clients first, invitations in batches, collecting last year's statements so the AI learns, and checking the first quarter.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "onboarding",
+          "rollout"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Start with ten"
+        ],
+        [
+          "0:50",
+          "Invite in batches"
+        ],
+        [
+          "1:50",
+          "Load last year first"
+        ],
+        [
+          "2:50",
+          "Check the first quarter closely"
+        ],
+        [
+          "3:30",
+          "Then the next forty"
+        ]
+      ],
+      "script": "scripts/V48.md"
+    },
+    {
+      "id": "V49",
+      "slug": "staff-roles-and-permissions",
+      "title": "Staff roles and permissions",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 180,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "roles",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/roles",
+            "lapis/middleware/namespace.lua"
+          ]
+        },
+        {
+          "name": "members",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/members"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Staff roles and permissions",
+        "description": "Partners, tax seniors and bookkeepers: who can see and change what, set per workspace.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "permissions",
+          "roles"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your team"
+        ],
+        [
+          "0:40",
+          "Permissions module by module"
+        ],
+        [
+          "1:40",
+          "Least access by default"
+        ],
+        [
+          "2:30",
+          "Set it once"
+        ]
+      ],
+      "script": "scripts/V49.md"
+    },
+    {
+      "id": "V50",
+      "slug": "sign-off-and-audit-trail",
+      "title": "Sign-off and the audit trail",
+      "audience": "practice",
+      "vertical": "practice",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 180,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": [
+          "C1",
+          "C3"
+        ]
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        },
+        {
+          "name": "activity-log",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/activity/page.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Sign-off and the audit trail",
+        "description": "Who checked what, who asked the client, who filed: the request history and the workspace activity log.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "audit trail",
+          "professional standards"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Each request keeps its history"
+        ],
+        [
+          "0:50",
+          "Every correction is a person's"
+        ],
+        [
+          "1:40",
+          "The workspace log"
+        ],
+        [
+          "2:30",
+          "A qualified person signs off"
+        ]
+      ],
+      "script": "scripts/V50.md"
+    },
+    {
+      "id": "V51",
+      "slug": "mtd-who-needs-it",
+      "title": "MTD for Income Tax: who needs it",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/work-out-your-qualifying-income-for-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/find-out-if-you-can-get-an-exemption-from-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: who needs it",
+        "description": "MTD for Income Tax: who needs it. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/work-out-your-qualifying-income-for-making-tax-digital-for-income-tax https://www.gov.uk/guidance/find-out-if-you-can-get-an-exemption-from-making-tax-digital-for-income-tax https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "explainer"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Sole traders and landlords"
+        ],
+        [
+          "0:40",
+          "What counts"
+        ],
+        [
+          "1:20",
+          "Some people are exempt"
+        ],
+        [
+          "2:00",
+          "Check GOV.UK"
+        ]
+      ],
+      "script": "scripts/V51.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V52",
+      "slug": "mtd-when-it-starts",
+      "title": "MTD for Income Tax: when it starts",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/sign-up-for-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/guidance/sign-up-your-client-for-making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: when it starts",
+        "description": "MTD for Income Tax: when it starts. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/find-out-if-and-when-you-need-to-use-making-tax-digital-for-income-tax https://www.gov.uk/guidance/sign-up-for-making-tax-digital-for-income-tax https://www.gov.uk/guidance/sign-up-your-client-for-making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "explainer",
+          "thresholds"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "April 2026: over £50,000"
+        ],
+        [
+          "0:40",
+          "Then £30,000, then £20,000"
+        ],
+        [
+          "1:20",
+          "Based on an earlier return"
+        ]
+      ],
+      "script": "scripts/V52.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V53",
+      "slug": "mtd-quarterly-updates",
+      "title": "MTD for Income Tax: quarterly updates",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/government/collections/making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: quarterly updates",
+        "description": "MTD for Income Tax: quarterly updates. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax https://www.gov.uk/government/collections/making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "explainer"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Four updates a year"
+        ],
+        [
+          "0:50",
+          "Running totals, not a return"
+        ],
+        [
+          "1:40",
+          "How Daybook builds them"
+        ]
+      ],
+      "script": "scripts/V53.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V54",
+      "slug": "mtd-final-declaration",
+      "title": "MTD for Income Tax: the final declaration",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax",
+        "https://www.gov.uk/government/collections/making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: the final declaration",
+        "description": "MTD for Income Tax: the final declaration. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax https://www.gov.uk/government/collections/making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "explainer"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "After the year ends"
+        ],
+        [
+          "0:40",
+          "Calculation, then declaration"
+        ],
+        [
+          "1:20",
+          "Deadline: check GOV.UK"
+        ]
+      ],
+      "script": "scripts/V54.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V55",
+      "slug": "mtd-digital-records",
+      "title": "MTD for Income Tax: digital records",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: digital records",
+        "description": "MTD for Income Tax: digital records. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/use-making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "digital records",
+          "explainer"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Records in software"
+        ],
+        [
+          "0:40",
+          "From statements to records"
+        ],
+        [
+          "1:20",
+          "Check GOV.UK for the rules"
+        ]
+      ],
+      "script": "scripts/V55.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V56",
+      "slug": "mtd-penalties",
+      "title": "MTD for Income Tax: penalties",
+      "audience": "mtd-explainer",
+      "vertical": "general",
+      "playlist": "Making Tax Digital",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "https://www.gov.uk/guidance/penalties-for-making-tax-digital-for-income-tax"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "MTD for Income Tax: penalties",
+        "description": "MTD for Income Tax: penalties. Plain-English explainer. Rules change: always check GOV.UK — https://www.gov.uk/guidance/penalties-for-making-tax-digital-for-income-tax",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "MTD ITSA",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "explainer",
+          "penalties"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Points, then a penalty"
+        ],
+        [
+          "0:50",
+          "First-year easement"
+        ],
+        [
+          "1:40",
+          "Late payment is separate"
+        ]
+      ],
+      "script": "scripts/V56.md",
+      "notes": "Every date, threshold and penalty figure on screen must be re-checked on GOV.UK the week it is recorded and again before each re-upload. [VERIFY on GOV.UK before recording; last checked 2026-11-21]"
+    },
+    {
+      "id": "V57",
+      "slug": "it-where-data-lives",
+      "title": "Where client data lives, and who can see it",
+      "audience": "it",
+      "vertical": "general",
+      "playlist": "For your IT team",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "tenancy",
+          "paths": [
+            "lapis/middleware/namespace.lua",
+            "NAMESPACE_IMPLEMENTATION_PLAN.md"
+          ]
+        },
+        {
+          "name": "roles",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/roles",
+            "lapis/middleware/namespace.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Where client data lives, and who can see it",
+        "description": "Where client data lives, and who can see it: for your practice's IT person.",
+        "tags": [
+          "Daybook",
+          "IT",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "security"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Where it's stored"
+        ],
+        [
+          "0:40",
+          "Kept apart"
+        ],
+        [
+          "1:20",
+          "Who can see what"
+        ]
+      ],
+      "script": "scripts/V57.md"
+    },
+    {
+      "id": "V58",
+      "slug": "it-sign-in-2fa-sso",
+      "title": "Staff sign-in: two-factor and single sign-on",
+      "audience": "it",
+      "vertical": "general",
+      "playlist": "For your IT team",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "sso-2fa",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/namespace/sso",
+            "lapis/helper/otp.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Staff sign-in: two-factor and single sign-on",
+        "description": "Staff sign-in: two-factor and single sign-on: for your practice's IT person.",
+        "tags": [
+          "Daybook",
+          "IT",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "security"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Emailed sign-in codes"
+        ],
+        [
+          "0:40",
+          "Your own identity provider"
+        ],
+        [
+          "1:30",
+          "Off-boarding in one place"
+        ]
+      ],
+      "script": "scripts/V58.md"
+    },
+    {
+      "id": "V59",
+      "slug": "it-hmrc-fraud-headers",
+      "title": "HMRC fraud-prevention headers, explained",
+      "audience": "it",
+      "vertical": "general",
+      "playlist": "For your IT team",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "fraud-headers",
+          "paths": [
+            "lapis/helper/hmrc.lua",
+            "opsapi-dashboard/lib/hmrc-fraud.ts"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "HMRC fraud-prevention headers, explained",
+        "description": "HMRC fraud-prevention headers, explained: for your practice's IT person.",
+        "tags": [
+          "Daybook",
+          "IT",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "security"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "What HMRC requires"
+        ],
+        [
+          "0:40",
+          "How Daybook sends them"
+        ],
+        [
+          "1:20",
+          "Checked against HMRC's validator"
+        ]
+      ],
+      "script": "scripts/V59.md"
+    },
+    {
+      "id": "V60",
+      "slug": "it-which-ai-sees-what",
+      "title": "Which AI model sees what",
+      "audience": "it",
+      "vertical": "general",
+      "playlist": "For your IT team",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "ai-providers",
+          "paths": [
+            "docs/AI_PROVIDERS.md",
+            "lapis/lib/llm-client.lua"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Which AI model sees what",
+        "description": "Which AI model sees what: for your practice's IT person.",
+        "tags": [
+          "Daybook",
+          "IT",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "security"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Most lines never reach a model"
+        ],
+        [
+          "0:40",
+          "Local or hosted, per deployment"
+        ],
+        [
+          "1:20",
+          "It never computes or files"
+        ]
+      ],
+      "script": "scripts/V60.md"
+    },
+    {
+      "id": "V61",
+      "slug": "landlords-demo-tour",
+      "title": "Landlords demo: three landlords, one practice",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "planned",
+      "dependsOn": "landlords vertical demo (namespace daybook-landlords, devops/daybook-demo/verticals/landlords.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Landlords demo: three landlords, one practice",
+        "description": "Landlords demo: three landlords, one practice. Filmed on the Daybook landlords demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "property"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "A landlord-focused practice"
+        ],
+        [
+          "0:40",
+          "Small, medium and 100 properties"
+        ],
+        [
+          "1:40",
+          "One property update each"
+        ]
+      ],
+      "script": "scripts/V61.md"
+    },
+    {
+      "id": "V62",
+      "slug": "landlords-letting-agent-statements",
+      "title": "Letting-agent statements: rent, fees and deductions",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "dependsOn": "landlords vertical demo (namespace daybook-landlords, devops/daybook-demo/verticals/landlords.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "statement-upload",
+          "paths": [
+            "lapis/lib/tax-extraction.lua",
+            "opsapi-dashboard/components/tax/StatementUploader.tsx",
+            "opsapi-dashboard/app/dashboard/tax/statements/page.tsx"
+          ]
+        },
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Letting-agent statements: rent, fees and deductions",
+        "description": "Letting-agent statements: rent, fees and deductions. Filmed on the Daybook landlords demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "property"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Agent statements"
+        ],
+        [
+          "1:00",
+          "Gross rent, fees as costs"
+        ]
+      ],
+      "script": "scripts/V62.md"
+    },
+    {
+      "id": "V63",
+      "slug": "landlords-repairs-vs-improvements",
+      "title": "Repairs vs improvements: what the AI leaves to you",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "dependsOn": "landlords vertical demo (namespace daybook-landlords, devops/daybook-demo/verticals/landlords.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Repairs vs improvements: what the AI leaves to you",
+        "description": "Repairs vs improvements: what the AI leaves to you. Filmed on the Daybook landlords demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "property"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Repair or improvement?"
+        ],
+        [
+          "1:00",
+          "A person decides"
+        ]
+      ],
+      "script": "scripts/V63.md"
+    },
+    {
+      "id": "V64",
+      "slug": "landlords-uk-property-quarterly",
+      "title": "UK property quarterly updates for landlords",
+      "audience": "practice",
+      "vertical": "landlords",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "dependsOn": "landlords vertical demo (namespace daybook-landlords, devops/daybook-demo/verticals/landlords.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-landlords",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "property",
+          "paths": [
+            "lapis/lib/hmrc-property-aggregator.lua"
+          ]
+        },
+        {
+          "name": "quarterly-update",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua",
+            "lapis/lib/hmrc-mtd-client.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "UK property quarterly updates for landlords",
+        "description": "UK property quarterly updates for landlords. Filmed on the Daybook landlords demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "landlords",
+          "property"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Property-only clients"
+        ],
+        [
+          "1:00",
+          "Finance costs separate"
+        ]
+      ],
+      "script": "scripts/V64.md"
+    },
+    {
+      "id": "V65",
+      "slug": "trades-demo-tour",
+      "title": "Trades demo: plumbers, electricians and builders",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 100,
+      "status": "planned",
+      "dependsOn": "trades vertical demo (namespace daybook-trades, devops/daybook-demo/verticals/trades.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "filing-requests",
+          "paths": [
+            "lapis/routes/tax-filing.lua",
+            "opsapi-dashboard/app/dashboard/tax/filing-requests/page.tsx",
+            "opsapi-dashboard/components/tax/FileForMe.tsx"
+          ]
+        },
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Trades demo: plumbers, electricians and builders",
+        "description": "Trades demo: plumbers, electricians and builders. Filmed on the Daybook trades demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "A practice for the trades"
+        ],
+        [
+          "0:40",
+          "Merchants, fuel and tools"
+        ]
+      ],
+      "script": "scripts/V65.md"
+    },
+    {
+      "id": "V66",
+      "slug": "trades-cis-deductions",
+      "title": "CIS deductions on a subcontractor's return",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 60,
+      "status": "roadmap",
+      "gate": "ROADMAP: CIS deductions suffered aren't modelled in the Income Tax engine. Script only.",
+      "scriptOnly": true,
+      "dependsOn": "trades vertical demo (namespace daybook-trades, devops/daybook-demo/verticals/trades.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "self-employment",
+          "paths": [
+            "lapis/lib/hmrc-aggregator.lua"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "CIS deductions on a subcontractor's return",
+        "description": "CIS deductions on a subcontractor's return. Filmed on the Daybook trades demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "CIS: tax already taken"
+        ]
+      ],
+      "script": "scripts/V66.md"
+    },
+    {
+      "id": "V67",
+      "slug": "trades-vans-and-tools",
+      "title": "Vans and tools: capital purchases go to a person",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "dependsOn": "trades vertical demo (namespace daybook-trades, devops/daybook-demo/verticals/trades.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "capital-purchase-flag",
+          "paths": [
+            "lapis/lib/tax-classifier.lua"
+          ]
+        },
+        {
+          "name": "review-queue",
+          "paths": [
+            "opsapi-dashboard/components/tax/TransactionReview.tsx",
+            "opsapi-dashboard/app/dashboard/tax/transactions/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Vans and tools: capital purchases go to a person",
+        "description": "Vans and tools: capital purchases go to a person. Filmed on the Daybook trades demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Big purchases"
+        ],
+        [
+          "1:00",
+          "A person decides allowances"
+        ]
+      ],
+      "script": "scripts/V67.md"
+    },
+    {
+      "id": "V68",
+      "slug": "trades-materials-and-cash-jobs",
+      "title": "Materials and cash jobs",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "Confirm how cash takings that never reach the bank are recorded (manual entry) before filming.",
+      "dependsOn": "trades vertical demo (namespace daybook-trades, devops/daybook-demo/verticals/trades.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "ai-sorting",
+          "paths": [
+            "lapis/lib/tax-classifier.lua",
+            "opsapi-dashboard/components/tax/TransactionReview.tsx"
+          ]
+        },
+        {
+          "name": "income-types",
+          "paths": [
+            "opsapi-dashboard/app/dashboard/tax/income/page.tsx",
+            "docs/MY_INCOME.md"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Materials and cash jobs",
+        "description": "Materials and cash jobs. Filmed on the Daybook trades demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Materials"
+        ],
+        [
+          "1:00",
+          "Cash jobs"
+        ]
+      ],
+      "script": "scripts/V68.md"
+    },
+    {
+      "id": "V69",
+      "slug": "trades-domestic-reverse-charge",
+      "title": "VAT-registered builders: the domestic reverse charge",
+      "audience": "practice",
+      "vertical": "trades",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "planned",
+      "dependsOn": "trades vertical demo (namespace daybook-trades, devops/daybook-demo/verticals/trades.lua)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-trades",
+        "clients": []
+      },
+      "features": [
+        {
+          "name": "reverse-charge-cis",
+          "paths": [
+            "lapis/lib/vat.lua"
+          ]
+        },
+        {
+          "name": "vat-return",
+          "paths": [
+            "lapis/lib/vat-return.lua",
+            "opsapi-dashboard/app/dashboard/tax/vat/page.tsx"
+          ]
+        }
+      ],
+      "youtube": {
+        "id": null,
+        "title": "VAT-registered builders: the domestic reverse charge",
+        "description": "VAT-registered builders: the domestic reverse charge. Filmed on the Daybook trades demo.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "construction",
+          "trades"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Reverse charge lines"
+        ],
+        [
+          "1:00",
+          "Handled by the rules"
+        ]
+      ],
+      "script": "scripts/V69.md"
+    },
+    {
+      "id": "V70",
+      "slug": "short-ai-learns-last-year",
+      "title": "274 of 275 lines sorted from last year's answers",
+      "audience": "social",
+      "vertical": "practice",
+      "playlist": "Shorts",
+      "format": "9:16",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "V01"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "274 of 275 lines sorted from last year's answers",
+        "description": "Vertical cut of V01 for LinkedIn and YouTube Shorts.",
+        "tags": [
+          "Daybook",
+          "LinkedIn",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "shorts"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "274 of 275 lines sorted from last year's answers"
+        ],
+        [
+          "0:05",
+          ""
+        ],
+        [
+          "0:35",
+          "daybook.co.uk"
+        ]
+      ],
+      "script": "scripts/V70.md",
+      "notes": "Cut from the edited V01: ffmpeg crop to 1080×1920 around the panel in use; burn in captions."
+    },
+    {
+      "id": "V71",
+      "slug": "short-ai-sorts-accountant-reviews",
+      "title": "The AI sorts. The accountant decides.",
+      "audience": "social",
+      "vertical": "practice",
+      "playlist": "Shorts",
+      "format": "9:16",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "V04"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "The AI sorts. The accountant decides.",
+        "description": "Vertical cut of V04 for LinkedIn and YouTube Shorts.",
+        "tags": [
+          "Daybook",
+          "LinkedIn",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "shorts"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "The AI sorts. The accountant decides."
+        ],
+        [
+          "0:05",
+          ""
+        ],
+        [
+          "0:35",
+          "daybook.co.uk"
+        ]
+      ],
+      "script": "scripts/V71.md",
+      "notes": "Cut from the edited V04: ffmpeg crop to 1080×1920 around the panel in use; burn in captions."
+    },
+    {
+      "id": "V72",
+      "slug": "short-daybook-in-45-seconds",
+      "title": "Daybook in 45 seconds",
+      "audience": "social",
+      "vertical": "practice",
+      "playlist": "Shorts",
+      "format": "9:16",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "V08"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Daybook in 45 seconds",
+        "description": "Vertical cut of V08 for LinkedIn and YouTube Shorts.",
+        "tags": [
+          "Daybook",
+          "LinkedIn",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "shorts"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Daybook in 45 seconds"
+        ],
+        [
+          "0:05",
+          ""
+        ],
+        [
+          "0:35",
+          "daybook.co.uk"
+        ]
+      ],
+      "script": "scripts/V72.md",
+      "notes": "Cut from the edited V08: ffmpeg crop to 1080×1920 around the panel in use; burn in captions."
+    },
+    {
+      "id": "V73",
+      "slug": "short-remembers-last-year",
+      "title": "It remembers what you decided last year",
+      "audience": "social",
+      "vertical": "practice",
+      "playlist": "Shorts",
+      "format": "9:16",
+      "targetLength": 45,
+      "status": "planned",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-demo",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "V34"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "It remembers what you decided last year",
+        "description": "Vertical cut of V34 for LinkedIn and YouTube Shorts.",
+        "tags": [
+          "Daybook",
+          "LinkedIn",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "shorts"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "It remembers what you decided last year"
+        ],
+        [
+          "0:05",
+          ""
+        ],
+        [
+          "0:35",
+          "daybook.co.uk"
+        ]
+      ],
+      "script": "scripts/V73.md",
+      "notes": "Cut from the edited V34: ffmpeg crop to 1080×1920 around the panel in use; burn in captions."
+    },
+    {
+      "id": "V74",
+      "slug": "payroll-pay-run-to-fps",
+      "title": "Payroll: from pay run to the FPS",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 140,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Payroll: from pay run to the FPS",
+        "description": "Payroll: from pay run to the FPS. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Start the pay run"
+        ],
+        [
+          "0:40",
+          "Gross to net, by rules"
+        ],
+        [
+          "1:30",
+          "Approve, then the FPS"
+        ]
+      ],
+      "script": "scripts/V74.md"
+    },
+    {
+      "id": "V75",
+      "slug": "payroll-bureau-for-practices",
+      "title": "Running payroll for your clients (bureau)",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 150,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Running payroll for your clients (bureau)",
+        "description": "Running payroll for your clients (bureau). Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Every client payroll in one list"
+        ],
+        [
+          "0:50",
+          "Run each client's payroll"
+        ],
+        [
+          "1:50",
+          "The client approves"
+        ]
+      ],
+      "script": "scripts/V75.md"
+    },
+    {
+      "id": "V76",
+      "slug": "payroll-employee-payslip-explained",
+      "title": "Employees: your payslip, explained",
+      "audience": "client",
+      "vertical": "payroll",
+      "playlist": "For your clients",
+      "format": "16:9",
+      "targetLength": 90,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Employees: your payslip, explained",
+        "description": "Employees: your payslip, explained. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Your payslip"
+        ],
+        [
+          "0:40",
+          "Ask what a line means"
+        ]
+      ],
+      "script": "scripts/V76.md"
+    },
+    {
+      "id": "V77",
+      "slug": "payroll-approve-on-phone",
+      "title": "Approving a pay run on your phone",
+      "audience": "client",
+      "vertical": "payroll",
+      "playlist": "For your clients",
+      "format": "16:9",
+      "targetLength": 80,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Approving a pay run on your phone",
+        "description": "Approving a pay run on your phone. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "A pay run to approve"
+        ],
+        [
+          "0:40",
+          "Check and approve"
+        ]
+      ],
+      "script": "scripts/V77.md"
+    },
+    {
+      "id": "V78",
+      "slug": "payroll-starters-and-leavers",
+      "title": "Payroll: starters and leavers",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Payroll: starters and leavers",
+        "description": "Payroll: starters and leavers. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "A new starter"
+        ],
+        [
+          "1:00",
+          "A leaver"
+        ]
+      ],
+      "script": "scripts/V78.md"
+    },
+    {
+      "id": "V79",
+      "slug": "payroll-auto-enrolment",
+      "title": "Payroll: pension auto-enrolment",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Payroll: pension auto-enrolment",
+        "description": "Payroll: pension auto-enrolment. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Who must be enrolled"
+        ],
+        [
+          "1:00",
+          "Contributions on every run"
+        ]
+      ],
+      "script": "scripts/V79.md"
+    },
+    {
+      "id": "V80",
+      "slug": "payroll-ssp-smp",
+      "title": "Payroll: statutory sick and maternity pay",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Payroll: statutory sick and maternity pay",
+        "description": "Payroll: statutory sick and maternity pay. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Statutory Sick Pay"
+        ],
+        [
+          "1:00",
+          "Statutory Maternity Pay"
+        ]
+      ],
+      "script": "scripts/V80.md"
+    },
+    {
+      "id": "V81",
+      "slug": "payroll-year-end-p60",
+      "title": "Payroll: year end and P60s",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Payroll: year end and P60s",
+        "description": "Payroll: year end and P60s. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Year-end checks"
+        ],
+        [
+          "1:00",
+          "P60s to every employee"
+        ]
+      ],
+      "script": "scripts/V81.md"
+    },
+    {
+      "id": "V82",
+      "slug": "payroll-cis300-for-builders",
+      "title": "CIS monthly returns (CIS300) for contractors",
+      "audience": "practice",
+      "vertical": "payroll",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the payroll module isn't built yet (docs/plans/PROMPT_PAYROLL.md, PROMPT_PAYROLL_UI.md, PROMPT_PAYROLL_MOBILE.md). Script only: no scene file, no recording, and no claim of live HMRC RTI filing until the module exists and its HMRC submissions are tested.",
+      "scriptOnly": true,
+      "dependsOn": "payroll module + payroll vertical demo (namespace daybook-payroll)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-payroll",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_PAYROLL.md",
+        "docs/plans/PROMPT_PAYROLL_UI.md",
+        "docs/plans/PROMPT_PAYROLL_MOBILE.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "CIS monthly returns (CIS300) for contractors",
+        "description": "CIS monthly returns (CIS300) for contractors. Coming to Daybook; not available yet.",
+        "tags": [
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "PAYE",
+          "RTI",
+          "UK tax",
+          "accountants",
+          "payroll"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Payments to subcontractors"
+        ],
+        [
+          "1:00",
+          "The monthly CIS return"
+        ]
+      ],
+      "script": "scripts/V82.md"
+    },
+    {
+      "id": "V83",
+      "slug": "ct-year-end-wizard",
+      "title": "Corporation Tax: the year-end wizard",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Corporation Tax: the year-end wizard",
+        "description": "Corporation Tax: the year-end wizard. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "The year end, step by step"
+        ],
+        [
+          "1:00",
+          "From books to computation"
+        ]
+      ],
+      "script": "scripts/V83.md"
+    },
+    {
+      "id": "V84",
+      "slug": "ct-ai-suggested-adjustments",
+      "title": "AI-suggested adjustments a person accepts",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "AI-suggested adjustments a person accepts",
+        "description": "AI-suggested adjustments a person accepts. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Suggestions, with reasons"
+        ],
+        [
+          "1:00",
+          "A person accepts each one"
+        ]
+      ],
+      "script": "scripts/V84.md"
+    },
+    {
+      "id": "V85",
+      "slug": "ct-capital-allowances",
+      "title": "Corporation Tax: capital allowances",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Corporation Tax: capital allowances",
+        "description": "Corporation Tax: capital allowances. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Assets and allowances"
+        ],
+        [
+          "1:00",
+          "You confirm the claims"
+        ]
+      ],
+      "script": "scripts/V85.md"
+    },
+    {
+      "id": "V86",
+      "slug": "ct-directors-loan-s455",
+      "title": "Director's loan accounts and s455",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Director's loan accounts and s455",
+        "description": "Director's loan accounts and s455. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "The director's loan"
+        ],
+        [
+          "1:00",
+          "When s455 applies"
+        ]
+      ],
+      "script": "scripts/V86.md"
+    },
+    {
+      "id": "V87",
+      "slug": "ct-ct600-and-ixbrl",
+      "title": "CT600 and iXBRL",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "CT600 and iXBRL",
+        "description": "CT600 and iXBRL. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "The CT600"
+        ],
+        [
+          "1:00",
+          "Tagged accounts"
+        ]
+      ],
+      "script": "scripts/V87.md"
+    },
+    {
+      "id": "V88",
+      "slug": "ct-companies-house-accounts",
+      "title": "Annual accounts for Companies House",
+      "audience": "practice",
+      "vertical": "companies",
+      "playlist": "For practices",
+      "format": "16:9",
+      "targetLength": 120,
+      "status": "gated",
+      "gate": "GATED: the Corporation Tax module isn't built yet (docs/plans/PROMPT_CORPORATION_TAX.md). Script only: no scene file, no recording, and no claim of live CT600 or Companies House filing until it exists and is tested.",
+      "scriptOnly": true,
+      "dependsOn": "Corporation Tax module + companies vertical demo (namespace daybook-companies)",
+      "demo": {
+        "host": "demo.daybook.co.uk",
+        "namespace": "daybook-companies",
+        "clients": []
+      },
+      "features": [],
+      "sources": [
+        "docs/plans/PROMPT_CORPORATION_TAX.md"
+      ],
+      "youtube": {
+        "id": null,
+        "title": "Annual accounts for Companies House",
+        "description": "Annual accounts for Companies House. Coming to Daybook; not available yet.",
+        "tags": [
+          "CT600",
+          "Corporation Tax",
+          "Daybook",
+          "MTD",
+          "Making Tax Digital",
+          "UK tax",
+          "accountants",
+          "limited companies"
+        ]
+      },
+      "chapters": [
+        [
+          "0:00",
+          "Statutory accounts"
+        ],
+        [
+          "1:00",
+          "A director approves"
+        ]
+      ],
+      "script": "scripts/V88.md"
+    }
+  ]
+}

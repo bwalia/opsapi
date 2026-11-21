@@ -1,0 +1,218 @@
+# Deploy the Daybook demo back office to k3s1, namespace `daybook-demo`:
+#   https://demo.daybook.co.uk       dashboard (daybook-demo-dashboard), Daybook theme per workspace
+#   https://demo-api.daybook.co.uk   API, PROJECT_CODE=tax_copilot (daybook-demo)
+#
+# DNS -> wslproxy edge -> Postgres -> API -> dashboard -> workspaces + fictional data for
+# every vertical (devops/daybook-demo/verticals/) -> 30-minute reset job -> self-heal -> checks.
+# Every step is idempotent; the weekly run keeps the demo alive and on the latest release.
+# See devops/daybook-demo/README.md.
+#
+# Prerequisite (once): WSL Vault path daybook-demo/config
+# (devops/daybook-demo/seed-vault-daybook.sh). The session key is made here, once.
+name: Deploy Daybook demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      SKIP_DASHBOARD_BUILD:
+        description: "Reuse the existing bwalia/opsapi-dashboard:daybook-demo image"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "37 4 * * 1" # Mondays 04:37 UTC
+
+concurrency:
+  group: deploy-daybook-demo
+  cancel-in-progress: false
+
+env:
+  NS: daybook-demo
+  API_HOST: demo-api.daybook.co.uk
+  DASHBOARD_HOST: demo.daybook.co.uk
+  API_VALUES: devops/helm-charts/diytaxreturn-lapis/values-daybook-demo.yaml
+  DASHBOARD_VALUES: devops/helm-charts/opsapi-dashboard/values-daybook-demo.yaml
+  # The login is published on daybook.co.uk/demos, but the password is kept out of
+  # the repo (secret scanners): Actions secret DAYBOOK_DEMO_PASSWORD.
+  DEMO_EMAIL: demo@daybook.co.uk
+  DEMO_PASSWORD: ${{ secrets.DAYBOOK_DEMO_PASSWORD }}
+
+jobs:
+  dns:
+    name: Cloudflare DNS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CNAME the hosts to the edge (DNS-only, so Let's Encrypt HTTP-01 works)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: daybook.co.uk
+        run: |
+          set -euo pipefail
+          chmod +x devops/scripts/cloudflare-dns.sh
+          for h in "$API_HOST" "$DASHBOARD_HOST"; do
+            ./devops/scripts/cloudflare-dns.sh --name "$h" --content lon1.pop0.uk --proxied false
+          done
+
+  wslproxy:
+    name: wslproxy edge
+    needs: [dns]
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      # Only the demo's own hosts (rule daybook-demo-default). The website hosts
+      # (daybook.co.uk, www) are registered by hand: see devops/daybook-demo/README.md.
+      HOSTS: demo.daybook.co.uk demo-api.daybook.co.uk
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  dashboard-image:
+    name: Build dashboard image
+    runs-on: [self-hosted, Linux, X64]
+    if: ${{ !inputs.SKIP_DASHBOARD_BUILD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+      - uses: docker/setup-buildx-action@v3
+      # NEXT_PUBLIC_API_URL is baked into the bundle at build time.
+      - uses: docker/build-push-action@v6
+        with:
+          context: opsapi-dashboard
+          platforms: linux/amd64
+          push: true
+          tags: bwalia/opsapi-dashboard:daybook-demo
+          build-args: NEXT_PUBLIC_API_URL=https://${{ env.API_HOST }}
+
+  deploy:
+    name: Deploy to k3s1
+    needs: [wslproxy, dashboard-image]
+    if: ${{ always() && needs.wslproxy.result == 'success'
+            && (needs.dashboard-image.result == 'success' || needs.dashboard-image.result == 'skipped') }}
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Postgres
+        run: |
+          set -euo pipefail
+          kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
+          kubectl apply -f devops/k8s/daybook-demo-db.yaml
+          for i in $(seq 1 30); do
+            kubectl -n "$NS" get secret daybook-demo-db-auth >/dev/null 2>&1 && break
+            [ "$i" = 30 ] && { echo "::error::ExternalSecret daybook-demo-db-auth didn't sync from Vault daybook-demo/config (run devops/daybook-demo/seed-vault-daybook.sh)"; exit 1; }
+            sleep 10
+          done
+          kubectl -n "$NS" rollout status statefulset/daybook-demo-db --timeout=10m
+
+      - name: API (daybook-demo)
+        run: |
+          set -euo pipefail
+          # Its own session key, made once (values: extraEnvFromSecrets).
+          kubectl -n "$NS" get secret daybook-demo-jwt >/dev/null 2>&1 || \
+            kubectl -n "$NS" create secret generic daybook-demo-jwt \
+              --from-literal=JWT_SECRET_KEY="$(openssl rand -hex 48)"
+          # The newest release whose image exists, pinned: with :latest a pod restart could
+          # pull newer code than the schema the migrate hook last ran.
+          TAG=""
+          for t in $(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
+                     | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -3); do
+            if docker manifest inspect "bwalia/opsapi:$t" >/dev/null 2>&1; then TAG=$t; break; fi
+          done
+          [ -n "$TAG" ] || { echo "::error::no released bwalia/opsapi image among the newest tags"; exit 1; }
+          echo "API image bwalia/opsapi:$TAG"
+          # The migrate hook is pre-UPGRADE only, so a fresh install needs a
+          # second upgrade to migrate. On an existing release this is one upgrade
+          # plus a no-op one. No --wait: before the first migrate the pods
+          # aren't ready (empty DB); the rollout below is the real check.
+          for _ in 1 2; do
+            helm upgrade --install daybook-demo devops/helm-charts/diytaxreturn-lapis \
+              -f "$API_VALUES" --namespace "$NS" --timeout 20m \
+              --set image.tag="$TAG" --set image.pullPolicy=IfNotPresent
+          done
+          kubectl -n "$NS" rollout restart deploy/daybook-demo
+          kubectl -n "$NS" rollout status deploy/daybook-demo --timeout=10m
+
+      - name: Dashboard (daybook-demo-dashboard)
+        run: |
+          set -euo pipefail
+          helm upgrade --install daybook-demo-dashboard devops/helm-charts/opsapi-dashboard \
+            -f "$DASHBOARD_VALUES" --namespace "$NS" --timeout 10m --wait
+          kubectl -n "$NS" rollout restart deploy/daybook-demo-dashboard
+          kubectl -n "$NS" rollout status deploy/daybook-demo-dashboard --timeout=10m
+
+      - name: Seed files ConfigMap (read by the reset job)
+        run: |
+          set -euo pipefail
+          # Flat keys: a ConfigMap can't hold directories; the loader reads verticals__<slug>.lua too.
+          args=""
+          for f in devops/daybook-demo/*.lua; do args="$args --from-file=$(basename "$f")=$f"; done
+          for f in devops/daybook-demo/verticals/*.lua; do args="$args --from-file=verticals__$(basename "$f")=$f"; done
+          kubectl -n "$NS" create configmap daybook-demo-seeds $args --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Workspaces, demo login, theme and data (every vertical)
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n "$NS" get pod -l app=daybook-demo --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          mkdir -p seed && cp devops/daybook-demo/*.lua seed/ && cp -r devops/daybook-demo/verticals seed/
+          printf %s "$DEMO_PASSWORD" > seed/demo-password
+          tar -C seed -cf - . | kubectl -n "$NS" exec -i "$POD" -- \
+            sh -c 'rm -rf /tmp/daybook-seed && mkdir -p /tmp/daybook-seed && tar -C /tmp/daybook-seed -xf -'
+          kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && \
+            lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook.lua\"))()' && \
+            lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook-data.lua\"))()'; \
+            rc=\$?; rm -f /tmp/daybook-seed/demo-password; exit \$rc"
+
+      - name: Reset job (and run it now), self-heal
+        run: |
+          set -euo pipefail
+          kubectl apply -f devops/daybook-demo/selfheal.yaml
+          [ -n "$DEMO_PASSWORD" ] || { echo "::error::Actions secret DAYBOOK_DEMO_PASSWORD is empty"; exit 1; }
+          kubectl -n "$NS" create secret generic daybook-demo-login \
+            --from-literal=DEMO_PASSWORD="$DEMO_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f devops/daybook-demo/reset.yaml
+          JOB="daybook-demo-reset-$(date +%s)"
+          kubectl -n "$NS" create job "$JOB" --from=cronjob/daybook-demo-reset
+          kubectl -n "$NS" wait --for=condition=complete "job/$JOB" --timeout=5m
+
+      - name: Check
+        run: |
+          set -euo pipefail
+          sleep 20
+          curl -fsS --max-time 20 -o health.json "https://$API_HOST/health"
+          head -c 300 health.json; echo
+          curl -fsS --max-time 20 -o /dev/null -w "dashboard HTTP %{http_code}\n" "https://$DASHBOARD_HOST/login"
+          # The public login works, sees the practice's filing queue, and can't change it.
+          curl -fsS --max-time 20 -o login.json -X POST "https://$API_HOST/auth/login" \
+            --data-urlencode "username=$DEMO_EMAIL" --data-urlencode "password=$DEMO_PASSWORD"
+          TOKEN=$(jq -r '.token // .access_token // .data.token // empty' login.json)
+          [ -n "$TOKEN" ] || { echo "::error::demo login failed"; head -c 300 login.json; exit 1; }
+          H=(-H "Authorization: Bearer $TOKEN" -H "X-Namespace-Slug: daybook-demo")
+          curl -fsS --max-time 20 "${H[@]}" -o queue.json "https://$API_HOST/api/v2/tax/filing/queue"
+          jq -e '.data | length >= 4' queue.json >/dev/null || { echo "::error::filing queue is empty"; exit 1; }
+          UUID=$(jq -r '.data[0].uuid' queue.json)
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
+            -X POST "https://$API_HOST/api/v2/tax/filing/queue/$UUID/status" -d '{"status":"reviewing"}')
+          [ "$CODE" = 403 ] || { echo "::error::the demo login could change a filing request (HTTP $CODE)"; exit 1; }
+          echo "demo login: queue $(jq '.data | length' queue.json) requests, writes refused (403)"

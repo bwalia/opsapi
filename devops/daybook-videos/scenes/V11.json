@@ -1,0 +1,196 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V11",
+  "title": "Onboarding a client in five minutes",
+  "targetLength": 180,
+  "login": "staff:ruth",
+  "startPath": "/dashboard/namespace/members",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 25,
+      "action": "Workspace → Members → Invite Member (new recording client email)",
+      "caption": "1 · Invite the client",
+      "voice": "Ruth invites Sam, a new client, as a member of the practice's workspace.",
+      "actions": [
+        {
+          "do": "goto",
+          "path": "/dashboard/namespace/members"
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Invite Member"
+          }
+        },
+        {
+          "do": "type",
+          "target": {
+            "label": "/email/i"
+          },
+          "value": "sam.rivers.rec@sample.daybook.co.uk",
+          "optional": true
+        },
+        {
+          "do": "cutStart"
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Send invite|Invite)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "cutEnd"
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 25,
+      "action": "Sign in as the client (recording account client:C6)",
+      "caption": "2 · The client signs in to your app",
+      "voice": "Sam signs in. The app carries the practice's name and logo.",
+      "actions": [
+        {
+          "do": "signIn",
+          "account": "client:C6"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 20,
+      "action": "Tax → My Income: Employment and Self-employment",
+      "caption": "3 · The client says what income they had",
+      "voice": "Sam says what income they had this year: a salary, and a small craft business.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "My Income",
+          "group": "Tax"
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Income types reviewed"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 40,
+      "action": "Statements → Upload Bank Statements → two PDFs; processing (sped up)",
+      "caption": "4 · Upload bank statements",
+      "voice": "Sam uploads two bank statements. Daybook reads them and the AI sorts every line.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Statements",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/Upload/"
+          },
+          "optional": true
+        },
+        {
+          "do": "upload",
+          "dir": "C6",
+          "match": "\\.pdf$",
+          "target": {
+            "text": "/Drop (statements|a statement) here or click to choose/"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Upload|Start|Process)/"
+          },
+          "optional": true
+        },
+        {
+          "do": "slow",
+          "label": "processing",
+          "until": {
+            "gone": {
+              "text": "/Processing \\d+ statements?/"
+            }
+          },
+          "timeout": 7200,
+          "poll": 10000,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 30,
+      "action": "File My Tax → Our accountant files it → Send to our accountant",
+      "caption": "5 · Send it to the practice",
+      "voice": "Sam chooses to let the practice file, and sends the figures across.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "File My Tax",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Our accountant files it"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Send to our accountant"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 40,
+      "action": "Back as Ruth → Filing requests: Sam Rivers is new, sorted lines present",
+      "caption": "6 · It arrives sorted",
+      "voice": "Back at the practice, Sam's request has arrived with every line sorted and ready for review.",
+      "actions": [
+        {
+          "do": "signIn",
+          "account": "staff:ruth"
+        },
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Sam Rivers"
+          },
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

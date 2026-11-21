@@ -1,0 +1,303 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V10",
+  "title": "A morning in the review queue",
+  "targetLength": 300,
+  "login": "staff:ade",
+  "startPath": "/dashboard/tax/filing-requests",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 15,
+      "action": "Filing requests, Reviewing tab",
+      "caption": "9am: what needs a person today",
+      "voice": "It's nine o'clock. Ade opens Filing requests to see what needs a person today.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^Reviewing/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 45,
+      "action": "Priya Shah → Start review → Please check (3)",
+      "caption": "Priya Shah: two flats, three unsure lines",
+      "voice": "Priya has two flats. The AI sorted sixty lines and is unsure of three.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Priya Shah"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 40,
+      "action": "Open a line's reason (Best guess); correct one category",
+      "caption": "See the AI's reason, then decide",
+      "voice": "Each line shows the AI's reason. Ade agrees with two and corrects one.",
+      "actions": [
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Best guess"
+          },
+          "ms": 1800,
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Change category",
+            "within": "tr:has-text('BOILER'), li:has-text('BOILER'), div.rounded-lg:has-text('BOILER')"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "placeholder": "Search categories…"
+          },
+          "value": "Repairs",
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "option",
+            "name": "/^Repairs/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 50,
+      "action": "Tom Reid → Please check (6); two lines to Personal / transfer — exclude from return",
+      "caption": "Tom Reid: personal spending kept out",
+      "voice": "Tom uses one account for everything. Ade keeps his personal spending out of the business figures.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Tom Reid"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Change category",
+            "within": "tr:has-text('TESCO'), li:has-text('TESCO'), div.rounded-lg:has-text('TESCO')"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "placeholder": "Search categories…"
+          },
+          "value": "Personal / transfer",
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "option",
+            "name": "/^Personal / transfer/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 40,
+      "action": "Send question: “Was the £640 to Currys a work laptop?”",
+      "caption": "Ask the client, inside the same request",
+      "voice": "One purchase needs Tom's answer, so Ade asks him in the request. The status moves to Waiting on customer.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/Ask the customer|Needs info|Send question/"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "css": "textarea"
+          },
+          "value": "Was the £640 to Currys on 12 May a work laptop?",
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "Send question"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 45,
+      "action": "Dan Kowalski → Start review; van flagged as a capital purchase",
+      "caption": "Dan Kowalski: vans and tools",
+      "voice": "Dan is a builder. Fuel and small tools are straightforward; a new van is flagged for a person to decide.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Dan Kowalski"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "type",
+          "target": {
+            "placeholder": "Search descriptions…"
+          },
+          "value": "van",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "duration": 35,
+      "action": "Sam Rivers → two lines; summary figures",
+      "caption": "Sam Rivers: a job and an Etsy shop",
+      "voice": "Sam has a salary and a craft business. Two lines to check, then the figures are ready.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Sam Rivers"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "duration": 30,
+      "action": "Back to the list; statuses changed",
+      "caption": "Four clients reviewed before lunch",
+      "voice": "Four clients reviewed before lunch. Every change is recorded as Ade's, and the AI learns from them for next year.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        }
+      ]
+    }
+  ]
+}

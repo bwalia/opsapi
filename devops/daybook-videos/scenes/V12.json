@@ -1,0 +1,141 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V12",
+  "title": "Acting as agent: VAT for your clients",
+  "targetLength": 210,
+  "login": "staff:ade",
+  "startPath": "/dashboard/tax/vat/clients",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 25,
+      "action": "Tax → VAT clients list",
+      "caption": "Your VAT clients, under agent authorisation",
+      "voice": "As the client's agent, Ade sees every VAT client the practice is authorised for.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "VAT clients",
+          "group": "Tax"
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 30,
+      "action": "Open Corner Cup Café; registration and return",
+      "caption": "Corner Cup Café: one quarter ready",
+      "voice": "Ellie's café is VAT-registered on the standard scheme, filing quarterly.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "text": "/Corner Cup/"
+          }
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Your VAT registration"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 45,
+      "action": "Code your VAT: lines with codes; Still to code",
+      "caption": "Every bank line gets a VAT treatment",
+      "voice": "Every bank line has a VAT code. The AI suggests codes; it never works out the figures.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "text": "Code your VAT"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Still to code"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 40,
+      "action": "Return panel: Sales (net), Purchases (net), VAT on sales, VAT on purchases",
+      "caption": "The nine boxes, from coded lines",
+      "voice": "The nine boxes are worked out by a rules engine from the coded lines.",
+      "actions": [
+        {
+          "do": "scroll",
+          "target": {
+            "text": "Your VAT return"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Worked out from your coded lines — never by the AI."
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 40,
+      "action": "File with HMRC (sandbox) → filed message",
+      "caption": "Filed through Making Tax Digital (HMRC sandbox in this demo)",
+      "voice": "Ade files it through Making Tax Digital. In this demo, that's HMRC's test service.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "File with HMRC"
+          },
+          "optional": true
+        },
+        {
+          "do": "waitFor",
+          "target": {
+            "text": "/filed with HMRC/"
+          },
+          "timeout": 120000,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 30,
+      "action": "Back to your clients",
+      "caption": "Next client",
+      "voice": "And on to the next client.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "text": "Back to your clients"
+          },
+          "optional": true
+        }
+      ]
+    }
+  ]
+}
