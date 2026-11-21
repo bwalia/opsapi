@@ -1,0 +1,164 @@
+# daybook-demo-db: Postgres for one ring of the Daybook demo back office, plus the
+# ExternalSecrets the ring needs from WSLVault (https://vault.workstation.co.uk, mount kv).
+#
+# One copy per Ring Promoter ring, in the shared ring namespace (int | test | acc | prod)
+# on k3s1, next to release `daybook-demo` (PROJECT_CODE=tax_copilot). Every name is
+# prefixed daybook-demo-, so nothing collides with the other apps in those namespaces.
+# pgvector image, so the tax-classifier migration's vector(384) type works on a fresh volume.
+#
+# No namespace and no ring in here: deploy-daybook-demo.yml fills __RING__ and applies it
+# with -n <ring>. The PVC persists across redeploys; re-applying is a no-op.
+#   sed "s/__RING__/int/g" devops/k8s/daybook-demo-db.yaml | kubectl -n int apply -f -
+#
+# WSLVault paths (devops/daybook-demo/seed-vault-daybook.sh, RING=<ring>):
+#   daybook-demo/<ring>/config  POSTGRES_PASSWORD (+ the API's config keys, via the chart)
+#   daybook-demo/<ring>/login   DEMO_PASSWORD (the published demo login)
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: daybook-demo-db-auth
+  labels:
+    app: daybook-demo-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: wslvault-backend
+    kind: ClusterSecretStore
+  target:
+    name: daybook-demo-db-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: POSTGRES_PASSWORD
+      remoteRef:
+        key: daybook-demo/__RING__/config
+        property: POSTGRES_PASSWORD
+---
+# The published demo password (daybook.co.uk/demos), per ring. It's public, but kept
+# out of git so secret scanners stay quiet: WSLVault daybook-demo/<ring>/login.
+# Read by the reset CronJob (devops/daybook-demo/reset.yaml) and the deploy's checks.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: daybook-demo-login
+  labels:
+    app: daybook-demo-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: wslvault-backend
+    kind: ClusterSecretStore
+  target:
+    name: daybook-demo-login
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: DEMO_PASSWORD
+      remoteRef:
+        key: daybook-demo/__RING__/login
+        property: DEMO_PASSWORD
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: daybook-demo-db-initdb
+  labels:
+    app: daybook-demo-db
+data:
+  # Runs ONLY on a fresh (empty) data volume, against POSTGRES_DB.
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: daybook-demo-db
+  labels:
+    app: daybook-demo-db
+spec:
+  type: ClusterIP
+  selector:
+    app: daybook-demo-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: daybook-demo-db
+  labels:
+    app: daybook-demo-db
+spec:
+  serviceName: daybook-demo-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: daybook-demo-db
+  template:
+    metadata:
+      labels:
+        app: daybook-demo-db
+    spec:
+      # LAN amd64 pool, same as the app (see values-daybook-demo-<ring>.yaml). local-path
+      # binds the PVC to whichever node first schedules it, so the pod stays there.
+      nodeSelector:
+        net-region: home
+        kubernetes.io/arch: amd64
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: pguser
+            - name: POSTGRES_DB
+              value: daybook_demo
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: daybook-demo-db-auth
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d daybook_demo -h 127.0.0.1"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d daybook_demo -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: initdb
+          configMap:
+            name: daybook-demo-db-initdb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

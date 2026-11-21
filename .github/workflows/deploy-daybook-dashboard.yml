@@ -1,0 +1,218 @@
+name: Deploy Daybook demo dashboard
+
+# Builds and deploys ONE ring of the Daybook demo dashboard (opsapi-dashboard/, Next.js,
+# Daybook theme per workspace) to k3s1. Ring Promoter app `daybook-demo-ui`
+# (rp.workstation.co.uk) dispatches it with TARGET_ENV=<ring> and VERSION=<release>,
+# the same way `workstation-opsapi-ui` dispatches deploy-workstation-dashboard.yml,
+# which this mirrors. Promote the API (`daybook-demo`) first, then this, same release.
+#
+#   int  → https://int-demo.daybook.co.uk    (namespace int)
+#   test → https://test-demo.daybook.co.uk   (namespace test)
+#   acc  → https://acc-demo.daybook.co.uk    (namespace acc)
+#   prod → https://demo.daybook.co.uk        (namespace prod)
+#
+# Next.js inlines NEXT_PUBLIC_API_URL into the browser bundle at BUILD time, so each
+# ring gets its own image, built from the promoted release with that ring's API URL
+# (read from `apiUrl:` in values-daybook-demo-<ring>.yaml):
+#   bwalia/opsapi-dashboard:daybook-<ring>-<version>-<run>
+# It never pushes :latest, which the workstation dashboard uses as its build cache.
+#
+# Flow:  build (image) -> dns (Cloudflare CNAME) -> wslproxy (edge vhost)
+#        -> deploy (helm upgrade + rollout) -> public URL probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Ring (values-daybook-demo-<ring>.yaml): int → test → acc → prod"
+        required: true
+        default: "int"
+        type: choice
+        options: [int, test, acc, prod]
+      VERSION:
+        description: "Git ref to build: a release tag (e.g. 1.0.190, what Ring Promoter sends), branch or sha. Blank = the dispatched branch."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: deploy-daybook-dashboard-${{ github.event.inputs.TARGET_ENV || 'int' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_REGISTRY: bwalia
+  IMAGE_NAME: opsapi-dashboard
+  HELM_CHART_PATH: ./devops/helm-charts/opsapi-dashboard
+  RELEASE_NAME: daybook-demo-dashboard
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  DNS_ZONE: daybook.co.uk
+  DNS_TARGET: lon1.pop0.uk
+  DNS_PROXIED: "false"
+
+jobs:
+  build:
+    name: Build dashboard image
+    runs-on: [self-hosted, Linux, X64]
+    outputs:
+      image_tag: ${{ steps.meta.outputs.IMAGE_TAG }}
+      api_url: ${{ steps.meta.outputs.API_URL }}
+      host: ${{ steps.meta.outputs.HOST }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.VERSION || github.sha }}
+          fetch-depth: 0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Set up Docker Buildx (persistent builder)
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          # Same persistent builder as deploy-workstation-dashboard.yml: shared deps cache.
+          name: opsapi-dashboard-builder
+          keep-state: true
+
+      - name: Determine build metadata + API URL
+        id: meta
+        run: |
+          set -euo pipefail
+          # The values file comes from THIS checkout of the workflow's repo state. When
+          # VERSION is a release cut before the Daybook values existed, fall back to main's.
+          VALUES="${HELM_CHART_PATH}/values-daybook-demo-${TARGET_ENV}.yaml"
+          if [ ! -f "$VALUES" ]; then
+            git fetch -q --depth 1 origin main
+            mkdir -p /tmp/daybook-values
+            git show "origin/main:${VALUES#./}" > "/tmp/daybook-values/$(basename "$VALUES")"
+            VALUES="/tmp/daybook-values/$(basename "$VALUES")"
+          fi
+          API_URL="$(awk '/^apiUrl:/{print $2; exit}' "$VALUES")"
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          [ -n "$API_URL" ] && [ -n "$HOST" ] || { echo "::error::no apiUrl:/host: in $VALUES"; exit 1; }
+          APP_VERSION=$(git describe --tags --always --exclude 'sdk-v*' 2>/dev/null || echo 'dev')
+          SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
+          IMAGE_TAG="daybook-${TARGET_ENV}-${SAFE_VERSION}-${GITHUB_RUN_NUMBER:-local}"
+          {
+            echo "API_URL=$API_URL"; echo "HOST=$HOST"; echo "IMAGE_TAG=$IMAGE_TAG"
+            echo "BUILD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo '')"
+            echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} (API=${API_URL})"
+
+      - name: Build & push (NEXT_PUBLIC_API_URL baked in)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./opsapi-dashboard
+          file: ./opsapi-dashboard/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ steps.meta.outputs.API_URL }}
+            NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.IMAGE_TAG }}
+            NEXT_PUBLIC_BUILD_SHA=${{ steps.meta.outputs.BUILD_SHA }}
+            NEXT_PUBLIC_BUILD_TIME=${{ steps.meta.outputs.BUILD_TIME }}
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}
+          # Read the workstation dashboard's inline cache; never write :latest from here.
+          cache-from: type=registry,ref=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+          provenance: false
+
+  dns:
+    name: Ensure Cloudflare DNS
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure the CNAME for the dashboard host
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
+          HOST: ${{ needs.build.outputs.host }}
+        run: |
+          set -euo pipefail
+          chmod +x devops/scripts/cloudflare-dns.sh
+          ./devops/scripts/cloudflare-dns.sh --name "$HOST" --content "$DNS_TARGET" --proxied "$DNS_PROXIED"
+
+  wslproxy:
+    name: Register WSL Proxy vhost
+    needs: [build, dns]
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      # Only this ring's dashboard host (rule daybook-demo-default).
+      HOSTS: ${{ needs.build.outputs.host }}
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  deploy:
+    name: Deploy dashboard to K3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [build, dns, wslproxy]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    if: >-
+      ${{ always()
+          && needs.build.result == 'success'
+          && needs.dns.result == 'success'
+          && needs.wslproxy.result == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Decode kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Deploy dashboard
+        env:
+          TAG: ${{ needs.build.outputs.image_tag }}
+          API_URL: ${{ needs.build.outputs.api_url }}
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-daybook-demo-${TARGET_ENV}.yaml"
+          kubectl get namespace "${TARGET_ENV}" >/dev/null   # shared ring namespace, pre-exists
+          helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
+            -f "$VALUES" \
+            --namespace "${TARGET_ENV}" \
+            --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            --set image.tag="${TAG}" \
+            --set apiUrl="${API_URL}" \
+            --set deployedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --wait --timeout 8m
+          kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
+
+      - name: Public URL probe
+        env:
+          HOST: ${{ needs.build.outputs.host }}
+        run: |
+          set -euo pipefail
+          URL="https://${HOST}/login"
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 --max-redirs 3 -L "$URL" || echo 000)
+            echo "  attempt $i: HTTP ${code}"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "::error::public ${URL} never returned 200"; exit 1

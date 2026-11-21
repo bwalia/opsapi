@@ -1,0 +1,30 @@
+-- Shape of a vertical file (NOT seeded: not listed in verticals/index.lua).
+-- Copy this to verticals/<slug>.lua, fill it in, then add "<slug>" to index.lua.
+-- verticals/practice.lua is the full worked example; the generator contract is at its top.
+--
+-- return {
+--     slug = "landlords",
+--     tax_year = "2025-26",
+--     namespace = { slug = "daybook-landlords", name = "…", description = "…" },
+--     staff = {
+--         { email = "…@sample.daybook.co.uk", first = "…", last = "…", role = "owner" },
+--     },
+--     handler = "…@sample.daybook.co.uk",      -- who works the filing queue
+--     -- viewer_book = nil,                     -- only ONE vertical sets this (practice)
+--     -- vat_agent_arn = "XARN…",               -- if any client has `vat`
+--     clients = {
+--         {
+--             key = "L1", email = "…@sample.daybook.co.uk", first = "…", last = "…",
+--             profile_key = "landlord", business_description = "…",
+--             income_types = { "uk_property" }, profile = { property_finance_costs = 0 },
+--             years = { "2025-26" },             -- default: { tax_year }
+--             accounts = { main = { bank = "…", name = "…", last4 = "0000", sort = "00-00-00",
+--                                   type = "BUSINESS", opening = 0, statement_months = 1 } },
+--             workflow = "CLASSIFIED",          -- statement workflow_step
+--             generate = function(G, add, year) … end,
+--             filing = { status = "submitted", timeline = { { status = "submitted", by = "customer", days_ago = 2 } } },
+--             -- vat = { business_name, scheme, stagger, effective_date, returns = { … } },
+--         },
+--     },
+-- }
+return nil

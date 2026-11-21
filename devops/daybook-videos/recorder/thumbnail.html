@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- Daybook video thumbnail, 1280×720. Filled from the URL by make_thumbnail.mjs:
+     ?id=V10&eyebrow=…&title=…&hl=…&sub=…&chips=A|B|C&badge=…&badgeSmall=…&shot=<file url>
+     "hl" is a word or phrase inside the title that is set in gold.
+     Brand: docs/plans/DAYBOOK_DEMO_SPEC.md (navy band, gold rule, warm paper; Unbounded + Poppins). -->
+<html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden}
+body{font-family:Poppins,system-ui,sans-serif;color:#EEF1F6;position:relative;background:#14213D;
+ background-image:repeating-linear-gradient(to bottom,transparent 0 47px,rgba(212,178,106,.07) 47px 48px)}
+body:before{content:"";position:absolute;left:44px;top:0;bottom:0;width:2px;background:rgba(212,178,106,.35)}
+.shot{position:absolute;right:-70px;top:104px;width:700px;height:420px;border-radius:12px;overflow:hidden;
+ box-shadow:0 30px 70px rgba(0,0,0,.5);border:3px solid #D4B26A;background:#F6F4EE}
+.shot img{width:100%;height:100%;object-fit:cover;object-position:0 0}
+.left{position:absolute;left:78px;top:58px;width:600px}
+.brand{display:flex;align-items:center;gap:12px;font-family:Unbounded,sans-serif;font-weight:800;font-size:28px;letter-spacing:.2px}
+.glyph{width:34px;height:28px;border:3px solid #D4B26A;border-radius:4px;position:relative}
+.glyph:after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:3px;background:#D4B26A;transform:translateX(-50%)}
+.eyebrow{margin-top:34px;display:inline-block;font-weight:600;font-size:22px;letter-spacing:2px;text-transform:uppercase;
+ color:#D4B26A;padding-bottom:8px;border-bottom:2px solid #D4B26A}
+h1{margin-top:22px;font-family:Unbounded,sans-serif;font-weight:800;font-size:64px;line-height:1.04;letter-spacing:-1px}
+h1 .hl{color:#D4B26A}
+.sub{margin-top:24px;font-size:28px;font-weight:600;line-height:1.25;color:#B3BDCE}
+.chips{position:absolute;left:78px;bottom:48px;display:flex;gap:12px}
+.chip{background:#F6F4EE;color:#14213D;font-weight:700;font-size:21px;padding:8px 16px;border-radius:6px}
+.badge{position:absolute;right:56px;bottom:56px;background:#F6F4EE;color:#14213D;font-family:Unbounded,sans-serif;
+ font-weight:800;font-size:40px;padding:14px 24px;border-radius:8px;border-left:8px solid #D4B26A;box-shadow:0 12px 30px rgba(0,0,0,.4)}
+.badge small{display:block;font-family:Poppins,sans-serif;font-size:17px;font-weight:700;letter-spacing:1px;color:#46526A}
+.id{position:absolute;right:28px;top:22px;font-size:16px;color:rgba(238,241,246,.45);font-weight:600}
+</style></head>
+<body>
+<div class="shot" id="shot"><img id="shotimg" alt=""></div>
+<div class="left">
+  <div class="brand"><span class="glyph"></span>Daybook</div>
+  <div class="eyebrow" id="eyebrow"></div>
+  <h1 id="title"></h1>
+  <div class="sub" id="sub"></div>
+</div>
+<div class="chips" id="chips"></div>
+<div class="badge" id="badge"><small id="badgeSmall"></small><span id="badgeText"></span></div>
+<div class="id" id="vid"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const title = q.get('title') || 'Daybook';
+const hl = q.get('hl');
+document.getElementById('title').innerHTML = hl && title.includes(hl)
+  ? esc(title).replace(esc(hl), '<span class="hl">' + esc(hl) + '</span>') : esc(title);
+document.getElementById('eyebrow').textContent = q.get('eyebrow') || 'AI tax returns for UK practices';
+document.getElementById('sub').textContent = q.get('sub') || '';
+document.getElementById('vid').textContent = q.get('id') || '';
+const chips = (q.get('chips') || '').split('|').filter(Boolean);
+document.getElementById('chips').innerHTML = chips.map((c) => '<div class="chip">' + esc(c) + '</div>').join('');
+if (q.get('badge')) {
+  document.getElementById('badgeText').textContent = q.get('badge');
+  document.getElementById('badgeSmall').textContent = q.get('badgeSmall') || '';
+} else document.getElementById('badge').style.display = 'none';
+if (q.get('shot')) document.getElementById('shotimg').src = q.get('shot');
+else document.getElementById('shot').style.display = 'none';
+</script>
+</body></html>

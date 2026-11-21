@@ -1,0 +1,250 @@
+# Deploy ONE ring of the Daybook demo back office's API to k3s1. Ring Promoter app
+# `daybook-demo` (rp.workstation.co.uk) dispatches it with TARGET_ENV=<ring> and
+# IMAGE_TAG=<release>, the same way `workstation-opsapi` dispatches deploy-k3s.yml.
+# The dashboard is a separate RP app (`daybook-demo-ui`, deploy-daybook-dashboard.yml).
+#
+#   ring  namespace  API                                dashboard
+#   int   int        https://int-demo-api.daybook.co.uk   https://int-demo.daybook.co.uk
+#   test  test       https://test-demo-api.daybook.co.uk  https://test-demo.daybook.co.uk
+#   acc   acc        https://acc-demo-api.daybook.co.uk   https://acc-demo.daybook.co.uk
+#   prod  prod       https://demo-api.daybook.co.uk       https://demo.daybook.co.uk
+#
+# Flow: a merge to main cuts a release (deploy-k3s.yml), whose seed job seeds RP's int
+# ring for daybook-demo + daybook-demo-ui; RP auto-promotes int → test → acc when
+# healthy; acc → prod is by hand (production password), like jobshout.
+#
+# One run: DNS (CNAME → lon1.pop0.uk) → wslproxy edge (rule daybook-demo-default) →
+# Postgres + ExternalSecrets (WSLVault daybook-demo/<ring>/{config,login}) → API helm
+# release `daybook-demo` (image bwalia/opsapi:<release>, nothing rebuilt) → workspaces +
+# fictional data for every vertical → 30-minute reset + self-heal → checks (/ready
+# reports the release, demo login reads, writes refused).
+# Every name is prefixed daybook-demo-: the ring namespaces are shared with other apps.
+#
+# Prerequisite per ring (once): RING=<ring> devops/daybook-demo/seed-vault-daybook.sh.
+# EDGE_ONLY=true does DNS + edge for all 8 hosts and nothing else.
+name: Deploy Daybook demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Ring (values-daybook-demo-<ring>.yaml): int → test → acc → prod"
+        required: true
+        default: "int"
+        type: choice
+        options: [int, test, acc, prod]
+      IMAGE_TAG:
+        description: "Release to deploy (bwalia/opsapi:<tag>, e.g. 1.0.190 — what Ring Promoter sends). Blank = newest released image."
+        required: false
+        default: ""
+        type: string
+      EDGE_ONLY:
+        description: "Only DNS + wslproxy edge for all 8 demo hosts (no deploy)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: deploy-daybook-demo-${{ github.event.inputs.TARGET_ENV || 'int' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  NS: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  API_CHART: devops/helm-charts/diytaxreturn-lapis
+  UI_CHART: devops/helm-charts/opsapi-dashboard
+  DEMO_EMAIL: demo@daybook.co.uk
+
+jobs:
+  plan:
+    name: Plan hosts
+    runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.h.outputs.hosts }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: h
+        env:
+          EDGE_ONLY: ${{ inputs.EDGE_ONLY }}
+        run: |
+          set -euo pipefail
+          # host: lines in the values files are the single source of truth.
+          if [ "$EDGE_ONLY" = "true" ]; then rings="int test acc prod"; else rings="$TARGET_ENV"; fi
+          hosts=""
+          for r in $rings; do
+            for v in "$API_CHART/values-daybook-demo-$r.yaml" "$UI_CHART/values-daybook-demo-$r.yaml"; do
+              h=$(awk '/^host:/{print $2; exit}' "$v"); [ -n "$h" ] || { echo "::error::no host: in $v"; exit 1; }
+              hosts="$hosts $h"
+            done
+          done
+          echo "hosts=${hosts# }" >> "$GITHUB_OUTPUT"
+          echo "Hosts:${hosts}"
+
+  dns:
+    name: Cloudflare DNS
+    needs: [plan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CNAME the hosts to the edge (DNS-only, so Let's Encrypt HTTP-01 works)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: daybook.co.uk
+          HOSTS: ${{ needs.plan.outputs.hosts }}
+        run: |
+          set -euo pipefail
+          chmod +x devops/scripts/cloudflare-dns.sh
+          for h in $HOSTS; do
+            ./devops/scripts/cloudflare-dns.sh --name "$h" --content lon1.pop0.uk --proxied false
+          done
+
+  wslproxy:
+    name: wslproxy edge
+    needs: [plan, dns]
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      # Only these demo hosts (rule daybook-demo-default). The website hosts
+      # (daybook.co.uk, www) are registered by hand: see devops/daybook-demo/README.md.
+      HOSTS: ${{ needs.plan.outputs.hosts }}
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  deploy:
+    name: Deploy API to k3s1 (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [wslproxy]
+    if: ${{ !inputs.EDGE_ONLY }}
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig && chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Release to deploy
+        env:
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          TAG="${IMAGE_TAG:-}"
+          if [ -z "$TAG" ]; then
+            for t in $(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
+                       | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -3); do
+              if docker manifest inspect "bwalia/opsapi:$t" >/dev/null 2>&1; then TAG=$t; break; fi
+            done
+          fi
+          [ -n "$TAG" ] || { echo "::error::no release to deploy"; exit 1; }
+          docker manifest inspect "bwalia/opsapi:$TAG" >/dev/null 2>&1 || \
+            { echo "::error::bwalia/opsapi:$TAG doesn't exist; promote a release built after the bare-tag change"; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Deploying bwalia/opsapi:$TAG to ring $TARGET_ENV (namespace $NS)"
+
+      - name: Postgres and secrets from WSLVault
+        run: |
+          set -euo pipefail
+          kubectl get namespace "$NS" >/dev/null   # int/test/acc/prod are shared and pre-exist
+          sed "s/__RING__/$TARGET_ENV/g" devops/k8s/daybook-demo-db.yaml | kubectl -n "$NS" apply -f -
+          for s in daybook-demo-db-auth daybook-demo-login; do
+            for i in $(seq 1 30); do
+              kubectl -n "$NS" get secret "$s" >/dev/null 2>&1 && break
+              [ "$i" = 30 ] && { echo "::error::ExternalSecret $s didn't sync from WSLVault daybook-demo/$TARGET_ENV/* (run RING=$TARGET_ENV devops/daybook-demo/seed-vault-daybook.sh)"; exit 1; }
+              sleep 10
+            done
+          done
+          kubectl -n "$NS" rollout status statefulset/daybook-demo-db --timeout=10m
+
+      - name: API (release daybook-demo)
+        run: |
+          set -euo pipefail
+          # Its own session key per ring, made once (values: extraEnvFromSecrets).
+          kubectl -n "$NS" get secret daybook-demo-jwt >/dev/null 2>&1 || \
+            kubectl -n "$NS" create secret generic daybook-demo-jwt \
+              --from-literal=JWT_SECRET_KEY="$(openssl rand -hex 48)"
+          # The migrate hook is pre-UPGRADE only, so a fresh install needs a second
+          # upgrade to migrate. No --wait: before the first migrate the pods aren't
+          # ready (empty DB); the rollout below is the real check.
+          for _ in 1 2; do
+            helm upgrade --install daybook-demo "$API_CHART" \
+              -f "$API_CHART/values-daybook-demo-$TARGET_ENV.yaml" --namespace "$NS" --timeout 20m \
+              --set image.tag="$TAG" --set image.pullPolicy=IfNotPresent
+          done
+          kubectl -n "$NS" rollout restart deploy/daybook-demo
+          kubectl -n "$NS" rollout status deploy/daybook-demo --timeout=10m
+
+      - name: Seed files ConfigMap (read by the reset job)
+        run: |
+          set -euo pipefail
+          # Flat keys: a ConfigMap can't hold directories; the loader reads verticals__<slug>.lua too.
+          args=""
+          for f in devops/daybook-demo/*.lua; do args="$args --from-file=$(basename "$f")=$f"; done
+          for f in devops/daybook-demo/verticals/*.lua; do args="$args --from-file=verticals__$(basename "$f")=$f"; done
+          kubectl -n "$NS" create configmap daybook-demo-seeds $args --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Workspaces, demo login, theme and data (every vertical)
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n "$NS" get pod -l app=daybook-demo --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          mkdir -p seed && cp devops/daybook-demo/*.lua seed/ && cp -r devops/daybook-demo/verticals seed/
+          tar -C seed -cf - . | kubectl -n "$NS" exec -i "$POD" -- \
+            sh -c 'rm -rf /tmp/daybook-seed && mkdir -p /tmp/daybook-seed && tar -C /tmp/daybook-seed -xf -'
+          # The published password, straight from the Secret into the pod; never in the log.
+          kubectl -n "$NS" get secret daybook-demo-login -o jsonpath='{.data.DEMO_PASSWORD}' | base64 -d | \
+            kubectl -n "$NS" exec -i "$POD" -- sh -c "cat > /tmp/daybook-seed/demo-password && cd /app && \
+              lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook.lua\"))()' && \
+              lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook-data.lua\"))()'; \
+              rc=\$?; rm -f /tmp/daybook-seed/demo-password; exit \$rc"
+
+      - name: Reset job (and run it now), self-heal
+        run: |
+          set -euo pipefail
+          sed "s/__RING__/$TARGET_ENV/g" devops/daybook-demo/selfheal.yaml | kubectl -n "$NS" apply -f -
+          sed "s/__RING__/$TARGET_ENV/g" devops/daybook-demo/reset.yaml | kubectl -n "$NS" apply -f -
+          JOB="daybook-demo-reset-$(date +%s)"
+          kubectl -n "$NS" create job "$JOB" --from=cronjob/daybook-demo-reset
+          kubectl -n "$NS" wait --for=condition=complete "job/$JOB" --timeout=5m
+
+      - name: Check
+        run: |
+          set -euo pipefail
+          API_HOST=$(awk '/^host:/{print $2; exit}' "$API_CHART/values-daybook-demo-$TARGET_ENV.yaml")
+          DEMO_PASSWORD=$(kubectl -n "$NS" get secret daybook-demo-login -o jsonpath='{.data.DEMO_PASSWORD}' | base64 -d)
+          echo "::add-mask::$DEMO_PASSWORD"
+          sleep 20
+          # /ready reports the running release; Ring Promoter checks the same field.
+          curl -fsS --max-time 20 -o ready.json "https://$API_HOST/ready"
+          V=$(jq -r '.version // empty' ready.json)
+          [ "$V" = "$TAG" ] || echo "::warning::/ready reports version '$V', expected '$TAG'"
+          # The public login works, sees the practice's filing queue, and can't change it.
+          curl -fsS --max-time 20 -o login.json -X POST "https://$API_HOST/auth/login" \
+            --data-urlencode "username=$DEMO_EMAIL" --data-urlencode "password=$DEMO_PASSWORD"
+          TOKEN=$(jq -r '.token // .access_token // .data.token // empty' login.json)
+          [ -n "$TOKEN" ] || { echo "::error::demo login failed"; exit 1; }
+          H=(-H "Authorization: Bearer $TOKEN" -H "X-Namespace-Slug: daybook-demo")
+          curl -fsS --max-time 20 "${H[@]}" -o queue.json "https://$API_HOST/api/v2/tax/filing/queue"
+          jq -e '.data | length >= 4' queue.json >/dev/null || { echo "::error::filing queue is empty"; exit 1; }
+          UUID=$(jq -r '.data[0].uuid' queue.json)
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
+            -X POST "https://$API_HOST/api/v2/tax/filing/queue/$UUID/status" -d '{"status":"reviewing"}')
+          [ "$CODE" = 403 ] || { echo "::error::the demo login could change a filing request (HTTP $CODE)"; exit 1; }
+          echo "ring $TARGET_ENV: $TAG live, queue $(jq '.data | length' queue.json) requests, writes refused (403)"
+          rm -f login.json

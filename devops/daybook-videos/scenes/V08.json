@@ -1,0 +1,184 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V08",
+  "title": "Daybook in 90 seconds",
+  "targetLength": 90,
+  "login": "staff:ade",
+  "startPath": "/dashboard/tax",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 8,
+      "action": "Signed in as Ade Okoro; Tax Dashboard",
+      "caption": "Harbour & Lane Accountants, on Daybook",
+      "voice": "This is Harbour and Lane, a small practice. Every client sits in one place.",
+      "actions": [
+        {
+          "do": "goto",
+          "path": "/dashboard/tax"
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 14,
+      "action": "Tax → Filing requests: six clients and their statuses",
+      "caption": "Every client, every return, one list",
+      "voice": "Clients send their figures in. You see who is waiting, who is in review and who has filed.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "wait",
+          "ms": 2500
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 16,
+      "action": "Open Tom Reid's request; sorted transactions; hover “How we sorted it”",
+      "caption": "The AI sorted every bank line, and says why",
+      "voice": "The AI has read Tom's bank statements and sorted every line into HMRC categories, with its reason on each one.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "text": "Tom Reid"
+          }
+        },
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "/^(Start|Resume) review$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "How we sorted it"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 14,
+      "action": "Please check tab; change one category",
+      "caption": "Unsure lines come to your team",
+      "voice": "Anything it isn't sure of comes to your team. One click to correct it, and it remembers next year.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "tab",
+            "name": "/^Please check \\(\\d+\\)$/"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "role": "button",
+            "name": "Change category"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 12,
+      "action": "Jordan Hale: estimate and “Why is HMRC's figure different?”",
+      "caption": "The tax is worked out by rules and by HMRC, never by the AI",
+      "voice": "The figures come from a rules engine and from HMRC's own calculation. The AI never does the maths.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "Jordan Hale"
+          }
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Why is HMRC's figure different?"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 10,
+      "action": "Corner Cup Café → VAT return panel",
+      "caption": "VAT returns from coded lines",
+      "voice": "VAT works the same way: coded lines in, nine boxes out, filed through Making Tax Digital.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "VAT clients",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "/Corner Cup/"
+          }
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Worked out from your coded lines — never by the AI."
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "duration": 10,
+      "action": "Client's view with the practice's logo (recording account client:C6, second sign-in)",
+      "caption": "Your clients see your brand",
+      "voice": "Your clients see your name and your colours, not ours.",
+      "actions": [
+        {
+          "do": "signIn",
+          "account": "client:C6"
+        },
+        {
+          "do": "goto",
+          "path": "/dashboard/tax/file"
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "duration": 6,
+      "action": "End card",
+      "caption": "Book a demo at daybook.co.uk",
+      "voice": "Daybook. AI does the sorting; your accountants sign it off.",
+      "actions": []
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "daybook-www-redirect",
+  "name": "daybook-www-redirect",
+  "profile_id": "prod",
+  "priority": 1,
+  "rules_tags": [
+    "daybook",
+    "redirect",
+    "prod"
+  ],
+  "match": {
+    "rules": {
+      "path": "/",
+      "path_key": "starts_with"
+    },
+    "response": {
+      "code": 301,
+      "redirect_uri": "https://daybook.co.uk",
+      "redirect_preserve_uri": true
+    }
+  },
+  "servers": [
+    "host:www.daybook.co.uk"
+  ],
+  "_schema_version": 2
+}

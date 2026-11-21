@@ -1,0 +1,33 @@
+# ── Daybook demo back office: dashboard ────────────────────────────────────
+# Helm RELEASE: daybook-demo-dashboard   Namespace: int (Ring Promoter ring `int`)   Cluster: k3s1
+# Public host: https://int-demo.daybook.co.uk
+#   → calls the API at https://int-demo-api.daybook.co.uk (release daybook-demo)
+# Built and deployed per ring by deploy-daybook-dashboard.yml, which Ring Promoter app
+# `daybook-demo-ui` dispatches with TARGET_ENV=int and VERSION=<release>.
+# The Daybook look (navy, gold, warm paper) is the workspace's theme, set by
+# devops/daybook-demo/seed-daybook.lua; the image is the stock dashboard.
+env: int
+
+# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so each ring has its
+# own image: bwalia/opsapi-dashboard:daybook-<ring>-<release>-<run> (deploy-daybook-dashboard.yml
+# reads this line with awk; keep it a plain `apiUrl: <url>`).
+apiUrl: https://int-demo-api.daybook.co.uk
+
+image:
+  repository: bwalia/opsapi-dashboard
+  tag: ""   # set by deploy-daybook-dashboard.yml
+  pullPolicy: IfNotPresent
+
+# Read by the DNS + wslproxy steps (awk). MUST equal ingress.hostname below.
+host: int-demo.daybook.co.uk
+
+ingress:
+  enabled: true
+  className: traefik-edge
+  hostname: int-demo.daybook.co.uk
+  annotations: {}
+  tls: []
+
+nodeSelector:
+  net-region: home
+  kubernetes.io/arch: amd64

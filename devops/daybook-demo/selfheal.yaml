@@ -1,0 +1,113 @@
+# Self-heal for the Daybook demo: a copy of devops/demo/selfheal.yaml (see the history
+# there). Every 10 minutes it re-applies a Daybook Helm release whose resources went
+# missing, and scales back up a Daybook workload below its declared replicas.
+#
+# One copy per Ring Promoter ring, in the SHARED ring namespace (int | test | acc | prod),
+# which also holds other apps (jobshout, workstation-opsapi, …). So it only ever touches
+# the two Daybook releases (DAYBOOK_RELEASES), and its Role is narrower than `admin`:
+# no RBAC, no pods/exec, only the kinds those two releases own. (Helm keeps release
+# state in Secrets, so Secrets stay in the Role; it can't be scoped by name.)
+# deploy-daybook-demo.yml fills __RING__ and applies it with -n <ring>.
+#   kubectl -n int logs -l app=daybook-demo-selfheal --tail=50
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: daybook-demo-selfheal, labels: { app: daybook-demo-selfheal } }
+---
+# Only what `helm rollback` of daybook-demo / daybook-demo-dashboard and a scale-up need.
+# The image is pinned by digest: a re-pushed tag can't run with these rights.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: daybook-demo-selfheal, labels: { app: daybook-demo-selfheal } }
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: daybook-demo-selfheal, labels: { app: daybook-demo-selfheal } }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: daybook-demo-selfheal }
+subjects: [{ kind: ServiceAccount, name: daybook-demo-selfheal, namespace: __RING__ }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: daybook-demo-selfheal, labels: { app: daybook-demo-selfheal } }
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      template:
+        metadata: { labels: { app: daybook-demo-selfheal } }
+        spec:
+          serviceAccountName: daybook-demo-selfheal
+          restartPolicy: Never
+          nodeSelector: { net-region: home, kubernetes.io/arch: amd64 }
+          containers:
+            - name: selfheal
+              # helm + kubectl + jq; alpine/k8s:1.31.4, pinned (see the RoleBinding note).
+              image: alpine/k8s@sha256:9c4976d47656d78cf53a92b0203fc54ac45eae18a2b45001ac221c27da4c8036
+              resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
+              env:
+                - name: NS
+                  valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+                # The ONLY releases this job may touch in the shared namespace.
+                - { name: DAYBOOK_RELEASES, value: "daybook-demo daybook-demo-dashboard" }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -u
+                  healed=0; scaled=0; failed=0
+                  # Daybook releases that are deployed here; never anything else in this namespace.
+                  mine() { for r in $(helm -n "$NS" list --deployed -q); do
+                             case " $DAYBOOK_RELEASES " in *" $r "*) echo "$r" ;; esac; done; }
+                  for r in $(mine); do
+                    missing=$(helm -n "$NS" get manifest "$r" | kubectl -n "$NS" get -f - -o name 2>&1 | grep -i "not found" || true)
+                    [ -z "$missing" ] && continue
+                    rev=$(helm -n "$NS" history "$r" --max 1 -o json | jq -r '.[-1].revision')
+                    echo "$(date -u +%FT%TZ) $r: missing resources, re-applying revision $rev:"
+                    echo "$missing" | sed 's/^/    /'
+                    if helm -n "$NS" rollback "$r" "$rev" --wait --timeout 5m; then healed=$((healed + 1))
+                    else echo "$(date -u +%FT%TZ) $r: re-apply FAILED"; exit 1; fi
+                  done
+                  # Replica drift: a workload scaled below what its release declares (e.g. to 0).
+                  # Only scales up, so it never fights a deliberate scale-out.
+                  for r in $(mine); do
+                    helm -n "$NS" get manifest "$r" | kubectl create --dry-run=client -o json -f - 2>/dev/null \
+                      | jq -r '(.items // [.])[] | select(.kind=="Deployment" or .kind=="StatefulSet")
+                               | "\(.kind | ascii_downcase)/\(.metadata.name) \(.spec.replicas // 1)"'
+                  done > /tmp/want
+                  while read -r obj want; do
+                    live=$(kubectl -n "$NS" get "$obj" -o json 2>/dev/null \
+                      | jq -r 'if .metadata.annotations["demo-selfheal/skip"] == "true" then "skip" else (.spec.replicas // 1) end') || continue
+                    case "$live" in ''|skip) continue ;; esac
+                    [ "$live" -ge "$want" ] && continue
+                    echo "$(date -u +%FT%TZ) $obj: replicas $live, release declares $want, scaling up"
+                    if kubectl -n "$NS" scale "$obj" --replicas="$want" \
+                       && kubectl -n "$NS" rollout status "$obj" --timeout=5m; then scaled=$((scaled + 1))
+                    else echo "$(date -u +%FT%TZ) $obj: scale-up FAILED"; failed=1; fi
+                  done < /tmp/want
+                  echo "$(date -u +%FT%TZ) checked $(mine | wc -l) releases, restored $healed, scaled up $scaled"
+                  exit $failed

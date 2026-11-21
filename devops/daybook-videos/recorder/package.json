@@ -1,0 +1,13 @@
+{
+  "name": "daybook-video-recorder",
+  "private": true,
+  "type": "module",
+  "description": "Records Daybook demo videos from scene files (Playwright) — see ../README.md",
+  "scripts": {
+    "record": "node run.mjs",
+    "thumbs": "node make_thumbnail.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "base": "https://demo.daybook.co.uk",
+  "api": "https://demo-api.daybook.co.uk",
+  "id": "V29",
+  "title": "Client walkthrough: Corner Cup Café, VAT and Income Tax",
+  "targetLength": 270,
+  "login": "staff:ade",
+  "startPath": "/dashboard/tax/vat/clients",
+  "scenes": [
+    {
+      "id": "s1",
+      "duration": 25,
+      "action": "Tax → VAT clients → Corner Cup Café",
+      "caption": "Corner Cup Café: VAT-registered, quarterly",
+      "voice": "Ellie Moss runs the Corner Cup Café. She's VAT-registered on the standard scheme and files quarterly.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "VAT clients",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "/Corner Cup/"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "duration": 40,
+      "action": "Code your VAT: card takings, supplier invoices, wages (outside the scope)",
+      "caption": "Every line gets a VAT code",
+      "voice": "Card takings, food suppliers, utilities and wages. Every line gets a VAT code; wages are outside the scope of VAT.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "text": "Code your VAT"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "duration": 40,
+      "action": "A supplier line: VAT read from the receipt (“Read from the receipt”), Reclaimable",
+      "caption": "Reclaimable VAT on purchases",
+      "voice": "On purchases, the reclaimable VAT is recorded, using the receipt where there is one.",
+      "actions": [
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Reclaimable"
+          },
+          "ms": 1800,
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Read from the receipt"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "duration": 40,
+      "action": "Still to code: 5 lines; the AI suggests codes; a person confirms",
+      "caption": "Five lines for a person",
+      "voice": "Five lines need a person. The AI suggests a code; Ade confirms or changes it.",
+      "actions": [
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Still to code"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "duration": 40,
+      "action": "Your VAT return panel: Sales (net), Purchases (net), VAT on sales, VAT on purchases, You owe HMRC",
+      "caption": "Nine boxes, never by the AI",
+      "voice": "The return is worked out by a rules engine from the coded lines. Never by the AI.",
+      "actions": [
+        {
+          "do": "scroll",
+          "target": {
+            "text": "Your VAT return"
+          },
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "Worked out from your coded lines — never by the AI."
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "duration": 40,
+      "action": "File with HMRC (sandbox); penalty points shown as none",
+      "caption": "Filed (HMRC sandbox)",
+      "voice": "Ade files the quarter. In this demo, that's HMRC's sandbox. HMRC's penalty points for the business show here too.",
+      "actions": [
+        {
+          "do": "click",
+          "target": {
+            "role": "button",
+            "name": "File with HMRC"
+          },
+          "optional": true
+        },
+        {
+          "do": "waitFor",
+          "target": {
+            "text": "/filed with HMRC/"
+          },
+          "timeout": 120000,
+          "optional": true
+        },
+        {
+          "do": "highlight",
+          "target": {
+            "text": "/HMRC late-filing penalty points/"
+          },
+          "ms": 1800,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "duration": 45,
+      "action": "Filing requests → Corner Cup Café: Income Tax side in progress",
+      "caption": "Income Tax: in progress",
+      "voice": "On the Income Tax side, the café's figures are still being reviewed. Same lines, same sorting.",
+      "actions": [
+        {
+          "do": "nav",
+          "menu": "Filing requests",
+          "group": "Tax"
+        },
+        {
+          "do": "click",
+          "target": {
+            "text": "/Ellie Moss|Corner Cup/"
+          },
+          "optional": true
+        }
+      ]
+    }
+  ]
+}
