@@ -301,12 +301,26 @@ export interface LeadSettings {
   ai_daily_cost_usd: number;
   ai_hot_score: number;
   currency: string;
+  /** What the workspace sells, free text. Blank or property-like = the Property Deals lead panel. */
+  business_type?: string;
   qualification_questions: { key: string; label: string }[];
   lost_reasons: string[];
   stage_labels: Partial<Record<LeadStage, string>> | [];
   public_captcha: boolean;
   meeting: { default_minutes: number; default_link: string; send_invites: boolean; lead_reminder_hours: number;
     staff_reminder_minutes: number };
+}
+
+/** Suggestions for the free-text business type (the lead settings page). */
+export const BUSINESS_TYPE_SUGGESTIONS = [
+  'Property', 'Computers & IT', 'Retail', 'Professional services', 'Trades & construction',
+  'Health & care', 'Hospitality', 'Manufacturing', 'Software', 'Other',
+];
+
+/** Blank counts as property so workspaces that never set it keep today's panel. */
+export function isPropertyBusiness(businessType?: string | null): boolean {
+  const t = (businessType || '').trim();
+  return t === '' || /propert|real[\s-]?estate|estate agen|letting|landlord/i.test(t);
 }
 
 export interface SettingsBundle {

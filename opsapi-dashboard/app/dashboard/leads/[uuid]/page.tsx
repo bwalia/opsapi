@@ -460,7 +460,7 @@ function LeadContent() {
 
           <ShopPanel metadata={lead.metadata} />
           <RecordFormResponses entityType="lead" entityUuid={lead.uuid} />
-          <PropertyDealsLeadPanel leadUuid={lead.uuid} />
+          <PropertyDealsLeadPanel leadUuid={lead.uuid} businessType={settings?.settings.business_type} />
 
           {canWork && lead.stage !== 'converted' && (
             <button type="button" onClick={remove} className="inline-flex items-center gap-2 text-sm text-secondary-500 hover:text-error-600">
