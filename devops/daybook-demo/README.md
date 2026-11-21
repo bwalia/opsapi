@@ -5,17 +5,55 @@ the demo behind daybook.co.uk/demo and /demos. One deployment
 (`PROJECT_CODE=tax_copilot`) holds **one workspace per use case** ("vertical"). Every
 name, figure and address is made up. The spec is `docs/plans/DAYBOOK_DEMO_SPEC.md`.
 
-| Host | What | k3s1, namespace `daybook-demo` |
+It runs as **two Ring Promoter apps** on the workstation instance
+(https://rp.workstation.co.uk), the same way as jobshout and `workstation-opsapi`:
+`daybook-demo` (API) and `daybook-demo-ui` (dashboard). Each ring is a copy of the demo
+in the shared k3s1 namespace of the same name; every k8s name is prefixed
+`daybook-demo-`, so nothing collides with the other apps there.
+
+| Ring | Namespace | Dashboard | API |
+|---|---|---|---|
+| int | `int` | `int-demo.daybook.co.uk` | `int-demo-api.daybook.co.uk` |
+| test | `test` | `test-demo.daybook.co.uk` | `test-demo-api.daybook.co.uk` |
+| acc | `acc` | `acc-demo.daybook.co.uk` | `acc-demo-api.daybook.co.uk` |
+| prod | `prod` | **`demo.daybook.co.uk`** (published) | **`demo-api.daybook.co.uk`** |
+
+In every ring:
+
+- **API:** Helm release `daybook-demo` (`values-daybook-demo-<ring>.yaml`), image
+  `bwalia/opsapi:<release>`, `PROJECT_CODE=tax_copilot`.
+- **Dashboard:** Helm release `daybook-demo-dashboard`, image
+  `bwalia/opsapi-dashboard:daybook-<ring>-<release>-<run>`, built per ring because the
+  API URL is baked in.
+- **Postgres:** StatefulSet `daybook-demo-db` (`devops/k8s/daybook-demo-db.yaml`).
+
+**Promotion:**
+
+1. A merge to main cuts a release. `deploy-k3s.yml`'s seed job seeds it into **int** for
+   both apps, next to `workstation-opsapi`.
+2. Ring Promoter auto-promotes **int → test → acc** when each ring is healthy.
+3. **acc → prod is by hand**, with the production password, like jobshout.
+
+Promote the API before the dashboard, with the same release. RP dispatches
+`deploy-daybook-demo.yml` (`TARGET_ENV`, `IMAGE_TAG`) and
+`deploy-daybook-dashboard.yml` (`TARGET_ENV`, `VERSION`).
+
+**Secrets:** WSLVault (https://vault.workstation.co.uk, mount `kv`), per ring, synced by
+ESO (`ClusterSecretStore` `wslvault-backend`). Like jobshout's `jobshout/<ring>/<name>`,
+the chart and manifests commit paths only:
+
+| WSLVault path | Keys | Becomes |
 |---|---|---|
-| `demo.daybook.co.uk` | Dashboard, Daybook theme per workspace | Helm release `daybook-demo-dashboard` (image `bwalia/opsapi-dashboard:daybook-demo`) |
-| `demo-api.daybook.co.uk` | API, `PROJECT_CODE=tax_copilot` | Helm release `daybook-demo` (`values-daybook-demo.yaml`) |
-| (internal) | Postgres | StatefulSet `daybook-demo-db` (`devops/k8s/daybook-demo-db.yaml`) |
+| `daybook-demo/<ring>/config` | `POSTGRES_*`, `JWT_SECRET_KEY`, `OPENSSL_SECRET_KEY/IV`, `ADMIN_PASSWORD` (+ optional `HMRC_CLIENT_ID/SECRET`) | `daybook-demo-secrets` (chart), `daybook-demo-db-auth` |
+| `daybook-demo/<ring>/login` | `DEMO_PASSWORD` | `daybook-demo-login` (seed, reset job, deploy checks) |
 
-Traffic: browser → Cloudflare CNAME (DNS only) → wslproxy edge `lon1.pop0.uk`
-(Let's Encrypt), with lon2/pop0 mirroring it → rule `daybook-demo-default` →
-k3s1 traefik-edge `193.237.176.232:8888` → pods, routed by Host header.
+**Traffic:** browser → Cloudflare CNAME (DNS only) → wslproxy edge `lon1.pop0.uk`
+(Let's Encrypt), with lon2/pop0 mirroring it → rule `daybook-demo-default` (all 8 hosts)
+→ k3s1 traefik-edge `193.237.176.232:8888` → pods, routed by Host header.
 
-**Public login:** `demo@daybook.co.uk`, with the password published on daybook.co.uk/demos. It lives in the Actions secret `DAYBOOK_DEMO_PASSWORD`, and the deploy copies it to the k8s Secret `daybook-demo-login`. It's kept out of the repo so secret scanners stay quiet.
+**Public login:** `demo@daybook.co.uk`, with the password published on
+daybook.co.uk/demos. It's `DEMO_PASSWORD` in WSLVault `daybook-demo/<ring>/login`,
+never in git, so secret scanners (GitGuardian) stay quiet.
 
 - **Role:** a `viewer` in every demo workspace: read on every module, so every change
   through a workspace (RBAC) route is refused with 403.
@@ -32,39 +70,58 @@ k3s1 traefik-edge `193.237.176.232:8888` → pods, routed by Host header.
 | `daybook-common.lua` | Finds the seed directory and loads verticals (tree or flat ConfigMap layout) |
 | `seed-daybook.lua` | Workspaces, viewer role, staff, clients, the demo login, the Daybook theme |
 | `seed-daybook-data.lua` | Tax data: profiles, AI-assistant profile, accounts, statements, classified lines, VAT, filing queue |
-| `reset.yaml` | CronJob (every 30 min) that re-runs both seeds for every vertical, plus a ServiceAccount that may only exec into pods here |
-| `selfheal.yaml` | Copy of `devops/demo/selfheal.yaml` for this namespace |
-| `seed-vault-daybook.sh` | Writes `daybook-demo/config` to WSL Vault, once |
-| `../k8s/daybook-demo-db.yaml` | Postgres (pgvector) and its ExternalSecret |
-| `../helm-charts/*/values-daybook-demo.yaml` | API and dashboard values |
-| `../../.github/workflows/deploy-daybook-demo.yml` | DNS → edge → DB → API → dashboard → seed → reset job → checks (weekly too) |
-| `../../.github/wslproxy/data/{rules,servers}/prod/*daybook*` | Edge records: `daybook-demo-default` (demo hosts), `daybook-website-pages` and `daybook-www-redirect` (website) |
+| `reset.yaml` | CronJob (every 30 min) that re-runs both seeds for every vertical, plus a ServiceAccount that may only exec into pods in its ring namespace. Ring-agnostic: applied with `sed s/__RING__/<ring>/ \| kubectl -n <ring> apply` |
+| `selfheal.yaml` | Copy of `devops/demo/selfheal.yaml`, limited to the two Daybook releases (the ring namespaces are shared) with a Role narrower than `admin` |
+| `seed-vault-daybook.sh` | Writes `daybook-demo/<ring>/config` and `daybook-demo/<ring>/login` to WSLVault (`RING=int\|test\|acc\|prod\|all`) |
+| `../k8s/daybook-demo-db.yaml` | Postgres (pgvector) and the ring's two ExternalSecrets (`__RING__` filled at apply) |
+| `../helm-charts/*/values-daybook-demo-<ring>.yaml` | API and dashboard values per ring (`host:` / `apiUrl:` are read by the workflows) |
+| `../../.github/workflows/deploy-daybook-demo.yml` | One ring of the API: DNS → edge → DB + secrets → API → seed → reset/self-heal → checks. `EDGE_ONLY=true` does DNS + edge for all 8 hosts |
+| `../../.github/workflows/deploy-daybook-dashboard.yml` | One ring of the dashboard: build for that ring's API URL → DNS → edge → helm → public probe |
+| `../../.github/wslproxy/data/{rules,servers}/prod/*daybook*` | Edge records: `daybook-demo-default` (8 demo hosts), `daybook-website-pages` and `daybook-www-redirect` (website) |
+| `ring-promoter` repo, `deploy/k8s/configmap.yaml` | The `daybook-demo` and `daybook-demo-ui` app entries |
 
 ## Run order (first time)
 
-1. **Vault:**
+1. **WSLVault, per ring** (prompts for the published `DEMO_PASSWORD` without echo):
 
    ```bash
-   export WSLVAULT_API_KEY='wslv_…'
-   ./devops/daybook-demo/seed-vault-daybook.sh
+   export WSLVAULT_API_KEY='wslv_…'    # a scoped key made in the WSLVault UI
+   RING=all ./devops/daybook-demo/seed-vault-daybook.sh     # or RING=int, then the others later
    ```
 
-   Then add the HMRC **sandbox** application's `HMRC_CLIENT_ID` / `HMRC_CLIENT_SECRET`
-   to `daybook-demo/config`, and add `https://demo-api.daybook.co.uk/auth/hmrc/callback`
-   to that application's redirect URIs. You only need this for "Connect to HMRC" in the
-   demo.
-2. **Repo secrets:** the workflow needs `CLOUDFLARE_API_TOKEN` (zone `daybook.co.uk`,
-   DNS:Edit), `KUBE_CONFIG_DATA_K3S`, `DOCKER_USERNAME`/`DOCKER_PASSWD`, and the wslproxy
-   secrets the register workflow uses.
-3. **Run "Deploy Daybook demo"** (`gh workflow run deploy-daybook-demo.yml`). Everything
-   after that is in the workflow.
+   For "Connect to HMRC" in the demo only: add the HMRC **sandbox** application's
+   `HMRC_CLIENT_ID` / `HMRC_CLIENT_SECRET` to `daybook-demo/<ring>/config`. Then add
+   each ring's `https://<api host>/auth/hmrc/callback` to that application's redirect
+   URIs.
+2. **Ring Promoter config:** merge the `daybook-demo` / `daybook-demo-ui` entries in the
+   ring-promoter repo (`deploy/k8s/configmap.yaml`). Its deploy workflow applies the
+   ConfigMap and restarts RP. RP's `RP_GITHUB_TOKEN` already dispatches workflows in
+   bwalia/opsapi for `workstation-opsapi`.
+3. **Edge and DNS for all 8 hosts, once:**
+   `gh workflow run deploy-daybook-demo.yml -f TARGET_ENV=int -f EDGE_ONLY=true`.
+   Every deploy re-ensures its own ring's hosts anyway.
+4. **First deploy:** seed int in Ring Promoter, or merge to main and let
+   `deploy-k3s.yml` do it:
+
+   ```bash
+   curl -X POST https://rp.workstation.co.uk/api/apps/daybook-demo/seed?async=true \
+     -H "Authorization: Bearer $RP_TOKEN" -d '{"ring":"int","version":"<release>"}'
+   ```
+
+   Then the same for `daybook-demo-ui`. RP carries both to acc; promote acc → prod in
+   the RP UI.
 
    The migrate hook creates the platform admin's own workspace `daybook-admin` (kept
    apart from the demo workspaces). The seeds then create `daybook-demo` and the rest.
 
+Repo secrets used by the workflows (all already exist for the other demos):
+`CLOUDFLARE_API_TOKEN` (zone `daybook.co.uk`), `KUBE_CONFIG_DATA_K3S`,
+`DOCKER_USERNAME`/`DOCKER_PASSWD`, `WORKSTATION_RING_PROMOTER_TOKEN`, and the wslproxy
+login.
+
 ### Website hosts (daybook.co.uk, www)
 
-The workflow only registers the two demo hosts. Register the website hosts by hand,
+The workflows only register the demo hosts. Register the website hosts by hand,
 once, after the `bwalia/daybook-website` Pages site exists:
 
 - rule `daybook-website-pages`: 305 to `https://bwalia.github.io/daybook-website`, Host
@@ -125,21 +182,22 @@ request uses.
 The generators are deterministic, so the demo comes back identical. A run takes about
 1–2 s per vertical.
 
-Run it now:
+Run it now (in ring `prod`; use the ring's namespace):
 
 ```bash
-kubectl -n daybook-demo create job reset-now --from=cronjob/daybook-demo-reset
-kubectl -n daybook-demo logs -l app=daybook-demo-reset --tail=50
+kubectl -n prod create job daybook-demo-reset-now --from=cronjob/daybook-demo-reset
+kubectl -n prod logs -l app=daybook-demo-reset --tail=50
 ```
 
 By hand, one vertical:
 
 ```bash
-POD=$(kubectl -n daybook-demo get pod -l app=daybook-demo -o jsonpath='{.items[0].metadata.name}')
-tar -C devops/daybook-demo -cf - . | kubectl -n daybook-demo exec -i "$POD" -- sh -c \
+NS=prod
+POD=$(kubectl -n $NS get pod -l app=daybook-demo -o jsonpath='{.items[0].metadata.name}')
+tar -C devops/daybook-demo -cf - . | kubectl -n $NS exec -i "$POD" -- sh -c \
   'rm -rf /tmp/daybook-seed && mkdir -p /tmp/daybook-seed && tar -C /tmp/daybook-seed -xf -'
-kubectl -n daybook-demo get secret daybook-demo-login -o jsonpath='{.data.DEMO_PASSWORD}' | base64 -d | \
-kubectl -n daybook-demo exec -i "$POD" -- sh -c "cat > /tmp/daybook-seed/demo-password && cd /app && \
+kubectl -n $NS get secret daybook-demo-login -o jsonpath='{.data.DEMO_PASSWORD}' | base64 -d | \
+kubectl -n $NS exec -i "$POD" -- sh -c "cat > /tmp/daybook-seed/demo-password && cd /app && \
   lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook.lua\"))(\"practice\")' && \
   lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook-data.lua\"))(\"practice\")'"
 ```
@@ -149,7 +207,8 @@ kubectl -n daybook-demo exec -i "$POD" -- sh -c "cat > /tmp/daybook-seed/demo-pa
 1. Copy `verticals/_example.lua` to `verticals/<slug>.lua`. Use namespace
    `daybook-<slug>`; use `practice.lua` as the worked example.
 2. Add `"<slug>"` to `verticals/index.lua`.
-3. Re-run the workflow, or update the ConfigMap and run the reset job.
+3. Merge: the next release carries it through the rings. To try it sooner, update the
+   ring's ConfigMap (`daybook-demo-seeds`) and run its reset job.
 
 The demo login joins the new workspace as a viewer automatically. Only one vertical may
 set `viewer_book`, because personal tax pages aren't per workspace.
@@ -176,7 +235,7 @@ lines in the dashboard's post-login redirect).
 ## Verify
 
 ```bash
-API=https://demo-api.daybook.co.uk
+API=https://demo-api.daybook.co.uk     # or https://<ring>-demo-api.daybook.co.uk
 TOKEN=$(curl -s -X POST $API/auth/login --data-urlencode username=demo@daybook.co.uk \
   --data-urlencode "password=$DEMO_PASSWORD" | jq -r .token)
 H=(-H "Authorization: Bearer $TOKEN" -H "X-Namespace-Slug: daybook-demo")

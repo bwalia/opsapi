@@ -48,19 +48,28 @@ numbers. Change them here first. Everything below is **fictional**.
 |---|---|
 | `daybook.co.uk` | Marketing site (repo `bwalia/daybook-website`, GitHub Pages behind the edge) |
 | `www.daybook.co.uk` | 301 → apex |
-| `demo.daybook.co.uk` | Demo back office: OpsAPI dashboard, Daybook theme |
-| `demo-api.daybook.co.uk` | Demo API: OpsAPI, `PROJECT_CODE=tax_copilot` |
+| `demo.daybook.co.uk` | Demo back office (prod ring): OpsAPI dashboard, Daybook theme. The published demo |
+| `demo-api.daybook.co.uk` | Demo API (prod ring): OpsAPI, `PROJECT_CODE=tax_copilot` |
+| `<ring>-demo.daybook.co.uk`, `<ring>-demo-api.daybook.co.uk` | The same for rings `int`, `test`, `acc` |
 
-k3s1, namespace `daybook-demo`. Helm releases `daybook-demo` (API) and
-`daybook-demo-dashboard`. Postgres StatefulSet `daybook-demo-db`. Vault path
-`daybook-demo/config`.
+Promoted by **Ring Promoter** (https://rp.workstation.co.uk), like jobshout:
+
+- **Apps:** `daybook-demo` (API) and `daybook-demo-ui` (dashboard).
+- **Flow:** a merge to main seeds int. int → test → acc are automatic when healthy;
+  acc → prod is by hand.
+- **Where it runs:** each ring is k3s1 namespace `<ring>` (shared with other apps), with:
+  - Helm releases `daybook-demo` (API) and `daybook-demo-dashboard`;
+  - Postgres StatefulSet `daybook-demo-db`.
+- **Secrets:** WSLVault (https://vault.workstation.co.uk, mount `kv`) at
+  `daybook-demo/<ring>/config` and `daybook-demo/<ring>/login`. See
+  `devops/daybook-demo/README.md`.
 
 ## Demo login (published on daybook.co.uk/demo)
 
 | | |
 |---|---|
 | Email | `demo@daybook.co.uk` |
-| Password | published on daybook.co.uk/demos; stored in the Actions secret `DAYBOOK_DEMO_PASSWORD` (not in the repo) |
+| Password | published on daybook.co.uk/demos; stored in WSLVault `daybook-demo/<ring>/login` (`DEMO_PASSWORD`), never in the repo |
 | Role | `viewer`: reads every module, every change → 403 |
 | Reset | every 30 minutes |
 | Emailed code | off for this workspace only |

@@ -873,7 +873,7 @@ jobs:
   # Promoter's API token (RP_API_TOKEN in the workstation-ring-promoter Secret;
   # NOT the diytaxreturn one in RING_PROMOTER_TOKEN).
   seed-workstation-ring-promoter:
-    name: Seed workstation Ring Promoter (int)
+    name: Seed workstation Ring Promoter (int; + Daybook demo)
     needs: [build, smoke-test]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
@@ -898,7 +898,12 @@ jobs:
             exit 1
           fi
           failed=0
-          for APP in workstation-opsapi workstation-opsapi-ui; do
+          # daybook-demo + daybook-demo-ui (the Daybook demo back office, demo.daybook.co.uk)
+          # ride the same release: RP auto-promotes them int → test → acc, prod by hand.
+          # They're OPTIONAL here: a failure to seed them is a warning, never a failed
+          # workstation deploy (e.g. before their RP config is live).
+          OPTIONAL_APPS=" daybook-demo daybook-demo-ui "
+          for APP in workstation-opsapi workstation-opsapi-ui daybook-demo daybook-demo-ui; do
             echo "Seeding ${APP} int with ${RELEASE}"
             # async=true: 202 + a job id now; Ring Promoter still rejects a seed that
             # could never work (unknown ring/version, closed gate) on this request.
@@ -911,8 +916,17 @@ jobs:
             echo "HTTP $CODE"; cat "$BODY"; echo
             case "$CODE" in
               200|202) echo "::notice::${APP}: Ring Promoter is deploying ${RELEASE} to int. Watch it at ${RP_BASE}/?app=${APP}" ;;
-              000) echo "::error::${APP}: could not reach ${RP_BASE}; ${RELEASE} is built but NOT deploying. Seed it by hand in Ring Promoter."; failed=1 ;;
-              *) echo "::error::${APP}: Ring Promoter rejected the seed (HTTP ${CODE}); ${RELEASE} is built and can be seeded by hand once fixed."; failed=1 ;;
+              *)
+                case "$OPTIONAL_APPS" in
+                  *" ${APP} "*) echo "::warning::${APP}: not seeded (HTTP ${CODE}); seed ${RELEASE} into int by hand in ${RP_BASE}/?app=${APP}." ;;
+                  *)
+                    if [ "$CODE" = 000 ]; then
+                      echo "::error::${APP}: could not reach ${RP_BASE}; ${RELEASE} is built but NOT deploying. Seed it by hand in Ring Promoter."
+                    else
+                      echo "::error::${APP}: Ring Promoter rejected the seed (HTTP ${CODE}); ${RELEASE} is built and can be seeded by hand once fixed."
+                    fi
+                    failed=1 ;;
+                esac ;;
             esac
           done
           exit $failed

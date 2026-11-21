@@ -178,7 +178,8 @@ Copy the opsapi.org/demo pattern (`devops/demo/`) with an accountant's story ins
 a developer's:
 
 - **Deployment:** one OpsAPI release with `PROJECT_CODE=tax_copilot`, its own Postgres,
-  and the dashboard themed as Daybook. It runs on k3s1 in namespace `daybook-demo`, with
+  and the dashboard themed as Daybook. It is promoted through Ring Promoter rings int → test → acc → prod on k3s1
+  (apps `daybook-demo` and `daybook-demo-ui`; see `devops/daybook-demo/README.md`), with
   a workflow copied from `.github/workflows/deploy-opsapi-showcase.yml`. Hosts:
   - `demo.daybook.co.uk`: dashboard;
   - `demo-api.daybook.co.uk`: API.
@@ -494,7 +495,8 @@ gh workflow run 'Sync POP config from CP (Go → data/ → PR)' -R bwalia/wslpro
 
 - Ingresses for `demo.daybook.co.uk` and `demo-api.daybook.co.uk` on traefik-edge, as in
   `devops/demo/hello-apps.yaml`.
-- Secrets in WSL Vault under `daybook-demo/config` (copy `devops/demo/seed-vault-demo.sh`).
+- Secrets in WSLVault (vault.workstation.co.uk) under `daybook-demo/<ring>/config` and
+  `daybook-demo/<ring>/login` (`devops/daybook-demo/seed-vault-daybook.sh`).
 - The dashboard image is built with `NEXT_PUBLIC_API_URL=https://demo-api.daybook.co.uk`.
 - Add `https://demo.daybook.co.uk` to the demo namespace's trusted origins (as
   `opsapi-demo-trusted-origins.yml` does).

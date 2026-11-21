@@ -1,21 +1,23 @@
-# daybook-demo-db: Postgres for the Daybook demo back office (demo.daybook.co.uk).
+# daybook-demo-db: Postgres for one ring of the Daybook demo back office, plus the
+# ExternalSecrets the ring needs from WSLVault (https://vault.workstation.co.uk, mount kv).
 #
-# Owned by ONE release (`daybook-demo`, k8s namespace `daybook-demo`, cluster k3s1),
-# PROJECT_CODE=tax_copilot. Copied from opsapi-showcase-db.yaml (pgvector image, so
-# the tax-classifier migration's vector(384) type works on a fresh volume).
+# One copy per Ring Promoter ring, in the shared ring namespace (int | test | acc | prod)
+# on k3s1, next to release `daybook-demo` (PROJECT_CODE=tax_copilot). Every name is
+# prefixed daybook-demo-, so nothing collides with the other apps in those namespaces.
+# pgvector image, so the tax-classifier migration's vector(384) type works on a fresh volume.
 #
-# Credentials: POSTGRES_PASSWORD comes from WSL Vault daybook-demo/config
-# (devops/daybook-demo/seed-vault-daybook.sh). No plaintext in git.
+# No namespace and no ring in here: deploy-daybook-demo.yml fills __RING__ and applies it
+# with -n <ring>. The PVC persists across redeploys; re-applying is a no-op.
+#   sed "s/__RING__/int/g" devops/k8s/daybook-demo-db.yaml | kubectl -n int apply -f -
 #
-# Apply (one-time; the PVC persists across app redeploys; the deploy workflow
-# re-applies it, which is a no-op):
-#   kubectl apply -f devops/k8s/daybook-demo-db.yaml
+# WSLVault paths (devops/daybook-demo/seed-vault-daybook.sh, RING=<ring>):
+#   daybook-demo/<ring>/config  POSTGRES_PASSWORD (+ the API's config keys, via the chart)
+#   daybook-demo/<ring>/login   DEMO_PASSWORD (the published demo login)
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: daybook-demo-db-auth
-  namespace: daybook-demo
   labels:
     app: daybook-demo-db
 spec:
@@ -30,14 +32,37 @@ spec:
   data:
     - secretKey: POSTGRES_PASSWORD
       remoteRef:
-        key: daybook-demo/config
+        key: daybook-demo/__RING__/config
         property: POSTGRES_PASSWORD
+---
+# The published demo password (daybook.co.uk/demos), per ring. It's public, but kept
+# out of git so secret scanners stay quiet: WSLVault daybook-demo/<ring>/login.
+# Read by the reset CronJob (devops/daybook-demo/reset.yaml) and the deploy's checks.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: daybook-demo-login
+  labels:
+    app: daybook-demo-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: wslvault-backend
+    kind: ClusterSecretStore
+  target:
+    name: daybook-demo-login
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: DEMO_PASSWORD
+      remoteRef:
+        key: daybook-demo/__RING__/login
+        property: DEMO_PASSWORD
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: daybook-demo-db-initdb
-  namespace: daybook-demo
   labels:
     app: daybook-demo-db
 data:
@@ -49,7 +74,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: daybook-demo-db
-  namespace: daybook-demo
   labels:
     app: daybook-demo-db
 spec:
@@ -65,7 +89,6 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: daybook-demo-db
-  namespace: daybook-demo
   labels:
     app: daybook-demo-db
 spec:
@@ -79,7 +102,7 @@ spec:
       labels:
         app: daybook-demo-db
     spec:
-      # LAN amd64 pool, same as the app (see values-daybook-demo.yaml). local-path
+      # LAN amd64 pool, same as the app (see values-daybook-demo-<ring>.yaml). local-path
       # binds the PVC to whichever node first schedules it, so the pod stays there.
       nodeSelector:
         net-region: home

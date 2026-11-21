@@ -5,22 +5,29 @@
 # Deterministic generators, so each reset gives the same demo. ~1-2 s per vertical.
 #
 # How: a kubectl pod copies the seed files (ConfigMap daybook-demo-seeds, made by
-# deploy-daybook-demo.yml from devops/daybook-demo/) into the running API pod and
-# runs them with `lapis exec`, exactly as the deploy does. The ServiceAccount can
-# only list pods and exec into them, in this namespace only.
+# deploy-daybook-demo.yml from devops/daybook-demo/) into the running API pod
+# (label app=daybook-demo) and runs them with `lapis exec`, exactly as the deploy does.
+# The ServiceAccount can only list pods and exec into them, in its own namespace.
 #
-# The password below is the PUBLISHED demo password (daybook.co.uk/demo), not a secret.
+# One copy per Ring Promoter ring, in the shared ring namespace (int | test | acc | prod).
+# No namespace in here: the job reads its own from the downward API, and
+# deploy-daybook-demo.yml fills __RING__ (the RoleBinding subject) and applies with -n.
+# NOTE: in a shared namespace, pods/exec is namespace-wide (RBAC can't scope it to a
+# label). The script only ever targets app=daybook-demo; the image is pinned by digest.
 #
-#   kubectl apply -f devops/daybook-demo/reset.yaml
-#   kubectl -n daybook-demo create job reset-now --from=cronjob/daybook-demo-reset
-#   kubectl -n daybook-demo logs -l app=daybook-demo-reset --tail=50
+# The password is the PUBLISHED demo password, from Secret daybook-demo-login
+# (ExternalSecret in devops/k8s/daybook-demo-db.yaml ← WSLVault daybook-demo/<ring>/login).
+#
+#   sed "s/__RING__/int/g" devops/daybook-demo/reset.yaml | kubectl -n int apply -f -
+#   kubectl -n int create job daybook-demo-reset-now --from=cronjob/daybook-demo-reset
+#   kubectl -n int logs -l app=daybook-demo-reset --tail=50
 apiVersion: v1
 kind: ServiceAccount
-metadata: { name: daybook-demo-reset, namespace: daybook-demo, labels: { app: daybook-demo-reset } }
+metadata: { name: daybook-demo-reset, labels: { app: daybook-demo-reset } }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
-metadata: { name: daybook-demo-reset, namespace: daybook-demo, labels: { app: daybook-demo-reset } }
+metadata: { name: daybook-demo-reset, labels: { app: daybook-demo-reset } }
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -31,13 +38,13 @@ rules:
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
-metadata: { name: daybook-demo-reset, namespace: daybook-demo, labels: { app: daybook-demo-reset } }
+metadata: { name: daybook-demo-reset, labels: { app: daybook-demo-reset } }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: daybook-demo-reset }
-subjects: [{ kind: ServiceAccount, name: daybook-demo-reset, namespace: daybook-demo }]
+subjects: [{ kind: ServiceAccount, name: daybook-demo-reset, namespace: __RING__ }]
 ---
 apiVersion: batch/v1
 kind: CronJob
-metadata: { name: daybook-demo-reset, namespace: daybook-demo, labels: { app: daybook-demo-reset } }
+metadata: { name: daybook-demo-reset, labels: { app: daybook-demo-reset } }
 spec:
   schedule: "*/30 * * * *"
   concurrencyPolicy: Forbid
@@ -59,22 +66,23 @@ spec:
               image: alpine/k8s@sha256:9c4976d47656d78cf53a92b0203fc54ac45eae18a2b45001ac221c27da4c8036
               resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
               env:
-                # The published demo password, from Secret daybook-demo-login (made by
-                # deploy-daybook-demo.yml from the DAYBOOK_DEMO_PASSWORD Actions secret).
+                - name: NS
+                  valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+                # The published demo password (Secret daybook-demo-login, from WSLVault).
                 - name: DEMO_PASSWORD
                   valueFrom: { secretKeyRef: { name: daybook-demo-login, key: DEMO_PASSWORD } }
               command: ["/bin/sh", "-c"]
               args:
                 - |
                   set -eu
-                  POD=$(kubectl -n daybook-demo get pod -l app=daybook-demo --field-selector=status.phase=Running \
+                  POD=$(kubectl -n "$NS" get pod -l app=daybook-demo --field-selector=status.phase=Running \
                     -o jsonpath='{.items[0].metadata.name}')
                   [ -n "$POD" ] || { echo "no running API pod"; exit 1; }
                   # ConfigMap keys are flat (verticals__practice.lua); the loader reads both layouts.
                   mkdir -p /tmp/s && cp /seeds/* /tmp/s/ && printf %s "$DEMO_PASSWORD" > /tmp/s/demo-password
-                  tar -C /tmp/s -cf - . | kubectl -n daybook-demo exec -i "$POD" -- \
+                  tar -C /tmp/s -cf - . | kubectl -n "$NS" exec -i "$POD" -- \
                     sh -c 'rm -rf /tmp/daybook-seed && mkdir -p /tmp/daybook-seed && tar -C /tmp/daybook-seed -xf -'
-                  kubectl -n daybook-demo exec "$POD" -- sh -c "cd /app && \
+                  kubectl -n "$NS" exec "$POD" -- sh -c "cd /app && \
                     lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook.lua\"))()' && \
                     lapis exec 'assert(loadfile(\"/tmp/daybook-seed/seed-daybook-data.lua\"))()'; \
                     rc=\$?; rm -f /tmp/daybook-seed/demo-password; exit \$rc"

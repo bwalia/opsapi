@@ -1,21 +1,24 @@
 # ── Daybook demo back office: dashboard ────────────────────────────────────
-# Helm RELEASE: daybook-demo-dashboard   Namespace: daybook-demo   Cluster: k3s1
+# Helm RELEASE: daybook-demo-dashboard   Namespace: prod (Ring Promoter ring `prod`)   Cluster: k3s1
 # Public host: https://demo.daybook.co.uk
 #   → calls the API at https://demo-api.daybook.co.uk (release daybook-demo)
+# Built and deployed per ring by deploy-daybook-dashboard.yml, which Ring Promoter app
+# `daybook-demo-ui` dispatches with TARGET_ENV=prod and VERSION=<release>.
 # The Daybook look (navy, gold, warm paper) is the workspace's theme, set by
 # devops/daybook-demo/seed-daybook.lua; the image is the stock dashboard.
 env: prod
 
-# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so the image
-# is built for this URL: bwalia/opsapi-dashboard:daybook-demo (deploy-daybook-demo.yml).
+# Baked into the browser bundle at BUILD time (NEXT_PUBLIC_API_URL), so each ring has its
+# own image: bwalia/opsapi-dashboard:daybook-<ring>-<release>-<run> (deploy-daybook-dashboard.yml
+# reads this line with awk; keep it a plain `apiUrl: <url>`).
 apiUrl: https://demo-api.daybook.co.uk
 
 image:
   repository: bwalia/opsapi-dashboard
-  tag: daybook-demo
-  pullPolicy: Always
+  tag: ""   # set by deploy-daybook-dashboard.yml
+  pullPolicy: IfNotPresent
 
-# MUST equal ingress.hostname below.
+# Read by the DNS + wslproxy steps (awk). MUST equal ingress.hostname below.
 host: demo.daybook.co.uk
 
 ingress:

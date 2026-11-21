@@ -31,6 +31,12 @@
   },
   "servers": [
     "host:demo.daybook.co.uk",
-    "host:demo-api.daybook.co.uk"
+    "host:demo-api.daybook.co.uk",
+    "host:int-demo.daybook.co.uk",
+    "host:int-demo-api.daybook.co.uk",
+    "host:test-demo.daybook.co.uk",
+    "host:test-demo-api.daybook.co.uk",
+    "host:acc-demo.daybook.co.uk",
+    "host:acc-demo-api.daybook.co.uk"
   ]
 }
