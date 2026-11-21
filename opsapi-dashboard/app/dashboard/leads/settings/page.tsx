@@ -15,7 +15,7 @@ import { Button, confirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { cn } from '@/lib/utils';
 import {
-  ALL_STAGES, leadError, leadsService, type AssignmentRule, type LeadSettings, type SettingsBundle, type TeamMember,
+  ALL_STAGES, BUSINESS_TYPE_SUGGESTIONS, leadError, leadsService, type AssignmentRule, type LeadSettings, type SettingsBundle, type TeamMember,
 } from '@/services/leads.service';
 import { FieldError } from '@/components/leads/ui';
 
@@ -280,6 +280,19 @@ function SettingsContent() {
         </Card>
 
         <Card title="Qualifying and losing" help="The questions your team answers on a call, and the reasons a lead can be lost.">
+          <div>
+            <Label htmlFor="business-type">Type of business</Label>
+            <input id="business-type" list="business-type-options" maxLength={60} className={cn(input, 'mt-1')}
+              placeholder="e.g. Computers & IT" value={s.business_type ?? ''} onChange={(e) => set('business_type', e.target.value)} />
+            <datalist id="business-type-options">
+              {BUSINESS_TYPE_SUGGESTIONS.map((t) => <option key={t} value={t} />)}
+            </datalist>
+            <p className="mt-1 text-xs text-secondary-500">
+              Shapes the details panel on each lead. Property shows the property deal fields (kind, situation, seller&apos;s deadline);
+              anything else shows general fields. Blank is treated as property.
+            </p>
+            <FieldError message={errors.business_type} />
+          </div>
           <div>
             <Label>Qualification questions</Label>
             <ul className="mt-2 space-y-2">

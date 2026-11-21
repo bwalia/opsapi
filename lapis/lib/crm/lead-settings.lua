@@ -34,6 +34,10 @@ Settings.DEFAULTS = {
     ai_daily_cost_usd = 5,
     ai_hot_score = 70,
     currency = "GBP",
+    -- What the workspace sells, free text ("Property", "Computers", ...). The lead
+    -- page uses it to pick its side panel: blank or property keeps the Property
+    -- Deals panel, anything else gets the generic one.
+    business_type = "",
     qualification_questions = {
         { key = "budget", label = "Budget" },
         { key = "need", label = "What they need" },
@@ -168,6 +172,14 @@ function Settings.validate(s)
 
     out.currency = type(s.currency) == "string" and s.currency:upper() or ""
     if not out.currency:match("^%u%u%u$") then e.currency = "a 3-letter currency code, e.g. GBP" end
+
+    if s.business_type == nil or s.business_type == cjson.null then
+        out.business_type = ""
+    elseif type(s.business_type) ~= "string" or #s.business_type > 60 then
+        e.business_type = "up to 60 characters"
+    else
+        out.business_type = s.business_type:match("^%s*(.-)%s*$")
+    end
 
     out.qualification_questions = setmetatable({}, cjson.array_mt)
     if type(s.qualification_questions) ~= "table" or #s.qualification_questions > 20 then
