@@ -251,7 +251,7 @@ function FormEditor() {
         )}
         {tab === 'settings' && <FormSettingsPanel form={form} onSave={saveSettings} readOnly={readOnly} />}
         {tab === 'share' && <FormSharePanel form={form} />}
-        {tab === 'responses' && <FormResponses formUuid={form.uuid} initialResponse={search?.get('response') || undefined} />}
+        {tab === 'responses' && <FormResponses formUuid={form.uuid} formTitle={form.title} initialResponse={search?.get('response') || undefined} />}
         {tab === 'insights' && <FormInsights formUuid={form.uuid} />}
       </div>
     </div>
