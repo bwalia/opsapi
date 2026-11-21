@@ -2,7 +2,7 @@
 
 /**
  * The Responses tab: newest first ("Load more" pages by cursor), filters,
- * CSV export, and a detail view with the records each response created or
+ * CSV and PDF export, and a detail view with the records each response created or
  * matched, plus Retry / Spam / Delete.
  */
 
@@ -11,7 +11,7 @@ import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  AlertTriangle, Download, Inbox, Loader2, Paperclip, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2,
+  AlertTriangle, Download, FileText, Inbox, Loader2, Paperclip, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2,
 } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, Input, Modal, Select } from '@/components/ui';
 import { apiError } from '@/components/field-service/shared';
@@ -20,6 +20,19 @@ import {
   formsService, parseTs, type Column, type FormField, type Submission, type SubmissionLink,
 } from '@/services/forms.service';
 import { TARGET_LABEL } from './field-types';
+import { buildFormResponsesPdf, formPdfFilename, type PdfResponse } from '@/lib/form-responses-pdf';
+
+const HIDDEN_TYPES = ['heading', 'paragraph', 'page_break'];
+/** Most responses one PDF export will fetch (50 per page). */
+const PDF_MAX = 1000;
+
+function pdfMeta(s: Submission): string {
+  return [
+    `Received ${parseTs(s.created_at)?.toLocaleString() || s.created_at}`,
+    s.respondent_email ? `from ${s.respondent_email}` : '',
+    STATUS_BADGE[s.status]?.label || s.status,
+  ].filter(Boolean).join(' · ');
+}
 
 /** A human-readable answer (mirrors Fields.show on the server). */
 export function showAnswer(field: Pick<FormField, 'type' | 'options' | 'scale' | 'columns'> | Column | undefined, v: unknown): string {
@@ -115,7 +128,9 @@ function when(iso: string) {
   return d ? formatDistanceToNow(d, { addSuffix: true }) : iso;
 }
 
-export default function FormResponses({ formUuid, initialResponse }: { formUuid: string; initialResponse?: string }) {
+export default function FormResponses({ formUuid, formTitle = 'Form', initialResponse }: {
+  formUuid: string; formTitle?: string; initialResponse?: string;
+}) {
   const { canUpdate, canDelete } = usePermissions();
   const [items, setItems] = useState<Submission[]>([]);
   const [columns, setColumns] = useState<Column[]>([]);
@@ -127,6 +142,7 @@ export default function FormResponses({ formUuid, initialResponse }: { formUuid:
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState<string | null>(initialResponse || null);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const fetchId = useRef(0);
 
   useEffect(() => {
@@ -172,6 +188,33 @@ export default function FormResponses({ formUuid, initialResponse }: { formUuid:
     }
   };
 
+  const exportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const all: Submission[] = [];
+      let cols = columns;
+      let next: string | undefined;
+      do {
+        const res = await formsService.submissions(formUuid, { status: status || undefined, q: q || undefined, cursor: next, limit: 50 });
+        all.push(...res.items);
+        cols = res.columns;
+        next = res.nextCursor;
+      } while (next && all.length < PDF_MAX);
+      if (all.length === 0) { toast.error('No responses to export'); return; }
+      const rows: PdfResponse[] = all.slice(0, PDF_MAX).map((s, i) => ({
+        heading: `Response ${i + 1}`,
+        meta: pdfMeta(s),
+        answers: cols.map((c) => [c.label, showAnswer(c, s.answers[c.key]) || '—'] as [string, string]),
+      }));
+      buildFormResponsesPdf(formTitle, rows).save(formPdfFilename(formTitle));
+      if (next) toast(`Exported the newest ${PDF_MAX} responses; use CSV for the rest`);
+    } catch (e) {
+      toast.error(apiError(e, 'Could not export'));
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const shown = columns.slice(0, 3);
   const replace = (s: Submission) => setItems((prev) => prev.map((x) => (x.uuid === s.uuid ? { ...x, ...s } : x)));
 
@@ -193,6 +236,9 @@ export default function FormResponses({ formUuid, initialResponse }: { formUuid:
         <Button variant="ghost" onClick={() => load()} leftIcon={<RefreshCw className="h-4 w-4" />}>Refresh</Button>
         <Button variant="outline" onClick={exportCsv} isLoading={exporting} leftIcon={<Download className="h-4 w-4" />}>
           Export CSV
+        </Button>
+        <Button variant="outline" onClick={exportPdf} isLoading={exportingPdf} leftIcon={<FileText className="h-4 w-4" />}>
+          Export PDF
         </Button>
       </div>
 
@@ -240,7 +286,7 @@ export default function FormResponses({ formUuid, initialResponse }: { formUuid:
       )}
 
       {openId && (
-        <ResponseDetail formUuid={formUuid} sid={openId} onClose={() => setOpenId(null)}
+        <ResponseDetail formUuid={formUuid} formTitle={formTitle} sid={openId} onClose={() => setOpenId(null)}
           canUpdate={canUpdate('forms')} canDelete={canDelete('forms')}
           onChanged={replace} onDeleted={(sid) => { setItems((p) => p.filter((x) => x.uuid !== sid)); setOpenId(null); }} />
       )}
@@ -248,8 +294,8 @@ export default function FormResponses({ formUuid, initialResponse }: { formUuid:
   );
 }
 
-function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdate, canDelete }: {
-  formUuid: string; sid: string; onClose: () => void; onChanged: (s: Submission) => void;
+function ResponseDetail({ formUuid, formTitle, sid, onClose, onChanged, onDeleted, canUpdate, canDelete }: {
+  formUuid: string; formTitle: string; sid: string; onClose: () => void; onChanged: (s: Submission) => void;
   onDeleted: (sid: string) => void; canUpdate: boolean; canDelete: boolean;
 }) {
   const [s, setS] = useState<Submission | null>(null);
@@ -278,12 +324,20 @@ function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdat
   };
 
   const failed = s?.links.filter((l) => l.outcome === 'failed') || [];
+  const downloadPdf = () => {
+    if (!s) return;
+    const answers = (s.fields || []).filter((f) => f.key && !HIDDEN_TYPES.includes(f.type))
+      .map((f) => [f.label, showAnswer(f, s.answers[f.key || '']) || '—'] as [string, string]);
+    buildFormResponsesPdf(formTitle, [{ heading: 'Response', meta: pdfMeta(s), answers }], `Form version ${s.version}`)
+      .save(formPdfFilename(formTitle, 'response'));
+  };
   return (
     <>
       <Modal isOpen onClose={onClose} title="Response" size="xl"
         description={s ? `Received ${parseTs(s.created_at)?.toLocaleString() || s.created_at}${s.respondent_email ? ` from ${s.respondent_email}` : ''}` : undefined}
-        footer={s && (canUpdate || canDelete) ? (
+        footer={s ? (
           <div className="flex w-full flex-wrap items-center gap-2">
+            <Button variant="outline" leftIcon={<FileText className="h-4 w-4" />} onClick={downloadPdf}>Download PDF</Button>
             {canDelete && (
               <Button variant="ghost" className="text-error-600" leftIcon={<Trash2 className="h-4 w-4" />}
                 onClick={() => setConfirmDelete(true)}>Delete</Button>
@@ -327,7 +381,7 @@ function ResponseDetail({ formUuid, sid, onClose, onChanged, onDeleted, canUpdat
               </p>
             ))}
             <dl className="divide-y divide-secondary-100">
-              {(s.fields || []).filter((f) => f.key && !['heading', 'paragraph', 'page_break'].includes(f.type)).map((f) => (
+              {(s.fields || []).filter((f) => f.key && !HIDDEN_TYPES.includes(f.type)).map((f) => (
                 <div key={f.key} className="grid gap-1 py-3 sm:grid-cols-3 sm:gap-4">
                   <dt className="text-sm text-secondary-500">{f.label}</dt>
                   <dd className="whitespace-pre-wrap break-words text-sm text-secondary-900 sm:col-span-2">
